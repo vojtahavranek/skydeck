@@ -24,8 +24,12 @@ concurrency:
 # every n-th file, so no file is named here and a new test file needs no upkeep. The option is given
 # as NODE_OPTIONS, not as `npm test -- --test-shard=i/n`: npm puts that argument after the glob, where
 # `node --test` ignores it without a word and every shard would run the whole suite.
-# The `shard` list of a job must hold 1/n to n/n: each entry names the count too, and nothing checks
-# the list, so an entry added or left out leaves files unrun or run twice with every job green.
+# The suites' sandbox builds the environment of its child processes from nothing, so it drops
+# NODE_OPTIONS and a nested `node --test` of a test stays whole; one given process.env would be
+# sharded too and could pass with no test at all.
+# The `shard` list of a job must hold 1/n to n/n: each entry names the count too, so a list with an
+# entry added or left out would leave files unrun or run twice with every job green. The `lint`
+# job therefore reads this file and fails unless every list is exactly that, for one n.
 # A job that reaches its `timeout-minutes` is only cancelled, which not every reader of the checks
 # takes for a failure; a step that reaches its own limit fails the job. So each test step has one.
 jobs:
@@ -44,7 +48,8 @@ jobs:
         # the second.
         # - node '24.12': the oldest Node the launcher accepts, on the newest Ubuntu.
         # - node '24': the newest 24.x, on Ubuntu 24.04 (the development machine's), the system
-        #   of the page job (see there).
+        #   of the page job, whose runner pin (see there) is the one to drop with Playwright's
+        #   upgrade; this leg's goes with it.
         leg: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"node":"24.12","os":"ubuntu-latest"},{"node":"24","os":"ubuntu-24.04"}]' || '[{"node":"24","os":"ubuntu-24.04"}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -58,6 +63,46 @@ jobs:
       # By name: bin/skydeck-keeper is python, not sh (plan A14).
       - run: shellcheck bin/skydeck bin/skydeck-hook bin/skydeck-keepalive
       - run: python3 -m py_compile bin/skydeck-keeper
+      # Each `shard` list against itself (no knowledge of the legs): every entry is i/n for one n,
+      # each i from 1 to n appears once, and there are as many lists as steps that give Node a shard.
+      - name: Check the shard lists
+        run: |
+          python3 - .github/workflows/ci.yml <<'PY'
+          import re
+          import sys
+
+          lines = [
+              line
+              for line in open(sys.argv[1], encoding="utf-8").read().splitlines()
+              if not line.lstrip().startswith("#")
+          ]
+          matches = [re.fullmatch(r"\s*shard:\s*\[(.*)\]\s*", line) for line in lines]
+          lists = [m.group(1) for m in matches if m]
+          use = r"\s*NODE_OPTIONS:\s*--test-shard=\$[{][{]\s*matrix\.shard\s*[}][}]\s*"
+          uses = [line for line in lines if re.fullmatch(use, line)]
+          errors = []
+          if not uses:
+              errors.append("no step gives Node a shard")
+          if len(lists) != len(uses):
+              errors.append(f"{len(lists)} shard lists for {len(uses)} steps that use one")
+          for text in lists:
+              entries = [e.strip().strip("'\"") for e in text.split(",")]
+              pairs = [re.fullmatch(r"([0-9]+)/([0-9]+)", e) for e in entries]
+              if not all(pairs):
+                  errors.append(f"[{text}]: an entry is not i/n")
+                  continue
+              indexes = sorted(int(p.group(1)) for p in pairs)
+              totals = {int(p.group(2)) for p in pairs}
+              if len(totals) != 1:
+                  errors.append(f"[{text}]: the entries do not share one n")
+              elif indexes != list(range(1, totals.pop() + 1)):
+                  errors.append(f"[{text}]: not exactly 1/n to n/n")
+          for error in errors:
+              print("shard lists:", error)
+          if errors:
+              sys.exit(1)
+          print(f"shard lists: {len(lists)} lists, all 1/n to n/n")
+          PY
 
   unit:
     name: unit (node ${{ matrix.leg.node }}, ${{ matrix.shard }})

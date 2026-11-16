@@ -236,7 +236,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | `src/cli/commands/` | `resume` and `new`: `--window`; `restore` with `"terminal": "window"` (11.4). `show`: `(in the skydeck window)` (11.4). | C |
 | the interactive list (`src/cli/tui/`) | `R` with `"terminal": "window"` sends `POST /resume` (11.4) and shows the answer's lines the way it shows a tab launch's lines today. Nothing else in the list changes. | C |
 | `package.json`, `.prettierignore`, `tsconfig.json` | Development dependencies: `playwright`, `ws`, and the `@xterm/*` packages of 16.6 (exact versions); scripts `vendor`, `test:page`, `check` (17.5); `vendor/` added to `.prettierignore`, so that the vendored files are kept byte for byte; `web/tsconfig.json` beside the root one. | A |
-| `.github/workflows/ci.yml` | 17.5: `shellcheck` by name, the page suite on one leg, the jobs `lint`, `unit (i/n)` and `page (i/n)` side by side with Node's `--test-shard`, the time limits. | A |
+| `.github/workflows/ci.yml` | 17.5: `shellcheck` by name, the jobs `lint`, `unit (i/n)` and `page (i/n)` side by side with Node's `--test-shard`, the page suite on the newest leg only, on a runner pin of its own, the time limits. | A |
 
 ## 5. Starting the window
 
@@ -3586,28 +3586,37 @@ grants a permission through Playwright.
   both legs of them. `lint` runs format check, type checks,
   `python3 -m py_compile bin/skydeck-keeper` and `shellcheck` on the shell scripts by name —
   `bin/skydeck`, `bin/skydeck-hook`, `bin/skydeck-keepalive` — because today's `shellcheck
-  bin/skydeck*` would also match the python keeper. `unit (i/n)` runs `npm test` (keeper and
+  bin/skydeck*` would also match the python keeper; it also checks the shard lists (below).
+  `unit (i/n)` runs `npm test` (keeper and
   server tests included; Ubuntu runners have python3; the vendored-files check of 16.6,
   `test/vendor/vendor.test.ts`, is a test in `npm test` that needs the packages `npm ci`
   installed, so it has no step of its own). `page (i/n)` runs the page suite. CI does not run
   `npm run check` (format check, both type checks and the two suites in a row; it has neither
   `shellcheck` nor `py_compile`). A suite runs in n shards, each a job of its own (three for each
   suite; the job's `shard` list in the workflow holds `1/n` to `n/n`, each entry naming the count
-  too, and nothing checks the list: a wrong one, an entry added or left out, leaves files unrun or
-  run twice with every job still green): Node's
+  too, so a wrong list, an entry added or left out, would leave files unrun or run twice with
+  every job still green; a step of `lint` therefore reads the workflow as text and fails unless
+  every `shard` list is exactly `1/n` to `n/n` for one n and there are as many lists as steps that
+  give Node a shard): Node's
   `--test-shard=i/n` cuts the sorted list of test files into n parts by taking every n-th file,
   so the shards together run every file once, no file is named in the workflow, and a new test
   file needs no upkeep there. The workflow gives the option as `NODE_OPTIONS` and not as
   `npm test -- --test-shard=i/n`: npm puts that argument after the glob in `package.json`, where
-  `node --test` ignores it without a word and every shard would run the whole suite. The commands
+  `node --test` ignores it without a word and every shard would run the whole suite. The suites'
+  sandbox (`test/helpers/sandbox.ts`) builds the environment of its child processes from nothing,
+  so it drops `NODE_OPTIONS` and the nested `node --test` runs of `test-page/smoke.test.ts` stay
+  whole; a test that started `node --test` with the inherited environment would take the shard
+  too and could pass with no test at all. The commands
   in `package.json` and `npm run check` stay as they are. A job has a time limit of its own: 10
   minutes for `lint`, 25 for a shard; the test step of a shard has 20 minutes of its own, because a
   job that reaches its limit is only cancelled, which not every reader of the checks takes for a
-  failure, while a step that reaches its limit fails its job. A failing shard does not stop the others (`fail-fast` is
+  failure, while a step that reaches its limit fails its job; so a pull request is good when every
+  one of its checks reads pass (a cancelled job is not a pass), not when a command's exit code is
+  0. A failing shard does not stop the others (`fail-fast` is
   off), so one run shows every failure. Only the newest leg (Node 24) runs the page suite, and it
   runs on Ubuntu 24.04 (the development machine's system) while the other leg runs on the newest
-  Ubuntu (26.04), because Playwright 1.60.0 has no Chromium for Ubuntu 26.04; the pin of that
-  leg's runner is dropped when Playwright is upgraded. A run started by hand runs `lint` and
+  Ubuntu (26.04), because Playwright 1.60.0 has no Chromium for Ubuntu 26.04; the page job's
+  runner pin, and with it the Node 24 leg's, is dropped when Playwright is upgraded. A run started by hand runs `lint` and
   `unit` on both legs (the oldest leg's `unit` is in shards too, so that the one workflow has one
   shape) and `page` on the newest leg only. Each `page` shard reads the installed Playwright's
   version and the system's (`ID-VERSION_ID` of `/etc/os-release`), restores
