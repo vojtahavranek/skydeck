@@ -1523,9 +1523,13 @@ page last proposed (`attach`, `resize`). The rules:
   computes its proposal itself (not with the fit addon): the most columns and rows whose screen
   fits the terminal's area, the screen being cell × count rounded to whole pixels as xterm.js
   6.0.0 rounds it, and the room the addon gave its scroll bar (14 px) and the margin the page
-  keeps around the terminal's text (12.6) counted out — read from the page's style sheet at every
-  count, so that the margin drawn and the margin counted cannot drift apart; the answer does not
-  depend on the terminal's current size. The fit addon's does (it
+  keeps around the terminal's text (12.6) counted out — read at every count from the element the
+  style sheet gives it to, as lengths, so that the margin drawn and the margin counted cannot
+  drift apart (whatever unit or element sets it); the answer does not depend on the terminal's
+  current size. A first size the page asks for (an act's, `focus.area`) is counted by the same
+  rule for the terminal area's box as it is laid out, not rounded to whole pixels: at a display
+  scale of 125 % that box is a fraction, and the rounded one could hold one column more than the
+  view proposes once the terminal is there (F2, review 2). The fit addon's does (it
   divides by the cell of the current size), so at some widths no size proposes itself — 104
   columns propose 103 and 103 propose 104 — and a terminal shown there was resized every second
   (ruled by the plan owner, M4 of plan task 28's review). The proposal is a function of the box,
@@ -2411,14 +2415,19 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   snapshot (7.3).
   The terminal's text keeps a margin in the terminal's own background: 8 px above and below,
   10 px at the left, and 10 px between the text and the scroll bar's room, which stays at the
-  terminal's right edge (the room is kept whether the scroll bar shows or not, so without one the
-  text ends 24 px or more from the edge). The size is in whole cells, so at the right and the
-  bottom the margin is wider by what is left of a cell. The size the page proposes is counted
-  inside it (8.2.6); what lies over the terminal (its bars, the hint, the find bar) keeps its
-  place in the terminal's box. The lines that frame the terminal — the list's right edge, the line
-  under the header (and under an ended bar), the line over the key bar — have one colour of their
-  own (`--edge`), softer than the page's other lines in both colour schemes; the focused zone's
-  coloured top edge (12.9) is the focus sign and keeps its colour. The owner's request of
+  terminal's right edge and is always kept, whether the scroll bar shows or not (so without one
+  the text ends 24 px or more from the edge; ruled by the plan owner, F2's review 1: the size must
+  not depend on the scrollback). The size is in whole cells, so at the right and the bottom the
+  margin is wider by what is left of a cell. The size the page proposes is counted inside it
+  (8.2.6); what lies over the terminal (its bars, the hint, the find bar) keeps its place in the
+  terminal's box. A wheel in the margin does what a wheel over the nearest cell of the text does,
+  once: it scrolls the scrollback, or in the program's mouse mode reaches the program as one
+  report (ruled, F2's review 2). The lines that frame the terminal — the list's right edge, the
+  line under the header (in every pane: one header, one colour; and under an ended bar), the line
+  over the key bar — have one colour of their own (`--edge`), softer than the page's other lines
+  in both colour schemes; the focused zone's coloured top edge (12.9) is the focus sign and keeps
+  its colour. The notice bars over the terminal keep their own line (`--line2`): they lie over
+  the terminal, not on its frame, and must stand out from its text (ruled, F2's review 1). The owner's request of
   2026-11-16 (follow-up F2): before it, the text touched the list and the header, and xterm.js's
   own style painted the 4 px and 2 px it had there black, which read as a hard border, above all
   in the light scheme.
