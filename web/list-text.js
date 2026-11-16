@@ -52,10 +52,12 @@ function clean(text) {
  * @typedef {object} ChipText S2 12.3's chip of a row, as the list draws it
  * @property {string} text the open ones (`PR · failing`, `3 PRs · failing`), or with none open
  *   `3 merged` or `closed`
- * @property {string} merged `+30` for the merged ones beside open ones, drawn dim; '' when none
+ * @property {string} merged `+30` for the merged ones beside open ones, in the chip's tint (dim
+ *   only on a grey chip, F4); '' when none
  * @property {string} tip each open one with its own state, then the merged and closed counts
  * @property {boolean} dotted its state is `can't read`
- * @property {boolean} dim none is open: the chip is `3 merged` or `closed`
+ * @property {boolean} dim none is open: the chip is `3 merged` (in merged's tint, F4) or `closed`
+ *   (dim)
  * @property {string} level the state the chip names, one of design 7.3's levels, for its tint
  *   (follow-up F4); '' for a level the page does not know, which keeps the chip grey
  * @typedef {object} RowText
@@ -207,7 +209,7 @@ function openPrTip(pr, nowNs) {
 }
 
 /**
- * A row's chip (S2 12.3): its parts, dim when none is open, dotted when it is `can't read`; the
+ * A row's chip (S2 12.3): its parts, `dim` when none is open, dotted when it is `can't read`; the
  * tooltip lists each open pull request with its own state, then the merged and closed counts
  * (`30 merged · 1 closed`).
  * @param {RowPayload} row
