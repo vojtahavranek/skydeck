@@ -124,6 +124,16 @@ describe('skydeck update: what must hold, else it refuses — exit 1, one line, 
     assert.deepEqual(u.trace(), [...BEFORE_FETCH, 'fetch', ...LOOK]);
   });
 
+  test('1. CLAUDECODE set but empty is set: refused all the same', async (t) => {
+    const u = updater(t, {}, { CLAUDECODE: '' });
+
+    const r = await u.update();
+
+    assert.equal(r.code, 1);
+    assert.equal(r.stderr, IN_CLAUDE_CODE);
+    assert.deepEqual(u.trace(), []);
+  });
+
   test('2. git not found: the line, and no other call', async (t) => {
     const u = updater(t, {
       answers: { 'rev-parse --show-toplevel': { code: null, notFound: true } },
@@ -512,6 +522,26 @@ describe('skydeck update: what it reports (U4)', () => {
     assert.equal(r.stdout.split('\n').length, 23);
   });
 
+  test('a branch and an upstream with a bidirectional control (a ref may hold one) come out harmless in the report and in the up-to-date line', async (t) => {
+    const upstream = {
+      ref: 'refs/remotes/origin/\u202ework',
+      remote: 'origin',
+      short: 'origin/\u202ework',
+    };
+    const behind = updater(t, { branch: '\u202ework', upstream });
+    const r = await behind.update(['--check']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(
+      r.stdout,
+      `1 new commit on origin/work (0123456..fedcba9):\n  fedcba9  the new commit\nrun skydeck update to apply it\n`,
+    );
+
+    const up = updater(t, { branch: '\u202ework', upstream, fetched: OLD });
+    const r2 = await up.update();
+    assert.equal(r2.code, 0, r2.stderr);
+    assert.equal(r2.stdout, 'skydeck is up to date (work at 0123456, as origin/work)\n');
+  });
+
   test('a subject with an escape sequence, a line break and a bidirectional control comes out harmless', async (t) => {
     const u = updater(t, {
       commits: [{ id: NEW, subject: 'fix \x1b[2J\x1b]8;;http://x\x07link\r\nnext ‮evil' }],
@@ -574,6 +604,20 @@ describe('skydeck update: applying, no window server (U5)', () => {
       [],
     );
     assert.deepEqual(u.tp.processes.calls, []);
+  });
+
+  test("the merge fails: git's line comes out harmless (an escape sequence, a bidirectional control)", async (t) => {
+    const u = updater(t, {
+      merge: { code: 1, stderr: 'error: \x1b[31mred\x1b[0m \u202ething\x1b]0;title\x07\nmore\n' },
+    });
+
+    const r = await u.update();
+
+    assert.equal(r.code, 1);
+    assert.equal(
+      r.stderr,
+      'skydeck: the update could not be applied: error: red thing; the checkout is as it was\n',
+    );
   });
 
   test('the merge fails: HEAD and status show the checkout as it was — exit 1 and the line; nothing started', async (t) => {

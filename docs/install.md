@@ -1645,10 +1645,17 @@ Four more ends, each with exit 1:
 - `the update could not be applied: <git's line>; the checkout may not be as it was: look at it
   with git status, then run skydeck window` (`git merge timed out` stands for git's line when it
   did not end in 60 seconds): git did not leave the checkout as it was, so the files may be half
-  new, and the window is not brought back on them. `git status` shows what is left. You had no
-  change of your own to a tracked file (the command refuses then), so `git merge --ff-only
-  origin/main` finishes the update, or `git restore .` puts the old commit's files back; then
-  `skydeck window`.
+  new, and the window is not brought back on them. You had no change of your own to a tracked
+  file (the command refuses then), so what is changed is git's. In this order:
+  1. When a git command names `.git/index.lock` (`Unable to create '…/.git/index.lock': File
+     exists.`) and no other git runs, remove that file: `rm .git/index.lock`. A git that was ended
+     in the middle leaves it.
+  2. `git restore .` puts the old commit's version of every tracked file back.
+  3. `skydeck update` again.
+  4. When it then says that untracked working tree files would be overwritten, they are the new
+     commit's own files that the interrupted update had written: `git reset --hard origin/main`
+     puts the checkout at the new commit, those files included (it discards every change to a
+     tracked file; after step 2 there is none), and `skydeck window` starts the window again.
 - `updated to <id>, but skydeck window ended with exit <n>; run skydeck window`: the update is in,
   but the new `skydeck window` failed (its own lines above say why); run `skydeck window`.
 
