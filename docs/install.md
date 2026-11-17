@@ -1614,9 +1614,10 @@ rest. (After a Ctrl+C the shell shows exit status 130 whatever the command print
 `bin/skydeck`, ends with 130 on Ctrl+C once node has ended. Its lines say what happened.) A
 terminal closed in the middle ends the command (there is no one left to read what it would say),
 but never cuts the fast-forward, which ends by itself: what is left is at worst a stopped server.
-In a new terminal, in the checkout, `git status`: clean and `behind '<upstream>' by <n> commits`,
-the update was not applied — `skydeck window`, then `skydeck update` again; clean and `up to date
-with '<upstream>'`, it was — `skydeck window`; otherwise see "the checkout may not be as it was"
+In a new terminal, in the checkout, `git status`: no changed file (files git does not track do not
+count) and `Your branch is behind '<upstream>' by <n> commits`, the update was not applied —
+`skydeck window`, then `skydeck update` again; no changed file and `Your branch is up to date with
+'<upstream>'`, it was — `skydeck window`; otherwise see "the checkout may not be as it was"
 below.
 
 Each commit's line shows its subject's first 200 characters (a longer one ends with `…`).
@@ -1675,9 +1676,10 @@ More ends, each with exit 1:
   run any command that writes**, in a WSL terminal of your own, in the checkout:
   - **`<why>` is one of the command's own three** — `git merge timed out` (after 60 seconds), `git
     merge was ended by a signal`, `git merge ended, but HEAD is not at <id>` — **or git's line says
-    that it could not write, create or remove a file** (`error: unable to write …`, `error: unable
-    to create …`, `error: unable to unlink …`): git was cut off or failed while it wrote, and the
-    files may be half new. Only then these four steps:
+    that it could not write, create or remove a file or folder**, whatever its first word
+    (`error: unable to write …`, `warning: unable to unlink …: Permission denied`, `fatal: cannot
+    create directory at …`): git was cut off or failed while it wrote, and the files may be half
+    new. Only then these four steps:
     1. Make sure no git command runs in the checkout (one of yours in another terminal, an
        editor's).
     2. When `.git/index.lock` is there, remove it (`rm .git/index.lock`): a git that was cut off
@@ -1698,7 +1700,8 @@ More ends, each with exit 1:
     git does not track elsewhere, and files it ignores, stay as they are.
   - **Any other `<why>`** — any other line of git's, such as `error: The following untracked
     working tree files would be overwritten by merge:`, `error: Updating the following directories
-    would lose untracked files in them:` or `fatal: Not possible to fast-forward, aborting.` — means
+    would lose untracked files in them:` or `hint: Diverging branches can't be fast-forwarded, you
+    need to either:` (a commit made in the checkout meanwhile) — means
     git refused and wrote nothing that matters; only the look after it could not tell (a file came
     into the checkout meanwhile, or the look took too long). `git status`, move away (or commit)
     what git names — it is yours —, `skydeck window`, then `skydeck update` again. No reset.
