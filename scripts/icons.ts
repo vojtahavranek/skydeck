@@ -11,8 +11,11 @@
 // skipped), nothing rings, and no halo of the tile's edge spreads onto the transparent corners (a
 // stepwise halving on a canvas with Chromium's high-quality smoothing, tried first, left a grey
 // halo outside the tile on a light background and a duller 16 pixel icon). The transparent
-// icons are the whole picture in their box; the maskable ones are the picture scaled by
-// MASKABLE_SCALE into the middle of a box of BACKGROUND.
+// icons are the whole picture in their box. The maskable ones are the picture scaled by
+// MASKABLE_SCALE into the middle of a full background, with the tile's outermost RIM pixels left
+// out (the picture's tile has a lighter hairline and a shade along its edge) on a background that
+// runs from the tile's colour along its top edge to its colour along its bottom edge (the tile
+// is lighter at its top), so that the tile's edge does not show as a square inside a square.
 //
 // Chromium is launched by the rules the page suite's test-page/helpers/browser.ts follows (whose
 // `browser(t)` needs a test context, so the script launches by itself): headless, with an
@@ -37,21 +40,26 @@ export const SIZES = [16, 32, 48, 192, 512];
 export const IN_ICO = [16, 32, 48];
 /** The maskable ones: the picture in the middle, on the full background. */
 export const MASKABLE = [192, 512];
-/** The tile's flat colour: the median of the picture's flat pixels (checked below). The maskable
- *  icons' background, so that the tile does not show as a square inside a square. */
-export const BACKGROUND = '#050925';
+/** The tile's colour along its top edge and along its bottom edge (the average of the pixels 5 to
+ *  14 inside it, in the middle 40 % of the side; the tile is lighter at its top): the maskable
+ *  icons' background runs from the first, in their top row, to the second, in their bottom row.
+ *  test/window/icons.test.ts measures both on the picture. */
+export const BACKGROUND_TOP = '#080e25';
+export const BACKGROUND_BOTTOM = '#030723';
+/** In a maskable icon the picture is drawn without the pixels within this many of one that is not
+ *  opaque: the tile's own edge (a lighter hairline, a shade) would show as a frame on the
+ *  background. None of the drawing is that close to the edge. */
+export const RIM = 5;
 /** How much of the icon's width the picture takes in a maskable icon: the largest scale, to three
  *  decimals, at which everything of the drawing is inside the safe zone (checked below). */
 export const MASKABLE_SCALE = 0.927;
 
 /** The safe zone of a maskable icon: a circle of this radius, in parts of the icon's width. */
 const SAFE_RADIUS = 0.4;
-/** The drawing is what differs from the flat colour by more than this (of 255) in some channel,
- *  composited on it. The lighter hairline along the picture's rounded corners, 36 at most, is
- *  the tile's own edge, not the drawing. */
+/** The drawing is what differs from the background (that of its own height) by more than this (of
+ *  255) in some channel, composited on it. The tile's edge, 36 at most, is not the drawing. */
 const DRAWN = 40;
-/** A pixel this close to the background, and opaque (the tile is at alpha 252 to 253), is flat. */
-const FLAT_NEAR = 6;
+/** The tile is at alpha 252 to 253 of 255: a pixel from this alpha up is opaque. */
 const OPAQUE = 250;
 
 /** What a page under the page suite can reach (test-page/helpers/browser.ts): nothing. */
@@ -84,7 +92,7 @@ function colourOf(hex: string): number[] {
  */
 async function drawAll(page: Page, picture: Buffer, jobs: Job[]): Promise<Map<string, Buffer>> {
   const drawn = await page.evaluate(
-    async ({ base64, jobs, background, safeRadius, drawn, flatNear, opaque, maskableScale }) => {
+    async ({ base64, jobs, top, bottom, rim, safeRadius, drawn, opaque, maskableScale }) => {
       const bitmap = await createImageBitmap(
         new Blob([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], { type: 'image/png' }),
       );
@@ -101,41 +109,21 @@ async function drawAll(page: Page, picture: Buffer, jobs: Job[]): Promise<Map<st
       const pixels = context.getImageData(0, 0, count, count).data;
       const at = (i: number, c: number): number => pixels[i * 4 + c] ?? 0;
 
-      // The numbers hold for this picture: the flat colour is the background, and the drawing,
-      // scaled, stays inside the circle.
-      const histogram = [0, 1, 2].map(() => new Array<number>(256).fill(0));
-      let flat = 0;
+      // The background at a height (0 at the top, 1 at the bottom), in bytes: top to bottom.
+      const backgroundAt = (f: number): number[] =>
+        top.map((value, c) => value + ((bottom[c] ?? 0) - value) * f);
+
+      // The scale holds for this picture: the drawing, scaled, stays inside the circle.
       let farthest = 0;
-      for (let i = 0; i < count * count; i++) {
-        const near = [0, 1, 2].every((c) => Math.abs(at(i, c) - (background[c] ?? 0)) <= flatNear);
-        if (near && at(i, 3) >= opaque) {
-          [0, 1, 2].forEach((c) => {
-            const bin = histogram[c] ?? [];
-            bin[at(i, c)] = (bin[at(i, c)] ?? 0) + 1;
-          });
-          flat++;
-        }
-        const a = at(i, 3) / 255;
-        if ([0, 1, 2].some((c) => Math.abs(a * (at(i, c) - (background[c] ?? 0))) > drawn)) {
-          const x = (i % count) + 0.5 - count / 2;
-          const y = Math.floor(i / count) + 0.5 - count / 2;
-          farthest = Math.max(farthest, Math.hypot(x, y));
-        }
-      }
-      const median = histogram.map((bin) => {
-        let seen = 0;
-        for (let value = 0; value < 256; value++) {
-          seen += bin[value] ?? 0;
-          if (seen * 2 >= flat) {
-            return value;
+      for (let y = 0; y < count; y++) {
+        const background = backgroundAt((y + 0.5) / count);
+        for (let x = 0; x < count; x++) {
+          const i = y * count + x;
+          const a = at(i, 3) / 255;
+          if ([0, 1, 2].some((c) => Math.abs(a * (at(i, c) - (background[c] ?? 0))) > drawn)) {
+            farthest = Math.max(farthest, Math.hypot(x + 0.5 - count / 2, y + 0.5 - count / 2));
           }
         }
-        return -1;
-      });
-      if (median.some((value, c) => value !== background[c])) {
-        throw new Error(
-          `the picture's flat colour is rgb(${median.join(', ')}), not the background: change BACKGROUND`,
-        );
       }
       if (maskableScale * farthest > safeRadius * count) {
         throw new Error(
@@ -164,11 +152,41 @@ async function drawAll(page: Page, picture: Buffer, jobs: Job[]): Promise<Map<st
         }
         linear[i * 4 + 3] = a;
       }
-      const backgroundLinear = background.map((value) => lut[value] ?? 0);
+      // The same without the pixels near the tile's edge: only where every pixel within `rim` is
+      // opaque (a square window, in two passes), for the maskable icons.
+      const solid = new Uint8Array(count * count);
+      for (let i = 0; i < count * count; i++) {
+        solid[i] = at(i, 3) >= opaque ? 1 : 0;
+      }
+      const alongRow = new Uint8Array(count * count);
+      for (let y = 0; y < count; y++) {
+        for (let x = 0; x < count; x++) {
+          let all = 1;
+          for (let d = -rim; d <= rim && all === 1; d++) {
+            all = x + d >= 0 && x + d < count ? (solid[y * count + x + d] ?? 0) : 0;
+          }
+          alongRow[y * count + x] = all;
+        }
+      }
+      const tile = new Float32Array(linear);
+      for (let y = 0; y < count; y++) {
+        for (let x = 0; x < count; x++) {
+          let all = 1;
+          for (let d = -rim; d <= rim && all === 1; d++) {
+            all = y + d >= 0 && y + d < count ? (alongRow[(y + d) * count + x] ?? 0) : 0;
+          }
+          if (all === 0) {
+            tile.fill(0, (y * count + x) * 4, (y * count + x) * 4 + 4);
+          }
+        }
+      }
+      // The background of a row of an icon, in linear light: from `top` to `bottom`.
+      const topLinear = top.map((value) => lut[value] ?? 0);
+      const bottomLinear = bottom.map((value) => lut[value] ?? 0);
 
       // The picture's pixels that the output pixel `t` (one axis) covers, with their weights.
-      const axis = (t: number, inner: number, offset: number): [number, number[]] => {
-        const k = inner / count;
+      const axis = (t: number, span: number, offset: number): [number, number[]] => {
+        const k = span / count;
         const first = Math.max(0, Math.floor((t - offset) / k));
         const last = Math.min(count - 1, Math.ceil((t + 1 - offset) / k) - 1);
         const weights: number[] = [];
@@ -191,9 +209,10 @@ async function drawAll(page: Page, picture: Buffer, jobs: Job[]): Promise<Map<st
       const out: Record<string, string> = {};
       for (const job of jobs) {
         const { size } = job;
-        const inner = size * job.scale;
-        const offset = (size - inner) / 2;
-        const lines = Array.from({ length: size }, (_, t) => axis(t, inner, offset));
+        const span = size * job.scale;
+        const offset = (size - span) / 2;
+        const source = job.onBackground ? tile : linear;
+        const lines = Array.from({ length: size }, (_, t) => axis(t, span, offset));
         const rgba = new Uint8ClampedArray(size * size * 4);
         for (let ty = 0; ty < size; ty++) {
           const [y0, wy] = lines[ty] ?? [0, []];
@@ -205,15 +224,17 @@ async function drawAll(page: Page, picture: Buffer, jobs: Job[]): Promise<Map<st
                 const from = ((y0 + j) * count + x0 + i) * 4;
                 const weight = weightX * weightY;
                 for (let c = 0; c < 4; c++) {
-                  sum[c] = (sum[c] ?? 0) + weight * (linear[from + c] ?? 0);
+                  sum[c] = (sum[c] ?? 0) + weight * (source[from + c] ?? 0);
                 }
               });
             });
             const o = (ty * size + tx) * 4;
             const covered = sum[3] ?? 0;
             if (job.onBackground) {
+              const f = (ty + 0.5) / size;
               for (let c = 0; c < 3; c++) {
-                rgba[o + c] = encode((sum[c] ?? 0) + (1 - covered) * (backgroundLinear[c] ?? 0));
+                const background = (topLinear[c] ?? 0) * (1 - f) + (bottomLinear[c] ?? 0) * f;
+                rgba[o + c] = encode((sum[c] ?? 0) + (1 - covered) * background);
               }
               rgba[o + 3] = 255;
             } else if (covered > 0) {
@@ -238,10 +259,11 @@ async function drawAll(page: Page, picture: Buffer, jobs: Job[]): Promise<Map<st
     {
       base64: picture.toString('base64'),
       jobs,
-      background: colourOf(BACKGROUND),
+      top: colourOf(BACKGROUND_TOP),
+      bottom: colourOf(BACKGROUND_BOTTOM),
+      rim: RIM,
       safeRadius: SAFE_RADIUS,
       drawn: DRAWN,
-      flatNear: FLAT_NEAR,
       opaque: OPAQUE,
       maskableScale: MASKABLE_SCALE,
     },

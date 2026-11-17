@@ -1731,11 +1731,9 @@ the short id).
    prompt (`>_`); not Edge's. At the title bar's small size only the cloud's ring and a light spot
    read: that is the picture at 16 pixels, not a fault. Since follow-up F10 the icon is this
    picture; the one before it was three cards, the front one white with a prompt, on a blue
-   rounded square. When the button or the title bar still shows that earlier icon (not Edge's)
-   after the page reloaded itself, close the window and run `skydeck window` again, then look once
-   more: the one case in this check where you close it yourself (step 3's "do not close it" is
-   about Edge's own icon). Not tried: that Edge shows the new icon after the window is opened anew
-   is an expectation, not something seen.
+   rounded square. When the button or the title bar still shows that earlier icon after the page
+   reloaded itself, write it down and treat it as step 3 treats Edge's own icon: look again the
+   next time the window is opened anew (do not close it for this check).
 2. In W: `skydeck window --restart`. Expected: the same window stays and says `skydeck's server
    restarted; your sessions kept running`. Look at the button again.
 3. When the button showed Edge's icon in step 1 or 2, write that down, and look at it again the

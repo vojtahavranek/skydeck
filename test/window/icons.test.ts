@@ -14,10 +14,12 @@ import { inflateSync } from 'node:zlib';
 import * as prettier from 'prettier';
 
 import {
-  BACKGROUND,
+  BACKGROUND_BOTTOM,
+  BACKGROUND_TOP,
   IN_ICO as SCRIPT_IN_ICO,
   MASKABLE as SCRIPT_MASKABLE,
   MASKABLE_SCALE,
+  RIM as SCRIPT_RIM,
   SIZES as SCRIPT_SIZES,
   SOURCE,
 } from '../../scripts/icons.ts';
@@ -40,16 +42,17 @@ const MASTER_BYTES = 1_691_903;
 const MASTER_SHA256 = 'fe94068db275c4d89b8e612ab2b9081fba7a571c6233ade6cf012af6a8dce12f';
 const MASTER_SIZE = 1254;
 
-/** The tile's flat colour (`#050925`): the maskable icons' full background. */
-const TILE = [0x05, 0x09, 0x25];
+/** The tile's colour along its top edge and along its bottom edge (the tile is lighter at its
+ *  top): the maskable icons' full background runs from the first to the second, top to bottom. */
+const EDGE_TOP = [8, 14, 37];
+const EDGE_BOTTOM = [3, 7, 35];
 /** The tile is at alpha 252 to 253 of 255 (the picture's own, kept): "opaque" is from here up. */
 const OPAQUE = 250;
-/** How far a pixel of the picture may be from the tile's colour and still count as its flat part
- *  (the noise of the picture is about two steps). */
-const FLAT_NEAR = 6;
-/** The drawing is what differs from the flat colour by more than this (of 255) in some channel,
- *  composited on it. The picture's rounded corners have a lighter hairline of the tile's own
- *  edge, 36 at most, 658 pixels and more from the centre: that is the tile's, not the drawing's. */
+/** The maskable icons leave out the pixels of the picture within this many of one that is not
+ *  opaque: the tile's own edge, a lighter hairline and a shade, would show as a frame. */
+const RIM = 5;
+/** The drawing is what differs from the background (that of its own height) by more than this (of
+ *  255) in some channel, composited on it. The tile's own edge, 36 at most, is not the drawing. */
 const DRAWN = 40;
 /** The safe zone of a maskable icon: a circle of this radius, in parts of the icon's width. */
 const SAFE_RADIUS = 0.4;
@@ -184,49 +187,46 @@ function master(): Png {
   return decodedMaster;
 }
 
-/** The tile's flat colour of a picture: the median, per channel, of its opaque pixels that are
- *  within FLAT_NEAR of TILE. */
-function flatColour(png: Png): number[] {
-  const counts = [0, 1, 2].map(() => new Array<number>(256).fill(0));
-  let total = 0;
-  for (let i = 0; i < png.width * png.height; i++) {
-    const at = i * png.channels;
-    const colour = [0, 1, 2].map((c) => png.pixels[at + c] ?? 0);
-    const a = png.channels === 4 ? (png.pixels[at + 3] ?? 0) : 255;
-    if (a >= OPAQUE && colour.every((value, c) => Math.abs(value - (TILE[c] ?? 0)) <= FLAT_NEAR)) {
-      colour.forEach((value, c) => {
-        const histogram = counts[c] ?? [];
-        histogram[value] = (histogram[value] ?? 0) + 1;
+/** The background at a height (0 at the top, 1 at the bottom): from EDGE_TOP to EDGE_BOTTOM. */
+function backgroundAt(f: number): number[] {
+  return EDGE_TOP.map((value, c) => value + ((EDGE_BOTTOM[c] ?? 0) - value) * f);
+}
+
+/** The colour of the tile along one side, as the script measures it: the average, per channel, of
+ *  the pixels from RIM to RIM + 9 inside the first opaque one, in the middle 40 % of the side. */
+function edgeColour(png: Png, side: 'top' | 'bottom'): number[] {
+  const sum = [0, 0, 0];
+  let n = 0;
+  for (let t = Math.round(png.width * 0.3); t < Math.round(png.width * 0.7); t++) {
+    const row = (depth: number): number => (side === 'top' ? depth : png.height - 1 - depth);
+    let first = 0;
+    while (alpha(png, t, row(first)) < OPAQUE) {
+      first++;
+    }
+    for (let depth = first + RIM; depth <= first + RIM + 9; depth++) {
+      rgb(png, t, row(depth)).forEach((value, c) => {
+        sum[c] = (sum[c] ?? 0) + value;
       });
-      total++;
+      n++;
     }
   }
-  assert.ok(total > png.width * png.height * 0.4, 'most of the picture is flat tile');
-  return counts.map((histogram) => {
-    let seen = 0;
-    for (let value = 0; value < 256; value++) {
-      seen += histogram[value] ?? 0;
-      if (seen * 2 >= total) {
-        return value;
-      }
-    }
-    return -1;
-  });
+  return sum.map((value) => value / n);
 }
 
 /** How far from the centre the drawing reaches, in pixels: the farthest pixel centre whose colour,
- *  composited on `flat`, differs from it by more than DRAWN in some channel. */
-function farthestDrawn(png: Png, flat: readonly number[]): number {
+ *  composited on the background of its height, differs from it by more than DRAWN in some channel. */
+function farthestDrawn(png: Png): number {
   let farthest = 0;
   const centre = png.width / 2;
   for (let y = 0; y < png.height; y++) {
+    const background = backgroundAt((y + 0.5) / png.height);
     for (let x = 0; x < png.width; x++) {
       const at = (y * png.width + x) * png.channels;
       const a = (png.channels === 4 ? (png.pixels[at + 3] ?? 0) : 255) / 255;
       let differs = false;
       for (let c = 0; c < 3; c++) {
-        // The colour composited on the flat one, less the flat one: alpha times the difference.
-        if (Math.abs(a * ((png.pixels[at + c] ?? 0) - (flat[c] ?? 0))) > DRAWN) {
+        // The colour composited on the background, less the background: alpha times the difference.
+        if (Math.abs(a * ((png.pixels[at + c] ?? 0) - (background[c] ?? 0))) > DRAWN) {
           differs = true;
         }
       }
@@ -249,22 +249,38 @@ const encode = (v: number): number =>
     Math.max(0, Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055))),
   );
 
-let premultiplied: Float32Array | null = null;
-/** The picture's pixels as premultiplied linear light, 4 floats each (r, g, b, alpha). */
-function linearMaster(): Float32Array {
-  if (premultiplied === null) {
+const premultiplied = new Map<boolean, Float32Array>();
+/** The picture's pixels as premultiplied linear light, 4 floats each (r, g, b, alpha); with
+ *  `withoutRim`, all zero for those within RIM pixels of one that is not opaque (a square window). */
+function linearMaster(withoutRim: boolean): Float32Array {
+  let out = premultiplied.get(withoutRim);
+  if (out === undefined) {
     const png = master();
-    const out = new Float32Array(png.width * png.height * 4);
-    for (let i = 0; i < png.width * png.height; i++) {
-      const a = (png.pixels[i * 4 + 3] ?? 0) / 255;
-      for (let c = 0; c < 3; c++) {
-        out[i * 4 + c] = (LINEAR[png.pixels[i * 4 + c] ?? 0] ?? 0) * a;
+    const { width, height } = png;
+    out = new Float32Array(width * height * 4);
+    const solid = (x: number, y: number): boolean =>
+      x >= 0 && y >= 0 && x < width && y < height && alpha(png, x, y) >= OPAQUE;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        let keep = true;
+        for (let dy = -RIM; dy <= RIM && keep && withoutRim; dy++) {
+          for (let dx = -RIM; dx <= RIM && keep; dx++) {
+            keep = solid(x + dx, y + dy);
+          }
+        }
+        if (keep) {
+          const i = y * width + x;
+          const a = (png.pixels[i * 4 + 3] ?? 0) / 255;
+          for (let c = 0; c < 3; c++) {
+            out[i * 4 + c] = (LINEAR[png.pixels[i * 4 + c] ?? 0] ?? 0) * a;
+          }
+          out[i * 4 + 3] = a;
+        }
       }
-      out[i * 4 + 3] = a;
     }
-    premultiplied = out;
+    premultiplied.set(withoutRim, out);
   }
-  return premultiplied;
+  return out;
 }
 
 /** The picture's pixels that the output pixel `t` (one axis) covers, with their weights. */
@@ -282,12 +298,13 @@ function axis(t: number, count: number, inner: number, offset: number): [number,
 /**
  * The picture reduced to `size * scale` pixels in the middle of a box of `size`, in plain Node:
  * each pixel of the box is the average of the picture's pixels under it, weighted by the area they
- * cover, premultiplied and in linear light; what the picture does not cover is `background` (an
- * opaque colour) or transparent. Straight RGBA, 8 bits. This is what scripts/icons.ts does in
- * Chromium, written again here so that the committed files can be compared to it.
+ * cover, premultiplied and in linear light; what the picture does not cover is transparent, or, with
+ * `maskable`, the background of EDGE_TOP to EDGE_BOTTOM (opaque; the picture without its RIM). Straight
+ * RGBA, 8 bits. This is what scripts/icons.ts does in Chromium, written again here so that the
+ * committed files can be compared to it.
  */
-function reduced(size: number, scale: number, background: readonly number[] | null): Uint8Array {
-  const source = linearMaster();
+function reduced(size: number, scale: number, maskable: boolean): Uint8Array {
+  const source = linearMaster(maskable);
   const count = master().width;
   const inner = size * scale;
   const offset = (size - inner) / 2;
@@ -309,9 +326,12 @@ function reduced(size: number, scale: number, background: readonly number[] | nu
       });
       const o = (ty * size + tx) * 4;
       const covered = sum[3] ?? 0;
-      if (background !== null) {
+      if (maskable) {
+        const f = (ty + 0.5) / size;
         for (let c = 0; c < 3; c++) {
-          out[o + c] = encode((sum[c] ?? 0) + (1 - covered) * (LINEAR[background[c] ?? 0] ?? 0));
+          const background =
+            (LINEAR[EDGE_TOP[c] ?? 0] ?? 0) * (1 - f) + (LINEAR[EDGE_BOTTOM[c] ?? 0] ?? 0) * f;
+          out[o + c] = encode((sum[c] ?? 0) + (1 - covered) * background);
         }
         out[o + 3] = 255;
       } else if (covered > 0) {
@@ -367,14 +387,28 @@ describe('the picture, scripts/icons/skydeck-source.png', () => {
     );
   });
 
-  test("its flat colour is the maskable icons' background: the median of the tile's flat pixels", () => {
-    assert.equal(BACKGROUND, '#050925');
-    assert.deepEqual(flatColour(master()), TILE);
+  test("its tile's colour along its top and its bottom edge is the maskable icons' background, top to bottom", () => {
+    const hex = (colour: number[]): string =>
+      `#${colour.map((value) => value.toString(16).padStart(2, '0')).join('')}`;
+    const png = master();
+
+    assert.equal(SCRIPT_RIM, RIM);
+    assert.equal(BACKGROUND_TOP, hex(EDGE_TOP));
+    assert.equal(BACKGROUND_BOTTOM, hex(EDGE_BOTTOM));
+    // The measured averages are within one step of the colours chosen (whole numbers).
+    for (const [side, chosen] of [
+      ['top', EDGE_TOP],
+      ['bottom', EDGE_BOTTOM],
+    ] as const) {
+      edgeColour(png, side).forEach((value, c) => {
+        assert.ok(Math.abs(value - (chosen[c] ?? 0)) <= 1, `${side}, channel ${c}: ${value}`);
+      });
+    }
   });
 
   test('MASKABLE_SCALE is the largest scale, to three decimals, that keeps the drawing inside the circle', () => {
     const png = master();
-    const farthest = farthestDrawn(png, flatColour(png));
+    const farthest = farthestDrawn(png);
     const bound = SAFE_RADIUS * png.width;
 
     assert.ok(farthest > 0.3 * png.width, `the drawing is found (it reaches ${farthest} pixels)`);
@@ -431,17 +465,22 @@ describe('the PNG files', () => {
   test("the maskable ones: the drawing on the tile's colour, inside the safe zone (a circle of 0.4 of the size)", () => {
     for (const { file, size } of MASKABLE) {
       const png = decodePng(read(`${ICONS}/${file}`));
+      const last = size - 1;
 
       assert.deepEqual(
         cornerColours(png),
-        [TILE, TILE, TILE, TILE],
-        `${file}: the corners are the tile's colour`,
+        [EDGE_TOP, EDGE_TOP, EDGE_BOTTOM, EDGE_BOTTOM],
+        `${file}: the corners are the background of their height`,
       );
+      const middle = backgroundAt(0.5);
       assert.ok(
-        rgb(png, size >> 1, size >> 1).some((value, i) => Math.abs(value - (TILE[i] ?? 0)) > DRAWN),
+        rgb(png, size >> 1, size >> 1).some(
+          (value, i) => Math.abs(value - (middle[i] ?? 0)) > DRAWN,
+        ),
         `${file}: the drawing is there`,
       );
-      const farthest = farthestDrawn(png, TILE);
+      assert.ok(alpha(png, last, last) === 255);
+      const farthest = farthestDrawn(png);
       // One pixel for the resampling: the picture's farthest pixel is 0.3 of a pixel inside.
       assert.ok(
         farthest <= SAFE_RADIUS * size + 1,
@@ -454,6 +493,77 @@ describe('the PNG files', () => {
     }
   });
 
+  test("the maskable ones: the tile's edge does not show: no step above 2 along a line across it, above 3 anywhere outside the drawing", () => {
+    // Outside the drawing: both pixels of a pair farther from the middle than 0.41 of the size.
+    const step = (png: Png, x: number, y: number, x2: number, y2: number): number => {
+      const size = png.width;
+      const out = (px: number, py: number): boolean =>
+        Math.hypot(px + 0.5 - size / 2, py + 0.5 - size / 2) > 0.41 * size;
+      if (!out(x, y) || !out(x2, y2)) {
+        return 0;
+      }
+      const a = rgb(png, x, y);
+      const b = rgb(png, x2, y2);
+      return Math.max(...a.map((value, c) => Math.abs(value - (b[c] ?? 0))));
+    };
+    const picture = master();
+
+    for (const { file, size } of MASKABLE) {
+      const png = decodePng(read(`${ICONS}/${file}`));
+      const inner = size * MASKABLE_SCALE;
+      const offset = (size - inner) / 2;
+      // Where the line crosses the tile's border: the first and the last opaque pixel of the
+      // picture's row (or column) that the line shows, put through the scale.
+      const crossings = (line: number, across: 'row' | 'column'): number[] => {
+        const at = Math.min(
+          picture.width - 1,
+          Math.floor(((line + 0.5 - offset) * picture.width) / inner),
+        );
+        const solid = Array.from({ length: picture.width }, (_, t) =>
+          (across === 'row' ? alpha(picture, t, at) : alpha(picture, at, t)) >= OPAQUE ? t : -1,
+        ).filter((t) => t >= 0);
+        const toIcon = (t: number): number => offset + (t * inner) / picture.width;
+        return [toIcon(solid[0] ?? -1), toIcon((solid.at(-1) ?? -1) + 1)];
+      };
+      let lines = 0;
+      for (const fraction of [0.12, 0.27, 0.5, 0.78, 0.9]) {
+        const line = Math.floor(fraction * size);
+        for (const across of ['row', 'column'] as const) {
+          const along = crossings(line, across);
+          // The line shows a border inside the icon, and not under the drawing.
+          assert.ok(
+            along.every((t) => t > 2 && t < size - 3),
+            `${file}: the ${across} ${line} crosses the border at ${along}`,
+          );
+          let worst = 0;
+          for (let t = 0; t < size - 1; t++) {
+            worst = Math.max(
+              worst,
+              across === 'row' ? step(png, t, line, t + 1, line) : step(png, line, t, line, t + 1),
+            );
+          }
+          assert.ok(
+            worst <= 2,
+            `${file}: the ${across} ${line}: a step of ${worst} across the border`,
+          );
+          lines++;
+        }
+      }
+      assert.equal(lines, 10);
+      let worst = 0;
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          worst = Math.max(
+            worst,
+            x + 1 < size ? step(png, x, y, x + 1, y) : 0,
+            y + 1 < size ? step(png, x, y, x, y + 1) : 0,
+          );
+        }
+      }
+      assert.ok(worst <= 3, `${file}: a step of ${worst} outside the drawing`);
+    }
+  });
+
   test('every one is the picture, reduced: the same pixels as an average of it written again here', () => {
     // The script averages the picture's pixels under each pixel, in linear light, in Chromium;
     // `reduced` does the same in Node. Only rounding and the premultiplying of the canvas differ:
@@ -461,7 +571,7 @@ describe('the PNG files', () => {
     for (const { file, size } of PNGS) {
       const maskable = MASKABLE.some((m) => m.file === file);
       const png = decodePng(read(`${ICONS}/${file}`));
-      const expected = reduced(size, maskable ? MASKABLE_SCALE : 1, maskable ? TILE : null);
+      const expected = reduced(size, maskable ? MASKABLE_SCALE : 1, maskable);
       let worst = 0;
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
