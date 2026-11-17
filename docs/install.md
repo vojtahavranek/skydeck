@@ -1607,13 +1607,16 @@ window's server has begun, Ctrl+C (and a `kill`) no longer end the command**, so
 leaves the server stopped and the checkout half written without a word. One that comes during the
 stop ends it there: no fast-forward, the window brought back on the code it had (when it was open),
 and `skydeck: interrupted before the update was applied; the checkout was not changed` (exit 1).
-One that comes later changes nothing: the fast-forward runs to its end (git runs it in a session of
-its own, which Ctrl+C does not reach), and so does the rest. A terminal closed in the middle ends
-the command (there is no one left to read what it would say), but never cuts the fast-forward,
-which ends by itself: what is left is at worst a stopped server. In a new terminal, `git status`:
-when it shows nothing of the update's (the checkout at the old commit, or at the new one, and
-clean), `skydeck window` starts the window again; otherwise see "the checkout may not be as it
-was" below.
+One that comes later changes nothing: the fast-forward runs to its end (git runs it, and every look
+at the checkout after it, in a session of its own, which Ctrl+C does not reach), and so does the
+rest. (After a Ctrl+C the shell shows exit status 130 whatever the command printed: the launcher,
+`bin/skydeck`, ends with 130 on Ctrl+C once node has ended. Its lines say what happened.) A
+terminal closed in the middle ends the command (there is no one left to read what it would say),
+but never cuts the fast-forward, which ends by itself: what is left is at worst a stopped server.
+In a new terminal, `git status` and `git log -1 --format=%h` (against the two ids of the command's
+first line, `(<old>..<new>)`): at the old commit and clean, the
+update was not applied — `skydeck window`, then `skydeck update` again; at the new commit and
+clean, it was — `skydeck window`; otherwise see "the checkout may not be as it was" below.
 
 Each commit's line shows its subject's first 200 characters (a longer one ends with `…`).
 

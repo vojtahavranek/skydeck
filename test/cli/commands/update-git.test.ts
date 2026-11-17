@@ -180,7 +180,13 @@ describe('the merge in a session of its own (ruled by the plan owner, review 2 S
     assert.notEqual(mergeCall?.session, mine.session, 'not in this session');
     assert.notEqual(mergeCall?.pgrp, mine.pgrp, 'not in this process group');
     const top = calls.find((c) => c.args.endsWith('rev-parse --show-toplevel'));
-    assert.equal(top?.session, mine.session, 'the control: another call shares the session');
+    assert.equal(top?.session, mine.session, 'the control: a call before the merge shares it');
+    // The look at HEAD after the merge is in a session of its own too (the re-check's M1).
+    const after = calls.slice(calls.findIndex((c) => c.args.includes(' merge --ff-only ')) + 1);
+    const look = after.find((c) => c.args.endsWith('rev-parse --verify HEAD^{commit}'));
+    assert.ok(look !== undefined, JSON.stringify(after));
+    assert.notEqual(look.session, mine.session, 'the look after the merge: not in this session');
+    assert.notEqual(look.pgrp, mine.pgrp);
   });
 });
 

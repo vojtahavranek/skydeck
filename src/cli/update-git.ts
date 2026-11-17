@@ -61,15 +61,14 @@ const GIT_NOT_FOUND = 'git was not found on PATH; skydeck update needs it';
 export interface Git {
   /** The checkout (`platform.appRoot`). */
   root: string;
+  /** `git -C <root> <args>` with a timeout (GIT_MS unless given); a SkydeckError when git is not found. */
+  run(args: readonly string[], timeoutMs?: number): Promise<RunResult>;
   /**
-   * `git -C <root> <args>` with a timeout (GIT_MS unless given), in a session of its own with
-   * `newSession`; a SkydeckError when git is not found.
+   * From now on every call runs in a session of its own (RunOptions.newSession): the terminal's
+   * Ctrl+C and hang-up reach none of them. `skydeck update` calls it right before the merge, so that
+   * neither the merge nor a look after it can be cut by a signal (ruled by the plan owner, S2).
    */
-  run(
-    args: readonly string[],
-    timeoutMs?: number,
-    options?: { newSession?: boolean },
-  ): Promise<RunResult>;
+  ownSessions(): void;
   /** run(), and its standard output; any failure is gitFailure's SkydeckError. */
   output(args: readonly string[]): Promise<string>;
   /** `git -C <root> <args>` with the terminal and no timeout: its exit code, null when it did not end by itself. */
@@ -78,15 +77,12 @@ export interface Git {
 
 export function gitOn(platform: Platform, root: string): Git {
   const env = gitEnv(platform.env);
-  const run = async (
-    args: readonly string[],
-    timeoutMs = GIT_MS,
-    options: { newSession?: boolean } = {},
-  ): Promise<RunResult> => {
+  let ownSessions = false;
+  const run = async (args: readonly string[], timeoutMs = GIT_MS): Promise<RunResult> => {
     const result = await platform.runner.run('git', ['-C', root, ...args], {
       env,
       timeoutMs,
-      ...(options.newSession === true ? { newSession: true } : {}),
+      ...(ownSessions ? { newSession: true } : {}),
     });
     if (result.notFound) throw new SkydeckError(GIT_NOT_FOUND);
     return result;
@@ -94,6 +90,9 @@ export function gitOn(platform: Platform, root: string): Git {
   return {
     root,
     run,
+    ownSessions() {
+      ownSessions = true;
+    },
     async output(args) {
       const result = await run(args);
       if (result.code !== 0 || result.timedOut) throw gitFailure(args, result, GIT_MS);

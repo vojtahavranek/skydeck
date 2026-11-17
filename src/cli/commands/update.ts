@@ -372,9 +372,9 @@ type Merged =
 async function merge(git: Git, id: string): Promise<Merged> {
   let result: RunResult;
   try {
-    result = await git.run(['merge', '--ff-only', '--no-squash', id], MERGE_MS, {
-      newSession: true,
-    });
+    // The merge and every look after it in a session of its own (ruled, S2; review 2's re-check M1).
+    git.ownSessions();
+    result = await git.run(['merge', '--ff-only', '--no-squash', id], MERGE_MS);
   } catch (error) {
     // git not found, or a start that failed (EAGAIN …): it changed nothing (review 2 C4).
     return {

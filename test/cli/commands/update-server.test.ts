@@ -211,8 +211,11 @@ describe('skydeck update with a window server of this checkout (U5)', () => {
       assert.equal(r.code, 0, r.stderr);
       assert.equal(r.stdout, `${ONE_COMMIT}updated to fedcba9\n`);
       assert.equal(r.stderr, STOPPED);
+      // The untracked files are listed before the stop (the re-check's K4): a listing that fails
+      // then ends the command with nothing changed.
       inOrder(
         h.events,
+        'git ls-files',
         'GET /status',
         'POST /shutdown',
         'git merge',
@@ -389,6 +392,25 @@ describe('signals once the stop has begun (ruled by the plan owner, review 2 S2)
     assert.equal(r.stdout, `${ONE_COMMIT}updated to fedcba9\n`);
     assert.equal(r.stderr, STOPPED);
     inOrder(h.events, 'git merge', `launch ${h.root}/bin/skydeck window`);
+  });
+
+  test('the hold lasts to the last line: a signal while the new checkout’s launcher runs is held, and the result line comes', async (t) => {
+    const h = harness(t);
+    await h.serve({ FAKE_SERVE_PAGES: '1' });
+    const captured = capture();
+    const held: boolean[] = [];
+    const runner = scripted(h, {
+      onCall: (call) => {
+        if (call.command !== 'git') held.push(captured.signal('SIGINT'));
+      },
+    });
+
+    const r = await runUpdateOn(h.platform(runner), h.s, captured);
+
+    assert.deepEqual(held, [true], 'held while the launcher ran');
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, `${ONE_COMMIT}updated to fedcba9\n`);
+    assert.equal(captured.signal('SIGINT'), false, 'released after the last line');
   });
 
   test('before the stop nothing is held: a signal during the fetch would end the command as it always did', async (t) => {

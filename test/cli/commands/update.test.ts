@@ -405,14 +405,17 @@ describe('skydeck update: how git is run (U3)', () => {
     const r = await u.update();
 
     assert.equal(r.code, 0, r.stderr);
-    for (const call of u.runner.calls) {
+    const mergeAt = u.runner.calls.findIndex((call) => subCommand(call, u.root) === 'merge');
+    assert.ok(mergeAt > 0);
+    for (const [i, call] of u.runner.calls.entries()) {
       assert.equal(call.command, 'git');
       assert.deepEqual(call.args.slice(0, 2), ['-C', u.root]);
       assert.equal(call.options?.cwd, undefined, 'no chdir');
       const sub = subCommand(call, u.root);
       assert.equal(call.options?.timeoutMs, sub === 'merge' ? 60_000 : 10_000, sub);
-      // The merge alone runs in a session of its own (ruled, review 2 S2).
-      assert.equal(call.options?.newSession, sub === 'merge' ? true : undefined, sub);
+      // The merge and every call after it run in a session of its own (ruled, review 2 S2 and
+      // its re-check's M1); none before it.
+      assert.equal(call.options?.newSession, i >= mergeAt ? true : undefined, `${i} ${sub}`);
     }
     assert.deepEqual(
       u.runner.calls.map((c) => c.args.slice(2)),
@@ -725,6 +728,28 @@ describe('skydeck update: applying, no window server (U5)', () => {
     assert.equal(
       r.stderr,
       'skydeck: the update could not be applied: error: red thing; the checkout is as it was\n',
+    );
+  });
+
+  test('after a merge git refused, the three looks run in a session of their own too (a Ctrl+C cannot cut them)', async (t) => {
+    const u = updater(t, { merge: { code: 1, stderr: 'error: a refusal\n' } });
+
+    const r = await u.update();
+
+    assert.equal(r.code, 1);
+    const mergeAt = u.runner.calls.findIndex((call) => subCommand(call, u.root) === 'merge');
+    const after = u.runner.calls.slice(mergeAt);
+    assert.deepEqual(
+      after.map((call) => [subCommand(call, u.root), call.options?.newSession]),
+      [
+        ['merge', true],
+        ['rev-parse', true],
+        ['status', true],
+        ['ls-files', true],
+      ],
+    );
+    assert.ok(
+      u.runner.calls.slice(0, mergeAt).every((call) => call.options?.newSession === undefined),
     );
   });
 
