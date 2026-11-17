@@ -10,7 +10,10 @@
  *   | { kind: 'elsewhere', row: RowPayload }
  *   | { kind: 'resume', row: RowPayload }
  *   | { kind: 'new' }
+ *   | { kind: 'group', section: string, group: string, size: number, needYou: number }
  *   | { kind: 'none' }} Pane
+ * `group` (F9): a closed block's caption is selected — the pane shows a small card of the group, no
+ * terminal, and nothing has the keyboard.
  */
 
 /** The terminal states that show the last screen under the ended bar (S2 7.8; hub.ts). */
@@ -99,4 +102,34 @@ export function paneFor(selected, rows, terminals, newOpen, selectedRow = null) 
     return { kind: 'elsewhere', row: listed };
   }
   return { kind: 'resume', row: listed };
+}
+
+/**
+ * F9: the block of `group` in the section `section` as `list` draws it — its closed caption
+ * (`closedStacks`), or the rows of its open card (each with a `stack` of that group) —, as the
+ * number of its sessions and how many of them need you; null when the section draws neither (no
+ * such block, the section folded, or a filter set: no block then). The group card of the pane and
+ * the list's rule for a selected caption read it.
+ * @param {ListMessage | null} list
+ * @param {string} section
+ * @param {string} group
+ * @returns {{ size: number, needYou: number } | null}
+ */
+export function blockInfo(list, section, group) {
+  const part = list?.sections.find((candidate) => candidate.name === section);
+  if (part === undefined) {
+    return null;
+  }
+  const caption = (part.closedStacks ?? []).find((candidate) => candidate.group === group);
+  if (caption !== undefined) {
+    return { size: caption.size, needYou: caption.needYou };
+  }
+  const rows = part.rows.filter((row) => (row.stack ?? null)?.group === group);
+  if (rows.length === 0) {
+    return null;
+  }
+  return {
+    size: rows[0]?.stack?.size ?? rows.length,
+    needYou: rows.filter((row) => row.attention !== null).length,
+  };
 }

@@ -11,10 +11,13 @@
 //
 // Stage E (plan E task 97, E4–E7): the chips under the filter field (web/chips.js) and the blocks
 // of every section as the server sends them (E6 as ruled 2026-11-16; the protocol calls a block a
-// stack) — a head with its `×4`, an open block's members indented after it, a closed block's
-// `+3 more in ORB-2107` line (no row: never selected, no `data-id`), with ` · 1 needs you` in the
-// needs-you colour while members it hides need you —, ← and → on a block, and done sessions while
-// filtering. The list keeps the chips and the blocks the user closed as it keeps `showDone`: its
+// stack), drawn as CARDS since follow-up F9: a box of its own (`.list-block`) with a caption line at
+// its top (`.block-head`: the fold arrow, the group's name, its number of sessions) and, while open,
+// every session of the block as an ordinary row, none special; a closed block is its caption alone
+// (`data-open="false"`, no row: the server sends none of its rows, `section.closedStacks`), with
+// ` · 1 needs you` in the needs-you colour while sessions it hides need you. A CLOSED caption can
+// hold the selection (app.js's `caption`: no session is selected then); an open one cannot. ← and
+// → on a block, and done sessions while filtering. The list keeps the chips and the blocks the user closed as it keeps `showDone`: its
 // own state, sent whole in the page's `view` (`closed`, each entry a section and a group; a block
 // is open unless named there). Which rows match, which form a block, and whether the list is
 // filtering are the server's (`list.filtering`); the page decides no rule.
@@ -27,12 +30,13 @@
 /** @import { ClosedBlock, HiddenBy, ListMessage, RowPayload, SearchChip, SectionPayload, StackPayload, TerminalPayload } from '../src/window/protocol.ts' */
 /** @import { ListAction, Zone } from './keys.js' */
 /** @import { RowText } from './list-text.js' */
+/** @typedef {{ section: SectionPayload['name'], group: string }} Caption a closed block's caption (F9) */
 import { needYouText } from './attention-text.js';
 import { createChips } from './chips.js';
 import { serverNow } from './format.js';
-import { countsText, footerText, rowText, sectionText } from './list-text.js';
-import { MAY_START } from './pane.js';
-import { moreNeedText, moreText, stackBadge } from './search-text.js';
+import { countsText, footerText, rowText, sanitize, sectionText } from './list-text.js';
+import { blockInfo, MAY_START } from './pane.js';
+import { captionNeedText } from './search-text.js';
 
 /**
  * @typedef {object} ViewChange
@@ -44,7 +48,10 @@ import { moreNeedText, moreText, stackBadge } from './search-text.js';
  */
 /**
  * @typedef {object} ListHooks
- * @property {(id: string, how: 'click' | 'key') => void} select
+ * @property {(id: string, how: 'click' | 'key' | 'list') => void} select `list`: the list zone
+ *   takes the keyboard first (F9: a click on a selected closed caption), so that no terminal does
+ * @property {(section: SectionPayload['name'], group: string) => void} caption F9: selects the
+ *   caption of the closed block of `group` in `section` (no session is selected then)
  * @property {(id: string) => void} activate
  * @property {(change: ViewChange) => void} view
  * @property {(text: string) => void} [say] a line for the key bar (a refused click, F3)
@@ -61,7 +68,8 @@ const SEARCH_CHIPS = /** @type {const} */ (['running', 'open-pr', 'note']);
 /** E6: the most entries a view's `closed` holds (the parser's MAX_CLOSED; web/ imports only types
  *  from src/, so the page holds the number itself). */
 const MAX_CLOSED = 64;
-/** Ruled 2026-11-16 (review 2 of F3): what a click on `×n` that would move the selection says. */
+/** Ruled 2026-11-16 (review 2 of F3): what a click on a block's caption (F9; `×n` before) that
+ *  would move the selection says. */
 const HOLDS_SELECTED = 'this block holds the selected session; it stays open';
 /** Ruled 2026-11-16 (review 2 of F3): what ← and `×n` say on a block a start holds open. */
 const HOLDS_STARTING = 'this block holds a session that is still starting; it stays open';
@@ -143,15 +151,11 @@ function setTip(target, tip) {
  * clicks would otherwise resume a session the user clicked once (S2 12.6: nothing resumes but on
  * purpose). Then they are two single clicks: each selects the row it landed on.
  *
- * A block's head shows `×4` after its ticket key (or group) (E7): a click on it opens or closes
- * the block (`toggleStack`) and does nothing else — it selects no row and, its mousedown
- * cancelled, takes no keyboard.
  * @param {string} id
  * @param {ListHooks} hooks
  * @param {{ first: string | null }} clicks the row of the last click that began a sequence
- * @param {(head: string) => void} toggleStack
  */
-function makeRow(id, hooks, clicks, toggleStack) {
+function makeRow(id, hooks, clicks) {
   const root = element('list-row', 'div');
   root.dataset.id = id;
   root.addEventListener('click', (event) => {
@@ -171,16 +175,6 @@ function makeRow(id, hooks, clicks, toggleStack) {
   const slot = element('row-slot');
   const key = element('row-key');
   const group = element('row-group');
-  const stack = element('row-stack');
-  stack.hidden = true;
-  stack.addEventListener('mousedown', (event) => event.preventDefault());
-  stack.addEventListener('click', (event) => {
-    event.stopPropagation(); // not a click on the row: it selects nothing
-    if (event.detail <= 1) {
-      toggleStack(id); // the first click of a sequence only (task 38's rule)
-    }
-  });
-  stack.addEventListener('dblclick', (event) => event.stopPropagation()); // and resumes nothing
   const title = element('row-title');
   const marks = new Map(MARK_KINDS.map((kind) => [kind, element('row-mark')]));
   for (const [kind, mark] of marks) {
@@ -193,7 +187,7 @@ function makeRow(id, hooks, clicks, toggleStack) {
   const note = element('row-note');
   const age = element('row-age');
   const state = element('row-state', 'div');
-  first.append(slot, key, group, stack, title, ...marks.values(), chip, note, age);
+  first.append(slot, key, group, title, ...marks.values(), chip, note, age);
   main.append(first, state);
   root.append(icon, main);
   return {
@@ -202,7 +196,6 @@ function makeRow(id, hooks, clicks, toggleStack) {
     slot,
     key,
     group,
-    stack,
     title,
     marks,
     chip,
@@ -270,8 +263,10 @@ function paintRow(row, text, done) {
 }
 
 /**
- * Draws a row's place in a block (E7): `data-stack="head"` with its `×4`, `data-stack="member"`
- * (indented by search.css), nothing for a row in no block.
+ * Marks a row's place in an open block (E7, F9): `data-stack="head"` on its first row,
+ * `data-stack="member"` on the others, nothing for a row in no block. Every row of a card is drawn
+ * alike (list.css hides its ticket key and group there, which the caption says); the mark is a hook
+ * for the tests only.
  * @param {RowElements} row
  * @param {StackPayload | null} stack
  */
@@ -283,9 +278,6 @@ function paintStack(row, stack) {
   } else {
     setData(row.root, 'stack', stack.role === 'head' ? 'head' : 'member');
   }
-  const head = stack !== null && stack.role === 'head';
-  setText(row.stack, head ? stackBadge(stack.size) : '');
-  setTip(row.stack, head ? (stack.open ? 'close the block' : 'open the block') : '');
 }
 
 /** A section header's elements, made once (S2 12.1). @param {SectionPayload['name']} name */
@@ -371,7 +363,7 @@ export function createList(root, hooks) {
    */
   const clicks = { first: /** @type {string | null} */ (null) };
   /**
-   * The current click sequence began on a block's `×4` or `+3 more` line (E7, ruled on review 2):
+   * The current click sequence began on a block's caption (F9; `×4` and `+3 more` before) (E7, ruled on review 2):
    * its first click opened or closed the block, so the list may have moved under the pointer, and
    * the later clicks of the sequence (`detail` above 1) are not acted on anywhere in the list —
    * their press takes no keyboard, their click selects no row and toggles no block, a double click
@@ -380,7 +372,7 @@ export function createList(root, hooks) {
   let onStack = false;
   /** @param {EventTarget | null} target */
   const isStackControl = (target) =>
-    target instanceof Element && target.closest('.row-stack, .list-more') !== null;
+    target instanceof Element && target.closest('.block-head') !== null;
   /** @param {Event} event */
   const drop = (event) => {
     event.preventDefault();
@@ -424,6 +416,8 @@ export function createList(root, hooks) {
   let current = null;
   /** @type {string | null} */
   let selected = null;
+  /** F9: the selected caption (app.js's), its section and group; null while none is. @type {Caption | null} */
+  let selectedCaption = null;
   let showDone = false;
   /** Whether the page's view unfolds Earlier (`unfolded`): only the list sends it, app.js starts
    *  with none, so the list knows it as it knows `showDone` (reveal sends only what changes). */
@@ -456,14 +450,13 @@ export function createList(root, hooks) {
   /** @type {Map<string, ReturnType<typeof makeHeader>>} */
   const headers = new Map();
   /**
-   * A closed block's `+3 more in ORB-2107` line, by its head's session id (E7): the line, its text,
-   * and its part ` · 1 needs you` (G5).
-   * @type {Map<string, { root: HTMLElement, text: HTMLElement, need: HTMLElement }>}
+   * Each block's card (F9), by its section and group, made once: the box, its caption line and the
+   * caption's parts; `kids` the lines it holds after this render (the caption, then its rows).
+   * @typedef {{ root: HTMLElement, head: HTMLElement, name: HTMLElement, count: HTMLElement,
+   *   need: HTMLElement, kids: HTMLElement[] }} BlockElements
+   * @type {Map<string, BlockElements>}
    */
-  const moreLines = new Map();
-
-  /** @returns {RowPayload[]} the rows drawn, in order */
-  const rows = () => current?.sections.flatMap((section) => section.rows) ?? [];
+  const blocks = new Map();
 
   /**
    * The row of `id` the list draws and its section's name, or undefined.
@@ -511,104 +504,137 @@ export function createList(root, hooks) {
 
   /**
    * Closes the block of `group` in `section` (E7): adds it to `closed`, the oldest dropped past
-   * MAX_CLOSED (that block opens again). With one of its members other than the head selected —
-   * which only ← on a member reaches: a click on `×n` refuses then (`toggleStack`, ruled) — the
-   * head is selected first: a selected member keeps its block open (G5), and the page would forget
-   * the closing at the next list. A group the server would refuse is never sent: its block cannot
-   * be closed, and nothing happens (it stays open).
+   * MAX_CLOSED (that block opens again). It moves no selection: ← selects the caption first (F9),
+   * a click never moves it (ruled 2026-11-16). A group the server would refuse is never sent: its
+   * block cannot be closed, and nothing happens (it stays open). Returns whether it is closed.
    * @param {SectionPayload['name']} section
    * @param {string} group
+   * @returns {boolean}
    */
-  const closeBlock = (section, group) => {
+  const shutBlock = (section, group) => {
     if (!sendable(group)) {
-      return;
-    }
-    const place = placeOf(selected);
-    const stack = place?.row.stack ?? null;
-    if (
-      stack !== null &&
-      place?.section === section &&
-      stack.role === 'member' &&
-      stack.group === group
-    ) {
-      hooks.select(stack.head, 'key');
+      return false;
     }
     if (!isClosed(section, group)) {
       sendClosed([...closed, { section, group }].slice(-MAX_CLOSED));
     }
+    return true;
   };
 
   /**
-   * A click on a head's `×4` or on its `+3 more` line (E7): opens the block, or closes it. A click
-   * never moves the selection (ruled 2026-11-16): while a member other than the head is selected —
-   * as the page selects and draws it now —, a click that would close the block leaves it open and
-   * the key bar says why (closing would select the head, and from the terminal zone the head's
-   * terminal would take the keyboard); ← in the list still selects the head and closes (E7).
-   * @param {string} head the head's session id
+   * F9: the block of `group` in `section` as the list draws it now: its closed caption, or its open
+   * card's rows; null when the section draws neither.
+   * @param {SectionPayload['name']} section
+   * @param {string} group
    */
-  const toggleStack = (head) => {
-    const place = placeOf(head);
-    const stack = place?.row.stack ?? null;
-    if (place === undefined || stack === null || stack.role !== 'head') {
+  const drawnBlock = (section, group) => {
+    const part = current?.sections.find((candidate) => candidate.name === section);
+    const caption = (part?.closedStacks ?? []).find((candidate) => candidate.group === group);
+    const rows = (part?.rows ?? []).filter((row) => (row.stack ?? null)?.group === group);
+    return caption !== undefined
+      ? { caption, rows: [] }
+      : rows.length > 0
+        ? { caption: null, rows }
+        : null;
+  };
+
+  /**
+   * F9's → and Enter on a selected caption, and a click on it: the block opens and its first
+   * session is selected (`how` 'key' from the keys, 'list' from a click: the list zone takes the
+   * keyboard first, so that no terminal does). Its first session is the caption's `head`, or the
+   * first row of its card while a list that still draws it open has not been followed by one that
+   * draws it closed (right after ←). Nothing while the list draws neither (a filter is set).
+   * @param {SectionPayload['name']} section
+   * @param {string} group
+   * @param {'key' | 'list'} how
+   */
+  const openCaption = (section, group, how) => {
+    const drawn = drawnBlock(section, group);
+    const first = drawn?.caption?.head ?? drawn?.rows[0]?.id ?? null;
+    if (first === null) {
       return;
     }
-    if (!stack.open) {
-      openBlock(place.section, stack.group);
+    hooks.select(first, how); // first, so that no view names the block closed with it selected
+    openBlock(section, group);
+  };
+
+  /**
+   * A click on a block's caption (E7, F9): opens the block, or closes it. A click never moves the
+   * selection (ruled 2026-11-16) — but on the selected closed caption itself it opens the block and
+   * selects its first session, as → does (K4). While the block holds the selected session (any of
+   * its rows) the click to close is refused and the key bar says why; so it is while an unreported
+   * terminal holds it open (`heldLine`).
+   * @param {SectionPayload['name']} section
+   * @param {string} group
+   */
+  const clickCaption = (section, group) => {
+    const drawn = drawnBlock(section, group);
+    if (drawn === null) {
       return;
     }
-    const chosen = placeOf(selected);
-    const member = chosen?.row.stack ?? null;
-    if (
-      chosen?.section === place.section &&
-      member !== null &&
-      member.role === 'member' &&
-      member.group === stack.group
-    ) {
+    if (drawn.caption !== null) {
+      if (selectedCaption?.section === section && selectedCaption.group === group) {
+        openCaption(section, group, 'list');
+      } else {
+        openBlock(section, group);
+      }
+      return;
+    }
+    if (drawn.rows.some((row) => row.id === selected)) {
       hooks.say?.(HOLDS_SELECTED);
       return;
     }
-    const held = heldLine(place.section, stack.group);
+    const held = heldLine(section, group);
     if (held !== null) {
       hooks.say?.(held); // the server keeps it open: nothing moves
       return;
     }
-    closeBlock(place.section, stack.group);
+    shutBlock(section, group);
   };
 
   /**
-   * The line after a closed block's head, made once (E7): no row — no `data-id`, never selected —,
-   * and a click on it opens the block and, its mousedown cancelled, takes no keyboard. Its part
-   * ` · 1 needs you` (G5) is an element of its own, in the needs-you colour (search.css).
-   * @param {string} head the head's session id
+   * A block's card, made once (F9): the box and its caption line — the fold arrow (list.css draws
+   * it by `data-open`), the group's name (text only), its number of sessions, and, while closed,
+   * ` · 1 needs you` in the needs-you colour. The whole caption line is the control: a click opens
+   * or closes the block (the first click of a sequence only, task 38's rule) and, its mousedown
+   * cancelled, takes no keyboard. It carries no `data-id`.
+   * @param {SectionPayload['name']} section
+   * @param {string} group
+   * @returns {BlockElements}
    */
-  const moreFor = (head) => {
-    let line = moreLines.get(head);
-    if (line === undefined) {
-      const root = element('list-more', 'div');
-      root.dataset.head = head;
-      root.title = 'open the block';
-      const text = element('more-text');
-      const need = element('more-need');
+  const blockFor = (section, group) => {
+    const key = `${section}\n${group}`;
+    let block = blocks.get(key);
+    if (block === undefined) {
+      const root = element('list-block', 'div');
+      root.dataset.section = section;
+      const head = element('block-head', 'div');
+      const twist = element('block-twist');
+      twist.setAttribute('aria-hidden', 'true');
+      const name = element('block-name');
+      const count = element('block-count');
+      const need = element('block-need');
       need.hidden = true;
-      root.append(text, need);
-      root.addEventListener('mousedown', (event) => event.preventDefault());
-      root.addEventListener('click', (event) => {
+      head.append(twist, name, count, need);
+      root.append(head);
+      head.addEventListener('mousedown', (event) => event.preventDefault());
+      head.addEventListener('click', (event) => {
         if (event.detail <= 1) {
-          toggleStack(head); // the first click of a sequence only (task 38's rule)
+          clickCaption(section, group);
         }
       });
-      line = { root, text, need };
-      moreLines.set(head, line);
+      block = { root, head, name, count, need, kids: [] };
+      blocks.set(key, block);
     }
-    return line;
+    return block;
   };
 
   /**
    * Whether `row` is drawn with a terminal of the window that has not reported a session (its
    * `sessionId` is null in the list's `terminals`, S2 7.5): a start, or a program that ended before
    * it reported. A COPY OF THE SERVER'S RULE (`src/window/view/build.ts`, `stacked`'s
-   * `unreported`; ruled 2026-11-16): the server draws a closed block open while one of its members
-   * is such a row, and this page forgets that it closed it (render) and refuses to close it
+   * `unreported`; ruled 2026-11-16): the server draws a closed block open while one of its rows (F9:
+   * its first too) is such a row, and this page forgets that it closed it (render) and refuses to close it
    * (`heldLine`, which tells the two lines apart by MAY_START, a copy too). A change of one is a
    * change of the other.
    * @param {RowPayload} row
@@ -618,8 +644,8 @@ export function createList(root, hooks) {
     current?.terminals.find((candidate) => candidate.id === row.terminal)?.sessionId === null;
 
   /**
-   * What ← and `×n` say on the drawn block of `group` in `section` when a member other than the
-   * head is one that `unreported` names — the server keeps it open, so they do nothing —, or null
+   * What ← and a click on the caption say on the drawn block of `group` in `section` when one of its
+   * rows (F9: its first too) is one that `unreported` names — the server keeps it open, so they do nothing —, or null
    * when none is: HOLDS_STARTING while such a member's terminal may still start (MAY_START; it also
    * wins when both kinds hold the block, since it is the one that changes by itself), else
    * HOLDS_ENDED (its terminal ended, was lost or never started before its session was known).
@@ -632,7 +658,7 @@ export function createList(root, hooks) {
     for (const row of current?.sections.find((candidate) => candidate.name === section)?.rows ??
       []) {
       const stack = row.stack ?? null;
-      if (stack === null || stack.role !== 'member' || stack.group !== group || !unreported(row)) {
+      if (stack === null || stack.group !== group || !unreported(row)) {
         continue;
       }
       const state = current?.terminals.find((candidate) => candidate.id === row.terminal)?.state;
@@ -682,7 +708,7 @@ export function createList(root, hooks) {
   const rowFor = (id) => {
     let row = rowElements.get(id);
     if (row === undefined) {
-      row = makeRow(id, hooks, clicks, toggleStack);
+      row = makeRow(id, hooks, clicks);
       rowElements.set(id, row);
     }
     return row;
@@ -742,24 +768,32 @@ export function createList(root, hooks) {
    * @param {ListMessage | null} list
    * @param {string | null} selectedId
    * @param {Zone} zone
+   * @param {Caption | null} [caption] F9: the selected caption (then `selectedId` is null)
    */
-  const render = (list, selectedId, zone) => {
+  const render = (list, selectedId, zone, caption = null) => {
     setData(root, 'zone', zone);
-    if (list === current && selectedId === selected) {
+    const sameCaption =
+      caption?.section === selectedCaption?.section && caption?.group === selectedCaption?.group;
+    if (list === current && selectedId === selected && sameCaption) {
       return; // only the zone changed
     }
-    const moved = selectedId !== selected;
+    const moved = selectedId !== selected || !sameCaption;
     if (list !== current) {
       receivedAt = performance.now();
     }
     current = list;
     selected = selectedId;
+    selectedCaption = caption === null ? null : { section: caption.section, group: caption.group };
     const now = nowNs();
     const searching = filtering();
     const sections = list?.sections ?? [];
     const nothing = searching && sections.every((section) => section.count === 0);
     /** @type {HTMLElement[]} */
     const lines = [];
+    /** The cards drawn, in order. @type {BlockElements[]} */
+    const cards = [];
+    /** The selected line (a row or a caption) and its section, to scroll it into view. */
+    let selectedLine = /** @type {HTMLElement | null} */ (null);
     let sectionNow = '';
     if (nothing) {
       lines.push(empty);
@@ -777,26 +811,65 @@ export function createList(root, hooks) {
       setText(header.span, text.span);
       setData(header.root, 'folded', String(section.folded));
       lines.push(header.root);
-      for (const row of section.rows) {
+      /**
+       * The card of `group` in this section, its caption painted, taken into this render's lines
+       * once (a block's rows are one run of the section, so a second call adds to the same card).
+       * @param {string} group
+       * @param {number} size
+       * @param {number | null} needYou the closed caption's count; null for an open card
+       */
+      const cardOf = (group, size, needYou) => {
+        const block = blockFor(section.name, group);
+        if (!cards.includes(block)) {
+          const isSelected =
+            selectedCaption?.section === section.name && selectedCaption.group === group;
+          setData(block.root, 'open', String(needYou === null));
+          setText(block.name, sanitize(group));
+          setTip(block.name, sanitize(group));
+          setText(block.count, String(size));
+          setText(block.need, needYou === null ? '' : captionNeedText(needYou));
+          setTip(block.head, needYou === null ? 'close the group' : 'open the group');
+          setData(block.head, 'selected', String(isSelected));
+          if (isSelected) {
+            selectedLine = block.head;
+            sectionNow = section.name;
+          }
+          block.kids = [block.head];
+          cards.push(block);
+          lines.push(block.root);
+        }
+        return block;
+      };
+      const captions = section.closedStacks ?? []; // a list from before F9 has none
+      /** @param {number} at */
+      const captionsAt = (at) => {
+        for (const one of captions) {
+          if (one.at === at) {
+            cardOf(one.group, one.size, one.needYou);
+          }
+        }
+      };
+      section.rows.forEach((row, at) => {
+        captionsAt(at);
         const drawn = rowFor(row.id);
         const stack = row.stack ?? null; // a list from before stage E has none
         paintRow(drawn, rowText(row, now, terminalOf(row)), row.done);
         paintStack(drawn, stack);
         setData(drawn.root, 'selected', String(row.id === selectedId));
         if (row.id === selectedId) {
+          selectedLine = drawn.root;
           sectionNow = section.name;
         }
-        lines.push(drawn.root);
-        if (stack !== null && stack.role === 'head' && !stack.open) {
-          const more = moreFor(row.id);
-          setText(more.text, moreText(stack.size, stack.group));
-          setText(more.need, moreNeedText(stack.hiddenNeedYou));
-          lines.push(more.root);
+        if (stack === null) {
+          lines.push(drawn.root);
+        } else {
+          cardOf(stack.group, stack.size, null).kids.push(drawn.root);
         }
-      }
+      });
+      captionsAt(section.rows.length);
     }
     // Moved only where the order changed; lines no longer drawn are removed.
-    const keep = new Set(lines);
+    const keep = new Set([...lines, ...cards.flatMap((block) => block.kids)]);
     for (const [id, row] of rowElements) {
       if (!keep.has(row.root)) {
         row.root.remove();
@@ -809,20 +882,33 @@ export function createList(root, hooks) {
         headers.delete(name);
       }
     }
-    for (const [head, more] of moreLines) {
-      if (!keep.has(more.root)) {
-        more.root.remove();
-        moreLines.delete(head);
+    for (const [key, block] of blocks) {
+      if (!cards.includes(block)) {
+        block.root.remove();
+        blocks.delete(key);
       }
     }
     if (!keep.has(empty)) {
       empty.remove();
     }
-    lines.forEach((line, at) => {
-      if (body.children[at] !== line) {
-        body.insertBefore(line, body.children[at] ?? null);
+    /**
+     * @param {HTMLElement} container
+     * @param {HTMLElement[]} children
+     */
+    const place = (container, children) => {
+      children.forEach((line, at) => {
+        if (container.children[at] !== line) {
+          container.insertBefore(line, container.children[at] ?? null);
+        }
+      });
+      while (container.children.length > children.length) {
+        container.lastElementChild?.remove();
       }
-    });
+    };
+    place(body, lines);
+    for (const block of cards) {
+      place(block.root, block.kids);
+    }
 
     // While filtering the footer of done sessions is not shown (S2 12.8, E5): they are listed.
     const foot = list === null || searching ? null : footerText(list.doneHidden, showDone);
@@ -831,33 +917,43 @@ export function createList(root, hooks) {
     setText(footerAction, foot?.action ?? '');
     paintCounts();
 
-    // The selected row is scrolled into view when the selection changed and when the row moved
-    // to another section (a resume brings it to Open); never for a move inside its section, so
-    // that a list that arrives does not pull the list back from where the user scrolled it.
-    if (selectedId !== null && (moved || sectionNow !== selectedSection)) {
-      rowElements.get(selectedId)?.root.scrollIntoView({ block: 'nearest' });
+    // The selected line is scrolled into view when the selection changed and when it moved to
+    // another section (a resume brings it to Open); never for a move inside its section, so that a
+    // list that arrives does not pull the list back from where the user scrolled it.
+    if (selectedLine !== null && (moved || sectionNow !== selectedSection)) {
+      /** @type {HTMLElement} */ (selectedLine).scrollIntoView({ block: 'nearest' });
     }
     selectedSection = sectionNow;
 
-    // G5 (ruled 2026-11-16): a closed block that the selection opened — a member of it is
-    // selected, however it got there (a slot chord, Ctrl+Shift+J, Ctrl+Tab, a notification, the
-    // switcher, a resume's answer) — is forgotten as closed, so that it stays open once the
-    // selection leaves, until the user closes it again. So is one that a member's unreported
-    // terminal opened (the server's rule, copied in `unreported`), so that it stays open after the
-    // report.
+    // G5 (ruled 2026-11-16; F9: any row of the block, its first too): a closed block that the
+    // selection opened — one of its rows is selected, however it got there (a slot chord,
+    // Ctrl+Shift+J, Ctrl+Tab, a notification, the switcher, a resume's answer, → on its caption) —
+    // is forgotten as closed, so that it stays open once the selection leaves, until the user
+    // closes it again. So is one that a row's unreported terminal opened (the server's rule, copied
+    // in `unreported`), so that it stays open after the report.
     for (const section of sections) {
       for (const row of section.rows) {
         const stack = row.stack ?? null;
-        if (
-          stack !== null &&
-          stack.role === 'member' &&
-          (row.id === selectedId || unreported(row))
-        ) {
+        if (stack !== null && (row.id === selectedId || unreported(row))) {
           openBlock(section.name, stack.group);
         }
       }
     }
   };
+
+  /**
+   * F9 (ruled (a), (b)): whether the selected caption `caption` can stay selected after this render:
+   * while filtering, yes (as a selected session the filter hides stays selected); else only while
+   * the page still names its block closed and the list draws that block (closed, or still open
+   * right after ←). app.js selects nothing when it cannot: its block was opened without a key
+   * (an unreported terminal of a session starting into it, the 65th closed block dropping it) or
+   * is gone (fewer than two sessions of its group left in the section).
+   * @param {Caption} caption
+   */
+  const holds = (caption) =>
+    filtering() ||
+    (isClosed(caption.section, caption.group) &&
+      blockInfo(current, caption.section, caption.group) !== null);
 
   /** `a`, the footer's `show` / `hide` and the chip `Show done`: one state (E4). */
   const toggleDone = () => {
@@ -878,9 +974,53 @@ export function createList(root, hooks) {
   };
 
   /**
+   * F9: what the list's keys move through, in the list's order: every row drawn and every CLOSED
+   * caption (an open card's caption holds no selection, K3). While filtering there is no caption.
+   * @typedef {{ kind: 'row', section: SectionPayload['name'], id: string }
+   *   | { kind: 'caption', section: SectionPayload['name'], group: string }} Stop
+   * @returns {Stop[]}
+   */
+  const stops = () => {
+    /** @type {Stop[]} */
+    const all = [];
+    for (const section of current?.sections ?? []) {
+      const captions = section.closedStacks ?? [];
+      /** @param {number} at */
+      const captionsAt = (at) => {
+        for (const one of captions) {
+          if (one.at === at) {
+            all.push({ kind: 'caption', section: section.name, group: one.group });
+          }
+        }
+      };
+      section.rows.forEach((row, at) => {
+        captionsAt(at);
+        all.push({ kind: 'row', section: section.name, id: row.id });
+      });
+      captionsAt(section.rows.length);
+    }
+    return all;
+  };
+
+  /** @param {Stop} stop whether it is what is selected now */
+  const isSelected = (stop) =>
+    stop.kind === 'row'
+      ? stop.id === selected
+      : selectedCaption?.section === stop.section && selectedCaption.group === stop.group;
+
+  /** Selects `stop` from a key: a row (the zone stays), or a caption (F9). @param {Stop} stop */
+  const selectStop = (stop) => {
+    if (stop.kind === 'row') {
+      hooks.select(stop.id, 'key');
+    } else {
+      hooks.caption(stop.section, stop.group);
+    }
+  };
+
+  /**
    * Folds or unfolds Earlier (S2 12.1: the only section that folds). Folding it with the
-   * selection inside selects the row above it, so that the selection stays on a row the list
-   * shows.
+   * selection inside — a row, or a caption (F9) — selects the line above it that can hold the
+   * selection (a row, or a closed caption), so that the selection stays on what the list shows.
    * @param {boolean} folded
    */
   const fold = (folded) => {
@@ -890,13 +1030,15 @@ export function createList(root, hooks) {
     if (earlier === undefined || filtering()) {
       return;
     }
-    if (folded && selected !== null && earlier.rows.some((row) => row.id === selected)) {
-      const before = (current?.sections ?? [])
-        .filter((section) => section.name !== 'earlier')
-        .flatMap((section) => section.rows)
+    const inside =
+      selectedCaption?.section === 'earlier' ||
+      (selected !== null && earlier.rows.some((row) => row.id === selected));
+    if (folded && inside) {
+      const before = stops()
+        .filter((stop) => stop.section !== 'earlier')
         .at(-1);
       if (before !== undefined) {
-        hooks.select(before.id, 'key');
+        selectStop(before);
       }
     }
     earlierUnfolded = !folded;
@@ -912,15 +1054,19 @@ export function createList(root, hooks) {
     return Math.max(1, Math.floor(body.clientHeight / height) - 1);
   };
 
-  /** @param {ListAction} action */
-  const key = (action) => {
-    const all = rows();
+  /**
+   * @param {ListAction} action
+   * @param {boolean} [repeat] the key is an auto-repeat of one held down (F9: ← on a caption)
+   */
+  const key = (action, repeat = false) => {
     switch (action.kind) {
       case 'move': {
+        // F9: through the rows and the closed captions; with nothing selected, the first of them.
+        const all = stops();
         if (all.length === 0) {
           return;
         }
-        const at = all.findIndex((row) => row.id === selected);
+        const at = all.findIndex(isSelected);
         const by = action.by;
         /** @type {number} */
         let index;
@@ -929,29 +1075,40 @@ export function createList(root, hooks) {
         } else if (by === 'end') {
           index = all.length - 1;
         } else if (at === -1) {
-          index = 0; // nothing of the list selected: its first row
+          index = 0; // nothing of the list selected: its first row or caption
         } else {
           const step = by === 'page-up' ? -pageRows() : by === 'page-down' ? pageRows() : by;
           index = Math.max(0, Math.min(all.length - 1, at + step));
         }
-        const row = all[index];
-        if (row !== undefined && row.id !== selected) {
-          hooks.select(row.id, 'key');
+        const stop = all[index];
+        if (stop !== undefined && !isSelected(stop)) {
+          selectStop(stop);
         }
         return;
       }
       case 'fold': {
-        // E7: ← on an open head closes its block, ← on a member selects the head and closes it (a
-        // group the server would refuse: nothing, the block stays open); otherwise ← folds
-        // Earlier, as in stage A.
+        // F9: ← on a selected caption does what ← on a closed head did, it folds Earlier (inside
+        // Earlier the line above is selected) — but an auto-repeat does nothing there (ruled (d)):
+        // a held ← that has just closed a block must not go on to fold Earlier and select a
+        // session the user did not choose.
+        if (selectedCaption !== null) {
+          if (!repeat) {
+            fold(true);
+          }
+          return;
+        }
+        // E7, F9: ← on any session of an open card closes the block and selects its caption (a
+        // group the server would refuse: nothing, the block stays open; an unreported terminal
+        // holding it open: the key bar says why); otherwise ← folds Earlier, as in stage A.
         const place = placeOf(selected);
         const stack = place?.row.stack ?? null;
-        if (place !== undefined && stack !== null && (stack.open || stack.role === 'member')) {
+        if (place !== undefined && stack !== null) {
           const held = heldLine(place.section, stack.group);
           if (held !== null) {
             hooks.say?.(held); // the server keeps it open: nothing moves
-          } else {
-            closeBlock(place.section, stack.group);
+          } else if (sendable(stack.group)) {
+            hooks.caption(place.section, stack.group); // first: no session stays selected in it
+            shutBlock(place.section, stack.group);
           }
         } else {
           fold(true);
@@ -959,11 +1116,10 @@ export function createList(root, hooks) {
         return;
       }
       case 'unfold': {
-        // E7: → on a closed head opens its block; otherwise → unfolds Earlier, as in stage A.
-        const place = placeOf(selected);
-        const stack = place?.row.stack ?? null;
-        if (place !== undefined && stack !== null && stack.role === 'head' && !stack.open) {
-          openBlock(place.section, stack.group);
+        // F9: → on a selected caption opens its block and selects its first session; otherwise →
+        // unfolds Earlier, as in stage A (on a session of an open card too).
+        if (selectedCaption !== null) {
+          openCaption(selectedCaption.section, selectedCaption.group, 'key');
         } else {
           fold(false);
         }
@@ -973,8 +1129,14 @@ export function createList(root, hooks) {
         if (enterDown) {
           return; // an auto-repeat of an Enter that is still down
         }
+        // Set before any act (F9, ruled (d)): an Enter held on a caption opens the block and selects
+        // its first session once; its repeats never resume that session.
         enterDown = true;
-        if (selected !== null && all.some((row) => row.id === selected)) {
+        if (selectedCaption !== null) {
+          openCaption(selectedCaption.section, selectedCaption.group, 'key');
+          return;
+        }
+        if (selected !== null && placeOf(selected) !== undefined) {
           hooks.activate(selected);
         }
         return;
@@ -1034,5 +1196,5 @@ export function createList(root, hooks) {
     }
   };
 
-  return { render, key, editFilter, reveal };
+  return { render, key, editFilter, reveal, holds };
 }

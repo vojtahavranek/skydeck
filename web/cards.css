@@ -354,6 +354,21 @@
   color: var(--dim);
   margin-top: 10px;
 }
+/* F9: the group card of a selected closed caption — its name (a long one wraps), the number of
+   its sessions, ` · 1 needs you` in the needs-you colour, what opens it. */
+.card-group-name {
+  overflow-wrap: anywhere;
+}
+.card-group-line {
+  color: var(--dim);
+}
+.card-group-need {
+  color: var(--need);
+  white-space: pre; /* keeps its leading space */
+}
+.card-group-hint {
+  margin-top: 10px;
+}
 .card-actions,
 .card-bar {
   display: flex;

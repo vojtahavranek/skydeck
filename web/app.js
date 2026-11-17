@@ -47,7 +47,7 @@ import { createHelp } from './help.js';
 import { cancels, listKey, switcherKey, windowChord } from './keys.js';
 import { createList } from './list.js';
 import { createNotifications } from './notify.js';
-import { paneFor, sessionRow } from './pane.js';
+import { blockInfo, paneFor, sessionRow } from './pane.js';
 import { cutWords } from './search-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
@@ -132,6 +132,14 @@ const state = {
   unlisted: new Set(),
   /** @type {string | null} */
   selected: null,
+  /**
+   * F9: the selected caption of a closed block — its section and group, and the number of its
+   * sessions and of those that need you as last drawn (the pane's group card keeps them while a
+   * filter hides the caption) —, or null. Never with `selected`: while a caption is selected no
+   * session is, and the server is told `selected: null` (nothing is seen, no session is acted on).
+   * @type {{ section: SectionPayload['name'], group: string, size: number, needYou: number } | null}
+   */
+  caption: null,
   /** @type {Zone} */
   zone: 'terminal',
   /** Session ids, the most recently selected first (Ctrl+Tab, Ctrl+Shift+O). @type {string[]} */
@@ -209,6 +217,7 @@ const send = (message) => connection?.send(message) ?? false;
 
 const list = createList(dom.list, {
   select: (id, how) => select(id, how),
+  caption: (section, group) => selectCaption(section, group),
   activate: (id) => activate(id),
   view: (change) => changeView(change),
   say: (text) => say(text),
@@ -680,25 +689,54 @@ function overLimit(action) {
 
 /**
  * Selects a session (S2 12.9): a click on a running row focuses its terminal, a click on another
- * row the list; moving with the list's keys keeps the list.
+ * row the list; moving with the list's keys keeps the list. `list` (F9, a click on a selected
+ * closed caption): the list zone takes the keyboard before the session is shown, so that no
+ * terminal takes it. A selected caption is no longer selected.
  * @param {string} id
- * @param {'click' | 'key' | 'chord'} how
+ * @param {'click' | 'key' | 'chord' | 'list'} how
  */
 function select(id, how) {
   state.newOpen = false;
   if (state.bringing !== id) {
     state.bringing = null; // the user chose another session: the resume's mark ends (Z1)
   }
+  state.caption = null;
   if (state.selected !== id) {
     state.selected = id;
     state.mru = [id, ...state.mru.filter((other) => other !== id)];
     sendView();
     sendFocus();
   }
+  if (how === 'list') {
+    setZone('list');
+  }
   render();
-  if (how !== 'key') {
+  if (how !== 'key' && how !== 'list') {
     setZone(hasTerminal(id) ? 'terminal' : 'list');
   }
+}
+
+/**
+ * F9: selects the caption of the closed block of `group` in `section` (the list's keys: ↑ ↓ onto
+ * it, ← on a session of its open card). No session is selected then: `view` and `focus` say
+ * `selected: null`, so that the server sees none (S2 12.4's seen, notifications, the resume card),
+ * and the pane shows the group card. The zone stays.
+ * @param {SectionPayload['name']} section
+ * @param {string} group
+ */
+function selectCaption(section, group) {
+  state.newOpen = false;
+  state.bringing = null;
+  const same =
+    state.selected === null && state.caption?.section === section && state.caption.group === group;
+  const info = blockInfo(state.list, section, group) ?? { size: 0, needYou: 0 };
+  state.caption = { section, group, ...info };
+  if (!same) {
+    state.selected = null;
+    sendView();
+    sendFocus();
+  }
+  render();
 }
 
 /**
@@ -1240,8 +1278,10 @@ function received(message) {
       state.lists++;
       state.unlisted.clear(); // a list after the answer holds the result
       dom.tick.hidden = true;
-      if (state.selected === null) {
-        // Nothing selected yet: the first row (Open's first slot when there is one).
+      if (state.selected === null && state.caption === null && state.mru.length === 0) {
+        // Nothing selected yet: the first row (Open's first slot when there is one). Only before
+        // anything was ever selected (F9: once a selected caption's block opened without a key,
+        // nothing is selected on purpose, and no list selects a session for the user).
         const first = rows()[0];
         if (first !== undefined) {
           state.selected = first.id;
@@ -1328,16 +1368,45 @@ function received(message) {
 
 // --- rendering ----------------------------------------------------------------------------------
 
+/**
+ * Draws the list for the current state in `zone`. F9: a selected caption is kept while the list
+ * can hold it (`list.holds`, ruled (a), (b)), its counts taken from what is drawn; when its block
+ * was opened without a key or is gone, NOTHING is selected — never a session the user did not
+ * choose — and the list is drawn again so.
+ * @param {Zone} zone
+ */
+function renderList(zone) {
+  list.render(state.list, state.selected, zone, state.caption);
+  const caption = state.caption;
+  if (caption === null) {
+    return;
+  }
+  if (!list.holds(caption)) {
+    state.caption = null;
+    list.render(state.list, state.selected, zone, null);
+    return;
+  }
+  const info = blockInfo(state.list, caption.section, caption.group);
+  if (info !== null) {
+    state.caption = { ...caption, ...info };
+  }
+}
+
 /** Renders the list and the right side for the current state. */
 function render() {
-  list.render(state.list, state.selected, state.zone);
-  const pane = paneFor(
-    state.selected,
-    rows(),
-    state.list?.terminals ?? [],
-    state.newOpen,
-    sessionRow(state.list, state.selected), // E13: also a session the list does not show
-  );
+  renderList(state.zone);
+  const caption = state.caption;
+  /** @type {Pane} */
+  const pane =
+    caption !== null && !state.newOpen
+      ? { kind: 'group', ...caption }
+      : paneFor(
+          state.selected,
+          rows(),
+          state.list?.terminals ?? [],
+          state.newOpen,
+          sessionRow(state.list, state.selected), // E13: also a session the list does not show
+        );
   const exit = pane.kind === 'terminal' ? (state.exits.get(pane.term.id) ?? null) : null;
   // `list.selected` when it is the pane's session, for every pane (plan D 2.4, ruled on review B).
   const paneRow = pane.kind === 'new' || pane.kind === 'none' ? null : pane.row;
@@ -1386,6 +1455,11 @@ function render() {
       cards.newForm({ dir: row?.dir ?? dirs[0] ?? '', dirs });
       break;
     }
+    case 'group':
+      // F9: a closed caption is selected: the group's card, no header, no terminal.
+      cards.header(null, null, null, listNow);
+      cards.groupCard(pane);
+      break;
     case 'none':
       cards.header(null, null, null, listNow);
       break;
@@ -1448,7 +1522,7 @@ function setZone(zone, moveFocus = true) {
   dom.listZone.classList.toggle('focused', zone === 'list');
   dom.rightZone.classList.toggle('focused', zone === 'terminal');
   dom.focusZone.textContent = zone === 'list' ? 'Focus: list' : 'Focus: terminal';
-  list.render(state.list, state.selected, zone);
+  renderList(zone);
   if (!moveFocus) {
     return;
   }
@@ -1763,7 +1837,7 @@ function doListKey(action, event) {
       }
       return true;
     default:
-      list.key(action);
+      list.key(action, event.repeat); // F9: a held ← on a caption acts once
       return true;
   }
 }

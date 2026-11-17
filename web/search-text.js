@@ -1,7 +1,7 @@
-// The page's texts of search (S2 12.2, 12.8; plan task 93, E3, E7, E9): the cut of a search text
-// after its 16th word, a block's badge and its `+3 more in ORB-2107 · 1 needs you` line, a title's
-// parts with the words found in it, the switcher's headings and its footer. web/list.js and web/switcher.js draw
-// them. Pure: no DOM, no clock, nothing logged, so that node:test and the root type check load it
+// The page's texts of search (S2 12.2, 12.8; plan task 93, E3, E7, E9; F9): the cut of a search
+// text after its 16th word, a closed block caption's ` · 1 needs you` and the pane's group card, a
+// title's parts with the words found in it, the switcher's headings and its footer. web/list.js,
+// web/cards.js and web/switcher.js draw them. Pure: no DOM, no clock, nothing logged, so that node:test and the root type check load it
 // (test/web/search-text.test.ts).
 //
 // A search text and a title are foreign text: they are cut and split by one literal pattern and
@@ -39,37 +39,37 @@ export function cutWords(text) {
 }
 
 /**
- * E7: the badge after a stack's head: `×4`.
- * @param {number} size the stack's rows, the head included
+ * G5 (ruled 2026-11-16), F9: what a closed block's caption adds when sessions it hides need you —
+ * ` · 1 needs you`, ` · 2 need you` (the server's `needYou` of the caption, taken from the same
+ * fact as a row's own mark: every session of a closed block is hidden, its first too); '' for
+ * none. Drawn in the needs-you colour.
+ * @param {number} count the caption's `needYou`
  * @returns {string}
  */
-export function stackBadge(size) {
-  return `×${size}`;
-}
-
-/**
- * E7: the line after a closed stack: `+3 more in ORB-2107` for a stack of 4. The group is passed
- * through list-text.js's `sanitize` (the page decides for itself what foreign text it shows).
- * @param {number} size the stack's rows, the head included
- * @param {string} group the stack's group
- * @returns {string}
- */
-export function moreText(size, group) {
-  return `+${size - 1} more in ${sanitize(group)}`;
-}
-
-/**
- * G5 (ruled 2026-11-16): what the `+n more` line of a closed block adds when members it hides need
- * you — ` · 1 needs you`, ` · 2 need you` (the server's `hiddenNeedYou`, taken from the same fact
- * as a row's own mark); '' for none, so that the line is as before. Drawn in the needs-you colour.
- * @param {number} count the block's `hiddenNeedYou`
- * @returns {string}
- */
-export function moreNeedText(count) {
+export function captionNeedText(count) {
   if (typeof count !== 'number' || !Number.isInteger(count) || count <= 0) {
     return '';
   }
   return ` · ${count} ${count === 1 ? 'needs' : 'need'} you`;
+}
+
+/**
+ * F9: the pane's small card while a closed block's caption is selected: the group's name
+ * (sanitised, as list-text.js's `sanitize` shows foreign text), the number of its sessions, the
+ * caption's ` · 1 needs you` part ('' for none), and what opens it.
+ * @param {string} group
+ * @param {number} size
+ * @param {number} needYou
+ * @returns {{ title: string, count: string, need: string, hint: string }}
+ */
+export function groupCardText(group, size, needYou) {
+  const count = Number.isInteger(size) && size >= 0 ? size : 0;
+  return {
+    title: sanitize(group),
+    count: `${count} ${count === 1 ? 'session' : 'sessions'}`,
+    need: captionNeedText(needYou),
+    hint: '→ or Enter opens the group',
+  };
 }
 
 /**

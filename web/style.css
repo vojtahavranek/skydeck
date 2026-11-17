@@ -12,6 +12,10 @@
   /* The lines that frame the terminal (F2): softer than --line, against the terminal and its
      neighbours. */
   --edge: #eceef1;
+  /* The edge of a block's card in the list (F9): seen as an edge against the list (--panel) and
+     the card's own background (--panel2), at least 1.3 : 1 against both in each scheme
+     (test/web/card-edge.test.ts). */
+  --card-edge: #d9dce1;
   --text: #1d2127;
   --dim: #5d6470;
   --faint: #8b929c;
@@ -52,6 +56,7 @@
     --line: #2c3037;
     --line2: #3a3f47;
     --edge: #262a30;
+    --card-edge: #3d424b;
     --text: #e4e6ea;
     --dim: #a3a9b2;
     --faint: #6f7680;

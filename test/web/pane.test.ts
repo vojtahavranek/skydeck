@@ -3,9 +3,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import type { TerminalState } from '../../src/window/hub.ts';
-import type { ListMessage, RowPayload, TerminalPayload } from '../../src/window/protocol.ts';
+import type {
+  ListMessage,
+  RowPayload,
+  SectionPayload,
+  TerminalPayload,
+} from '../../src/window/protocol.ts';
 import { MAY_START as SERVER_MAY_START } from '../../src/window/view/sections.ts';
-import { isEnded, MAY_START, paneFor, sessionRow } from '../../web/pane.js';
+import { blockInfo, isEnded, MAY_START, paneFor, sessionRow } from '../../web/pane.js';
 import { S1, S2, S3 } from '../helpers/platform.ts';
 
 function row(id: string, more: Partial<RowPayload> = {}): RowPayload {
@@ -274,4 +279,49 @@ test('MAY_START and the ended states part the terminal states: each state in exa
       Object.keys(STATES).filter((state) => isEnded({ state } as TerminalPayload)).length,
     Object.keys(STATES).length,
   );
+});
+
+/** A list of `sections` only (blockInfo reads nothing else). */
+function listWith(sections: Partial<SectionPayload>[]): ListMessage {
+  return {
+    sections: sections.map((section) => ({
+      name: 'open',
+      folded: false,
+      firstNs: null,
+      lastNs: null,
+      count: 0,
+      rows: [],
+      ...section,
+    })),
+  } as unknown as ListMessage;
+}
+
+test("blockInfo (F9): a closed caption's size and needYou; an open card's size and its rows that need you; null for a block the section does not draw", () => {
+  const list = listWith([
+    {
+      name: 'open',
+      rows: [
+        row(S1, { stack: { group: 'G', size: 2, role: 'head', head: S1 } }),
+        row(S2, {
+          stack: { group: 'G', size: 2, role: 'member', head: S1 },
+          attention: { reason: 'asks', detail: null, sinceNs: '1' },
+        }),
+        row(S3, { group: 'H' }),
+      ],
+    },
+    {
+      name: 'week',
+      rows: [],
+      closedStacks: [{ group: 'G', size: 4, needYou: 3, head: S3, at: 0 }],
+    },
+  ]);
+  assert.deepEqual(blockInfo(list, 'open', 'G'), { size: 2, needYou: 1 });
+  assert.deepEqual(blockInfo(list, 'week', 'G'), { size: 4, needYou: 3 });
+  // A row in no block of its group, another group, another section, no list: none.
+  assert.equal(blockInfo(list, 'open', 'H'), null);
+  assert.equal(blockInfo(list, 'open', 'NOPE'), null);
+  assert.equal(blockInfo(list, 'earlier', 'G'), null);
+  assert.equal(blockInfo(null, 'open', 'G'), null);
+  // A list without `closedStacks` (a scripted list, a server before F9) has no caption.
+  assert.equal(blockInfo(listWith([{ name: 'week' }]), 'week', 'G'), null);
 });

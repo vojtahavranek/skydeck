@@ -52,7 +52,7 @@ const SECTIONS = [
     lines: [
       [['↑', '↓', 'j', 'k'], 'move'],
       [['Home', 'End', 'PgUp', 'PgDn'], 'the first, the last, a page up, a page down'],
-      [['←', '→'], 'fold or unfold Earlier; close or open a block'],
+      [['←', '→'], 'fold or unfold Earlier; close or open a group'],
       [['Enter'], 'show a running session’s terminal; resume one that is not running'],
       [['/'], 'filter: several words, all must match, also the start of the short id'],
       [['a'], 'show or hide done sessions'],

@@ -1,6 +1,6 @@
-// The page's texts of search (S2 12.2, 12.8; plan task 93, E3, E7, E9): the cut of a search text
-// after its 16th word, a stack's badge and its `+n more` line, a highlighted title's parts, the
-// switcher's headings and footer. node:test on web/search-text.js, which uses no DOM.
+// The page's texts of search (S2 12.2, 12.8; plan task 93, E3, E7, E9; F9): the cut of a search
+// text after its 16th word, a closed caption's ` · n needs you` and the pane's group card, a
+// highlighted title's parts, the switcher's headings and footer. node:test on web/search-text.js, which uses no DOM.
 //
 // The page and the server must never disagree about a search text (ruled for task 93): what a
 // word is, how many count, where one ends. So the page's cut is run here beside the server's own
@@ -16,12 +16,11 @@ import {
 } from '../../src/window/view/search/filter.ts';
 import {
   MAX_WORDS,
+  captionNeedText,
   cutWords,
+  groupCardText,
   highlightParts,
-  moreNeedText,
-  moreText,
   rankHeading,
-  stackBadge,
   switcherFooter,
 } from '../../web/search-text.js';
 
@@ -244,42 +243,54 @@ describe('cutWords (web/search-text.js) — the page cuts as the server reads', 
   });
 });
 
-describe('stackBadge and moreText (E7)', () => {
-  test('a stack of 4: ×4, and +3 more in its group', () => {
-    assert.equal(stackBadge(4), '×4');
-    assert.equal(moreText(4, 'ORB-2107'), '+3 more in ORB-2107');
-  });
-
-  test('a stack of 2: ×2, and +1 more', () => {
-    assert.equal(stackBadge(2), '×2');
-    assert.equal(moreText(2, 'ORB-2107'), '+1 more in ORB-2107');
-  });
-
-  test('the group is sanitised: escape sequences, controls, line breaks', () => {
-    assert.equal(moreText(3, '\u001b[31mORB\u001b[0m-21\u001b]0;title\u0007'), '+2 more in ORB-21');
-    assert.equal(moreText(3, 'ORB\n2107\u202e\u0000'), '+2 more in ORB 2107');
-  });
-
-  test('the group stays text: nothing in it is made markup or escaped', () => {
-    assert.equal(moreText(2, '<b>ORB</b> & <img src=x>'), '+1 more in <b>ORB</b> & <img src=x>');
-  });
-});
-
-describe('moreNeedText (G5, ruled 2026-11-16): what a closed block says of its hidden members that need you', () => {
-  test('none: nothing, so the line is as before', () => {
-    assert.equal(moreNeedText(0), '');
+describe('captionNeedText (G5, F9): what a closed caption says of the sessions it hides that need you', () => {
+  test('none: nothing', () => {
+    assert.equal(captionNeedText(0), '');
   });
 
   test('one and more: ` · 1 needs you`, ` · 2 need you`', () => {
-    assert.equal(moreNeedText(1), ' · 1 needs you');
-    assert.equal(moreNeedText(2), ' · 2 need you');
-    assert.equal(moreNeedText(17), ' · 17 need you');
-    assert.equal(`${moreText(3, 'test')}${moreNeedText(1)}`, '+2 more in test · 1 needs you');
+    assert.equal(captionNeedText(1), ' · 1 needs you');
+    assert.equal(captionNeedText(2), ' · 2 need you');
+    assert.equal(captionNeedText(17), ' · 17 need you');
   });
 
   test('what is no count is none (a list from before the field, or a bad value)', () => {
     for (const bad of [undefined, null, -1, 1.5, Number.NaN, Infinity, '2']) {
-      assert.equal(moreNeedText(bad as number), '', String(bad));
+      assert.equal(captionNeedText(bad as number), '', String(bad));
+    }
+  });
+});
+
+describe('groupCardText (F9): the pane while a closed caption is selected', () => {
+  test('the name, the number of its sessions, the needs-you part, what opens it', () => {
+    assert.deepEqual(groupCardText('DE-184319', 3, 1), {
+      title: 'DE-184319',
+      count: '3 sessions',
+      need: ' · 1 needs you',
+      hint: '→ or Enter opens the group',
+    });
+    assert.deepEqual(groupCardText('infra', 2, 0), {
+      title: 'infra',
+      count: '2 sessions',
+      need: '',
+      hint: '→ or Enter opens the group',
+    });
+    assert.equal(groupCardText('one', 1, 0).count, '1 session');
+    assert.equal(groupCardText('many', 12, 3).need, ' · 3 need you');
+  });
+
+  test('the group is sanitised: escape sequences, controls, line breaks; it stays text', () => {
+    assert.equal(
+      groupCardText('\u001b[31mORB\u001b[0m-21\u001b]0;title\u0007', 2, 0).title,
+      'ORB-21',
+    );
+    assert.equal(groupCardText('ORB\n2107\u202e\u0000', 2, 0).title, 'ORB 2107');
+    assert.equal(groupCardText('<b>ORB</b> & <img src=x>', 2, 0).title, '<b>ORB</b> & <img src=x>');
+  });
+
+  test('a count that is no whole number is 0', () => {
+    for (const bad of [undefined, -1, 1.5, Number.NaN]) {
+      assert.equal(groupCardText('g', bad as number, 0).count, '0 sessions', String(bad));
     }
   });
 });

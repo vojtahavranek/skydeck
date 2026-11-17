@@ -4,8 +4,8 @@
 // the state, Note and Done; the directory, "opened <time> · last active <age>", where the title
 // comes from and the short id; the window's chip (S2 12.3), the open pull requests and the button of
 // the pull-request dialog; the note's first line —, the resume card, the card of a session running
-// in another terminal, the ended bar and the new form. Its interface is contract 2.9's with plan D
-// 2.4's changes. Every server string reaches the DOM through textContent or a tooltip.
+// in another terminal, the ended bar, the new form and (F9) the small card of a group whose closed
+// caption is selected in the list. Its interface is contract 2.9's with plan D 2.4's changes. Every server string reaches the DOM through textContent or a tooltip.
 //
 // How app.js calls it: on a change of what the right side shows, `hide()` (every card and the
 // header), then `header(row, selected, term, now)` (plan D 2.4) and at most one card. `act` is
@@ -37,6 +37,7 @@ import {
   titleSourceText,
 } from './header-text.js';
 import { rowText } from './list-text.js';
+import { groupCardText } from './search-text.js';
 
 /**
  * @typedef {object} CardsDeps
@@ -691,6 +692,35 @@ export function createCards(root, deps) {
   }
 
   /**
+   * F9: the card of a selected closed caption — the group's name, the number of its sessions with
+   * ` · 1 needs you` in the needs-you colour while any needs you, and what opens it. It has no
+   * control: no key of the list acts on a session from here but → and Enter, which open the group.
+   */
+  function buildGroup() {
+    const name = element('div', 'card-title card-group-name');
+    name.dataset['fact'] = '';
+    const count = element('span', 'card-group-count');
+    count.dataset['fact'] = '';
+    const need = element('span', 'card-group-need');
+    need.dataset['fact'] = '';
+    const line = element('div', 'card-group-line');
+    line.append(count, need);
+    const hint = element('div', 'card-hint card-group-hint');
+    return {
+      parts: [name, line, hint],
+      /** @param {{ group: string, size: number, needYou: number }} info */
+      fill(info) {
+        const text = groupCardText(info.group, info.size, info.needYou);
+        setText(name, text.title);
+        setText(count, text.count);
+        setText(need, text.need);
+        setHidden(need, text.need === '');
+        setText(hint, text.hint);
+      },
+    };
+  }
+
+  /**
    * @param {string | null} sessionId
    * @param {string | null} term
    */
@@ -826,6 +856,14 @@ export function createCards(root, deps) {
       const sessionId = row?.id ?? null;
       const term = row?.terminal ?? exit?.term ?? null;
       showCard(`ended:${term}:${sessionId}`, () => buildEnded(sessionId, term), [exit]);
+    },
+    /**
+     * F9: the card of the group whose closed caption is selected.
+     * @param {{ section: string, group: string, size: number, needYou: number }} info
+     */
+    groupCard(info) {
+      card.dataset['card'] = 'group';
+      showCard(`group:${info.section}\n${info.group}`, buildGroup, [info]);
     },
     /** @param {{ dir: string, dirs: string[] }} defaults */
     newForm(defaults) {
