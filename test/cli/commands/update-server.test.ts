@@ -413,6 +413,42 @@ describe('signals once the stop has begun (ruled by the plan owner, review 2 S2)
     assert.equal(captured.signal('SIGINT'), false, 'released after the last line');
   });
 
+  test('a bring-back that does not go well is said, and named, after an interrupted update and after a refused merge (ruled, the re-check’s R2)', async (t) => {
+    const tails = [
+      [3, ', but skydeck window ended with exit 3; run skydeck window'],
+      [
+        null,
+        ', but skydeck window could not be started or was ended by a signal; run skydeck window',
+      ],
+    ] as const;
+    for (const [launcher, tail] of tails) {
+      // Interrupted during the stop.
+      const h = harness(t);
+      await h.serve({ FAKE_SERVE_PAGES: '1' });
+      const captured = capture();
+      h.onRequest = (method, path) => {
+        if (path === '/shutdown') captured.signal('SIGINT');
+      };
+      const r = await runUpdateOn(h.platform(scripted(h, { launcher })), h.s, captured);
+      assert.equal(r.code, 1);
+      assert.equal(
+        r.stderr,
+        `${STOPPED}skydeck: interrupted before the update was applied; the checkout was not changed${tail}\n`,
+      );
+      // A merge git refused, the checkout as it was.
+      const h2 = harness(t);
+      await h2.serve({ FAKE_SERVE_PAGES: '1' });
+      const r2 = await h2.update(
+        scripted(h2, { launcher, merge: { code: 1, stderr: 'error: a refusal\n' } }),
+      );
+      assert.equal(r2.code, 1);
+      assert.equal(
+        r2.stderr,
+        `${STOPPED}skydeck: the update could not be applied: error: a refusal; the checkout is as it was${tail}\n`,
+      );
+    }
+  });
+
   test('before the stop nothing is held: a signal during the fetch would end the command as it always did', async (t) => {
     const h = harness(t);
     await h.serve({ FAKE_SERVE_PAGES: '1' });

@@ -12,6 +12,7 @@ import type { Net, Platform } from '../../../src/platform/types.ts';
 import { SkydeckError } from '../../../src/platform/errors.ts';
 import { SCHEMA_VERSION } from '../../../src/store/migrations.ts';
 import { DatabaseNewerError, openStore } from '../../../src/store/store.ts';
+import { capture } from '../../helpers/capture.ts';
 import type { Run } from '../../helpers/install.ts';
 import { run } from '../../helpers/install.ts';
 import { testPlatform } from '../../helpers/platform.ts';
@@ -22,6 +23,7 @@ import {
   commitId,
   migrationsEntry,
   runUpdate,
+  runUpdateOn,
   scriptedGit,
   scriptedRepo,
   subCommand,
@@ -795,6 +797,32 @@ describe('skydeck update: applying, no window server (U5)', () => {
         JSON.stringify(afterFailedMerge),
       );
     }
+  });
+});
+
+describe('skydeck update: the hold with no server to stop (ruled, review 2’s re-check R1)', () => {
+  test('no server: nothing held up to the merge, held from its start to the last line — the merge’s result is used, "updated to"', async (t) => {
+    const captured = capture();
+    const held: [string, boolean][] = [];
+    const u = updater(t, {
+      onCall: (call) => {
+        const sub = call.command === 'git' ? (call.args[2] === 'fetch' ? 'fetch' : '') : '';
+        if (sub === 'fetch') held.push(['fetch', captured.signal('SIGINT')]);
+        if (call.command === 'git' && call.args.includes('merge')) {
+          held.push(['merge', captured.signal('SIGINT')]);
+        }
+      },
+    });
+
+    const r = await runUpdateOn(u.platform, u.tp.sandbox, captured);
+
+    assert.deepEqual(held, [
+      ['fetch', false],
+      ['merge', true],
+    ]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, `${ONE_COMMIT}updated to fedcba9\n`);
+    assert.equal(captured.signal('SIGINT'), false, 'released after the last line');
   });
 });
 

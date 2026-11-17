@@ -132,9 +132,11 @@ describe('skydeck update with the real git: applying (U5, U8)', () => {
     const u = await r.update();
 
     assert.equal(u.code, 1);
-    assert.match(
+    // The reason is git's own first line, the one install.md's recovery tells the cases apart by
+    // (ruled, the re-check's M1): git prints more lines, and this is the one that reaches the line.
+    assert.equal(
       u.stderr,
-      /^skydeck: the update could not be applied: error: .*untracked working tree files would be overwritten by merge:; the checkout is as it was\n$/,
+      'skydeck: the update could not be applied: error: The following untracked working tree files would be overwritten by merge:; the checkout is as it was\n',
     );
     assert.equal(r.c.id(), old);
     assert.equal(r.status(), '?? new.txt\n');

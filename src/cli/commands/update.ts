@@ -320,14 +320,15 @@ interface Stopped {
 
 /**
  * The command's lines, and the signals it holds once the server's stop has begun (ruled by the plan
- * owner, review 2 S2): from the moment stopServer is called until the last line, SIGINT and SIGTERM
- * do not end the command — it never ends silently with the server stopped and the checkout half
- * written. `interrupted` says whether one came. Before the hold starts a signal ends the command as
- * it always did (the fetch above all). SIGHUP is not held: with the terminal gone nobody would read
- * what the command says (install.md says what a closed terminal leaves).
+ * owner, review 2 S2 and its re-check's R1): from the moment stopServer is called — or, when no
+ * server is stopped, from the merge's start — until the last line, SIGINT and SIGTERM do not end
+ * the command: it never ends silently with the server stopped or the checkout being written.
+ * `interrupted` says whether one came. Before the hold starts a signal ends the command as it always
+ * did (the fetch above all). SIGHUP is not held: with the terminal gone nobody would read what the
+ * command says (install.md says what a closed terminal leaves).
  */
 interface Held {
-  /** Starts the hold (called right before stopServer). */
+  /** Starts the hold (right before stopServer, and right before the merge); again does nothing. */
   start(): void;
   /** Ends it; again does nothing. */
   release(): void;
@@ -407,13 +408,17 @@ async function apply(ctx: Context, git: Git, update: Update): Promise<number> {
     const step1 = await stopForUpdate(ctx, times, hold);
     if (hold.interrupted()) {
       // A signal during the stop: no merge; the window back on the old code (ruled, S2).
-      await bringBack(ctx, hold, step1, launcher, cwd, env);
-      hold.err('interrupted before the update was applied; the checkout was not changed');
+      const back = await bringBack(ctx, hold, step1, launcher, cwd, env);
+      hold.err(
+        `interrupted before the update was applied; the checkout was not changed${unlessBack(back)}`,
+      );
       return EXIT.failure;
     }
 
     // 2. The fast-forward to the commit the report named. From its start on a signal abandons
-    // nothing: the merge ends, step 3 runs, the result line is printed.
+    // nothing: the merge ends, step 3 runs, the result line is printed — also when no server was
+    // stopped, so the hold starts here at the latest (ruled, review 2's re-check R1).
+    hold.start();
     const merged = await merge(git, update.newId);
     // From here on this process loads nothing from the checkout (U6).
     const notApplied = await failedMerge(git, update, merged, untrackedBefore);
@@ -424,8 +429,10 @@ async function apply(ctx: Context, git: Git, update: Update): Promise<number> {
         );
         return EXIT.failure;
       }
-      await bringBack(ctx, hold, step1, launcher, cwd, env);
-      hold.err(`the update could not be applied: ${notApplied.why}; the checkout is as it was`);
+      const back = await bringBack(ctx, hold, step1, launcher, cwd, env);
+      hold.err(
+        `the update could not be applied: ${notApplied.why}; the checkout is as it was${unlessBack(back)}`,
+      );
       return EXIT.failure;
     }
 
@@ -437,15 +444,22 @@ async function apply(ctx: Context, git: Git, update: Update): Promise<number> {
       hold.out(`updated to ${id}`);
       return EXIT.ok;
     }
-    hold.err(
-      done === null
-        ? `updated to ${id}, but skydeck window could not be started or was ended by a signal; run skydeck window`
-        : `updated to ${id}, but skydeck window ended with exit ${done}; run skydeck window`,
-    );
+    hold.err(`updated to ${id}${unlessBack(done)}`);
     return EXIT.failure;
   } finally {
     hold.release();
   }
+}
+
+/**
+ * The tail of a line that follows a bring-back (step 3): nothing when it went well; else that the
+ * new `skydeck window` did not, and to run it (ruled, review 2's re-check R2).
+ */
+function unlessBack(back: 'ok' | number | null): string {
+  if (back === 'ok') return '';
+  return back === null
+    ? ', but skydeck window could not be started or was ended by a signal; run skydeck window'
+    : `, but skydeck window ended with exit ${back}; run skydeck window`;
 }
 
 /**

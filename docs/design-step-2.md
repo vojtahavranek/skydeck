@@ -3392,15 +3392,23 @@ itself, and there is no prompt, no `doctor` run at its end and no way back.
    (`set it right as docs/install.md says ("Updating"), then run skydeck window`; ruled by the plan
    owner, review 2).
 
-   **Signals** (ruled by the plan owner, review 2): from the moment stopServer is called until
-   the last line, SIGINT and SIGTERM do not end the command (`Io.holdSignals`), so that it never
-   ends silently with the server stopped and the checkout half written. One that came before the
-   merge was started ends the update there, once the stop is done: no merge, (c) as for a refused
-   merge, `interrupted before the update was applied; the checkout was not changed`, exit 1. One
-   that comes from the merge's start on abandons nothing: the merge ends, (c) runs, the result
-   line is printed. SIGHUP is not held: with the terminal gone nobody would read the lines; the
-   merge, in its own session, ends by itself. Before stopServer is called nothing is held: Ctrl+C
-   ends the command as before (the fetch above all), and nothing has changed.
+   **Signals** (ruled by the plan owner, review 2 and its re-check): from the moment stopServer is
+   called — or, when no server is stopped, from the merge's start — until the last line, SIGINT
+   and SIGTERM do not end the command (`Io.holdSignals`), so that it never ends silently with the
+   server stopped or the checkout being written. One that came before the merge was started ends
+   the update there, once the stop is done: no merge, (c) as for a refused merge, `interrupted
+   before the update was applied; the checkout was not changed`, exit 1. One that comes from the
+   merge's start on abandons nothing: the merge ends, (c) runs, the result line is printed. The
+   merge and every git call after it (the looks at HEAD, the status and the untracked files) run
+   in a session of their own, so that the terminal's Ctrl+C cannot cut a look and fake "not as it
+   was". After the two lines that follow a bring-back (`interrupted …` and `… the checkout is as it
+   was`) a child that did not end with 0 is said as after an update: `…, but skydeck window ended
+   with exit <n>; run skydeck window` (or `could not be started or was ended by a signal`). SIGHUP
+   is not held: with the terminal gone nobody would read the lines; the merge, in its own session,
+   ends by itself. Before the hold starts Ctrl+C ends the command as before (the fetch above all),
+   and nothing has changed. install.md's recovery for "may not be as it was" reads the reason
+   first: after git's own refusal that files would be overwritten git wrote nothing (no reset);
+   after any other the four steps with `git reset --hard <upstream>`.
 
    The fetch can wait at a prompt while the checkout is used, so the branch, HEAD and the status
    are read again after it: a changed status is refusal 6's line, a branch switched or HEAD moved

@@ -1603,8 +1603,9 @@ branch follows, and restarts the window's server for the new code. In this order
    it again`. Last, `updated to 5d6e7f8`.
 
 The look and the fetch can be ended with Ctrl+C: nothing is changed. **Once the stop of the
-window's server has begun, Ctrl+C (and a `kill`) no longer end the command**, so that it never
-leaves the server stopped and the checkout half written without a word. One that comes during the
+window's server has begun — or the fast-forward, when there is no server of this checkout to stop —
+Ctrl+C (and a `kill`) no longer end the command**, so that it never leaves the server stopped or
+the checkout being written without a word. One that comes during the
 stop ends it there: no fast-forward, the window brought back on the code it had (when it was open),
 and `skydeck: interrupted before the update was applied; the checkout was not changed` (exit 1).
 One that comes later changes nothing: the fast-forward runs to its end (git runs it, and every look
@@ -1664,25 +1665,39 @@ More ends, each with exit 1:
   fast-forward and changed nothing — most often a file git does not track is where the new commit
   puts one of its own — and the window was brought back as it was. Move the file away, then
   `skydeck update` again.
+- Either of the two lines above can go on with `, but skydeck window ended with exit <n>; run
+  skydeck window` (or `, but skydeck window could not be started or was ended by a signal; run
+  skydeck window`): the window was to be brought back, and its `skydeck window` did not do it (its
+  own lines above say why). The checkout is as the line says; run `skydeck window`.
 - `the update could not be applied: <why>; the checkout may not be as it was: set it right as
-  docs/install.md says ("Updating"), then run skydeck window`: git did not leave the checkout as it
-  was — it was cut off (`git merge timed out`, after 60 seconds; `git merge was ended by a
-  signal`), or it left files behind it —, so the files may be half new, and the window is not
-  brought back on them. Set it right in a WSL terminal of your own, in the checkout:
-  1. Make sure no git command runs in the checkout (one of yours in another terminal, an editor's).
-  2. When `.git/index.lock` is there, remove it (`rm .git/index.lock`): a git that was cut off
-     leaves it, and while it is there every git command that writes refuses.
-  3. `git reset --hard <upstream>`, with the upstream the command named in its first line (`… new
-     commits on origin/main (…)`: `git reset --hard origin/main`): it puts the branch, the index
-     and every tracked file at the new commit.
-  4. `skydeck window`.
+  docs/install.md says ("Updating"), then run skydeck window`: the command could not tell that the
+  checkout is as it was, and the window is not brought back on it. **Read `<why>` first, before you
+  run any command that writes**, in a WSL terminal of your own, in the checkout:
+  - **`<why>` is git's own refusal** that files "would be overwritten by merge" (`error: The
+    following untracked working tree files would be overwritten by merge:`). Then git wrote
+    nothing; only the look after it could not tell (a file came into the checkout meanwhile, or the
+    look took too long). `git status`, move away what git names (it is yours), `skydeck window`,
+    then `skydeck update` again. No reset.
+  - **Any other `<why>`**: git was cut off (`git merge timed out`, after 60 seconds; `git merge was
+    ended by a signal`), failed while it wrote files (git's line names what it could not write), or
+    left HEAD elsewhere (`git merge ended, but HEAD is not at <id>`): the files may be half new.
+    1. Make sure no git command runs in the checkout (one of yours in another terminal, an
+       editor's).
+    2. When `.git/index.lock` is there, remove it (`rm .git/index.lock`): a git that was cut off
+       leaves it, and while it is there every git command that writes refuses.
+    3. `git reset --hard <upstream>`, with the upstream the command named in its first line (`…
+       new commits on origin/main (…)`: `git reset --hard origin/main`): it puts the branch, the
+       index and every tracked file at the new commit.
+    4. `skydeck window`.
 
-  Nothing of yours is lost by step 3. It discards changes to tracked files and staged files, and
-  you had none when you typed `skydeck update` (it refuses then, and looks again after the fetch),
-  so only one made while it ran would be lost. A file of yours that git does not track and that is
-  where the new commit puts one makes git refuse the fast-forward before it writes anything, so
-  every untracked file in the way here is the new commit's own. Files git does not track and files
-  it ignores stay as they are.
+    In this case nothing of yours is lost by step 3, as long as you put nothing into the checkout
+    while the command ran. `git reset --hard` discards changes to tracked files and staged files —
+    you had none when you typed `skydeck update` (it refuses then, and looks again after the
+    fetch) — and it replaces any file that lies where a file of the new commit goes. After a
+    fast-forward that was cut off, every untracked file in such a place is the new commit's own: a
+    file of yours there would have made git refuse before it wrote anything. So a file you put into
+    the checkout while the command ran is the one thing at risk: move it away before step 3. Files
+    git does not track elsewhere, and files it ignores, stay as they are.
 - `updated to <id>, but skydeck window ended with exit <n>; run skydeck window`: the update is in,
   but the new `skydeck window` failed (its own lines above say why); run `skydeck window`.
 - `updated to <id>, but skydeck window could not be started or was ended by a signal; run skydeck
