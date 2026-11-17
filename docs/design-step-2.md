@@ -3000,23 +3000,23 @@ small sizes):
   At 16 pixels the small picture is the cloud's ring, the window's frame and a light chevron and
   bar of about five pixels; it reads as a terminal in a cloud, not crisply. At 32 and 48 the cloud,
   the window and the `>_` read.
-- **The maskable icons** are drawn from the large picture, in the middle at 0.927 of the icon's
-  width, on a full background that runs, top to bottom, from the colour of the tile along its top
-  edge, `#080e25`, to its colour along its bottom edge, `#030723` (the average of the pixels 5 to 14
-  inside the border, in the middle 40 % of the side; the tile is lighter at its top by about five
-  steps), so that the tile does not show as a square inside a square. The picture is drawn without
-  its outermost 5 pixels and without anything that is not opaque: the tile carries a lighter
-  hairline and a shade along its edge, up to 36 steps from its colour (the nearest is 594 pixels
-  from the picture's middle), which any background would leave as a faint frame (the first build,
-  a flat `#050925` and the whole picture, did: steps of 22 between neighbouring pixels). None of the
-  drawing is that near the edge. 0.927 is the largest scale, to three decimals, at which everything
-  of the drawing is inside the safe zone, the circle of 0.4 of the icon's width. The drawing is
-  what differs from the background of its own height by more than 40 (of 255) in some channel,
-  composited on it; the farthest of it from the picture's middle is 540.8 of the 1254 pixels, so
-  the scale can be at most 0.4 × 1254 / 540.8 = 0.9275. No pixel of a maskable icon is
-  transparent. In both files, outside the drawing, no step between neighbouring pixels is above 3,
-  and along ten lines across the tile's border none is above 2 (`test/window/icons.test.ts`
-  measures it). `scripts/icons.ts` stops if the drawing, scaled, leaves the circle.
+- **The maskable icons** have a full background of the large picture's tile colour, `#040925` (the
+  average of its opaque pixels between 555 and 585 pixels from its middle), with the picture in the
+  middle at 0.927 of the icon's width: drawn in full within 555 of its 1254 pixels from its middle,
+  faded out to the background over the next 30 and not drawn beyond. The drawing reaches 540.8
+  pixels from the middle, so nothing of it is touched; the tile's own edge (a lighter hairline and a
+  shade, up to 36 steps from its colour, starting 594 pixels from the middle at the nearest, and a
+  tile lighter at its top than at its bottom) is not drawn: left in, it showed as a faint frame
+  inside the background, a tile inside a tile (the first build, a flat `#050925` and the whole
+  picture, had steps of 22 between neighbouring pixels). 0.927 is the largest scale, to three
+  decimals, at which everything of the drawing is inside the safe zone, the circle of 0.4 of the
+  icon's width. The drawing is what differs from the background by more than 40 (of 255) in some
+  channel, composited on it; the farthest of it from the picture's middle is 540.8 pixels, so the
+  scale can be at most 0.4 × 1254 / 540.8 = 0.9275. No pixel of a maskable icon is transparent.
+  In both files, outside the drawing, no step between neighbouring pixels is above 2
+  (`test/window/icons.test.ts` measures it, also along ten lines across the circle where the picture
+  fades out). `scripts/icons.ts` stops if the drawing, scaled, leaves the circle of 0.4 or reaches
+  the fade.
 - **The manifest and the page** are as before: `web/manifest.webmanifest` holds `name`,
   `short_name`, `display` and the seven PNGs, each `src` under the versioned path; it is served at
   `/manifest.webmanifest` with the build put in, and the ICO at `/favicon.ico` (8.2.1). `index.html`
