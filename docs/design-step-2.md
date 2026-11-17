@@ -2957,28 +2957,60 @@ lead's decisions under the user's go-ahead to proceed.
 ### 12.12 The icon
 
 The page has an icon of its own, so that the window and its taskbar button need not show Edge's
-default: an SVG drawn for skydeck as the source, and PNG files of 16, 32, 48, 192 and 512 pixels
-(the 192 and 512 also as maskable icons) committed beside it in `web/icons/` (no build step:
-the PNGs are made once from the SVG and committed). `index.html` names the favicon
-(`<link rel="icon">`) and the manifest (`<link rel="manifest">`), whose `name` and `short_name`
-are `skydeck`, `display` `standalone`, and `icons` the PNGs. Whether Edge's app window and its
-taskbar button show it is check W3. Low priority: stage E (19).
+default: a picture, and PNG files of 16, 32, 48, 192 and 512 pixels (the 192 and 512 also as
+maskable icons) made from it and committed beside it in `web/icons/` (no build step: the PNGs are
+made once from the picture and committed). `index.html` names the favicon (`<link rel="icon">`) and
+the manifest (`<link rel="manifest">`), whose `name` and `short_name` are `skydeck`, `display`
+`standalone`, and `icons` the PNGs. Whether Edge's app window and its taskbar button show it is
+check W3. Low priority: stage E (19).
 
-As built (stage E, plan E14): `web/icons/skydeck.svg` is the source — a drawing of shapes, no
-script, nothing it loads —; `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-192.png` and
-`icon-512.png` on a transparent background, `icon-192-maskable.png` and `icon-512-maskable.png`
-(the drawing inside the maskable safe zone, the middle 80 %, on a full background), and
-`favicon.ico` (the 16, 32 and 48 pixel PNGs in one ICO) were drawn once from it by
-`scripts/icons.ts` with the page suite's pinned Chromium, headless, and committed; no test and no
-CI step runs the script. `web/manifest.webmanifest` holds `name`, `short_name`, `display` and the
-seven PNGs, each `src` under the versioned path; it is served at `/manifest.webmanifest` with the
-build put in, and the ICO at `/favicon.ico` (8.2.1). `index.html` names the favicon by its
-versioned path (`/assets/<build>/web/icons/favicon.ico`, `sizes="16x16 32x32 48x48"`) and the
-manifest by `/manifest.webmanifest`; the policy's `img-src 'self'` and `manifest-src 'self'` let
-the page load both, and nothing is fetched from outside, at build time or at run time. The
-manifest has no `start_url`, `scope` or `id` (ruled, plan E task 94): the page is not meant to be
-installed as an app — Chromium counts it as not installable without `start_url`, and an
-installed app's shortcut would hold no launch token (5.1).
+As built (stage E, plan E14; the picture changed by follow-up F10, 2026-11-17, on the owner's words
+"change the icon, use this [a picture], but use appropriate sizes"):
+
+- **The picture** is the owner's: a dark navy rounded tile with a blue-to-violet cloud outline and
+  three stacked terminal windows, the front one with three coloured dots and a prompt (`>_`). It is
+  1254 × 1254 pixels, RGBA, transparent outside the tile, and it is kept exactly as it was received
+  (1,691,903 bytes; its `caBX` chunk, the content credentials of the image service that made it,
+  stays) in `scripts/icons/skydeck-source.png`, not under `web/`: it is not served and not part of the
+  build. `test/window/icons.test.ts` pins its sha256. Until F10 the source was a drawing of shapes,
+  `web/icons/skydeck.svg` (three cards on the page's accent colour); it is gone.
+- **The files** are `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-192.png` and `icon-512.png`
+  on a transparent background, `icon-192-maskable.png` and `icon-512-maskable.png`, and
+  `favicon.ico` (the 16, 32 and 48 pixel PNGs in one ICO). They were drawn once by
+  `scripts/icons.ts` with the page suite's pinned Chromium, headless and in an environment of its
+  own, and committed; no test and no CI step runs the script. Nothing is fetched from outside, at
+  build time or at run time.
+- **How a size is reduced.** Chromium decodes the picture; for each pixel of an icon the script
+  averages the picture's pixels under it, weighted by the area they cover, premultiplied and in
+  linear light: a box filter at exactly the icon's pixel pitch, so that no pixel of the picture is
+  skipped (nothing aliases), nothing rings, and the light of a thin line is kept. Halving on a
+  canvas with Chromium's high-quality smoothing was tried first and rejected: it left a grey halo
+  around the tile on a light background and a duller 16 pixel icon. The transparent icons are the
+  whole picture in their box, transparent where the picture is (its rounded corners; the tile
+  itself is at alpha 252 to 253 of 255, the picture's own). The test re-derives every file from the
+  picture in plain Node and compares. At 16 pixels the cloud's ring and a light spot where the
+  prompt is read; the three windows do not (a named limit: the picture holds more than 16 pixels
+  can).
+- **The maskable icons** have a full background of the tile's own colour, `#050925` (the median of
+  the picture's flat tile pixels; the tile varies by about two steps), with the whole picture in the
+  middle at 0.927 of the icon's width: the largest scale, to three decimals, at which everything of
+  the drawing is inside the safe zone, the circle of 0.4 of the icon's width. The drawing is what
+  differs from the flat colour by more than 40 (of 255) in some channel, composited on it; the
+  farthest of it from the picture's middle is 540.8 of the 1254 pixels, so the scale can be at most
+  0.4 × 1254 / 540.8 = 0.9275. No pixel of a maskable icon is transparent. The lighter hairline that the
+  picture's rounded corners carry (the tile's own edge, 36 at most) is 658 pixels or more from
+  the middle: it is not the drawing, and it lies outside the safe zone, so a mask that shows the
+  corners shows it as a faint frame. `scripts/icons.ts` stops if the picture's flat colour is not
+  `BACKGROUND` or the drawing, scaled, leaves the circle.
+- **The manifest and the page** are as before: `web/manifest.webmanifest` holds `name`,
+  `short_name`, `display` and the seven PNGs, each `src` under the versioned path; it is served at
+  `/manifest.webmanifest` with the build put in, and the ICO at `/favicon.ico` (8.2.1). `index.html`
+  names the favicon by its versioned path (`/assets/<build>/web/icons/favicon.ico`,
+  `sizes="16x16 32x32 48x48"`) and the manifest by `/manifest.webmanifest`; the policy's
+  `img-src 'self'` and `manifest-src 'self'` let the page load both. The manifest has no
+  `start_url`, `scope` or `id` (ruled, plan E task 94): the page is not meant to be installed as an
+  app — Chromium counts it as not installable without `start_url`, and an installed app's shortcut
+  would hold no launch token (5.1).
 
 ## 13. Notifications
 
