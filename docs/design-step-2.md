@@ -3407,8 +3407,11 @@ itself, and there is no prompt, no `doctor` run at its end and no way back.
    is not held: with the terminal gone nobody would read the lines; the merge, in its own session,
    ends by itself. Before the hold starts Ctrl+C ends the command as before (the fetch above all),
    and nothing has changed. install.md's recovery for "may not be as it was" reads the reason
-   first: after git's own refusal that files would be overwritten git wrote nothing (no reset);
-   after any other the four steps with `git reset --hard <upstream>`.
+   first, and its default is no reset: only for the command's own three reasons (`git merge timed
+   out`, `git merge was ended by a signal`, `git merge ended, but HEAD is not at <id>`) or a line of
+   git's saying that it could not write, create or remove a file, the four steps with `git reset
+   --hard <upstream>`; any other line of git's is a refusal that wrote nothing (`git status`, move
+   away what git names, `skydeck window`, `skydeck update` again; ruled by the plan owner).
 
    The fetch can wait at a prompt while the checkout is used, so the branch, HEAD and the status
    are read again after it: a changed status is refusal 6's line, a branch switched or HEAD moved

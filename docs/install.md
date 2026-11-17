@@ -1673,14 +1673,11 @@ More ends, each with exit 1:
   docs/install.md says ("Updating"), then run skydeck window`: the command could not tell that the
   checkout is as it was, and the window is not brought back on it. **Read `<why>` first, before you
   run any command that writes**, in a WSL terminal of your own, in the checkout:
-  - **`<why>` is git's own refusal** that files "would be overwritten by merge" (`error: The
-    following untracked working tree files would be overwritten by merge:`). Then git wrote
-    nothing; only the look after it could not tell (a file came into the checkout meanwhile, or the
-    look took too long). `git status`, move away what git names (it is yours), `skydeck window`,
-    then `skydeck update` again. No reset.
-  - **Any other `<why>`**: git was cut off (`git merge timed out`, after 60 seconds; `git merge was
-    ended by a signal`), failed while it wrote files (git's line names what it could not write), or
-    left HEAD elsewhere (`git merge ended, but HEAD is not at <id>`): the files may be half new.
+  - **`<why>` is one of the command's own three** — `git merge timed out` (after 60 seconds), `git
+    merge was ended by a signal`, `git merge ended, but HEAD is not at <id>` — **or git's line says
+    that it could not write, create or remove a file** (`error: unable to write …`, `error: unable
+    to create …`, `error: unable to unlink …`): git was cut off or failed while it wrote, and the
+    files may be half new. Only then these four steps:
     1. Make sure no git command runs in the checkout (one of yours in another terminal, an
        editor's).
     2. When `.git/index.lock` is there, remove it (`rm .git/index.lock`): a git that was cut off
@@ -1694,10 +1691,17 @@ More ends, each with exit 1:
     while the command ran. `git reset --hard` discards changes to tracked files and staged files —
     you had none when you typed `skydeck update` (it refuses then, and looks again after the
     fetch) — and it replaces any file that lies where a file of the new commit goes. After a
-    fast-forward that was cut off, every untracked file in such a place is the new commit's own: a
-    file of yours there would have made git refuse before it wrote anything. So a file you put into
+    fast-forward that was cut off or failed while it wrote, every untracked file in such a place is
+    the new commit's own: a file of yours there would have made git refuse before it wrote
+    anything. So a file you put into
     the checkout while the command ran is the one thing at risk: move it away before step 3. Files
     git does not track elsewhere, and files it ignores, stay as they are.
+  - **Any other `<why>`** — any other line of git's, such as `error: The following untracked
+    working tree files would be overwritten by merge:`, `error: Updating the following directories
+    would lose untracked files in them:` or `fatal: Not possible to fast-forward, aborting.` — means
+    git refused and wrote nothing that matters; only the look after it could not tell (a file came
+    into the checkout meanwhile, or the look took too long). `git status`, move away (or commit)
+    what git names — it is yours —, `skydeck window`, then `skydeck update` again. No reset.
 - `updated to <id>, but skydeck window ended with exit <n>; run skydeck window`: the update is in,
   but the new `skydeck window` failed (its own lines above say why); run `skydeck window`.
 - `updated to <id>, but skydeck window could not be started or was ended by a signal; run skydeck
