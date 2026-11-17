@@ -1409,7 +1409,8 @@ function render() {
         );
   const exit = pane.kind === 'terminal' ? (state.exits.get(pane.term.id) ?? null) : null;
   // `list.selected` when it is the pane's session, for every pane (plan D 2.4, ruled on review B).
-  const paneRow = pane.kind === 'new' || pane.kind === 'none' ? null : pane.row;
+  const paneRow =
+    pane.kind === 'new' || pane.kind === 'none' || pane.kind === 'group' ? null : pane.row;
   const selected =
     paneRow !== null && state.list?.selected?.sessionId === paneRow.id ? state.list.selected : null;
   const term = pane.kind === 'terminal' ? pane.term : null;
