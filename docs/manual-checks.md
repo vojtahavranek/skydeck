@@ -9,7 +9,8 @@ below; W27–W29 check editing in the window (stage D), at "The window (step 2, 
 and W21 check which sessions need you and the desktop notifications (stage B), at "The window
 (step 2, stage B)"; W16 checks restore in the window after WSL stopped (stage C), at
 "The window (step 2, stage C)"; W30, W31 and W3's icon check search, the quick switcher and the
-page's icon (stage E), at "The window (step 2, stage E)".
+page's icon (stage E), at "The window (step 2, stage E)"; W32 checks `skydeck update` (follow-up
+F8), at "Updating skydeck".
 
 Setup:
 
@@ -1744,3 +1745,57 @@ the short id).
 Write down: the icon the button and the title bar showed, after the update, after the restart (and
 when the window was opened anew, after a WSL restart, or "left out"); whether Edge's menu offered
 to install the page as an app, in its own words.
+
+## Updating skydeck
+
+The check of `skydeck update` (follow-up F8; [install.md](install.md), "Updating"): W32, on your
+own installation, with your window open. It types into no session, presses no key in the window
+and opens no dialog: everything is typed in a WSL terminal of your own (a Windows Terminal tab with
+WSL, say), never as a `!` command inside Claude Code and never in a terminal of the window. Your
+sessions are not touched: the update stops only the window's server, and the keepers keep them
+running.
+
+## W32. `skydeck update` on your installation
+
+Setup: the window open, as you work with it; do not close it for this check. In the window, write
+down how many sessions the title bar counts, and which slots the Open section shows. In your own
+WSL terminal: `cd ~/skydeck`, then `git status --short`, and write down what it prints. Lines that
+start with `??` are files git does not track: they do not matter. When it prints any other line,
+stop here and write that down: the update would refuse (a change of your own to a tracked file),
+and this check changes nothing of yours.
+
+1. **Look first.** Type `skydeck update --check`. Expected: one of
+   - `skydeck is up to date (main at <id>, as origin/main)` — write it down and leave step 2 out;
+   - `<n> new commits on origin/main (<old>..<new>):`, one line per commit (two spaces, a 7-digit
+     id, two spaces, its subject; at most 20, then `… and <m> more`), perhaps the line `this update
+     changes the database's upgrade steps: …`, and last `run skydeck update to apply it`.
+
+   Then look at the window: nothing changed — no bar saying that the server is not answering, the
+   same count of sessions, the same slots under Open. `git status --short` prints what it printed
+   in the setup (`--check` changes only `origin/main`, which `git status --short` does not list).
+   Any other line (a refusal: `skydeck: …`) — write it down and stop: install.md's table, under
+   "Updating", says what it means.
+2. **The update**, only when step 1 listed commits. Type `skydeck update`, then press no key in the
+   window until it has reloaded. Expected in the terminal, in this order: the list of step 1; the
+   line `skydeck: stopped skydeck's window server; <n> terminals in the window keep running`; then
+   `skydeck: waiting up to 7 s for the open window to come back; --new-window opens one now` (it
+   may be missing when the window was back sooner); `skydeck window: a window is already open`;
+   and last `updated to <new>`, the id of step 1's first line. `echo $?` prints `0`. In the window,
+   meanwhile: for a few seconds `skydeck's server is not answering (since <time>)…`, then the page
+   reloads itself and the list and the terminal come back. (A window whose key could not be stored
+   says `this window's page is not the one skydeck's server serves, and its key could not be
+   stored, so it cannot reload itself; run skydeck window again` and cannot come back: then the
+   terminal shows `skydeck window: http://127.0.0.1:…` in place of `a window is already open`, and
+   a new window opens after the 7 seconds. Write that down and close the old window with its ×.)
+   Then:
+   - every session is there: the title bar counts what you wrote down, and the Open section shows
+     the same slots;
+   - one window only: no second skydeck window opened (the taskbar shows one skydeck button, as
+     before);
+   - `skydeck doctor` prints no `problem` line.
+
+Write down: what step 1 printed (the count, whether the database line came); for step 2, every line
+the terminal printed, whether the window said that the server was not answering and how long it
+took to come back, the count and the slots after it, whether a second window opened, and
+`skydeck doctor`'s `problem` lines (none expected). When a second window opened, close it with its
+×: closing a window ends no session.

@@ -1274,8 +1274,9 @@ manifest names no start address).
   the new server expects that window back and the command waits for it ("Restore after a restart
   (stage C)"); the cases that are left are in "Known limits of stage C". (After `--restart`, or an
   update that does not upgrade the database, the command waits for the open windows, so none opens
-  then. An update that upgrades the database can open one: close every skydeck window and tab
-  before it, as "Updating" says.)
+  then. An update by hand that upgrades the database can open one: close every skydeck window and
+  tab before it, as "Updating by hand" says; `skydeck update` stops the old server first and needs
+  no closing.)
 - **Ctrl+C on a waiting `skydeck window`** leaves its launch address usable until its 30 seconds
   are over.
 - **Another program on skydeck's port.** A program that listens on `127.0.0.1:<port>` on the Windows
@@ -1399,7 +1400,7 @@ manifest names no start address).
   of its first window's connect. When the server's start hangs, the waits add up (about half a
   minute before Edge is started).
 - **The first update from stage A or B** can still open a second window once: their server keeps no
-  mark of its open windows. Close every skydeck window first, as "Updating" says.
+  mark of its open windows. Close every skydeck window first, as "Updating by hand" says.
 - **A terminal whose keeper ended unexpectedly** (its bar says `the terminal's keeper ended
   unexpectedly; claude ended with it`): while its `claude` may still be running, for at most 60
   seconds, the window refuses to start the session again — Resume, `--window`, restore — with
@@ -1476,6 +1477,24 @@ judged as before.
 
 ### Updating while the window runs
 
+In a WSL terminal of your own:
+
+```sh
+skydeck update --check
+skydeck update
+```
+
+`--check` only looks: it lists what is new and changes nothing else; the window and the sessions
+stay as they are. `skydeck update` brings the checkout up to date and restarts the window's server
+for the new code, and the window stays open: it says for a few seconds that the server is not
+answering, then reloads itself for the new page and connects again, and the command waits up to 7
+seconds for it, so it opens no second window. Sessions keep running; every terminal's screen is
+rebuilt (see "Known limits"). Keepers that run keep the code they started with; new terminals get
+the new keeper. No `npm ci`, no `skydeck install`. "Updating" below says what each line means,
+when the command refuses and what to do then.
+
+By hand — for a checkout that does not have `skydeck update` yet, or when it refuses —:
+
 ```sh
 cd ~/skydeck
 git pull
@@ -1484,10 +1503,7 @@ skydeck window
 
 The commands run the new code at once, as before. The server keeps running the code it started
 with until `skydeck window` finds that it is of another build and restarts it, with the line of
-"Starting it" above. Sessions keep running; every terminal's screen is rebuilt (see "Known
-limits"), and the open windows reload themselves for the new page and connect again: the command
-waits up to 7 seconds for them, so it opens no second window. Keepers that run keep the code they
-started with; new terminals get the new keeper. No `npm ci`, no `skydeck install`.
+"Starting it" above, and waits up to 7 seconds for the open windows in the same way.
 
 The update that brings stage D resizes every terminal of the window once, when a window first
 shows it after the update: the header is two lines taller than stage A's (one for the pull
@@ -1495,15 +1511,15 @@ requests, one for the note), so the terminal under it gets a little less room, a
 redraws its screen, as at any resize. From then on the header has one height for every session,
 and editing never resizes a terminal.
 
-An update that upgrades the database is different: follow "Updating" below and close every
-skydeck window and tab first. A command of the new code that upgrades the database while the old
-server still runs makes that server stop by itself (its windows say that it is not answering), and
-the `skydeck window` that follows can open a second window beside the old one. From outside you
-cannot tell whether an update upgrades the database (the one that brings stage B does); when in
-doubt, close them first: it costs nothing, the sessions keep running in their keepers.
+An update that upgrades the database is different when you update by hand: close every skydeck
+window and tab first ("Updating by hand" below). A command of the new code that upgrades the database while
+the old server still runs makes that server stop by itself (its windows say that it is not
+answering), and the `skydeck window` that follows can open a second window beside the old one.
+`skydeck update` needs no closing for it: it stops the old server before any code of the new
+commit opens the database, and it says when an update may upgrade the database.
 
 The update that brings stage B is one of them: close every skydeck window and tab, then `git
-pull`, then `skydeck window` ("Updating" below). Nothing is to be installed again: stage B adds no
+pull`, then `skydeck window` ("Updating by hand" below). Nothing is to be installed again: stage B adds no
 hook entry (turn ends are read from the files Claude Code keeps), so `skydeck install` is not run
 again and `skydeck doctor` says what it said before. It resizes no terminal: the header keeps its
 height. Then click `Turn on notifications` once ("Which sessions need you (stage B)" above).
@@ -1544,7 +1560,102 @@ installation.
 
 ## Updating
 
-When you use the window, update in this order. It is the one that is certain:
+In a WSL terminal of your own (not a `!` command inside Claude Code):
+
+```sh
+skydeck update --check
+skydeck update
+```
+
+`skydeck update` brings the checkout it runs from up to date with the branch of a remote that its
+branch follows, and restarts the window's server for the new code. In this order:
+
+1. **It looks.** The checkout must be a git checkout of its own, on a branch that follows a branch
+   of a remote (`origin/main`), with no change to a tracked file that is not committed (files git
+   does not track do not count). Then `git fetch` from that remote, in your terminal: a passphrase
+   prompt works, and Ctrl+C ends it with nothing changed. Then what is new, newest first, at most
+   20 commits (then `… and <n> more`):
+
+   ```
+   3 new commits on origin/main (1a2b3c4..5d6e7f8):
+     5d6e7f8  the newest commit's subject
+     4c5d6e7  the one before
+     3b4c5d6  the oldest new one
+   ```
+
+   The ids are the first 7 digits of each commit's id, for reading only; the update itself uses
+   the whole id. When the new commits change `src/store/migrations.ts`, one more line says so:
+   `this update changes the database's upgrade steps: it may upgrade the database, and an upgraded
+   database cannot be opened by an older checkout` (see "There is no way back" below). With
+   nothing new it says `skydeck is up to date (main at 1a2b3c4, as origin/main)` and does nothing
+   else: no server is looked at, stopped or started.
+2. **`--check` ends here**, with `run skydeck update to apply it`. Its fetch has changed the
+   checkout's remote-tracking refs (`origin/main`) and nothing else: not your files, not your
+   branch, not the window or the sessions. It also works inside Claude Code.
+3. **It stops the window's server** of this checkout (`skydeck: stopped skydeck's window server; 2
+   terminals in the window keep running`), then **moves the branch forward** to the commit it
+   listed (a fast-forward, never a merge commit), then, when a window was open, **runs the new
+   checkout's `skydeck window`**: that upgrades the database when the new code brings a new
+   version of it, starts the server of the new code and waits up to 7 seconds for the open window
+   (`skydeck: waiting up to 7 s for the open window to come back; …`), which reloads itself and
+   connects again (`skydeck window: a window is already open`). When no window was open it starts
+   nothing and says `skydeck: the window's server was stopped for the update; skydeck window starts
+   it again`. Last, `updated to 5d6e7f8`.
+
+The window may stay open, also for an update that upgrades the database: the old server is stopped
+before any code of the new commit opens the database, so no old server is left to stop by itself
+under it, and the window that was open is the one that comes back. A window whose key could not be
+stored (Edge's storage for the page off) cannot reload itself: it says `this window's page is not
+the one skydeck's server serves, and its key could not be stored, so it cannot reload itself; run
+skydeck window again`. The `skydeck window` the update runs is that run: after its 7 seconds it
+opens a new window; close the old one (its ×). The new server gets the environment of the shell you typed
+`skydeck update` in, as with `skydeck window` ("Starting it" above): run it from a plain shell.
+A window that was not open is never opened; one that does not come back within the 7 seconds is
+replaced by a new one, as `skydeck window` does.
+
+A server of another checkout is left as it is (`skydeck: the window's server runs from another
+checkout (<path>); it is left as it is`), and so is the server when the database was written by a
+newer skydeck (`skydeck: the database was written by a newer skydeck, so the window's server is not
+looked at; it is left as it is`): the update goes on, and no server is stopped or started.
+
+When it refuses, it says why in one line and changes nothing (exit 1):
+
+| It says | What to do |
+|---|---|
+| `skydeck update is not run from inside a Claude Code session: …` | Run it in a WSL terminal of your own. `skydeck update --check` works anywhere. |
+| `git was not found on PATH; skydeck update needs it` | Install git (`sudo apt install git`), or update the way you installed. |
+| `<path> is not a git checkout; update it the way it was installed` | The checkout is not a clone of its own (a copy, a download, a folder inside another repository): update it the way you got it. |
+| `this checkout is not on a branch (detached HEAD); update it with git yourself` | `git switch main`, then `skydeck update` again; or by hand. |
+| `the branch <name> follows no branch of a remote; update it with git yourself` | `git branch --set-upstream-to=origin/<name>`, then again; or by hand. |
+| `this checkout has changes that are not committed (<n> files, the first: <path>); commit or undo them first` | `git status` shows them: commit them, or undo them (`git restore <path>`), then again. |
+| `git fetch from <remote> failed (git's own message is above); nothing was changed` | git's own message above it says why (the network, a login). Then again. |
+| `this checkout has <n> commits that <upstream> does not have; update it with git yourself` | Commits of your own: push, rebase or drop them with git, then again. |
+| `the window's server (pid <n>) does not answer; skydeck window --restart stops it; nothing was changed` (or the line for a server that is starting) | `skydeck window --restart`, or wait for its start, then again. |
+| `git <command> failed: <git's line>; nothing was changed` | git's line says why; `git status`. |
+| a line of the window's server or of the database, then `; nothing was changed` | As that line says, then again. |
+
+Four more ends, each with exit 1:
+
+- `<why the server could not be stopped>; the checkout was not changed`: the server was asked to
+  stop, or sent a signal, and did not end. `skydeck window --restart`, then `skydeck update` again.
+- `the update could not be applied: <git's line>; the checkout is as it was`: the fast-forward
+  failed — most often a file git does not track is where the new commit puts one of its own, or
+  another git holds a lock — and the window was brought back as it was. Move the file away (or
+  wait for the other git), then `skydeck update` again.
+- `the update could not be applied: <git's line>; the checkout may not be as it was: look at it
+  with git status, then run skydeck window` (`git merge timed out` stands for git's line when it
+  did not end in 60 seconds): git did not leave the checkout as it was, so the files may be half
+  new, and the window is not brought back on them. `git status` shows what is left. You had no
+  change of your own to a tracked file (the command refuses then), so `git merge --ff-only
+  origin/main` finishes the update, or `git restore .` puts the old commit's files back; then
+  `skydeck window`.
+- `updated to <id>, but skydeck window ended with exit <n>; run skydeck window`: the update is in,
+  but the new `skydeck window` failed (its own lines above say why); run `skydeck window`.
+
+### Updating by hand
+
+For a checkout that does not have `skydeck update` yet, and when it refuses, update in this order.
+It is the one that is certain:
 
 1. Close every skydeck window (its ×, or Alt+F4 while it is in front), also those opened with
    `--new-window`, and every browser tab of a `--print-url` address: one page left open is enough
@@ -1572,6 +1683,7 @@ itself at its next write, and the next `skydeck window` finds no server: it star
 window, and an old window or tab that is still open connects to the new server a moment later. Two
 windows (close one). Even `skydeck window` run first is not certain: the old server can stop before
 the command has asked it about its open windows. With every page closed there is none to come back.
+`skydeck update` has no such order to keep: it stops the old server first.
 
 **There is no way back to an older checkout.** A database that a newer skydeck has upgraded is not
 opened by an older one: every command of an older checkout — a second clone, or this one moved back
@@ -1585,7 +1697,10 @@ and its `doctor` shows the same as a `problem` line of its report (`database …
 (the database … was written by a newer skydeck …); the checks that need it are skipped`).
 
 From the update that brings stage B's database (schema version 2) on, this is what every checkout
-from before it says. The way back is forward: `git pull`. skydeck keeps no copy of the database
+from before it says. The way back is forward: its `update skydeck` is `skydeck update` (or `git
+pull` by hand). `skydeck update` runs on such a database, although no other command does: it says
+`skydeck: the database was written by a newer skydeck, so the window's server is not looked at; it
+is left as it is`, brings the checkout up to date and starts no server. skydeck keeps no copy of the database
 from before an upgrade: putting one back would drop everything recorded since, and a copy of the
 file taken while the window's server has it open may not be whole. An upgrade only adds to the
 database; it changes nothing that is in it.

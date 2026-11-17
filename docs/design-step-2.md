@@ -327,6 +327,11 @@ A page that comes back in that time is "a page is already connected" (below): th
 exit code, no token, no Edge. An old server that did not answer, or whose answer has no page count
 that can be read, counts as none: no wait (ruled by the plan owner, stage A's plan task 25).
 
+`skydeck update` (16.5) restarts the server for an update in another order: it reads the old
+server's `pages` and stops it first, then fast-forwards the checkout, and only then runs the new
+checkout's `skydeck window`, which finds no server, starts one and waits for the window through the
+pages mark (below), so that no code of the new commit opens the database while the old server runs.
+
 After a WSL restart, a crash of the server or `--stop`, no old server is there to tell its pages,
 but the old window may still be open, and its page connects a few seconds after the new server's
 start is done (6.3). So the server keeps the `kv` entry `window_pages_open` while pages are
@@ -3298,7 +3303,9 @@ Unknown keys inside `window` are an error, as everywhere in `config.json`.
 
 ### 16.5 Updating skydeck while terminals are open
 
-`git pull` changes the checkout. Then:
+`git pull` changes the checkout — or `skydeck update`, which does it in an order that keeps the
+window (below; follow-up F8, asked for by the user on 2026-11-17, its decisions ruled by the plan
+owner). Then:
 
 - **Commands** run the new code at once, and the store migrates at the next command (design 9.2).
 - **The server** keeps running the old code — and only its own: at start it reads into memory
@@ -3319,6 +3326,71 @@ Unknown keys inside `window` are an error, as everywhere in `config.json`.
 - **Vendored xterm.js** changes for page and screen side together, at the server restart: the new
   screen side rebuilds each terminal from a snapshot written as escape sequences, which any version
   reads.
+
+**`skydeck update [--check]`** (src/cli/commands/update.ts) updates the checkout it runs from
+(`platform.appRoot`). It is a command the user types; nothing checks for an update or applies one by
+itself, and there is no prompt, no `doctor` run at its end and no way back.
+
+1. **It looks, and refuses** (exit 1, one line, nothing changed) in this order: `CLAUDECODE` set
+   without `--check` (the server it restarts would give every session in the window that
+   session's environment, 5.1); `git` not on `PATH`; the root not the top of a work tree of its own
+   (`rev-parse --show-toplevel` fails or names another real path); a detached HEAD; a branch that
+   follows no branch of a remote (no upstream, or a local one); a tracked file changed, staged or
+   unmerged (`status --porcelain --untracked-files=no`; untracked files do not count); the fetch
+   failing; HEAD not an ancestor of the fetched upstream (ahead or diverged). git always runs as
+   `git -C <root> …`, an argument list through the runner — never a shell, never a change of
+   directory —, in the command's environment without the variables that would point it at another
+   repository (git's own `rev-parse --local-env-vars` list and `GIT_NAMESPACE`), each call with
+   10 seconds (the fast-forward 60) and formats that depend neither on the locale nor on the user's
+   git settings (`status --porcelain -z`, `for-each-ref` and `log` with NUL-separated fields,
+   `rev-list --count`, `ls-tree -z`; `--no-optional-locks` on the status, a look). The fetch is the
+   exception: `fetch --quiet -- <remote>` in the user's own terminal with no timeout, as `git pull`
+   would be (a passphrase prompt works; Ctrl+C ends it, nothing changed). `--check` fetches too:
+   that changes the checkout's remote-tracking refs and nothing else.
+2. **It reports** on standard output: `skydeck is up to date (<branch> at <id>, as <upstream>)`
+   (exit 0, and nothing else happens: no server is looked at), or `<n> new commits on <upstream>
+   (<old>..<new>):` and one line per commit, newest first, at most 20 (`… and <m> more`). Ids are
+   the first 7 hexadecimal digits of the commit's id, for reading only; the fast-forward uses the
+   whole id. When `src/store/migrations.ts` differs between HEAD and the new commit (or is gone),
+   one more line says that the update may upgrade the database (`SCHEMA_VERSION` is computed, so
+   the file's change is the fact that can be known without running the new code; no file of the
+   new commit is run or imported to learn more). `--check` ends with `run skydeck update to apply
+   it`.
+3. **It applies**, in exactly this order. (a) The window's server of this checkout (`findServer`,
+   5.1) — `ours` or another build of it — has its `pages` read from `GET /status`, then is stopped
+   as `--stop` stops it (5.5), with `--stop`'s line on standard error; one of another checkout is
+   left as it is (one line says so); one that does not answer refuses the update (the window's line
+   and `nothing was changed`); a database written by a newer skydeck is no refusal (its message
+   asks for this command): the server is not looked at, and (a) and (c) are left out (ruled by the
+   plan owner). (b) `merge --ff-only <the commit the report named>`, by its id: no second fetch, no
+   `pull`. (c) Only when (a) stopped a server that had a page: the new checkout's own `bin/skydeck
+   window`, run as a new process with the command's own environment, working directory and
+   terminal. It upgrades the database (16.5 above), starts the server of the new code, and waits
+   for the open window: the stopped server kept its pages mark (5.1, plan C20), so the new one
+   expects the window back, and the page, which tries again for ever (6.3), reloads itself for the
+   new build (8.2.2) and counts as the open window; no second window is opened. When the stopped
+   server had no page nothing is started (`skydeck window starts it again`); windows are left as
+   they were, and one that does not come back within the 7 seconds is replaced as `skydeck window`
+   replaces it. (d) `updated to <id>`, exit 0; exit 1 when the child ended otherwise. A failed
+   fast-forward is looked at (HEAD and the status): as it was, (c) brings the window back and the
+   command ends with `the update could not be applied: <git's line>; the checkout is as it was`;
+   not as it was (or not to be told, or the 60 seconds over: `git merge timed out`), nothing is
+   started on the files on disk and the line says to look with `git status` (ruled by the plan
+   owner).
+
+So the old server is stopped **before** any code of the new commit opens the database: the case
+`skydeck window` alone cannot make certain (it opens, and so upgrades, the database before it asks
+the old server for its pages, and the old server stops by itself at its next write, 10.1) does not
+arise, and the window may stay open across an update that upgrades the database.
+
+**The process that runs `update` is the old code.** After (b) the files on disk are the new code,
+so from then on it loads nothing: every module it needs for (c), (d) and its way out is imported
+statically at its start, no `import()` and no read of `src/`, `web/` or `bin/` follows the merge,
+and everything the new code must do is done by the child. The launcher `bin/skydeck` is a shell
+script that `sh` is still reading while git replaces it; that is safe because git never rewrites a
+file in place — it removes the old file and creates a new one (a new inode), so `sh` reads on in the
+old file it holds open —, and after node has ended the launcher only runs a handoff when there is
+one (`update` writes none) and exits with node's status.
 
 ### 16.6 Vendored files
 
