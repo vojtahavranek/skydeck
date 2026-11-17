@@ -394,7 +394,14 @@ describe('the real launcher across an update of itself (U6, U8)', () => {
     });
 
     assert.equal(u.error, undefined);
-    assert.equal(u.stderr, '');
+    // Node 24.12 warns once that node:sqlite is experimental, on every run; that is not ours.
+    assert.equal(
+      u.stderr
+        .split('\n')
+        .filter((line) => line !== '' && !/ExperimentalWarning|--trace-warnings/.test(line))
+        .join('\n'),
+      '',
+    );
     assert.equal(
       u.stdout,
       `1 new commit on origin/main (${short(old)}..${short(made)}):\n  ${short(made)}  a new launcher and poisoned modules\n` +
