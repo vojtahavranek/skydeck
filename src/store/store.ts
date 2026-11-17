@@ -149,6 +149,21 @@ export interface Store {
  */
 export class StoreNewerError extends SkydeckError {}
 
+/**
+ * openStore's refusal of a database whose schema version is newer than this skydeck knows (`the
+ * database <path> was written by a newer skydeck (…); update skydeck`). A type of its own only so
+ * that `skydeck update` can tell it apart from every other failure to open the database (F8: the
+ * command the message asks for must still run then); its message, its exit code (1) and its name
+ * (`SkydeckError`, which describeError prints) are those of the plain SkydeckError it was before,
+ * so that every other caller sees what it saw.
+ */
+export class DatabaseNewerError extends SkydeckError {
+  constructor(message: string) {
+    super(message, 1);
+    this.name = 'SkydeckError';
+  }
+}
+
 /** The message of the StoreNewerError the store throws, and the server's `bye` (S2 10.1). */
 const STORE_NEWER = 'skydeck was updated; run skydeck window';
 
@@ -376,10 +391,9 @@ function schemaVersion(db: DatabaseSync, path: string): number {
 
 /** Runs the migrations the database lacks, each in one transaction with the kv update. */
 function migrate(db: DatabaseSync, path: string): void {
-  const tooNew = (version: number): SkydeckError =>
-    new SkydeckError(
+  const tooNew = (version: number): DatabaseNewerError =>
+    new DatabaseNewerError(
       `the database ${path} was written by a newer skydeck (schema version ${version}, this one knows ${SCHEMA_VERSION}); update skydeck`,
-      1,
     );
   const found = schemaVersion(db, path);
   if (found > SCHEMA_VERSION) {
@@ -413,8 +427,9 @@ function migrate(db: DatabaseSync, path: string): void {
 /**
  * Opens (creating when absent) the database at `path`; the directory must exist. Sets
  * journal_mode=WAL, synchronous=FULL, busy_timeout=5000, foreign_keys=ON, chmods the file 0600,
- * runs the missing migrations. Throws SkydeckError (exit 1) when kv schema_version is newer than
- * SCHEMA_VERSION ("the database was written by a newer skydeck"). Any other failure to open it (a
+ * runs the missing migrations. Throws DatabaseNewerError (a SkydeckError, exit 1) when kv
+ * schema_version is newer than SCHEMA_VERSION ("the database was written by a newer skydeck"). Any
+ * other failure to open it (a
  * file that is not a database, a lock held for more than the busy timeout, a missing directory,
  * a failed migration) is a SkydeckError (exit 1) naming the path: it is a fact of the machine,
  * not a bug in skydeck.

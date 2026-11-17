@@ -8,7 +8,10 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
-import type { Platform } from '../../../src/platform/types.ts';
+import type { Net, Platform } from '../../../src/platform/types.ts';
+import { SkydeckError } from '../../../src/platform/errors.ts';
+import { SCHEMA_VERSION } from '../../../src/store/migrations.ts';
+import { DatabaseNewerError, openStore } from '../../../src/store/store.ts';
 import type { Run } from '../../helpers/install.ts';
 import { run } from '../../helpers/install.ts';
 import { testPlatform } from '../../helpers/platform.ts';
@@ -608,6 +611,7 @@ describe('skydeck update: applying, no window server (U5)', () => {
     for (const afterFailedMerge of [
       { head: NEW, status: '' },
       { head: OLD, status: ' M src/a.ts\0' },
+      { head: 'not an id', status: '' },
     ]) {
       const u = updater(t, {
         merge: { code: 128, stderr: 'fatal: cannot write\n' },
@@ -621,5 +625,136 @@ describe('skydeck update: applying, no window server (U5)', () => {
         JSON.stringify(afterFailedMerge),
       );
     }
+  });
+});
+
+describe('skydeck update: the 60 s of the merge (ruled by the plan owner)', () => {
+  test('a merge the timeout ended is named, and the checkout looked at as after any failure', async (t) => {
+    for (const [afterFailedMerge, end] of [
+      [{ head: OLD, status: '' }, 'the checkout is as it was'],
+      [
+        { head: NEW, status: '' },
+        'the checkout may not be as it was: look at it with git status, then run skydeck window',
+      ],
+    ] as const) {
+      const u = updater(t, { merge: { code: null, timedOut: true }, afterFailedMerge });
+      const r = await u.update();
+      assert.equal(r.code, 1);
+      assert.equal(r.stdout, ONE_COMMIT);
+      assert.equal(
+        r.stderr,
+        `skydeck: the update could not be applied: git merge timed out; ${end}\n`,
+      );
+      const trace = u.trace();
+      assert.deepEqual(trace.slice(trace.indexOf('merge'), trace.indexOf('merge') + 2), [
+        'merge',
+        'rev-parse',
+      ]);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The database at step 1 (ruled by the plan owner)
+
+/** Writes a database one schema version newer than this skydeck knows, where the sandbox has it. */
+function newerDatabase(tp: TestPlatform): void {
+  mkdirSync(tp.places.dataDir, { recursive: true });
+  const store = openStore(tp.places.dbPath);
+  store.setKv('schema_version', String(SCHEMA_VERSION + 1));
+  store.close();
+}
+
+describe('skydeck update: the database at step 1 (ruled by the plan owner)', () => {
+  test('written by a newer skydeck: the line, no server asked, stopped or started — merged, "updated to", exit 0', async (t) => {
+    const u = updater(t);
+    newerDatabase(u.tp);
+    const asked: string[] = [];
+    const net: Net = {
+      ...u.platform.net,
+      requestUnix(path, request) {
+        asked.push(`${request.method} ${request.path}`);
+        return u.platform.net.requestUnix(path, request);
+      },
+    };
+
+    const r = await runUpdate({ ...u.platform, net }, u.tp.sandbox);
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, `${ONE_COMMIT}updated to fedcba9\n`);
+    assert.equal(
+      r.stderr,
+      "skydeck: the database was written by a newer skydeck, so the window's server is not looked at; it is left as it is\n",
+    );
+    assert.deepEqual(u.trace(), [...BEFORE_FETCH, 'fetch', ...LOOK, 'merge']);
+    assert.deepEqual(asked, []);
+    assert.deepEqual(
+      u.runner.interactiveCalls.filter((c) => c.command !== 'git'),
+      [],
+    );
+    assert.deepEqual(u.tp.processes.calls, []);
+    assert.deepEqual(u.tp.processes.signals, []);
+  });
+
+  test('one that cannot be opened (a directory in its place): "nothing was changed", no merge', async (t) => {
+    const u = updater(t);
+    mkdirSync(u.tp.places.dbPath, { recursive: true });
+
+    const r = await u.update();
+
+    assert.equal(r.code, 1);
+    assert.equal(r.stdout, ONE_COMMIT);
+    assert.match(
+      r.stderr,
+      new RegExp(
+        `^skydeck: cannot open the database ${u.tp.places.dbPath}: .+; nothing was changed\n$`,
+      ),
+    );
+    assert.ok(!u.trace().includes('merge'));
+  });
+
+  test('every other command says for a newer database what it said before: the same line, exit 1', async (t) => {
+    const tp = testPlatform(t);
+    newerDatabase(tp);
+    const line = `the database ${tp.places.dbPath} was written by a newer skydeck (schema version ${SCHEMA_VERSION + 1}, this one knows ${SCHEMA_VERSION}); update skydeck`;
+    for (const argv of [
+      [],
+      ['ls'],
+      ['show', 'abcd'],
+      ['label', 'abcd', 'x'],
+      ['group', 'abcd', 'x'],
+      ['note', 'abcd', '--set', 'x'],
+      ['done', 'abcd'],
+      ['undone', 'abcd'],
+      ['pr', 'refresh'],
+      ['new'],
+      ['resume', 'abcd'],
+      ['restore', '--dry-run'],
+      ['window'],
+      ['uninstall'],
+    ]) {
+      const r = await run(tp.platform, argv);
+      assert.equal(r.code, 1, argv.join(' '));
+      assert.equal(r.stdout, '', argv.join(' '));
+      assert.equal(r.stderr, `skydeck: ${line}\n`, argv.join(' '));
+    }
+    const doctor = await run(tp.platform, ['doctor']);
+    assert.equal(doctor.code, 1);
+    assert.ok(
+      doctor.stdout.startsWith(
+        `problem  database ${tp.places.dbPath} cannot be opened (${line}); the checks that need it are skipped\n`,
+      ),
+      doctor.stdout,
+    );
+    // The type that tells it apart for skydeck update keeps the name a reader prints.
+    assert.throws(
+      () => openStore(tp.places.dbPath),
+      (error: unknown) =>
+        error instanceof DatabaseNewerError &&
+        error instanceof SkydeckError &&
+        error.name === 'SkydeckError' &&
+        error.exitCode === 1 &&
+        error.message === line,
+    );
   });
 });

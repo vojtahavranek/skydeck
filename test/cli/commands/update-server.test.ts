@@ -56,12 +56,13 @@ interface Harness {
   update(runner: Runner, args?: string[]): Promise<Run>;
 }
 
-function harness(t: TestContext): Harness {
+/** `times`: SKYDECK_TEST_WINDOW_TIMES of the command (default a ping wait of 1.5 s). */
+function harness(t: TestContext, times = 'pingMs=1500'): Harness {
   const tp = realTestPlatform(t, {
     env: (s) => ({
       ...gitTestEnv(s),
       SKYDECK_NODE: process.execPath,
-      SKYDECK_TEST_WINDOW_TIMES: 'pingMs=1500',
+      SKYDECK_TEST_WINDOW_TIMES: times,
     }),
   });
   const s = tp.sandbox;
@@ -297,6 +298,24 @@ describe('skydeck update with a window server of this checkout (U5)', () => {
 });
 
 describe('skydeck update with another server, or none that answers (U2 9, U5 1)', () => {
+  test('a server that answers its shutdown but does not end, and cannot be signalled: the stop’s error and "the checkout was not changed" — no merge', async (t) => {
+    const h = harness(t, 'pingMs=1500,stopMs=300');
+    const server = await h.serve({ FAKE_SERVE_PAGES: '1', FAKE_SERVE_ON_SHUTDOWN: 'stay' });
+
+    const r = await h.update(scripted(h));
+
+    assert.equal(r.code, 1);
+    assert.equal(r.stdout, ONE_COMMIT);
+    assert.equal(
+      r.stderr,
+      `skydeck: the window's server (pid ${server.pid}) cannot be sent SIGTERM (Error: this test signals nothing, not ${server.pid}); the checkout was not changed\n`,
+    );
+    inOrder(h.events, 'GET /status', 'POST /shutdown');
+    assert.ok(!h.events.includes('git merge'));
+    assert.deepEqual(h.signals, [server.pid]);
+    assert.deepEqual(h.launches, []);
+  });
+
   test('a server of another checkout: neither asked for its pages nor stopped; the line; merged; nothing started', async (t) => {
     const h = harness(t);
     const server = await h.serve({

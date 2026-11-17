@@ -22,6 +22,7 @@ import { join } from 'node:path';
 
 import { SkydeckError } from '../../platform/errors.ts';
 import type { RunResult } from '../../platform/types.ts';
+import { DatabaseNewerError } from '../../store/store.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import { computeBuild } from '../../window/build.ts';
 import { findServer, stopServer } from '../../window/lifecycle.ts';
@@ -304,7 +305,9 @@ async function apply(ctx: Context, git: Git, update: Update): Promise<number> {
     });
   // From here on this process loads nothing from the checkout (U6).
   if (merge.code !== 0 || merge.timedOut) {
-    const why = failureReason(merge, MERGE_MS);
+    // A merge the 60 s ended has no line of git's: then it is named; the checkout is looked at as
+    // after any other failure (ruled by the plan owner).
+    const why = merge.timedOut ? 'git merge timed out' : failureReason(merge, MERGE_MS);
     if (!(await asItWas(git, update.oldId))) {
       err(
         `the update could not be applied: ${why}; the checkout may not be as it was: look at it with git status, then run skydeck window`,
@@ -335,10 +338,15 @@ async function apply(ctx: Context, git: Git, update: Update): Promise<number> {
 /**
  * U5 step 1 on the deck (opened here, and closed again when it returns): the window's server of
  * this checkout, when there is one, has its pages counted and is stopped. A server of another
- * checkout is left as it is; a server that does not answer is refused (U2 9). Any error ends the
- * command before anything was changed, and says so.
+ * checkout is left as it is; a server that does not answer is refused (U2 9). A database written by
+ * a newer skydeck is no error here — its message asks for this command —: the server is not looked
+ * at, and the update goes on without steps 1 and 3 (ruled by the plan owner). Any other error ends
+ * the command and says what was left as it was: `nothing was changed` before stopServer was called,
+ * `the checkout was not changed` once it was (a server asked to shut down, or signalled, that did
+ * not end).
  */
 async function stopForUpdate(ctx: Context, times: WindowTimes): Promise<Stopped> {
+  let stopping = false;
   try {
     return await withDeck(ctx, { refresh: false }, async (deck) => {
       const root = deck.platform.appRoot;
@@ -356,6 +364,7 @@ async function stopForUpdate(ctx: Context, times: WindowTimes): Promise<Stopped>
         case 'ours':
         case 'other-build': {
           const pages = await pagesOf(deck);
+          stopping = true;
           const { stopped, keepers } = await stopServer(deck, times);
           if (stopped) {
             ctx.io.stderr(`skydeck: stopped skydeck's window server; ${keepRunning(keepers)}\n`);
@@ -365,8 +374,15 @@ async function stopForUpdate(ctx: Context, times: WindowTimes): Promise<Stopped>
       }
     });
   } catch (error) {
+    if (error instanceof DatabaseNewerError) {
+      ctx.io.stderr(
+        "skydeck: the database was written by a newer skydeck, so the window's server is not looked at; it is left as it is\n",
+      );
+      return { stopped: false, pages: 0 };
+    }
     if (error instanceof SkydeckError) {
-      throw new SkydeckError(`${error.message}; nothing was changed`, error.exitCode);
+      const left = stopping ? 'the checkout was not changed' : 'nothing was changed';
+      throw new SkydeckError(`${error.message}; ${left}`, error.exitCode);
     }
     throw error;
   }
