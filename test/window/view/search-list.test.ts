@@ -12,6 +12,7 @@ import type { DerivedSession, Holder } from '../../../src/sessions/types.ts';
 import type { TerminalInfo } from '../../../src/window/hub.ts';
 import type {
   ClosedBlock,
+  ClosedStackPayload,
   RowPayload,
   SectionPayload,
   StackPayload,
@@ -423,11 +424,17 @@ function shut(section: SectionPayload['name'], ...groups: string[]): ClosedBlock
   return groups.map((group) => ({ section, group }));
 }
 
-/** The block payload of a row of ORB-1 headed by `head`. */
+/** The block payload of a row of ORB-1 headed by `head` (an open block: F9 draws no row of a
+ *  closed one). */
 function orb(
   over: Partial<StackPayload> & Pick<StackPayload, 'size' | 'head' | 'role'>,
 ): StackPayload {
-  return { group: 'ORB-1', open: true, hiddenNeedYou: 0, ...over };
+  return { group: 'ORB-1', ...over };
+}
+
+/** The closed blocks of `name` (F9: each its caption, none of its rows in `rows`). */
+function captions(message: Message, name: SectionPayload['name']): ClosedStackPayload[] {
+  return section(message, name).closedStacks ?? [];
 }
 
 test('blocks: three rows of ORB-1 in Recent are one block, OPEN by default — without `closed` and with `closed: []` (G1, G4)', () => {
@@ -438,36 +445,63 @@ test('blocks: three rows of ORB-1 in Recent are one block, OPEN by default — w
     assert.deepEqual(rowIn(message, S1).stack, orb({ size: 3, head: S1, role: 'head' }), why);
     assert.deepEqual(rowIn(message, S2).stack, orb({ size: 3, head: S1, role: 'member' }), why);
     assert.deepEqual(rowIn(message, S3).stack, orb({ size: 3, head: S1, role: 'member' }), why);
+    assert.deepEqual(captions(message, 'week'), [], why);
   }
 });
 
-test("blocks: `closed` naming Recent and ORB-1 closes that block: the head only; count and time span all its rows'", () => {
+test("blocks: `closed` naming Recent and ORB-1 closes that block: NO row of it, its caption alone (F9); count and time span all its rows'", () => {
   const message = buildListMessage(
-    input({ rows: orbWeek(), view: { closed: shut('week', 'ORB-1'), selected: S1 } }),
+    input({ rows: orbWeek(), view: { closed: shut('week', 'ORB-1') } }),
   );
   const week = section(message, 'week');
   assert.equal(week.count, 3);
-  assert.deepEqual(ids(message, 'week'), [S1]);
-  assert.deepEqual(rowIn(message, S1).stack, orb({ size: 3, head: S1, role: 'head', open: false }));
+  assert.deepEqual(ids(message, 'week'), []);
+  assert.deepEqual(captions(message, 'week'), [
+    { group: 'ORB-1', size: 3, needYou: 0, head: S1, at: 0 },
+  ]);
   assert.equal(week.firstNs, String(NOW - 3n * MIN));
   assert.equal(week.lastNs, String(NOW - MIN));
-  // Apart from `stack`, the head is the row as it is in no block (E13's `selectedRow`).
-  assert.deepEqual({ ...rowIn(message, S1), stack: null }, message.selectedRow);
   // Another group's entry, another section's, another case: the block stays open.
   for (const closed of [shut('week', 'ORB-2', 'orb-1', 'ORB-1 '), shut('earlier', 'ORB-1')]) {
     const other = buildListMessage(input({ rows: orbWeek(), view: { closed } }));
     assert.deepEqual(ids(other, 'week'), [S1, S2, S3], JSON.stringify(closed));
+    assert.deepEqual(captions(other, 'week'), [], JSON.stringify(closed));
   }
 });
 
-test('blocks: the selected member opens its closed block; the selected head does not (G5)', () => {
+test('blocks: a selected row opens its closed block — any of its rows, the FIRST too (G5, F9 K5)', () => {
   const closed = shut('week', 'ORB-1');
-  const member = buildListMessage(input({ rows: orbWeek(), view: { closed, selected: S3 } }));
-  assert.deepEqual(ids(member, 'week'), [S1, S2, S3]);
-  assert.equal(rowIn(member, S1).stack?.open, true);
-  const head = buildListMessage(input({ rows: orbWeek(), view: { closed, selected: S1 } }));
-  assert.deepEqual(ids(head, 'week'), [S1]);
-  assert.equal(rowIn(head, S1).stack?.open, false);
+  for (const selected of [S1, S2, S3]) {
+    const message = buildListMessage(input({ rows: orbWeek(), view: { closed, selected } }));
+    assert.deepEqual(ids(message, 'week'), [S1, S2, S3], selected);
+    assert.deepEqual(captions(message, 'week'), [], selected);
+    assert.deepEqual(rowIn(message, S1).stack, orb({ size: 3, head: S1, role: 'head' }), selected);
+    // Apart from `stack`, the row is the row as it is in no block (E13's `selectedRow`).
+    assert.deepEqual({ ...rowIn(message, selected), stack: null }, message.selectedRow, selected);
+  }
+});
+
+test('blocks: every section carries `closedStacks`: [] with nothing closed, while filtering and while folded (F9)', () => {
+  const list = rows([idle(S1, 'ORB-1 old', 30n * DAY), idle(S2, 'ORB-1 older', 31n * DAY)]);
+  const closed = shut('earlier', 'ORB-1');
+  const folded = buildListMessage(input({ rows: list, view: { closed } }));
+  assert.deepEqual(
+    folded.sections.map((s) => [s.name, s.closedStacks]),
+    [
+      ['open', []],
+      ['week', []],
+      ['earlier', []],
+    ],
+  );
+  const unfolded = buildListMessage(input({ rows: list, view: { closed, unfolded: ['earlier'] } }));
+  assert.deepEqual(captions(unfolded, 'earlier'), [
+    { group: 'ORB-1', size: 2, needYou: 0, head: S1, at: 0 },
+  ]);
+  const filtering = buildListMessage(
+    input({ rows: list, view: { closed, unfolded: ['earlier'], filter: 'orb' } }),
+  );
+  assert.deepEqual(ids(filtering, 'earlier'), [S1, S2]);
+  assert.deepEqual(captions(filtering, 'earlier'), []);
 });
 
 test('blocks: a group in two sections is two blocks, each closed on its own (G1)', () => {
@@ -495,7 +529,8 @@ test('blocks: a group in two sections is two blocks, each closed on its own (G1)
   for (const name of ['open', 'week', 'earlier'] as const) {
     const one = build(shut(name, 'ORB-1'));
     for (const other of ['open', 'week', 'earlier'] as const) {
-      assert.equal(ids(one, other).length, other === name ? 1 : 2, `${name} closed, ${other}`);
+      assert.equal(ids(one, other).length, other === name ? 0 : 2, `${name} closed, ${other}`);
+      assert.equal(captions(one, other).length, other === name ? 1 : 0, `${name}, ${other}`);
       assert.equal(section(one, other).count, 2, `${name} closed, ${other}`);
     }
   }
@@ -527,14 +562,7 @@ test('blocks: in Open, three running sessions of one group are one block, with t
   ];
   const message = buildListMessage(input({ rows: list, terminals }));
   assert.deepEqual(ids(message, 'open'), [S1, S2, S3]);
-  const head: StackPayload = {
-    group: 'test',
-    size: 3,
-    open: true,
-    role: 'head',
-    head: S1,
-    hiddenNeedYou: 0,
-  };
+  const head: StackPayload = { group: 'test', size: 3, role: 'head', head: S1 };
   assert.deepEqual(
     section(message, 'open').rows.map((row) => [row.slot, row.terminal, row.stack]),
     [
@@ -546,9 +574,11 @@ test('blocks: in Open, three running sessions of one group are one block, with t
   const closed = buildListMessage(
     input({ rows: list, terminals, view: { closed: shut('open', 'test') } }),
   );
-  assert.deepEqual(ids(closed, 'open'), [S1]);
+  assert.deepEqual(ids(closed, 'open'), []);
   assert.equal(section(closed, 'open').count, 3);
-  assert.equal(rowIn(closed, S1).stack?.open, false);
+  assert.deepEqual(captions(closed, 'open'), [
+    { group: 'test', size: 3, needYou: 0, head: S1, at: 0 },
+  ]);
 });
 
 test("blocks: in Open a block sits at its first member's place in Open's order, its members after it (G3)", () => {
@@ -604,15 +634,14 @@ test('blocks: a row with an ended terminal of the window and a row that needs yo
   assert.deepEqual(ids(open, 'week'), [S1, S2, S3, S4]);
   assert.deepEqual(rowIn(open, S1).stack, orb({ size: 4, head: S1, role: 'head' }));
   assert.deepEqual(rowIn(open, S2).stack, orb({ size: 4, head: S1, role: 'member' }));
-  // Closed: the head and, on its line, the one hidden member that needs you.
+  // Closed: no row; its caption counts the one row that needs you.
   const closed = build(shut('week', 'ORB-1'));
-  assert.deepEqual(ids(closed, 'week'), [S1]);
-  assert.deepEqual(
-    rowIn(closed, S1).stack,
-    orb({ size: 4, head: S1, role: 'head', open: false, hiddenNeedYou: 1 }),
-  );
+  assert.deepEqual(ids(closed, 'week'), []);
+  assert.deepEqual(captions(closed, 'week'), [
+    { group: 'ORB-1', size: 4, needYou: 1, head: S1, at: 0 },
+  ]);
   assert.equal(section(closed, 'week').count, 4);
-  // Selected, the member that needs you opens its block.
+  // Selected, the row that needs you opens its block.
   assert.deepEqual(ids(build(shut('week', 'ORB-1'), S2), 'week'), [S1, S2, S3, S4]);
 });
 
@@ -639,10 +668,10 @@ test('blocks: a closed block whose member is drawn with a terminal that has not 
   const message = buildListMessage(input({ rows: list, terminals, view: { closed } }));
   assert.deepEqual(ids(message, 'open'), [S1, S2]);
   assert.equal(rowIn(message, S2).slot, 2);
-  assert.equal(rowIn(message, S1).stack?.open, true);
+  assert.deepEqual(captions(message, 'open'), []);
   assert.deepEqual(ids(message, 'week'), [S3, S4]);
   assert.equal(rowIn(message, S4).slot, 3);
-  assert.equal(rowIn(message, S3).stack?.open, true);
+  assert.deepEqual(captions(message, 'week'), []);
   // Reported, the block is closed again, as `closed` says.
   const reported = buildListMessage(
     input({
@@ -651,8 +680,14 @@ test('blocks: a closed block whose member is drawn with a terminal that has not 
       view: { closed },
     }),
   );
+  // (S2, reported and not running, is in Recent now: S1 is alone in Open.)
   assert.deepEqual(ids(reported, 'open'), [S1]);
-  // An unreported head opens nothing (it is drawn anyway); needYou does not move.
+  assert.deepEqual(ids(reported, 'week'), []);
+  assert.deepEqual(captions(reported, 'week'), [
+    { group: 'test', size: 3, needYou: 0, head: S2, at: 0 },
+  ]);
+  // An unreported FIRST row opens its block too: a closed block hides it as well (F9); needYou
+  // does not move.
   const head = buildListMessage(
     input({
       rows: list,
@@ -661,9 +696,11 @@ test('blocks: a closed block whose member is drawn with a terminal that has not 
     }),
   );
   // (S1 runs without a terminal of the window now: Open's order puts S2, the terminal, first.)
-  assert.deepEqual(ids(head, 'open'), [S2]);
-  assert.equal(rowIn(head, S2).stack?.open, false);
-  assert.deepEqual(ids(head, 'week'), [S3]);
+  assert.deepEqual(ids(head, 'open'), [S2, S1]);
+  assert.equal(rowIn(head, S2).stack?.role, 'head');
+  assert.deepEqual(captions(head, 'open'), []);
+  assert.deepEqual(ids(head, 'week'), []);
+  assert.equal(captions(head, 'week').length, 1);
   assert.deepEqual(
     head.needYou,
     buildListMessage(
@@ -704,6 +741,9 @@ test('blocks: a filter or a chip flattens every block, in every section', () => 
       assert.ok(section(message, 'week').rows.length >= 2, why);
       for (const row of message.sections.flatMap((s) => s.rows)) {
         assert.equal(row.stack, null, `${row.id} ${why}`);
+      }
+      for (const s of message.sections) {
+        assert.deepEqual(s.closedStacks, [], `${s.name} ${why}`);
       }
     }
   }
@@ -753,10 +793,11 @@ test('blocks: `needYou` and the counts are the same with and without closed bloc
   assert.deepEqual(new Set(plain.needYou.order), new Set([S1, S3, S5]));
   assert.equal(plain.needYou.count, 3);
   const allClosed = build([...shut('open', 'test'), ...shut('week', 'ORB-1')]);
-  assert.deepEqual(ids(allClosed, 'open'), [S1]);
-  assert.deepEqual(ids(allClosed, 'week'), [S4]);
-  assert.equal(rowIn(allClosed, S1).stack?.hiddenNeedYou, 1);
-  assert.equal(rowIn(allClosed, S4).stack?.hiddenNeedYou, 1);
+  assert.deepEqual(ids(allClosed, 'open'), []);
+  assert.deepEqual(ids(allClosed, 'week'), []);
+  // Every row of a closed block is hidden, the first too: each caption counts all that need you.
+  assert.equal(captions(allClosed, 'open')[0]?.needYou, 2);
+  assert.equal(captions(allClosed, 'week')[0]?.needYou, 1);
   for (const closed of [
     [],
     shut('open', 'test'),
@@ -942,11 +983,11 @@ test("switcher: each item's hiddenBy says what this page's list would have to ch
   assert.deepEqual(hidden({ chips: ['running'] })[S1], []);
 });
 
-test('switcher: a member of a closed block is no hidden row (selecting it opens the block)', () => {
+test('switcher: a row of a closed block, its first too, is no hidden row (selecting it opens the block)', () => {
   const message = buildListMessage(
     input({ rows: orbWeek(), view: { closed: shut('week', 'ORB-1'), switcher: 'orb' } }),
   );
-  assert.deepEqual(ids(message, 'week'), [S1]);
+  assert.deepEqual(ids(message, 'week'), []);
   assert.deepEqual(
     items(message).map((one) => [one.row.id, one.hiddenBy]),
     [
@@ -955,9 +996,12 @@ test('switcher: a member of a closed block is no hidden row (selecting it opens 
       [S3, []],
     ],
   );
-  // The switcher's row is the row as the list carries it, without the block.
+  // The switcher's row is the row as the list carries it once the block opens, without the block.
   assert.equal(item(message, S1).row.stack, null);
-  assert.deepEqual({ ...rowIn(message, S1), stack: null }, item(message, S1).row);
+  const opened = buildListMessage(
+    input({ rows: orbWeek(), view: { closed: shut('week', 'ORB-1'), selected: S1 } }),
+  );
+  assert.deepEqual({ ...rowIn(opened, S1), stack: null }, item(message, S1).row);
 });
 
 test("switcher: with stage B's facts the sessions that need you come first, in B's order, shown or not", () => {

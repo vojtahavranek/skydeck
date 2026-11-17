@@ -1,8 +1,8 @@
 /**
  * Stage E's fields of `view` and `list` (plan E 2.3): `view.chips`, `view.closed` (E6 as ruled
  * 2026-11-16, which replaced `view.opened`) and `view.switcher` with the limits `parsePageMessage`
- * applies, a view without them, and the types every side codes against (`RowPayload.stack`, `list.filtering`,
- * `list.switcher`).
+ * applies, a view without them, and the types every side codes against (`RowPayload.stack`,
+ * `SectionPayload.closedStacks` of follow-up F9, `list.filtering`, `list.switcher`).
  */
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
@@ -10,11 +10,13 @@ import { describe, test } from 'node:test';
 import { MAX_CLOSED, parsePageMessage } from '../../src/window/protocol.ts';
 import type {
   ClosedBlock,
+  ClosedStackPayload,
   HiddenBy,
   ListMessage,
   RestoreOffer,
   RowPayload,
   SearchChip,
+  SectionPayload,
   StackPayload,
   SwitchItem,
   SwitchRank,
@@ -339,14 +341,22 @@ describe('the types of stage E (plan E 2.3) compile', () => {
   });
 
   test('a row in a stack, and the list with filtering and the switcher', () => {
-    const stack: StackPayload = {
+    const stack: StackPayload = { group: 'ORB-2107', size: 3, role: 'head', head: S1 };
+    // F9: a closed block is a caption of its section, none of its rows in `rows`.
+    const caption: ClosedStackPayload = {
       group: 'ORB-2107',
       size: 3,
-      open: false,
-      role: 'head',
+      needYou: 1,
       head: S1,
-      hiddenNeedYou: 1,
+      at: 0,
     };
+    const closedSection = { closedStacks: [caption] } satisfies Pick<
+      SectionPayload,
+      'closedStacks'
+    >;
+    const plainSection = {} satisfies Pick<SectionPayload, 'closedStacks'>;
+    assert.equal(closedSection.closedStacks.length, 1);
+    assert.equal(Object.keys(plainSection).length, 0);
     const shut: ClosedBlock = { section: 'open', group: 'ORB-2107' };
     // @ts-expect-error a closed block's section is one of the three
     const wrong: ClosedBlock = { section: 'done', group: 'ORB-2107' };

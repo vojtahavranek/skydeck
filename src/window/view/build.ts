@@ -17,6 +17,7 @@ import type { TerminalInfo } from '../hub.ts';
 import type {
   AttentionPayload,
   ClosedBlock,
+  ClosedStackPayload,
   HiddenBy,
   ListMessage,
   RowPayload,
@@ -224,12 +225,12 @@ function compareRecent(a: Entry, b: Entry): number {
 }
 
 /** A section of `entries` (in the section's order): `count`, `firstNs` and `lastNs` over all of
- *  them, `rows` the drawn ones (none while folded). */
+ *  them, `rows` the drawn ones and `closedStacks` its closed blocks (none of either while folded). */
 function sectionPayload(
   name: SectionName,
   entries: readonly Entry[],
   folded: boolean,
-  drawn: () => RowPayload[],
+  drawn: () => { rows: RowPayload[]; closedStacks: ClosedStackPayload[] },
 ): SectionPayload {
   let firstNs: Ns | null = null;
   let lastNs: Ns | null = null;
@@ -241,28 +242,31 @@ function sectionPayload(
       lastNs = row.lastActivityNs;
     }
   }
+  const { rows, closedStacks } = folded ? { rows: [], closedStacks: [] } : drawn();
   return {
     name,
     folded,
     firstNs: firstNs === null ? null : String(firstNs),
     lastNs: lastNs === null ? null : String(lastNs),
     count: entries.length,
-    rows: folded ? [] : drawn(),
+    rows,
+    closedStacks,
   };
 }
 
 /**
- * E6 for one section (ruled 2026-11-16): the rows drawn, each head and open member with its
- * `stack`; every row of a group is in its block (G2), `closed` is `view.closed` as it comes
- * (absent: every block open); a closed block is drawn open while a member's row is drawn with a
- * terminal that has not reported a session.
+ * E6 for one section (ruled 2026-11-16; F9): the rows drawn, each row of an open block with its
+ * `stack`, and the section's closed blocks, none of whose rows is drawn; every row of a group is in
+ * its block (G2), `closed` is `view.closed` as it comes (absent: every block open); a closed block
+ * is drawn open while any of its rows is selected or drawn with a terminal that has not reported a
+ * session.
  */
 function stacked(
   name: SectionName,
   entries: readonly Entry[],
   closed: readonly ClosedBlock[] | undefined,
   selected: string | null,
-): RowPayload[] {
+): { rows: RowPayload[]; closedStacks: ClosedStackPayload[] } {
   const stackable = entries.map(({ payload, terminal }) => ({
     id: payload.id,
     group: payload.group,
@@ -270,13 +274,18 @@ function stacked(
     // Ruled 2026-11-16 (review 2): its row's terminal has not reported a session (S2 7.5), so the
     // terminal's slot names no session for the page: the row stays on screen. THE PAGE COPIES THIS
     // RULE (web/list.js, `unreported`: the same terminal's `sessionId` null in `list.terminals`)
-    // to forget the closing and refuse ← and `×n` there; a change of one is a change of the other.
+    // to forget the closing and refuse ← and a click on the caption there; a change of one is a
+    // change of the other.
     unreported: terminal !== null && terminal.sessionId === null,
     payload,
   }));
-  return stackRows(stackable, name, closed, selected).map(({ entry, stack }) =>
-    stack === null ? entry.payload : { ...entry.payload, stack },
-  );
+  const drawn = stackRows(stackable, name, closed, selected);
+  return {
+    rows: drawn.rows.map(({ entry, stack }) =>
+      stack === null ? entry.payload : { ...entry.payload, stack },
+    ),
+    closedStacks: drawn.closed,
+  };
 }
 
 /**
@@ -294,10 +303,11 @@ function stacked(
  *   their done mark), `doneHidden` is 0, no section is folded and no stack is formed. `counts` are
  *   the title bar's: every row listed without the filter once, by state, the starting ones and
  *   those running elsewhere apart, whatever the filter or the chips list.
- * - Blocks (S2 12.2, plan E6 as ruled 2026-11-16): in every section while not filtering,
+ * - Blocks (S2 12.2, plan E6 as ruled 2026-11-16, F9): in every section while not filtering,
  *   `stackRows` over the section's rows with `view.closed` as it comes (absent: every block open); a
- *   section's `count` and time span are all its rows', a closed block's hidden members too, its
- *   `rows` the drawn ones.
+ *   section's `count` and time span are all its rows', a closed block's too, its `rows` the drawn
+ *   ones (an open block's rows; no row of a closed block, its first neither), its `closedStacks`
+ *   its closed blocks' captions ([] while filtering or folded).
  * - The switcher (S2 12.8, plan E8, E9): while `view.switcher` is a string, `switcherPayload` over
  *   every row listed with done ones shown (Open's in Open's order, then the others most recent
  *   first), each with what hides it from this page's list; else null. Its `restore` is null here.
@@ -430,7 +440,7 @@ export function buildListMessage(
     }
     // S2 12.2: a filter flattens every block.
     const drawn = filtering
-      ? () => entries.map((entry) => entry.payload)
+      ? () => ({ rows: entries.map((entry) => entry.payload), closedStacks: [] })
       : () => stacked(name, entries, view.closed, view.selected);
     return sectionPayload(name, entries, folded, drawn);
   });

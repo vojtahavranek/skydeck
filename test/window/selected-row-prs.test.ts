@@ -8,15 +8,16 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { attachManualPr } from '../../src/sessions/meta.ts';
+import { attachManualPr, setGroup } from '../../src/sessions/meta.ts';
 import { ghRunner } from '../helpers/gh.ts';
 import type { GhRunner } from '../helpers/gh.ts';
-import { S1, S2 } from '../helpers/platform.ts';
+import { S1, S2, S3 } from '../helpers/platform.ts';
 import { connectTestPage, rowsOf, serverSandbox } from '../helpers/window.ts';
 import type { ServerSandbox, TestServer } from '../helpers/window.ts';
 
 const PR1 = 'https://github.com/acme/web/pull/1';
 const PR2 = 'https://github.com/acme/web/pull/2';
+const PR3 = 'https://github.com/acme/web/pull/3';
 
 /** S1 in `alpha-dir` and S2 in `omega-dir`, each with a pull request never fetched (so due), and
  *  a server whose runner holds every `gh` it is asked for. */
@@ -70,4 +71,40 @@ test('a hidden selection without a terminal is not asked about; the listed sessi
   await gh.started(1, 20_000);
   // Both are due: had S1 been asked about, it would be in the same run.
   assert.deepEqual(gh.runs[0]?.prs, ['acme/web#2']);
+});
+
+test('a closed block hides every row of it, the first too (F9): none is asked about; a listed session is', async (t) => {
+  const d = serverSandbox(t);
+  d.resumable(S1, join(d.s.home, 'alpha-dir'));
+  d.resumable(S2, join(d.s.home, 'omega-dir'));
+  d.resumable(S3, join(d.s.home, 'gamma-dir'));
+  attachManualPr(d.deck, S1, PR1);
+  attachManualPr(d.deck, S2, PR2);
+  attachManualPr(d.deck, S3, PR3);
+  setGroup(d.deck, S1, 'G');
+  setGroup(d.deck, S2, 'G');
+  let gh: GhRunner | null = null;
+  const server = await d.start({
+    platform: (platform) => {
+      gh = ghRunner(platform.runner, { hold: 'held' });
+      return { ...platform, runner: gh };
+    },
+  });
+  assert.ok(gh !== null);
+  const runner: GhRunner = gh;
+  const page = await connectTestPage(t, d, server.server, {
+    view: { closed: [{ section: 'week', group: 'G' }] },
+  });
+  const list = await page.list(
+    (candidate) =>
+      (candidate.sections.find((s) => s.name === 'week')?.closedStacks ?? []).length === 1,
+    "Recent's closed block of G",
+  );
+  assert.deepEqual(
+    rowsOf(list).map((row) => row.id),
+    [S3],
+  );
+  await runner.started(1, 20_000);
+  // All three are due: had a row of the closed block been asked about, it would be in this run.
+  assert.deepEqual(runner.runs[0]?.prs, ['acme/web#3']);
 });

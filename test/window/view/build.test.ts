@@ -1421,11 +1421,12 @@ test('selectedRow: for a session the sections show, the same row (its stack null
   ]);
   const open = buildListMessage(input({ rows: list, view: { selected: S1 } }));
   assert.deepEqual(open.selectedRow, rowIn(open, S1));
-  // The head of a closed block: the sections carry it with its stack, selectedRow without.
+  // The first row of a block the view closed: selected, it opens the block (F9's K5), and the
+  // sections carry it with its stack, selectedRow without.
   const head = buildListMessage(
     input({ rows: list, view: { selected: S2, closed: [{ section: 'week', group: 'ORB-1' }] } }),
   );
-  assert.equal(rowIn(head, S2).stack?.open, false);
+  assert.deepEqual(head.sections.find((s) => s.name === 'week')?.closedStacks, []);
   assert.equal(rowIn(head, S2).stack?.role, 'head');
   assert.ok(head.selectedRow);
   assert.equal(head.selectedRow.stack, null);

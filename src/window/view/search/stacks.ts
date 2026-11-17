@@ -1,7 +1,8 @@
 /**
- * Blocks (S2 12.2, plan E6 as ruled 2026-11-16; the code calls a block a stack): in every section —
- * Open, Recent, Earlier —, each on its own, the rows of one group sit together, open unless the
- * page closed the block. Pure.
+ * Blocks (S2 12.2, plan E6 as ruled 2026-11-16, follow-up F9; the code calls a block a stack): in
+ * every section — Open, Recent, Earlier —, each on its own, the rows of one group sit together, open
+ * unless the page closed the block. An open block is drawn as a card of its rows; a closed one as
+ * its caption alone, none of its rows drawn (F9). Pure.
  *
  * Which rows reach this rule is the caller's (`build.ts`): a section's rows, and none while
  * filtering (S2 12.8: a filter flattens every block; the caller then gives every row `stack: null`).
@@ -10,7 +11,12 @@
  *
  * Imports (plan 2.1): types only, from `protocol.ts`.
  */
-import type { ClosedBlock, SectionPayload, StackPayload } from '../../protocol.ts';
+import type {
+  ClosedBlock,
+  ClosedStackPayload,
+  SectionPayload,
+  StackPayload,
+} from '../../protocol.ts';
 
 export interface StackEntry {
   readonly id: string;
@@ -18,24 +24,27 @@ export interface StackEntry {
   /** The row needs you (its `attention` is not null, stage B): a closed block counts it (G5). */
   readonly needsYou: boolean;
   /** The row is drawn with a terminal of the window that has not reported a session (S2 7.5: a
-   *  start, or a program that ended before it reported): a closed block that holds it as a member
-   *  is drawn open, so that the row, and its slot, are on screen (ruled 2026-11-16, review 2). */
+   *  start, or a program that ended before it reported): a closed block that holds it is drawn
+   *  open, so that the row, and its slot, are on screen (ruled 2026-11-16, review 2 of F3: (c2);
+   *  since F9 its first row too, which a closed block hides as well). */
   readonly unreported: boolean;
 }
 
 /**
- * E6 for the rows of one section, in the section's order. Returns the rows to draw, in order: every
- * row that is in no block, at its place; each block at the place of its first row, the head; right
- * after an open block's head, its other members in the section's order; a closed block's other
- * members left out. A group with one row is no block. `stack` is null for a row in no block.
+ * E6 for the rows of one section, in the section's order. Returns `rows`, the rows to draw, in
+ * order — every row that is in no block, at its place; each OPEN block at the place of its first
+ * row, the head, and right after it its other rows in the section's order —, and `closed`, the
+ * section's closed blocks in its order, each with the place of its caption (`at`: the number of
+ * rows drawn before it). A closed block draws none of its rows (F9). A group with one row is no
+ * block. `stack` is null for a row in no block.
  *
  * Every row of a group belongs to its block, one that a terminal of the window holds or that needs
  * you too (G2). A block is open unless `closed` holds an entry of `section` with its group; and it
- * is open, whatever `closed` says, while the selected session is one of its members other than the
- * head (G5: the page then forgets that it closed it, so that the selection is never on a row the
- * list does not show, however it got there) or while one of those members is `unreported` (its
- * terminal has not reported a session, so its slot names none: the row stays on screen). A closed
- * block's `hiddenNeedYou` counts the members it hides that need you.
+ * is open, whatever `closed` says, while the selected session is ANY of its rows (G5, F9's K5: the
+ * page then forgets that it closed it, so that the selection is never on a row the list does not
+ * show, however it got there) or while any of its rows is `unreported` (its terminal has not
+ * reported a session, so its slot names none: the row stays on screen). A closed block's `needYou`
+ * counts its rows that need you — all of them are hidden.
  *
  * `closed` is `view.closed` as it comes: absent or empty, every block is open. Groups are compared
  * as the text the entries carry (the row's group is sanitised when step 1's list model is built).
@@ -46,7 +55,7 @@ export function stackRows<T extends StackEntry>(
   section: SectionPayload['name'],
   closed: readonly ClosedBlock[] | undefined,
   selected: string | null,
-): { entry: T; stack: StackPayload | null }[] {
+): { rows: { entry: T; stack: StackPayload | null }[]; closed: ClosedStackPayload[] } {
   const shut = new Set<string>();
   for (const one of closed ?? []) {
     if (one.section === section) {
@@ -69,6 +78,7 @@ export function stackRows<T extends StackEntry>(
   }
 
   const drawn: { entry: T; stack: StackPayload | null }[] = [];
+  const captions: ClosedStackPayload[] = [];
   for (const [index, row] of rows.entries()) {
     const group = row.group;
     const block = group === null ? undefined : kin.get(group);
@@ -77,25 +87,30 @@ export function stackRows<T extends StackEntry>(
       continue;
     }
     if (index !== block.headAt) {
-      continue; // a member: drawn right after its head while the block is open, else left out
+      continue; // a later row: drawn right after the first while the block is open, else left out
     }
-    const members = block.rows.slice(1);
     const isOpen =
-      !shut.has(group) || members.some((member) => member.id === selected || member.unreported);
+      !shut.has(group) || block.rows.some((one) => one.id === selected || one.unreported);
+    if (!isOpen) {
+      captions.push({
+        group,
+        size: block.rows.length,
+        needYou: block.rows.filter((one) => one.needsYou).length,
+        head: row.id,
+        at: drawn.length,
+      });
+      continue;
+    }
     const payload = (role: StackPayload['role']): StackPayload => ({
       group,
       size: block.rows.length,
-      open: isOpen,
       role,
       head: row.id,
-      hiddenNeedYou: isOpen ? 0 : members.filter((member) => member.needsYou).length,
     });
     drawn.push({ entry: row, stack: payload('head') });
-    if (isOpen) {
-      for (const member of members) {
-        drawn.push({ entry: member, stack: payload('member') });
-      }
+    for (const member of block.rows.slice(1)) {
+      drawn.push({ entry: member, stack: payload('member') });
     }
   }
-  return drawn;
+  return { rows: drawn, closed: captions };
 }

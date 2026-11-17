@@ -255,6 +255,10 @@ export interface SectionPayload {
   lastNs: NsText | null;
   count: number;
   rows: RowPayload[];
+  /** F9: the section's closed blocks, in the section's order; [] while it is folded or the view is
+   *  filtering. Optional for the reader — a list without it (a scripted list of the test helpers)
+   *  has none. */
+  closedStacks?: ClosedStackPayload[];
 }
 /** `state`: a TerminalState of 2.5 (`reconnecting` shows S2 7.8's bar); `notReported`: S2 7.5's "started, not reported". */
 export interface TerminalPayload {
@@ -330,21 +334,36 @@ export interface ListMessage {
 
 /** E4: the chips that narrow the list (S2 12.8); Show done is `view.showDone`. */
 export type SearchChip = 'running' | 'open-pr' | 'note';
-/** RowPayload.stack (E6): the block of one group in one section (S2 12.2). */
+/** RowPayload.stack (E6; since F9 an OPEN block only, a closed one has no row in `rows`): the
+ *  block of one group in one section (S2 12.2) the row is drawn in, as a card. */
 export interface StackPayload {
   /** The group the block is of (the rows' group, as sanitised). */
   group: string;
-  /** Its rows, the head included: at least 2. */
+  /** Its rows, the first included: at least 2. */
   size: number;
-  /** E6 (ruled 2026-11-16): `view.closed` does not name its section and group, or a member other
-   *  than the head is selected. */
-  open: boolean;
+  /** `head`: the block's first row in the section's order (the card's caption is drawn above it);
+   *  `member`: one of the rows after it. Every row of a card is drawn alike (F9). */
   role: 'head' | 'member';
-  /** The head's session id. */
+  /** The first row's session id. */
   head: string;
-  /** G5: how many of the members a closed block hides need you (12.4), the head not counted; 0
-   *  while the block is open. */
-  hiddenNeedYou: number;
+}
+/** SectionPayload.closedStacks (F9): a CLOSED block — `view.closed` names its section and group,
+ *  and none of its rows is selected or drawn with a terminal of the window that has not reported a
+ *  session (S2 12.2). It is drawn as its caption alone: none of its rows is in the section's
+ *  `rows`, its first neither. */
+export interface ClosedStackPayload {
+  /** The group the block is of (the rows' group, as sanitised). */
+  group: string;
+  /** Its rows: at least 2. */
+  size: number;
+  /** G5: how many of its rows need you (12.4) — every one of them is hidden. */
+  needYou: number;
+  /** The session id of its first row in the section's order: → and Enter on the caption open the
+   *  block and select it. */
+  head: string;
+  /** Its place: the caption is drawn right before `rows[at]` of its section, `rows.length` after
+   *  the last row. Captions at one place come in the array's order. */
+  at: number;
 }
 export type SwitchRank = 'need' | 'open' | 'not-running' | 'done';
 /** E10: what the page changes so that its list shows the row, in this order of meaning:
