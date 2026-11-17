@@ -1,6 +1,8 @@
-// The page's own icon (S2 12.12; plan E14, task 94): the committed files of web/icons/ and
-// web/manifest.webmanifest, read from the checkout. scripts/icons.ts made the PNG and ICO files
-// once from web/icons/skydeck.svg; no test runs it, so these cases hold what it wrote.
+// The page's own icon (S2 12.12; plan E14, task 94; follow-up F10): the owner's picture
+// scripts/icons/skydeck-source.png, the committed files of web/icons/ and web/manifest.webmanifest,
+// read from the checkout. scripts/icons.ts drew the PNG and ICO files from the picture once; no
+// test runs it, so these cases hold what it wrote, and (by reducing the picture again in plain
+// Node) that the files are the picture's.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -11,6 +13,14 @@ import { inflateSync } from 'node:zlib';
 
 import * as prettier from 'prettier';
 
+import {
+  BACKGROUND,
+  IN_ICO as SCRIPT_IN_ICO,
+  MASKABLE as SCRIPT_MASKABLE,
+  MASKABLE_SCALE,
+  SIZES as SCRIPT_SIZES,
+  SOURCE,
+} from '../../scripts/icons.ts';
 import { readBuild } from '../../src/window/build.ts';
 import { testPlatform } from '../helpers/platform.ts';
 
@@ -23,14 +33,26 @@ const TRANSPARENT = [16, 32, 48, 192, 512].map((size) => ({ file: `icon-${size}.
 const MASKABLE = [192, 512].map((size) => ({ file: `icon-${size}-maskable.png`, size }));
 const PNGS = [...TRANSPARENT, ...MASKABLE];
 const IN_ICO = [16, 32, 48];
-/** The tile's colour (the page's accent, `#2f6fde`): the maskable icons' full background. */
-const TILE = [0x2f, 0x6f, 0xde];
-/** How far a pixel may differ from the background and still count as background: at 153.6 and
- *  409.6 pixels the tile's edge leaves a seam one step off the background, which no eye sees. */
-const SEAM = 2;
 
-/** The sha256 of web/icons/skydeck.svg as scripts/icons.ts last drew it. */
-const SVG_SHA256 = '0544fd2a8abb4a2ab523c4a57c815953499442afd3a24973ad8323ae4c2e10a8';
+/** The owner's picture, as received: where it lives, its size in bytes and its sha256. */
+const MASTER = 'scripts/icons/skydeck-source.png';
+const MASTER_BYTES = 1_691_903;
+const MASTER_SHA256 = 'fe94068db275c4d89b8e612ab2b9081fba7a571c6233ade6cf012af6a8dce12f';
+const MASTER_SIZE = 1254;
+
+/** The tile's flat colour (`#050925`): the maskable icons' full background. */
+const TILE = [0x05, 0x09, 0x25];
+/** The tile is at alpha 252 to 253 of 255 (the picture's own, kept): "opaque" is from here up. */
+const OPAQUE = 250;
+/** How far a pixel of the picture may be from the tile's colour and still count as its flat part
+ *  (the noise of the picture is about two steps). */
+const FLAT_NEAR = 6;
+/** The drawing is what differs from the flat colour by more than this (of 255) in some channel,
+ *  composited on it. The picture's rounded corners have a lighter hairline of the tile's own
+ *  edge, 36 at most, 658 pixels and more from the centre: that is the tile's, not the drawing's. */
+const DRAWN = 40;
+/** The safe zone of a maskable icon: a circle of this radius, in parts of the icon's width. */
+const SAFE_RADIUS = 0.4;
 
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -42,28 +64,34 @@ interface Png {
   /** Row by row, 4 bytes (RGBA) or 3 (RGB) per pixel, the filters undone. */
   pixels: Buffer;
   channels: number;
+  /** The chunk types in file order. */
+  chunks: string[];
 }
 
-/** The only chunks the files may hold: no metadata (a text chunk could carry a name or a path of
- *  the machine that drew them, in a file the server serves). */
+/** The only chunks the drawn files may hold: no metadata (a text chunk could carry a name or a
+ *  path of the machine that drew them, in a file the server serves). */
 const CHUNKS = ['IHDR', 'IDAT', 'IEND'];
+/** The picture's: the same and `caBX`, the content credentials of the image service that made it. */
+const MASTER_CHUNKS = ['IHDR', 'caBX', 'IDAT', 'IEND'];
 
 /**
  * Just enough of PNG to look at the pixels: 8-bit RGB or RGBA, not interlaced, IHDR first, only
- * the chunks of CHUNKS, and nothing after IEND.
+ * the chunks of `allowed`, and nothing after IEND.
  */
-function decodePng(bytes: Buffer): Png {
+function decodePng(bytes: Buffer, allowed: readonly string[] = CHUNKS): Png {
   assert.deepEqual(bytes.subarray(0, 8), SIGNATURE, 'the PNG signature');
   let at = 8;
   let header: Buffer | null = null;
   const data: Buffer[] = [];
+  const chunks: string[] = [];
   let ended = false;
   while (!ended) {
     assert.ok(at + 12 <= bytes.length, 'the file ends before IEND');
     const length = bytes.readUInt32BE(at);
     const type = bytes.toString('latin1', at + 4, at + 8);
     const body = bytes.subarray(at + 8, at + 8 + length);
-    assert.ok(CHUNKS.includes(type), `a chunk ${JSON.stringify(type)}`);
+    assert.ok(allowed.includes(type), `a chunk ${JSON.stringify(type)}`);
+    chunks.push(type);
     if (header === null) {
       assert.equal(type, 'IHDR', 'IHDR comes first');
     }
@@ -71,7 +99,7 @@ function decodePng(bytes: Buffer): Png {
       header = body;
     } else if (type === 'IDAT') {
       data.push(body);
-    } else {
+    } else if (type === 'IEND') {
       ended = true;
     }
     at += 12 + length;
@@ -125,7 +153,7 @@ function decodePng(bytes: Buffer): Png {
       pixels[y * stride + x] = (value + predicted) & 0xff;
     }
   }
-  return { width, height, bitDepth, colourType, pixels, channels };
+  return { width, height, bitDepth, colourType, pixels, channels, chunks };
 }
 
 /** The alpha of a pixel: 255 for an image without alpha. */
@@ -144,6 +172,223 @@ function corners(png: Png): number[] {
   return [alpha(png, 0, 0), alpha(png, last, 0), alpha(png, 0, last), alpha(png, last, last)];
 }
 
+function cornerColours(png: Png): number[][] {
+  const last = png.width - 1;
+  return [rgb(png, 0, 0), rgb(png, last, 0), rgb(png, 0, last), rgb(png, last, last)];
+}
+
+/** The picture, decoded once: its pixels are what the measurements and the re-drawing read. */
+let decodedMaster: Png | null = null;
+function master(): Png {
+  decodedMaster ??= decodePng(read(MASTER), MASTER_CHUNKS);
+  return decodedMaster;
+}
+
+/** The tile's flat colour of a picture: the median, per channel, of its opaque pixels that are
+ *  within FLAT_NEAR of TILE. */
+function flatColour(png: Png): number[] {
+  const counts = [0, 1, 2].map(() => new Array<number>(256).fill(0));
+  let total = 0;
+  for (let i = 0; i < png.width * png.height; i++) {
+    const at = i * png.channels;
+    const colour = [0, 1, 2].map((c) => png.pixels[at + c] ?? 0);
+    const a = png.channels === 4 ? (png.pixels[at + 3] ?? 0) : 255;
+    if (a >= OPAQUE && colour.every((value, c) => Math.abs(value - (TILE[c] ?? 0)) <= FLAT_NEAR)) {
+      colour.forEach((value, c) => {
+        const histogram = counts[c] ?? [];
+        histogram[value] = (histogram[value] ?? 0) + 1;
+      });
+      total++;
+    }
+  }
+  assert.ok(total > png.width * png.height * 0.4, 'most of the picture is flat tile');
+  return counts.map((histogram) => {
+    let seen = 0;
+    for (let value = 0; value < 256; value++) {
+      seen += histogram[value] ?? 0;
+      if (seen * 2 >= total) {
+        return value;
+      }
+    }
+    return -1;
+  });
+}
+
+/** How far from the centre the drawing reaches, in pixels: the farthest pixel centre whose colour,
+ *  composited on `flat`, differs from it by more than DRAWN in some channel. */
+function farthestDrawn(png: Png, flat: readonly number[]): number {
+  let farthest = 0;
+  const centre = png.width / 2;
+  for (let y = 0; y < png.height; y++) {
+    for (let x = 0; x < png.width; x++) {
+      const at = (y * png.width + x) * png.channels;
+      const a = (png.channels === 4 ? (png.pixels[at + 3] ?? 0) : 255) / 255;
+      let differs = false;
+      for (let c = 0; c < 3; c++) {
+        // The colour composited on the flat one, less the flat one: alpha times the difference.
+        if (Math.abs(a * ((png.pixels[at + c] ?? 0) - (flat[c] ?? 0))) > DRAWN) {
+          differs = true;
+        }
+      }
+      if (differs) {
+        farthest = Math.max(farthest, Math.hypot(x + 0.5 - centre, y + 0.5 - centre));
+      }
+    }
+  }
+  return farthest;
+}
+
+/** sRGB bytes to linear light, and back. */
+const LINEAR = Float64Array.from({ length: 256 }, (_, i) => {
+  const v = i / 255;
+  return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+});
+const encode = (v: number): number =>
+  Math.min(
+    255,
+    Math.max(0, Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055))),
+  );
+
+let premultiplied: Float32Array | null = null;
+/** The picture's pixels as premultiplied linear light, 4 floats each (r, g, b, alpha). */
+function linearMaster(): Float32Array {
+  if (premultiplied === null) {
+    const png = master();
+    const out = new Float32Array(png.width * png.height * 4);
+    for (let i = 0; i < png.width * png.height; i++) {
+      const a = (png.pixels[i * 4 + 3] ?? 0) / 255;
+      for (let c = 0; c < 3; c++) {
+        out[i * 4 + c] = (LINEAR[png.pixels[i * 4 + c] ?? 0] ?? 0) * a;
+      }
+      out[i * 4 + 3] = a;
+    }
+    premultiplied = out;
+  }
+  return premultiplied;
+}
+
+/** The picture's pixels that the output pixel `t` (one axis) covers, with their weights. */
+function axis(t: number, count: number, inner: number, offset: number): [number, number[]] {
+  const k = inner / count;
+  const first = Math.max(0, Math.floor((t - offset) / k));
+  const last = Math.min(count - 1, Math.ceil((t + 1 - offset) / k) - 1);
+  const weights: number[] = [];
+  for (let i = first; i <= last; i++) {
+    weights.push(Math.max(0, Math.min(t + 1, offset + (i + 1) * k) - Math.max(t, offset + i * k)));
+  }
+  return [first, weights];
+}
+
+/**
+ * The picture reduced to `size * scale` pixels in the middle of a box of `size`, in plain Node:
+ * each pixel of the box is the average of the picture's pixels under it, weighted by the area they
+ * cover, premultiplied and in linear light; what the picture does not cover is `background` (an
+ * opaque colour) or transparent. Straight RGBA, 8 bits. This is what scripts/icons.ts does in
+ * Chromium, written again here so that the committed files can be compared to it.
+ */
+function reduced(size: number, scale: number, background: readonly number[] | null): Uint8Array {
+  const source = linearMaster();
+  const count = master().width;
+  const inner = size * scale;
+  const offset = (size - inner) / 2;
+  const columns = Array.from({ length: size }, (_, t) => axis(t, count, inner, offset));
+  const out = new Uint8Array(size * size * 4);
+  for (let ty = 0; ty < size; ty++) {
+    const [y0, wy] = columns[ty] ?? [0, []];
+    for (let tx = 0; tx < size; tx++) {
+      const [x0, wx] = columns[tx] ?? [0, []];
+      const sum = [0, 0, 0, 0];
+      wy.forEach((weightY, j) => {
+        wx.forEach((weightX, i) => {
+          const at = ((y0 + j) * count + x0 + i) * 4;
+          const weight = weightX * weightY;
+          for (let c = 0; c < 4; c++) {
+            sum[c] = (sum[c] ?? 0) + weight * (source[at + c] ?? 0);
+          }
+        });
+      });
+      const o = (ty * size + tx) * 4;
+      const covered = sum[3] ?? 0;
+      if (background !== null) {
+        for (let c = 0; c < 3; c++) {
+          out[o + c] = encode((sum[c] ?? 0) + (1 - covered) * (LINEAR[background[c] ?? 0] ?? 0));
+        }
+        out[o + 3] = 255;
+      } else if (covered > 0) {
+        for (let c = 0; c < 3; c++) {
+          out[o + c] = encode((sum[c] ?? 0) / covered);
+        }
+        out[o + 3] = Math.round(covered * 255);
+      }
+    }
+  }
+  return out;
+}
+
+describe('the picture, scripts/icons/skydeck-source.png', () => {
+  test("is the owner's file, byte for byte: its size and sha256", () => {
+    const bytes = read(MASTER);
+
+    assert.equal(bytes.length, MASTER_BYTES);
+    assert.equal(
+      createHash('sha256').update(bytes).digest('hex'),
+      MASTER_SHA256,
+      "the picture changed: it is the owner's file, kept as it is; a new one needs a new run of scripts/icons.ts and new numbers here",
+    );
+  });
+
+  test('is square, 8-bit RGBA, with the chunks IHDR, caBX, IDAT and IEND and nothing else', () => {
+    const png = master();
+
+    assert.equal(png.width, MASTER_SIZE);
+    assert.equal(png.height, MASTER_SIZE);
+    assert.equal(png.colourType, 6);
+    assert.deepEqual(png.chunks, MASTER_CHUNKS);
+  });
+
+  test('is transparent outside its rounded tile and opaque in its middle', () => {
+    const png = master();
+
+    assert.deepEqual(corners(png), [0, 0, 0, 0]);
+    assert.ok(alpha(png, MASTER_SIZE >> 1, MASTER_SIZE >> 1) >= OPAQUE);
+  });
+
+  test('is not under web/: the server does not serve it, and the SVG it replaced is gone', (t) => {
+    const { platform } = testPlatform(t);
+
+    assert.equal(SOURCE, MASTER, 'scripts/icons.ts reads the picture from here');
+    assert.equal(existsSync(join(checkout, 'web/icons/skydeck-source.png')), false);
+    assert.equal(existsSync(join(checkout, 'web/icons/skydeck.svg')), false);
+    const built = [...readBuild(platform.files, checkout).files.keys()];
+    assert.deepEqual(
+      built.filter((path) => /skydeck-source|\.svg$/.test(path)),
+      [],
+      'the build holds neither the picture nor a drawing',
+    );
+  });
+
+  test("its flat colour is the maskable icons' background: the median of the tile's flat pixels", () => {
+    assert.equal(BACKGROUND, '#050925');
+    assert.deepEqual(flatColour(master()), TILE);
+  });
+
+  test('MASKABLE_SCALE is the largest scale, to three decimals, that keeps the drawing inside the circle', () => {
+    const png = master();
+    const farthest = farthestDrawn(png, flatColour(png));
+    const bound = SAFE_RADIUS * png.width;
+
+    assert.ok(farthest > 0.3 * png.width, `the drawing is found (it reaches ${farthest} pixels)`);
+    assert.ok(
+      MASKABLE_SCALE * farthest <= bound,
+      `the drawing reaches ${farthest} of ${png.width / 2} pixels: at ${MASKABLE_SCALE} it is out`,
+    );
+    assert.ok(
+      (MASKABLE_SCALE + 0.001) * farthest > bound,
+      `${MASKABLE_SCALE + 0.001} would still hold: the scale is not the largest`,
+    );
+  });
+});
+
 describe('the PNG files', () => {
   test('each has its size, 8 bits per channel; the five on a transparent background have alpha', () => {
     for (const { file, size } of PNGS) {
@@ -151,6 +396,11 @@ describe('the PNG files', () => {
       assert.equal(png.width, size, file);
       assert.equal(png.height, size, file);
       assert.equal(png.bitDepth, 8, file);
+      assert.deepEqual(
+        png.chunks.filter((type) => type !== 'IDAT'),
+        ['IHDR', 'IEND'],
+        file,
+      );
       if (TRANSPARENT.some((t) => t.file === file)) {
         assert.equal(png.colourType, 6, `${file}: RGBA`);
       }
@@ -161,7 +411,7 @@ describe('the PNG files', () => {
     for (const { file, size } of TRANSPARENT) {
       const png = decodePng(read(`${ICONS}/${file}`));
       assert.deepEqual(corners(png), [0, 0, 0, 0], file);
-      assert.equal(alpha(png, size >> 1, size >> 1), 255, file);
+      assert.ok(alpha(png, size >> 1, size >> 1) >= OPAQUE, `${file}: the middle is opaque`);
     }
   });
 
@@ -181,35 +431,67 @@ describe('the PNG files', () => {
   test("the maskable ones: the drawing on the tile's colour, inside the safe zone (a circle of 0.4 of the size)", () => {
     for (const { file, size } of MASKABLE) {
       const png = decodePng(read(`${ICONS}/${file}`));
-      const background = rgb(png, 0, 0);
-      const drawn = (x: number, y: number): boolean =>
-        rgb(png, x, y).some((value, i) => Math.abs(value - (background[i] ?? 0)) > SEAM);
 
-      assert.deepEqual(background, TILE, `${file}: the background is the tile's colour`);
-      assert.ok(drawn(size >> 1, size >> 1), `${file}: the drawing is there`);
-      let farthest = 0;
-      for (let y = 0; y < size; y++) {
-        for (let x = 0; x < size; x++) {
-          if (drawn(x, y)) {
-            farthest = Math.max(farthest, Math.hypot(x + 0.5 - size / 2, y + 0.5 - size / 2));
-          }
-        }
-      }
-      assert.ok(farthest <= 0.4 * size, `${file}: drawn ${farthest / size} of the size out`);
+      assert.deepEqual(
+        cornerColours(png),
+        [TILE, TILE, TILE, TILE],
+        `${file}: the corners are the tile's colour`,
+      );
+      assert.ok(
+        rgb(png, size >> 1, size >> 1).some((value, i) => Math.abs(value - (TILE[i] ?? 0)) > DRAWN),
+        `${file}: the drawing is there`,
+      );
+      const farthest = farthestDrawn(png, TILE);
+      // One pixel for the resampling: the picture's farthest pixel is 0.3 of a pixel inside.
+      assert.ok(
+        farthest <= SAFE_RADIUS * size + 1,
+        `${file}: drawn ${farthest / size} of the size out`,
+      );
+      assert.ok(
+        farthest >= SAFE_RADIUS * size - 3,
+        `${file}: the drawing stops at ${farthest / size} of the size: not the largest that holds`,
+      );
     }
   });
 
-  test('of web/icons/ the server reads exactly the source, the seven PNGs and favicon.ico', (t) => {
+  test('every one is the picture, reduced: the same pixels as an average of it written again here', () => {
+    // The script averages the picture's pixels under each pixel, in linear light, in Chromium;
+    // `reduced` does the same in Node. Only rounding and the premultiplying of the canvas differ:
+    // compared premultiplied, alpha within 2 and each channel within 3 of 255.
+    for (const { file, size } of PNGS) {
+      const maskable = MASKABLE.some((m) => m.file === file);
+      const png = decodePng(read(`${ICONS}/${file}`));
+      const expected = reduced(size, maskable ? MASKABLE_SCALE : 1, maskable ? TILE : null);
+      let worst = 0;
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          const i = (y * size + x) * 4;
+          const a = alpha(png, x, y);
+          const b = expected[i + 3] ?? 0;
+          worst = Math.max(worst, Math.abs(a - b));
+          rgb(png, x, y).forEach((value, c) => {
+            worst = Math.max(
+              worst,
+              Math.abs((value * a) / 255 - ((expected[i + c] ?? 0) * b) / 255),
+            );
+          });
+        }
+      }
+      assert.ok(worst <= 3, `${file}: ${worst} steps from the picture reduced`);
+    }
+  });
+
+  test('of web/icons/ the server reads exactly the seven PNGs and favicon.ico', (t) => {
     const { platform } = testPlatform(t);
 
-    // What the build holds and the server serves; an editor's `.skydeck.svg.swp` is neither.
+    // What the build holds and the server serves; an editor's `.icon-16.png.swp` is neither.
     const served = [...readBuild(platform.files, checkout).files.keys()]
       .filter((path) => path.startsWith(`${ICONS}/`))
       .map((path) => path.slice(ICONS.length + 1));
 
     assert.deepEqual(
       served.sort(),
-      ['favicon.ico', 'skydeck.svg', ...PNGS.map((p) => p.file)].sort(),
+      ['favicon.ico', ...PNGS.map((p) => p.file)].sort(),
       'a file left by scripts/icons.ts, or one added by hand: every file of web/ is served (S2 8.2.1)',
     );
   });
@@ -242,6 +524,42 @@ test("favicon.ico: a directory of three images, 16, 32 and 48 pixels, whose byte
     end = offset + length;
   });
   assert.equal(ico.length, end, 'nothing after the last image');
+});
+
+describe('scripts/icons.ts and what it wrote', () => {
+  test('the script draws the sizes the manifest names, and puts the three of IN_ICO into favicon.ico', () => {
+    assert.deepEqual(
+      SCRIPT_SIZES,
+      TRANSPARENT.map((t) => t.size),
+    );
+    assert.deepEqual(
+      SCRIPT_MASKABLE,
+      MASKABLE.map((m) => m.size),
+    );
+    assert.deepEqual(SCRIPT_IN_ICO, IN_ICO);
+    const { icons } = JSON.parse(read('web/manifest.webmanifest').toString('utf8')) as {
+      icons: Array<{ src: string; sizes: string; purpose?: string }>;
+    };
+    const named = (purpose: string | undefined): string[] =>
+      icons.filter((icon) => icon.purpose === purpose).map((icon) => icon.sizes);
+    assert.deepEqual(
+      named(undefined),
+      SCRIPT_SIZES.map((size) => `${size}x${size}`),
+    );
+    assert.deepEqual(
+      named('maskable'),
+      SCRIPT_MASKABLE.map((size) => `${size}x${size}`),
+    );
+    const ico = read(`${ICONS}/favicon.ico`);
+    assert.deepEqual(
+      SCRIPT_IN_ICO.map((_, i) => ico.readUInt8(6 + 16 * i)),
+      SCRIPT_IN_ICO,
+    );
+    assert.match(
+      read('web/index.html').toString('utf8'),
+      new RegExp(`<link rel="icon"[^>]*sizes="${SCRIPT_IN_ICO.map((s) => `${s}x${s}`).join(' ')}"`),
+    );
+  });
 });
 
 describe('web/manifest.webmanifest', () => {
@@ -306,199 +624,6 @@ describe('web/manifest.webmanifest', () => {
         ...options,
         filepath: path,
       }),
-    );
-  });
-});
-
-/** The elements and attributes a drawing of shapes needs; nothing in them runs, loads or names a
- *  file. */
-const SVG_ELEMENTS = new Set([
-  'svg',
-  'g',
-  'defs',
-  'rect',
-  'path',
-  'circle',
-  'ellipse',
-  'line',
-  'polyline',
-  'polygon',
-  'linearGradient',
-  'radialGradient',
-  'stop',
-]);
-const SVG_ATTRIBUTES = new Set([
-  'xmlns',
-  'viewBox',
-  'id',
-  'x',
-  'y',
-  'width',
-  'height',
-  'rx',
-  'ry',
-  'cx',
-  'cy',
-  'r',
-  'd',
-  'points',
-  'x1',
-  'y1',
-  'x2',
-  'y2',
-  'fill',
-  'stroke',
-  'stroke-width',
-  'stroke-linecap',
-  'stroke-linejoin',
-  'opacity',
-  'fill-opacity',
-  'stroke-opacity',
-  'transform',
-  'offset',
-  'stop-color',
-  'stop-opacity',
-  'gradientUnits',
-  'gradientTransform',
-]);
-/** A paint: a colour, none, or a gradient of the file itself. */
-const PAINT = /^(?:#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|none|url\(#[A-Za-z][\w-]*\))$/;
-
-/**
- * What in the SVG is outside what a self-contained drawing may hold (plan task 94: no script, no
- * `on…` attribute, no foreignObject, no reference outside the file, no `@import`). It allows
- * rather than forbids, so that no spelling slips past: only the elements and attributes above, no
- * prefixed name (`s:script`, `xml:base`, `inkscape:…`), the SVG namespace only, a paint for
- * `fill` and `stroke`, no `url(` elsewhere, no `&` (no character reference can spell anything),
- * no `<!` but a comment, no `<?`, and no text between the tags. One line per thing found; none
- * for a clean file.
- */
-function outsideAllowed(svg: string): string[] {
-  const found: string[] = [];
-  const text = svg.replace(/<!--[\s\S]*?-->/g, ' ');
-  for (const [what, pattern] of [
-    ['a DOCTYPE, an entity or a CDATA section', /<!/],
-    ['a processing instruction', /<\?/],
-    ['a character or entity reference', /&/],
-  ] as const) {
-    if (pattern.test(text)) {
-      found.push(what);
-    }
-  }
-  const tag = /<\/?([^\s/>]+)([^>]*)>/g;
-  const between = text.replace(tag, '').trim();
-  if (between !== '') {
-    found.push(`text outside the tags: ${JSON.stringify(between.slice(0, 40))}`);
-  }
-  for (const [, name = '', rest = ''] of text.matchAll(tag)) {
-    if (!SVG_ELEMENTS.has(name)) {
-      found.push(`the element ${name}`);
-    }
-    const attribute = /([^\s=/]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
-    for (const [, attr = '', double, single] of rest.matchAll(attribute)) {
-      const value = double ?? single ?? '';
-      if (!SVG_ATTRIBUTES.has(attr)) {
-        found.push(`the attribute ${attr} of ${name}`);
-      } else if (attr === 'fill' || attr === 'stroke') {
-        if (!PAINT.test(value)) {
-          found.push(`the paint ${JSON.stringify(value)} of ${name}`);
-        }
-      } else if (attr === 'xmlns') {
-        if (value !== 'http://www.w3.org/2000/svg') {
-          found.push(`the namespace ${JSON.stringify(value)}`);
-        }
-      } else if (/url\(/i.test(value)) {
-        found.push(`a url( in ${attr} of ${name}`);
-      }
-    }
-    const left = rest.replace(attribute, '').replace(/\/$/, '').trim();
-    if (left !== '') {
-      found.push(`${JSON.stringify(left.slice(0, 40))} in the tag ${name}`);
-    }
-  }
-  return found;
-}
-
-describe('web/icons/skydeck.svg', () => {
-  test('holds only shapes: no script, no reference outside the file, no image', () => {
-    assert.deepEqual(outsideAllowed(read(`${ICONS}/skydeck.svg`).toString('utf8')), []);
-  });
-
-  test('is the drawing the committed PNG files were made from', () => {
-    // Nothing draws in a test (ruled): this hash notices an edit of the SVG without a new run.
-    assert.equal(
-      createHash('sha256')
-        .update(read(`${ICONS}/skydeck.svg`))
-        .digest('hex'),
-      SVG_SHA256,
-      'web/icons/skydeck.svg changed: run node scripts/icons.ts, commit what it wrote, then put the new hash here',
-    );
-  });
-
-  test('is square and in the SVG namespace', () => {
-    const svg = read(`${ICONS}/skydeck.svg`).toString('utf8');
-    const root = /<svg\b[^>]*>/.exec(svg)?.[0] ?? assert.fail('no <svg> element');
-
-    assert.match(root, /\sxmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
-    const viewBox = /\sviewBox="0 0 (\d+) (\d+)"/.exec(root) ?? assert.fail('no viewBox');
-    assert.equal(viewBox[1], viewBox[2]);
-  });
-
-  test('the check refuses each thing a drawing must not hold, in every spelling tried', () => {
-    const svg = (inner: string): string =>
-      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${inner}</svg>`;
-
-    assert.deepEqual(
-      outsideAllowed(
-        svg(
-          '<!-- a note --><defs><linearGradient id="g"><stop offset="0" stop-color="#fff"/>' +
-            '</linearGradient></defs><rect fill=\'url(#g)\' stroke="none"/>',
-        ),
-      ),
-      [],
-    );
-    for (const inner of [
-      '<script>alert(1)</script>',
-      '<SCRIPT/>',
-      '<rect onload="x()"/>',
-      '<rect\nONCLICK="x()"/>',
-      '<foreignObject/>',
-      '<image href="#a"/>',
-      '<use href="https://example.com/a.svg#a"/>',
-      '<use xlink:href="data:image/svg+xml,x"/>',
-      '<use href=a.svg#x />',
-      '<rect fill="url(https://example.com/x)"/>',
-      '<rect style="fill:url( \'x.svg#g\')"/>',
-      '<style>@import "x.css";</style>',
-      '<!ENTITY x SYSTEM "file:///etc/passwd">',
-      '<s:script xmlns:s="http://www.w3.org/2000/svg">alert(1)</s:script>',
-      '<s:foreignObject xmlns:s="http://www.w3.org/2000/svg"/>',
-      '<s:image xmlns:s="http://www.w3.org/2000/svg" href="x.png"/>',
-      '<a><set attributeName="href" to="https://example.com/"/></a>',
-      '<animate attributeName="xlink:href" values="https://example.com/a.svg#x"/>',
-      '<rect style="fill:u\\72l(https://example.com/x.svg#g)"/>',
-      '<style>@\\69mport "https://example.com/x.css";</style>',
-      '<iframe xmlns="http://www.w3.org/1999/xhtml" src="https://example.com/"/>',
-      '<g xml:base="https://example.com/"/>',
-      '<metadata><x inkscape:export-filename="/home/u/icon.png"/></metadata>',
-      '<!DOCTYPE svg>',
-      '<rect fill="url(https://example.com/x.svg#g)"/>',
-      '<rect fill="u&#114;l(x.svg#g)"/>',
-      '<rect fill="red"/>',
-      '<rect x="1" onload="x()"/>',
-      '<rect x=1 />',
-      '<rect transform="url(x)"/>',
-      '<title>a</title>',
-      'text',
-      '<?xml-stylesheet href="x.css"?>',
-      '<![CDATA[x]]>',
-    ]) {
-      assert.notDeepEqual(outsideAllowed(svg(inner)), [], inner);
-    }
-    assert.notDeepEqual(
-      outsideAllowed('<svg xmlns="http://www.w3.org/1999/xhtml" viewBox="0 0 64 64"></svg>'),
-      [],
-      'another namespace',
     );
   });
 });
