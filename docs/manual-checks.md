@@ -1754,8 +1754,14 @@ Setup: the window open after the update to stage E (`git pull` and `skydeck wind
 the short id).
 
 1. Look at the window's taskbar button and at the left end of the window's own title bar (Edge's,
-   above the page). Expected: skydeck's icon, a deck of three session cards on a blue rounded
-   square, the front card white with a prompt (`>_`) on it; not Edge's.
+   above the page). Expected: skydeck's icon, a dark navy rounded square with a blue-to-violet
+   cloud outline and one terminal window with a white `>_` in it (the button and the title bar show
+   the small sizes of the icon; at the title bar's 16 pixels it is the cloud's ring, the window's
+   frame and a light `>_` of a few pixels, not crisp); not Edge's. Since follow-up F10 the icon is
+   this picture; the one before it was three cards, the front one white with a prompt, on a blue
+   rounded square. When the button or the title bar still shows that earlier icon after the page
+   reloaded itself, write it down and treat it as step 3 treats Edge's own icon: look again the
+   next time the window is opened anew (do not close it for this check).
 2. In W: `skydeck window --restart`. Expected: the same window stays and says `skydeck's server
    restarted; your sessions kept running`. Look at the button again.
 3. When the button showed Edge's icon in step 1 or 2, write that down, and look at it again the
