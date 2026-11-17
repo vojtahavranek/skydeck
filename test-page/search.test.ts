@@ -2903,4 +2903,59 @@ test('search and stacks in the list', async (t) => {
       await healthy(page, l.problems);
     },
   );
+
+  await t.test(
+    '`closedStacks` is required (ruled on review 1 of F9): a list whose section lacks it is not read as `no closed block` — the page fails on it as on a section that lacks `rows` (an error, its last drawing kept: the closed caption does not vanish), and draws the next good list',
+    async (t) => {
+      const rows: ScriptedRow[] = [
+        { id: S1, group: 'test', title: 'one' },
+        { id: S2, group: 'test', title: 'two' },
+        { id: S3, group: null, title: 'three' },
+      ];
+      /** The section's field to leave out of the next list, '' for none. */
+      let drop = '';
+      const build = (world: EditWorld | null, selected: string | null): Record<string, unknown> => {
+        const list = blockedList(rows, [], closedOf(world), selected) as {
+          sections: Record<string, unknown>[];
+        } & Record<string, unknown>;
+        if (drop === '') return list;
+        return {
+          ...list,
+          sections: list.sections.map((section) =>
+            Object.fromEntries(Object.entries(section).filter(([name]) => name !== drop)),
+          ),
+        };
+      };
+      const { page, world, problems } = await scriptedPage(
+        t,
+        chromium,
+        (w) => (selected) => build(w(), selected),
+      );
+      await untilShape(page, [OPEN('test'), `*${S1}`, S2, S3], 'the open card');
+      await toZone(page, 'list');
+      await page.keyboard.press('ArrowLeft');
+      await untilShape(page, [`*${CLOSED('test')}`, S3], 'closed, its caption selected');
+      assert.deepEqual(problems, []);
+
+      for (const field of ['rows', 'closedStacks']) {
+        const before = problems.length;
+        drop = field;
+        world.list((selected) => build(world, selected));
+        await until(
+          async () => problems.length > before,
+          `the page fails on a list without ${field}`,
+        );
+        assert.match(problems.at(-1) ?? '', /^pageerror: .*(not iterable|undefined)/, field);
+        // Its last drawing is kept: the closed caption is still there, not drawn as none.
+        assert.deepEqual(shapeOf(await lines(page)), [`*${CLOSED('test')}`, S3], field);
+        drop = '';
+        world.list((selected) => build(world, selected));
+        await untilShape(
+          page,
+          [`*${CLOSED('test')}`, S3],
+          `a good list after the one without ${field}`,
+        );
+      }
+    },
+  );
 });
