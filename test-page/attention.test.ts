@@ -119,6 +119,7 @@ function listOf(
       lastNs: null,
       count: name === 'earlier' ? 0 : (sections[name]?.length ?? 0),
       rows: name === 'earlier' ? [] : (sections[name] ?? []),
+      closedStacks: [],
     })),
     terminals,
   };

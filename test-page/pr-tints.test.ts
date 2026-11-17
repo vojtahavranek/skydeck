@@ -80,9 +80,33 @@ function listOf(
     ...scriptedList([], []),
     terminals,
     sections: [
-      { name: 'open', folded: false, firstNs: null, lastNs: null, count: 0, rows: [] },
-      { name: 'week', folded: false, firstNs: null, lastNs: null, count: rows.length, rows },
-      { name: 'earlier', folded: false, firstNs: null, lastNs: null, count: 0, rows: [] },
+      {
+        name: 'open',
+        folded: false,
+        firstNs: null,
+        lastNs: null,
+        count: 0,
+        rows: [],
+        closedStacks: [],
+      },
+      {
+        name: 'week',
+        folded: false,
+        firstNs: null,
+        lastNs: null,
+        count: rows.length,
+        rows,
+        closedStacks: [],
+      },
+      {
+        name: 'earlier',
+        folded: false,
+        firstNs: null,
+        lastNs: null,
+        count: 0,
+        rows: [],
+        closedStacks: [],
+      },
     ],
     selected:
       selected === null

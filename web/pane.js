@@ -120,7 +120,7 @@ export function blockInfo(list, section, group) {
   if (part === undefined) {
     return null;
   }
-  const caption = (part.closedStacks ?? []).find((candidate) => candidate.group === group);
+  const caption = part.closedStacks.find((candidate) => candidate.group === group);
   if (caption !== undefined) {
     return { size: caption.size, needYou: caption.needYou };
   }

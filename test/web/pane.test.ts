@@ -134,7 +134,15 @@ function listOf(shown: RowPayload[], selectedRow?: RowPayload | null): ListMessa
     counts: { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 },
     needYou: { count: 0, order: [] },
     sections: [
-      { name: 'open', folded: false, firstNs: null, lastNs: null, count: 0, rows: [] },
+      {
+        name: 'open',
+        folded: false,
+        firstNs: null,
+        lastNs: null,
+        count: 0,
+        rows: [],
+        closedStacks: [],
+      },
       {
         name: 'week',
         folded: false,
@@ -142,8 +150,17 @@ function listOf(shown: RowPayload[], selectedRow?: RowPayload | null): ListMessa
         lastNs: null,
         count: shown.length,
         rows: shown,
+        closedStacks: [],
       },
-      { name: 'earlier', folded: true, firstNs: null, lastNs: null, count: 0, rows: [] },
+      {
+        name: 'earlier',
+        folded: true,
+        firstNs: null,
+        lastNs: null,
+        count: 0,
+        rows: [],
+        closedStacks: [],
+      },
     ],
     doneHidden: 0,
     banner: null,
@@ -291,6 +308,7 @@ function listWith(sections: Partial<SectionPayload>[]): ListMessage {
       lastNs: null,
       count: 0,
       rows: [],
+      closedStacks: [],
       ...section,
     })),
   } as unknown as ListMessage;
@@ -322,6 +340,6 @@ test("blockInfo (F9): a closed caption's size and needYou; an open card's size a
   assert.equal(blockInfo(list, 'open', 'NOPE'), null);
   assert.equal(blockInfo(list, 'earlier', 'G'), null);
   assert.equal(blockInfo(null, 'open', 'G'), null);
-  // A list without `closedStacks` (a scripted list, a server before F9) has no caption.
+  // A section with no closed block and no row of the group: none.
   assert.equal(blockInfo(listWith([{ name: 'week' }]), 'week', 'G'), null);
 });

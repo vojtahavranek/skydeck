@@ -344,6 +344,7 @@ function fullList(
     lastNs: null,
     count: rows.length,
     rows,
+    closedStacks: [],
   });
   const earlier: SectionPayload =
     sections.earlier === 'folded'
@@ -354,6 +355,7 @@ function fullList(
           lastNs: ago(9n * DAY),
           count: 4,
           rows: [],
+          closedStacks: [],
         }
       : section('earlier', sections.earlier ?? []);
   return {

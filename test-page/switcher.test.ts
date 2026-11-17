@@ -594,6 +594,7 @@ function listOf(
         lastNs: null,
         count: rows.length,
         rows: folded ? [] : rows,
+        closedStacks: [],
       };
     }),
     terminals,

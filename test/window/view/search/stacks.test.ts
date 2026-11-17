@@ -118,7 +118,7 @@ test('stackRows: a group is text, whatever it spells; rows and closed entries na
   const twins: [string, string][] = [
     ['ORB-1', 'orb-1'],
     ['ORB-1', 'ORB-1 '],
-    ['café', 'café'], // NFC and NFD
+    ['caf\u00e9', 'cafe\u0301'], // NFC and NFD
   ];
   for (const [one, other] of twins) {
     const why = `${one} / ${other}`;

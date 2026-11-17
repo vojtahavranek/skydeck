@@ -734,6 +734,7 @@ export function scriptedList(
           attention: null,
           stack: null,
         })),
+        closedStacks: [],
       },
     ],
     doneHidden: 0,

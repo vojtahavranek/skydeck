@@ -628,6 +628,7 @@ function section(over: Partial<SectionPayload>): SectionPayload {
     lastNs: null,
     count: 0,
     rows: [],
+    closedStacks: [],
     ...over,
   };
 }

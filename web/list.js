@@ -535,7 +535,7 @@ export function createList(root, hooks) {
    */
   const drawnBlock = (section, group) => {
     const part = current?.sections.find((candidate) => candidate.name === section);
-    const caption = (part?.closedStacks ?? []).find((candidate) => candidate.group === group);
+    const caption = part?.closedStacks.find((candidate) => candidate.group === group);
     const rows = (part?.rows ?? []).filter((row) => (row.stack ?? null)?.group === group);
     return caption !== undefined
       ? { caption, rows: [] }
@@ -855,7 +855,7 @@ export function createList(root, hooks) {
         }
         return block;
       };
-      const captions = section.closedStacks ?? []; // a list from before F9 has none
+      const captions = section.closedStacks;
       /** @param {number} at */
       const captionsAt = (at) => {
         for (const one of captions) {
@@ -998,7 +998,7 @@ export function createList(root, hooks) {
     /** @type {Stop[]} */
     const all = [];
     for (const section of current?.sections ?? []) {
-      const captions = section.closedStacks ?? [];
+      const captions = section.closedStacks;
       /** @param {number} at */
       const captionsAt = (at) => {
         for (const one of captions) {

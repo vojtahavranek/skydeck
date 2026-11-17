@@ -108,6 +108,7 @@ function listOf(sections: Sections, terminals: Row[], selected: Row | null): Row
       lastNs: null,
       count: sections[name]?.length ?? 0,
       rows: sections[name] ?? [],
+      closedStacks: [],
     })),
     terminals,
     selected,

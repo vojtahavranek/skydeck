@@ -354,9 +354,12 @@ describe('the types of stage E (plan E 2.3) compile', () => {
       SectionPayload,
       'closedStacks'
     >;
-    const plainSection = {} satisfies Pick<SectionPayload, 'closedStacks'>;
+    // Required (ruled on review 1 of F9): a section without closed blocks carries `[]`.
+    const plainSection = { closedStacks: [] } satisfies Pick<SectionPayload, 'closedStacks'>;
+    // @ts-expect-error every section carries closedStacks
+    const missing: Pick<SectionPayload, 'closedStacks'> = {};
     assert.equal(closedSection.closedStacks.length, 1);
-    assert.equal(Object.keys(plainSection).length, 0);
+    assert.deepEqual([plainSection.closedStacks, missing], [[], {}]);
     const shut: ClosedBlock = { section: 'open', group: 'ORB-2107' };
     // @ts-expect-error a closed block's section is one of the three
     const wrong: ClosedBlock = { section: 'done', group: 'ORB-2107' };

@@ -256,9 +256,8 @@ export interface SectionPayload {
   count: number;
   rows: RowPayload[];
   /** F9: the section's closed blocks, in the section's order; [] while it is folded or the view is
-   *  filtering. Optional for the reader — a list without it (a scripted list of the test helpers)
-   *  has none. */
-  closedStacks?: ClosedStackPayload[];
+   *  filtering, and when it has none. Always sent. */
+  closedStacks: ClosedStackPayload[];
 }
 /** `state`: a TerminalState of 2.5 (`reconnecting` shows S2 7.8's bar); `notReported`: S2 7.5's "started, not reported". */
 export interface TerminalPayload {
