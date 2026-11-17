@@ -1676,15 +1676,22 @@ chip on. Write down how many sessions the title bar counts.
    `Focus: list`.
 
    *→ opens it again.* Press → only while you see that the selected line is that caption (the
-   group's name you wrote down, with `▸`) and that the right side shows the group's card. → selects
-   a real session, the first session of the card, which is not the throwaway session; nothing is
-   typed into it, and no Enter is pressed. Press → once. Expected: the card opens, its sessions
+   group's name you wrote down, with `▸`), that the caption shows the number of sessions you wrote
+   down and no `· … needs you`, and that the right side shows the group's card. When the number
+   differs or `· … needs you` shows (a session of the group joined the block meanwhile, or came to
+   need you: → would select it unseen), do not press →: click the throwaway session's row once
+   (look at the short id), then the caption once — it opens without selecting a session — and go on
+   with "Put it back". → selects a real session, the first session of the card, which is not the
+   throwaway session; nothing is typed into it, and no Enter is pressed. Press → once. Expected: the card opens, its sessions
    inside as before, the first of them selected, and the key bar says `Focus: list`. The right side
    shows that session (its resume card when it is not running: never click `Resume here`). Press
    nothing more on it.
 
    *Put it back.* The card is open, as you found it. When a card is still closed (a step above was
-   left out), click its caption once: it opens. Then click the throwaway session's row once (look at
+   left out), look first whether its caption is the selected line: then click the throwaway
+   session's row once (look at the short id) before anything else, since a click on the selected
+   closed caption selects its first session, as → does. Then click the closed caption once: it
+   opens. Then click the throwaway session's row once (look at
    the short id): the next steps start from it. When you unfolded Earlier in this step and the
    throwaway session's row is not in Earlier, fold Earlier again now, with a click on its header.
    When its row is in Earlier, leave Earlier unfolded until the end of step 6 (folding Earlier with

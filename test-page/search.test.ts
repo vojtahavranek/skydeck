@@ -1496,6 +1496,178 @@ test('search and stacks in the list', async (t) => {
   );
 
   await t.test(
+    "right after →, Enter or a click on the selected caption, before the list that draws the block open (review 2's mirror of ruled 2): ↓ and j select the line AFTER the caption, ↑ and k the line BEFORE it — never the list's first line",
+    async (t) => {
+      const rows: ScriptedRow[] = [
+        { id: S5, group: null, title: 'five' },
+        { id: S6, group: null, title: 'six' },
+        { id: S1, group: 'test', title: 'one' },
+        { id: S2, group: 'test', title: 'two' },
+        { id: S3, group: 'test', title: 'three' },
+        { id: S4, group: null, title: 'four' },
+      ];
+      const { page, world, problems } = await scriptedPage(
+        t,
+        chromium,
+        (w) => (selected) => blockedList(rows, [], closedOf(w()), selected),
+      );
+      const resend = (): void =>
+        world.list((selected) => blockedList(rows, [], closedOf(world), selected));
+      const open = [S5, S6, OPEN('test'), S1, S2, S3, S4];
+      const closedShape = [S5, S6, CLOSED('test'), S4];
+      const marked = (shape: string[], selected: string): string[] =>
+        shape.map((line) => (line === selected ? `*${line}` : line));
+      await untilShape(page, marked(open, S5), 'a card between rows');
+      await toZone(page, 'list');
+      for (const opener of ['ArrowRight', 'Enter', 'click'] as const) {
+        for (const [move, to] of [
+          ['ArrowDown', S4],
+          ['j', S4],
+          ['ArrowUp', S6],
+          ['k', S6],
+        ] as const) {
+          await page.locator(`#list [data-id="${S2}"]`).click();
+          await untilSelected(page, S2);
+          await page.keyboard.press('ArrowLeft');
+          await untilShape(
+            page,
+            marked(closedShape, CLOSED('test')),
+            'closed, its caption selected',
+          );
+          world.holdViews(true);
+          if (opener === 'click') await captionOf(page, 'open', 'test').click();
+          else await page.keyboard.press(opener);
+          await until(async () => world.selected() === S1, `${opener}: the view selects S1`);
+          await page.keyboard.press(move);
+          await until(
+            async () => world.selected() === to,
+            `${opener} then ${move}: the view selects ${to}`,
+          );
+          await untilShape(
+            page,
+            marked(closedShape, to),
+            `${opener} then ${move}: ${to} drawn selected`,
+          );
+          world.holdViews(false);
+          resend();
+          await untilShape(page, marked(open, to), 'the answer: open, the selection kept');
+        }
+      }
+      assert.deepEqual(world.acts(), [], 'nothing resumed');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    '→ then ←, before the list that draws the block open, with the block in an unfolded Earlier (review 2): Earlier stays unfolded and the block is closed again with its caption selected, in one view (closed with it, selected null), and the answer draws the caption selected; and → then a fold of Earlier selects the line above Earlier, never leaving the hidden session selected',
+    async (t) => {
+      const openRows: ScriptedRow[] = [
+        { id: S5, group: null, title: 'five' },
+        { id: S6, group: null, title: 'six' },
+      ];
+      const earlierRows: ScriptedRow[] = [
+        { id: S1, group: 'test', title: 'one' },
+        { id: S2, group: 'test', title: 'two' },
+        { id: S4, group: null, title: 'four' },
+      ];
+      /** Open's rows as `blockedList` draws them, then Earlier, folded unless the page's last view
+       *  unfolds it, whose rows the server's rule draws too (after s2-qf9's probe). */
+      const twoSections = (world: EditWorld | null, selected: string | null) => {
+        const closed = closedOf(world);
+        const views = (world?.sent ?? []).filter((message) => message['t'] === 'view');
+        const unfolded = ((views.at(-1)?.['unfolded'] ?? []) as string[]).includes('earlier');
+        const open = blockedList(openRows, [], closed, selected) as {
+          sections: Record<string, unknown>[];
+        } & Record<string, unknown>;
+        const earlier = blockedList(
+          earlierRows,
+          [],
+          closed
+            .filter((one) => one.section === 'earlier')
+            .map((one) => ({ section: 'open' as const, group: one.group })),
+          selected,
+        ) as {
+          sections: (Record<string, unknown> & { rows: unknown[]; closedStacks: unknown[] })[];
+        };
+        const part = earlier.sections[0];
+        return {
+          ...open,
+          sections: [
+            open.sections[0],
+            {
+              ...part,
+              name: 'earlier',
+              folded: !unfolded,
+              count: earlierRows.length,
+              rows: unfolded ? (part?.rows ?? []) : [],
+              closedStacks: unfolded ? (part?.closedStacks ?? []) : [],
+            },
+          ],
+        };
+      };
+      const { page, world, problems } = await scriptedPage(
+        t,
+        chromium,
+        (w) => (selected) => twoSections(w(), selected),
+      );
+      const resend = (): void => world.list((selected) => twoSections(world, selected));
+      const views = (from: number): [unknown, unknown, unknown][] =>
+        world.sent
+          .slice(from)
+          .filter((message) => message['t'] === 'view')
+          .map((view) => [view['selected'], view['closed'], view['unfolded']]);
+      await untilShape(page, [`*${S5}`, S6], 'Earlier folded');
+      await page.locator('#list .list-section[data-section="earlier"]').click();
+      await untilShape(page, [`*${S5}`, S6, OPEN('test'), S1, S2, S4], 'Earlier unfolded');
+      await page.locator(`#list [data-id="${S2}"]`).click();
+      await untilSelected(page, S2);
+      await toZone(page, 'list');
+      await page.keyboard.press('ArrowLeft');
+      await untilShape(page, [S5, S6, `*${CLOSED('test')}`, S4], 'closed in Earlier');
+
+      // → then ←, the answer held: two views, the second closing it again with nothing selected.
+      world.holdViews(true);
+      let from = world.sent.length;
+      await page.keyboard.press('ArrowRight');
+      await until(async () => world.selected() === S1, '→: the view selects S1');
+      await page.keyboard.press('ArrowLeft');
+      await until(async () => views(from).length >= 2, '←: a second view');
+      await sleep(300);
+      assert.deepEqual(views(from), [
+        [S1, [], ['earlier']],
+        [null, shut('earlier', 'test'), ['earlier']],
+      ]);
+      world.holdViews(false);
+      resend();
+      await untilShape(
+        page,
+        [S5, S6, `*${CLOSED('test')}`, S4],
+        'the answer: its caption selected',
+      );
+      assert.equal(await selectedLine(page), 'caption test');
+      await untilPane(page, 'group');
+
+      // → then a fold of Earlier (a click on its header), the answer held: the line above
+      // Earlier is selected (S6), and Earlier folds.
+      world.holdViews(true);
+      from = world.sent.length;
+      await page.keyboard.press('ArrowRight');
+      await until(async () => world.selected() === S1, '→ again: the view selects S1');
+      await page.locator('#list .list-section[data-section="earlier"]').click();
+      await until(
+        async () => JSON.stringify(views(from).at(-1)?.[2]) === '[]',
+        'a view folds Earlier',
+      );
+      assert.equal(world.selected(), S6, 'the line above Earlier is selected');
+      world.holdViews(false);
+      resend();
+      await untilShape(page, [S5, `*${S6}`], 'Earlier folded, S6 selected');
+      assert.deepEqual(world.acts(), [], 'nothing resumed');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
     'a held ← on a session of an open card in an unfolded Earlier closes the block and selects its caption once: its auto-repeats do nothing on the caption (ruled (d)) — Earlier stays unfolded and no session above is selected; a fresh ← on a caption in Earlier folds Earlier and selects the line above it (ruled (g)): a row, or a closed caption',
     async (t) => {
       const l = await launchedWithViews(t, chromium);

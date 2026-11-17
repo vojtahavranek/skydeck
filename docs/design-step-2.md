@@ -2835,8 +2835,20 @@ session (a real session, selected as by a click; the keyboard stays in the list 
 typed), and ← folds Earlier — inside Earlier it selects the line above it, a row or a closed caption
 —; an auto-repeat of ← does nothing there, so that a held ← that has just closed a block goes no
 further and does not select a session the user did not choose, and a held Enter opens the block
-once, its repeats never resuming that session. `d`, `l` and F2, `g`, `n` and `p` do nothing on a
-selected caption: no session is selected, and the key bar says `no session selected`. The pane then shows a small card of the group — its name, `3 sessions`, ` · 1 needs
+once, its repeats never resuming that session. Each of these gestures reaches the server in ONE
+view (ruled on 2026-11-17, rulings 1 and 3 of F9): ← sends the block's closing with `selected:
+null`, and →, Enter and a click on the selected caption send the block's leaving `closed` with its
+first session's selection, so that no view of theirs names a block closed while a session of it is
+selected. Every other way a session of a closed block becomes selected — a click on a row of the
+card still drawn open right after ←, a slot chord, Ctrl+Tab, Ctrl+Shift+J, a notification's click,
+the switcher, a resume's answer — keeps the way it had before F9: its view may name the block closed
+with that session selected, and the server opens the block for the selection (12.2). Until the list
+that answers the view comes, the list's keys move from where the page last drew the selection:
+right after ←, the card still drawn open counts as its caption (ruling 2); right after →, Enter or
+the click — or a slot chord, Ctrl+Shift+J or a notification onto a closed block's FIRST session —,
+that closed caption counts as the selected line, ↑ ↓ step from it, and ← closes the block again and
+selects its caption, never folding a section (review 2 of F9). `d`, `l` and F2, `g`, `n` and `p` do
+nothing on a selected caption: no session is selected, and the key bar says `no session selected`. The pane then shows a small card of the group — its name, `3 sessions`, ` · 1 needs
 you` in the needs-you colour while any of its sessions needs you, and `→ or Enter opens the group`
 —, no terminal, and nothing on it has the keyboard; the key help's line reads `fold or unfold
 Earlier; close or open a group`. The mouse: a click on a caption line opens or closes its block

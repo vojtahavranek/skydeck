@@ -97,7 +97,7 @@ test('a closed block hides every row of it, the first too (F9): none is asked ab
   });
   const list = await page.list(
     (candidate) =>
-      (candidate.sections.find((s) => s.name === 'week')?.closedStacks ?? []).length === 1,
+      (candidate.sections.find((s) => s.name === 'week')?.closedStacks.length ?? 0) === 1,
     "Recent's closed block of G",
   );
   assert.deepEqual(

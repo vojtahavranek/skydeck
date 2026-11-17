@@ -989,9 +989,10 @@ export function createList(root, hooks) {
 
   /**
    * F9: what the list's keys move through, in the list's order: every row drawn and every CLOSED
-   * caption (an open card's caption holds no selection, K3). While filtering there is no caption.
+   * caption (an open card's caption holds no selection, K3), with the session id of its first row
+   * (`head`; '' for the still-open card of ruling 2). While filtering there is no caption.
    * @typedef {{ kind: 'row', section: SectionPayload['name'], id: string }
-   *   | { kind: 'caption', section: SectionPayload['name'], group: string }} Stop
+   *   | { kind: 'caption', section: SectionPayload['name'], group: string, head: string }} Stop
    * @returns {Stop[]}
    */
   const stops = () => {
@@ -1003,7 +1004,7 @@ export function createList(root, hooks) {
       const captionsAt = (at) => {
         for (const one of captions) {
           if (one.at === at) {
-            all.push({ kind: 'caption', section: section.name, group: one.group });
+            all.push({ kind: 'caption', section: section.name, group: one.group, head: one.head });
           }
         }
       };
@@ -1018,7 +1019,7 @@ export function createList(root, hooks) {
           selectedCaption.group === group
         ) {
           if (row.stack?.role === 'head') {
-            all.push({ kind: 'caption', section: section.name, group });
+            all.push({ kind: 'caption', section: section.name, group, head: '' });
           }
           return;
         }
@@ -1029,11 +1030,29 @@ export function createList(root, hooks) {
     return all;
   };
 
-  /** @param {Stop} stop whether it is what is selected now */
+  /**
+   * Whether `stop` is what is selected now. A closed caption also stands where the selection is
+   * when the selected session is its FIRST row, which the list does not draw yet (review 2's S1,
+   * the mirror of ruling 2): right after →, Enter or a click on the caption, or a slot chord,
+   * Ctrl+Shift+J or a notification that selected that hidden session, until the list that draws
+   * the block open comes — so that ↑ ↓ step from the caption's place, never from the first line.
+   * @param {Stop} stop
+   */
   const isSelected = (stop) =>
     stop.kind === 'row'
       ? stop.id === selected
-      : selectedCaption?.section === stop.section && selectedCaption.group === stop.group;
+      : selectedCaption === null
+        ? selected !== null && stop.head === selected
+        : selectedCaption.section === stop.section && selectedCaption.group === stop.group;
+
+  /**
+   * The closed caption whose FIRST row is the selected session, which the list does not draw yet
+   * (`isSelected`'s case); undefined when there is none.
+   */
+  const hiddenFirst = () =>
+    selectedCaption !== null || selected === null || placeOf(selected) !== undefined
+      ? undefined
+      : stops().find((stop) => stop.kind === 'caption' && stop.head === selected);
 
   /** Selects `stop` from a key: a row (the zone stays), or a caption (F9). @param {Stop} stop */
   const selectStop = (stop) => {
@@ -1059,6 +1078,7 @@ export function createList(root, hooks) {
     }
     const inside =
       selectedCaption?.section === 'earlier' ||
+      hiddenFirst()?.section === 'earlier' ||
       (selected !== null && earlier.rows.some((row) => row.id === selected));
     if (folded && inside) {
       const before = stops()
@@ -1126,18 +1146,28 @@ export function createList(root, hooks) {
         }
         // E7, F9: ← on any session of an open card closes the block and selects its caption (a
         // group the server would refuse: nothing, the block stays open; an unreported terminal
-        // holding it open: the key bar says why); otherwise ← folds Earlier, as in stage A.
-        const place = placeOf(selected);
-        const stack = place?.row.stack ?? null;
-        if (place !== undefined && stack !== null) {
-          const held = heldLine(place.section, stack.group);
+        // holding it open: the key bar says why); otherwise ← folds Earlier, as in stage A. On a
+        // selected FIRST session the list does not draw yet (review 2's S1: → then ←, before the
+        // list that draws the block open), ← closes the block again and selects its caption, as
+        // ← on that session will once it is drawn — never a fold that leaves it hidden.
+        const hidden = hiddenFirst();
+        const drawn = placeOf(selected);
+        /** @type {{ section: SectionPayload['name'], group: string } | null} */
+        let place = null;
+        if (drawn !== undefined && (drawn.row.stack ?? null) !== null) {
+          place = { section: drawn.section, group: drawn.row.stack?.group ?? '' };
+        } else if (drawn === undefined && hidden?.kind === 'caption') {
+          place = { section: hidden.section, group: hidden.group };
+        }
+        if (place !== null) {
+          const group = place.group;
+          const held = heldLine(place.section, group);
           if (held !== null) {
             hooks.say?.(held); // the server keeps it open: nothing moves
-          } else if (sendable(stack.group)) {
+          } else if (sendable(group)) {
             // Ruled (1): the closing and the caption's `selected: null` go in ONE view, so that no
             // view names the block closed while a session of it is still selected. The list's own
             // state is set first, so that the caption holds when app.js draws it.
-            const group = stack.group;
             if (isClosed(place.section, group)) {
               hooks.caption(place.section, group);
             } else {

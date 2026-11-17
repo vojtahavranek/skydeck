@@ -434,7 +434,7 @@ function orb(
 
 /** The closed blocks of `name` (F9: each its caption, none of its rows in `rows`). */
 function captions(message: Message, name: SectionPayload['name']): ClosedStackPayload[] {
-  return section(message, name).closedStacks ?? [];
+  return section(message, name).closedStacks;
 }
 
 test('blocks: three rows of ORB-1 in Recent are one block, OPEN by default — without `closed` and with `closed: []` (G1, G4)', () => {
