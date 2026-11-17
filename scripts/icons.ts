@@ -15,13 +15,12 @@
 // light. That is the box filter at exactly the icon's pixel pitch: nothing aliases (no pixel is
 // skipped), nothing rings, and no halo of the tile's edge spreads onto the transparent corners (a
 // stepwise halving on a canvas with Chromium's high-quality smoothing, tried first, left a grey
-// halo outside the tile on a light background and a duller 16 pixel icon). The transparent icons
-// are the whole picture in their box. The maskable ones are the large picture scaled by
-// MASKABLE_SCALE into the middle of a full background of BACKGROUND, the tile's colour around the
-// ring where the picture is faded out: it is drawn in full within FADE_FROM pixels of its middle,
-// fades out to the background over the next ring and is not drawn beyond FADE_TO. The drawing
-// is well inside; the tile's own edge (a lighter hairline, and a tile lighter at its top) would
-// otherwise show as a faint frame, a tile inside a tile.
+// halo outside the tile on a light background and a duller 16 pixel icon). The transparent
+// icons are the whole picture in their box. The maskable ones are the picture scaled by
+// MASKABLE_SCALE into the middle of a full background, with the tile's outermost RIM pixels left
+// out (the picture's tile has a lighter hairline and a shade along its edge) on a background that
+// runs from the tile's colour along its top edge to its colour along its bottom edge (the tile
+// is lighter at its top), so that the tile's edge does not show as a square inside a square.
 //
 // Chromium is launched by the rules the page suite's test-page/helpers/browser.ts follows (whose
 // `browser(t)` needs a test context, so the script launches by itself): headless, with an
@@ -47,25 +46,29 @@ export const SIZES = [16, 32, 48, 192, 512];
 export const IN_ICO = [16, 32, 48];
 /** The sizes drawn from the small picture; the others are drawn from the large one. */
 export const SMALL = [16, 32, 48];
-/** The maskable ones: the large picture in the middle, on the full background. */
+/** The maskable ones: the picture in the middle, on the full background. */
 export const MASKABLE = [192, 512];
-/** The maskable icons' background: the large picture's tile around the ring between FADE_FROM and
- *  FADE_TO (the average of its opaque pixels there; test/window/icons.test.ts measures it). */
-export const BACKGROUND = '#040925';
-/** In a maskable icon the large picture is drawn in full within FADE_FROM pixels of its middle (of
- *  1254), fades out to the background over the next ring, and is not drawn beyond FADE_TO. The
- *  drawing reaches 540.8 pixels (checked below) and the tile's own edge starts 594 out. */
-export const FADE_FROM = 555;
-export const FADE_TO = 585;
-/** How much of the icon's width the large picture takes in a maskable icon: the largest scale, to
- *  three decimals, at which everything of the drawing is inside the safe zone (checked below). */
+/** The tile's colour along its top edge and along its bottom edge (the average of the pixels 5 to
+ *  14 inside it, in the middle 40 % of the side; the tile is lighter at its top): the maskable
+ *  icons' background runs from the first, in their top row, to the second, in their bottom row.
+ *  test/window/icons.test.ts measures both on the picture. */
+export const BACKGROUND_TOP = '#080e25';
+export const BACKGROUND_BOTTOM = '#030723';
+/** In a maskable icon the picture is drawn without the pixels within this many of one that is not
+ *  opaque: the tile's own edge (a lighter hairline, a shade) would show as a frame on the
+ *  background. None of the drawing is that close to the edge. */
+export const RIM = 5;
+/** How much of the icon's width the picture takes in a maskable icon: the largest scale, to three
+ *  decimals, at which everything of the drawing is inside the safe zone (checked below). */
 export const MASKABLE_SCALE = 0.927;
 
 /** The safe zone of a maskable icon: a circle of this radius, in parts of the icon's width. */
 const SAFE_RADIUS = 0.4;
-/** The drawing is what differs from the background by more than this (of 255) in some channel,
- *  composited on it. */
+/** The drawing is what differs from the background (that of its own height) by more than this (of
+ *  255) in some channel, composited on it. The tile's edge, 36 at most, is not the drawing. */
 const DRAWN = 40;
+/** The tile is at alpha 252 to 253 of 255: a pixel from this alpha up is opaque. */
+const OPAQUE = 250;
 
 /** What a page under the page suite can reach (test-page/helpers/browser.ts): nothing. */
 const ISOLATION = [
@@ -74,7 +77,7 @@ const ISOLATION = [
 ];
 
 /** One PNG to draw from `picture`: `size` pixels, the picture at `scale` of that in the middle, on
- *  the background (and faded out as above) or on nothing. */
+ *  the background (the large picture, without its rim) or on nothing. */
 interface Job {
   name: string;
   picture: 'large' | 'small';
@@ -102,21 +105,7 @@ async function drawAll(
   jobs: Job[],
 ): Promise<Map<string, Buffer>> {
   const drawn = await page.evaluate(
-    async ({ pictures, jobs, background, fadeFrom, fadeTo, safeRadius, drawn, maskableScale }) => {
-      // sRGB bytes to linear light, and back.
-      const lut = Float64Array.from({ length: 256 }, (_, i) => {
-        const v = i / 255;
-        return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-      });
-      const encode = (v: number): number =>
-        Math.min(
-          255,
-          Math.max(
-            0,
-            Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055)),
-          ),
-        );
-
+    async ({ pictures, jobs, top, bottom, rim, safeRadius, drawn, opaque, maskableScale }) => {
       const load = async (
         base64: string,
       ): Promise<{ count: number; pixels: Uint8ClampedArray }> => {
@@ -135,63 +124,93 @@ async function drawAll(
         context.drawImage(bitmap, 0, 0);
         return { count, pixels: context.getImageData(0, 0, count, count).data };
       };
+      const { count, pixels } = await load(pictures.large);
+      const smallPicture = await load(pictures.small);
+      const at = (i: number, c: number): number => pixels[i * 4 + c] ?? 0;
 
-      // A picture's pixels as premultiplied linear light, 4 floats a pixel, each times `weightAt`
-      // of its distance from the picture's middle.
-      const premultiply = (
-        { count, pixels }: { count: number; pixels: Uint8ClampedArray },
-        weightAt: (r: number) => number,
-      ): Float32Array => {
-        const out = new Float32Array(count * count * 4);
-        for (let y = 0; y < count; y++) {
-          for (let x = 0; x < count; x++) {
-            const i = y * count + x;
-            const w = weightAt(Math.hypot(x + 0.5 - count / 2, y + 0.5 - count / 2));
-            const a = ((pixels[i * 4 + 3] ?? 0) / 255) * w;
-            for (let c = 0; c < 3; c++) {
-              out[i * 4 + c] = (lut[pixels[i * 4 + c] ?? 0] ?? 0) * a;
-            }
-            out[i * 4 + 3] = a;
+      // The background at a height (0 at the top, 1 at the bottom), in bytes: top to bottom.
+      const backgroundAt = (f: number): number[] =>
+        top.map((value, c) => value + ((bottom[c] ?? 0) - value) * f);
+
+      // The scale holds for the large picture: the drawing, scaled, stays inside the circle.
+      let farthest = 0;
+      for (let y = 0; y < count; y++) {
+        const background = backgroundAt((y + 0.5) / count);
+        for (let x = 0; x < count; x++) {
+          const i = y * count + x;
+          const a = at(i, 3) / 255;
+          if ([0, 1, 2].some((c) => Math.abs(a * (at(i, c) - (background[c] ?? 0))) > drawn)) {
+            farthest = Math.max(farthest, Math.hypot(x + 0.5 - count / 2, y + 0.5 - count / 2));
           }
         }
-        return out;
-      };
-
-      const large = await load(pictures.large);
-      const small = await load(pictures.small);
-
-      // The scale holds for the large picture: the drawing, scaled, stays inside the circle, and
-      // it is clear of the ring where the maskable icons fade the picture out.
-      let farthest = 0;
-      for (let i = 0; i < large.count * large.count; i++) {
-        const a = (large.pixels[i * 4 + 3] ?? 0) / 255;
-        if (
-          [0, 1, 2].some(
-            (c) => Math.abs(a * ((large.pixels[i * 4 + c] ?? 0) - (background[c] ?? 0))) > drawn,
-          )
-        ) {
-          const x = (i % large.count) + 0.5 - large.count / 2;
-          const y = Math.floor(i / large.count) + 0.5 - large.count / 2;
-          farthest = Math.max(farthest, Math.hypot(x, y));
-        }
       }
-      if (maskableScale * farthest > safeRadius * large.count) {
+      if (maskableScale * farthest > safeRadius * count) {
         throw new Error(
-          `the drawing reaches ${farthest} of ${large.count / 2} pixels: at ${maskableScale} it leaves the circle of ${safeRadius}; the largest scale is ${(safeRadius * large.count) / farthest}`,
+          `the drawing reaches ${farthest} of ${count / 2} pixels: at ${maskableScale} it leaves the circle of ${safeRadius}; the largest scale is ${(safeRadius * count) / farthest}`,
         );
       }
-      if (farthest >= fadeFrom) {
-        throw new Error(`the drawing reaches ${farthest} pixels: the fade starts at ${fadeFrom}`);
-      }
 
-      const sources = {
-        large: premultiply(large, () => 1),
-        small: premultiply(small, () => 1),
-        faded: premultiply(large, (r) =>
-          r <= fadeFrom ? 1 : r >= fadeTo ? 0 : (fadeTo - r) / (fadeTo - fadeFrom),
-        ),
-      };
-      const backgroundLinear = background.map((value) => lut[value] ?? 0);
+      // Premultiplied linear light, 4 floats a pixel.
+      const lut = Float64Array.from({ length: 256 }, (_, i) => {
+        const v = i / 255;
+        return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      });
+      const encode = (v: number): number =>
+        Math.min(
+          255,
+          Math.max(
+            0,
+            Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055)),
+          ),
+        );
+      const linear = new Float32Array(count * count * 4);
+      for (let i = 0; i < count * count; i++) {
+        const a = at(i, 3) / 255;
+        for (let c = 0; c < 3; c++) {
+          linear[i * 4 + c] = (lut[at(i, c)] ?? 0) * a;
+        }
+        linear[i * 4 + 3] = a;
+      }
+      // The same without the pixels near the tile's edge: only where every pixel within `rim` is
+      // opaque (a square window, in two passes), for the maskable icons.
+      const solid = new Uint8Array(count * count);
+      for (let i = 0; i < count * count; i++) {
+        solid[i] = at(i, 3) >= opaque ? 1 : 0;
+      }
+      const alongRow = new Uint8Array(count * count);
+      for (let y = 0; y < count; y++) {
+        for (let x = 0; x < count; x++) {
+          let all = 1;
+          for (let d = -rim; d <= rim && all === 1; d++) {
+            all = x + d >= 0 && x + d < count ? (solid[y * count + x + d] ?? 0) : 0;
+          }
+          alongRow[y * count + x] = all;
+        }
+      }
+      const tile = new Float32Array(linear);
+      for (let y = 0; y < count; y++) {
+        for (let x = 0; x < count; x++) {
+          let all = 1;
+          for (let d = -rim; d <= rim && all === 1; d++) {
+            all = y + d >= 0 && y + d < count ? (alongRow[(y + d) * count + x] ?? 0) : 0;
+          }
+          if (all === 0) {
+            tile.fill(0, (y * count + x) * 4, (y * count + x) * 4 + 4);
+          }
+        }
+      }
+      // The small picture's pixels as premultiplied linear light, too.
+      const smallLinear = new Float32Array(smallPicture.count * smallPicture.count * 4);
+      for (let i = 0; i < smallPicture.count * smallPicture.count; i++) {
+        const a = (smallPicture.pixels[i * 4 + 3] ?? 0) / 255;
+        for (let c = 0; c < 3; c++) {
+          smallLinear[i * 4 + c] = (lut[smallPicture.pixels[i * 4 + c] ?? 0] ?? 0) * a;
+        }
+        smallLinear[i * 4 + 3] = a;
+      }
+      // The background of a row of an icon, in linear light: from `top` to `bottom`.
+      const topLinear = top.map((value) => lut[value] ?? 0);
+      const bottomLinear = bottom.map((value) => lut[value] ?? 0);
 
       // The picture's pixels that the output pixel `t` (one axis) covers, with their weights.
       const axis = (t: number, count: number, span: number, offset: number): [number, number[]] => {
@@ -218,11 +237,12 @@ async function drawAll(
       const out: Record<string, string> = {};
       for (const job of jobs) {
         const { size } = job;
-        const count = (job.picture === 'small' ? small : large).count;
-        const source = job.onBackground ? sources.faded : sources[job.picture];
+        const small = job.picture === 'small';
+        const across = small ? smallPicture.count : count;
         const span = size * job.scale;
         const offset = (size - span) / 2;
-        const lines = Array.from({ length: size }, (_, t) => axis(t, count, span, offset));
+        const source = small ? smallLinear : job.onBackground ? tile : linear;
+        const lines = Array.from({ length: size }, (_, t) => axis(t, across, span, offset));
         const rgba = new Uint8ClampedArray(size * size * 4);
         for (let ty = 0; ty < size; ty++) {
           const [y0, wy] = lines[ty] ?? [0, []];
@@ -231,7 +251,7 @@ async function drawAll(
             const sum = [0, 0, 0, 0];
             wy.forEach((weightY, j) => {
               wx.forEach((weightX, i) => {
-                const from = ((y0 + j) * count + x0 + i) * 4;
+                const from = ((y0 + j) * across + x0 + i) * 4;
                 const weight = weightX * weightY;
                 for (let c = 0; c < 4; c++) {
                   sum[c] = (sum[c] ?? 0) + weight * (source[from + c] ?? 0);
@@ -241,8 +261,10 @@ async function drawAll(
             const o = (ty * size + tx) * 4;
             const covered = sum[3] ?? 0;
             if (job.onBackground) {
+              const f = (ty + 0.5) / size;
               for (let c = 0; c < 3; c++) {
-                rgba[o + c] = encode((sum[c] ?? 0) + (1 - covered) * (backgroundLinear[c] ?? 0));
+                const background = (topLinear[c] ?? 0) * (1 - f) + (bottomLinear[c] ?? 0) * f;
+                rgba[o + c] = encode((sum[c] ?? 0) + (1 - covered) * background);
               }
               rgba[o + 3] = 255;
             } else if (covered > 0) {
@@ -270,11 +292,12 @@ async function drawAll(
         small: pictures.small.toString('base64'),
       },
       jobs,
-      background: colourOf(BACKGROUND),
-      fadeFrom: FADE_FROM,
-      fadeTo: FADE_TO,
+      top: colourOf(BACKGROUND_TOP),
+      bottom: colourOf(BACKGROUND_BOTTOM),
+      rim: RIM,
       safeRadius: SAFE_RADIUS,
       drawn: DRAWN,
+      opaque: OPAQUE,
       maskableScale: MASKABLE_SCALE,
     },
   );
