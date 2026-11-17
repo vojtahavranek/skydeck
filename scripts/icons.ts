@@ -6,9 +6,14 @@
 // the pictures again in Node to see that the files are the pictures').
 //
 // Which picture. The large one (a cloud and three stacked terminal windows) is drawn into the 192
-// and 512 pixel files and the two maskable ones. Below 48 pixels it blurs into a ring with a spot,
-// so the 16, 32 and 48 pixel files, and the three images of favicon.ico, are drawn from the small
-// one: the same tile and cloud with one terminal window and a bold `>_`.
+// and 512 pixel files and the two maskable ones. At 48 pixels and below it blurs (at 16 into a
+// ring with a spot), so the 16, 32 and 48 pixel files, and the three images of favicon.ico, are
+// drawn from the small one: the same tile and cloud with one terminal window and a bold `>_`. The
+// small picture has a transparent margin of 18 to 29 pixels (of 1254) around its tile, and one
+// pixel of a 16 pixel file is 78 of them: drawn whole, the outer rows and columns would be only
+// partly covered, a soft rim on a light title bar. So the small files are drawn from the tile's box
+// (the pixels of alpha 250 or more): its shorter side, scaled to the icon and centred on the tile,
+// so that the tile fills the box; the rounded corners stay transparent.
 //
 // How a size is made. Chromium decodes the picture; the script then averages, for each pixel of the
 // icon, the picture's pixels under it, weighted by the area they cover, premultiplied and in linear
@@ -35,7 +40,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { chromium } from 'playwright';
 import type { Browser, Page } from 'playwright';
 
 /** The owner's pictures, relative to the checkout: kept as they were received, and not under web/
@@ -66,6 +70,8 @@ const SAFE_RADIUS = 0.4;
 /** The drawing is what differs from the background by more than this (of 255) in some channel,
  *  composited on it. */
 const DRAWN = 40;
+/** A pixel from this alpha up is opaque (the tiles are at 251 to 254 of 255). */
+const OPAQUE = 250;
 
 /** What a page under the page suite can reach (test-page/helpers/browser.ts): nothing. */
 const ISOLATION = [
@@ -102,7 +108,17 @@ async function drawAll(
   jobs: Job[],
 ): Promise<Map<string, Buffer>> {
   const drawn = await page.evaluate(
-    async ({ pictures, jobs, background, fadeFrom, fadeTo, safeRadius, drawn, maskableScale }) => {
+    async ({
+      pictures,
+      jobs,
+      background,
+      fadeFrom,
+      fadeTo,
+      safeRadius,
+      drawn,
+      opaque,
+      maskableScale,
+    }) => {
       // sRGB bytes to linear light, and back.
       const lut = Float64Array.from({ length: 256 }, (_, i) => {
         const v = i / 255;
@@ -159,6 +175,27 @@ async function drawAll(
 
       const large = await load(pictures.large);
       const small = await load(pictures.small);
+
+      // The small picture's tile: the box of its opaque pixels.
+      let minX = small.count;
+      let maxX = -1;
+      let minY = small.count;
+      let maxY = -1;
+      for (let i = 0; i < small.count * small.count; i++) {
+        if ((small.pixels[i * 4 + 3] ?? 0) >= opaque) {
+          const x = i % small.count;
+          const y = Math.floor(i / small.count);
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        }
+      }
+      if (maxX < minX || maxY < minY) {
+        throw new Error('the small picture has no opaque pixel');
+      }
+      // The small files show the shorter side of the tile's box, centred on the tile.
+      const tileSide = Math.min(maxX - minX + 1, maxY - minY + 1);
 
       // The scale holds for the large picture: the drawing, scaled, stays inside the circle, and
       // it is clear of the ring where the maskable icons fade the picture out.
@@ -220,14 +257,21 @@ async function drawAll(
         const { size } = job;
         const count = (job.picture === 'small' ? small : large).count;
         const source = job.onBackground ? sources.faded : sources[job.picture];
-        const span = size * job.scale;
-        const offset = (size - span) / 2;
-        const lines = Array.from({ length: size }, (_, t) => axis(t, count, span, offset));
+        let span = size * job.scale;
+        let offsetX = (size - span) / 2;
+        let offsetY = offsetX;
+        if (job.picture === 'small') {
+          span = (size * count) / tileSide;
+          offsetX = size / 2 - (((minX + maxX + 1) / 2) * span) / count;
+          offsetY = size / 2 - (((minY + maxY + 1) / 2) * span) / count;
+        }
+        const columns = Array.from({ length: size }, (_, t) => axis(t, count, span, offsetX));
+        const rows = Array.from({ length: size }, (_, t) => axis(t, count, span, offsetY));
         const rgba = new Uint8ClampedArray(size * size * 4);
         for (let ty = 0; ty < size; ty++) {
-          const [y0, wy] = lines[ty] ?? [0, []];
+          const [y0, wy] = rows[ty] ?? [0, []];
           for (let tx = 0; tx < size; tx++) {
-            const [x0, wx] = lines[tx] ?? [0, []];
+            const [x0, wx] = columns[tx] ?? [0, []];
             const sum = [0, 0, 0, 0];
             wy.forEach((weightY, j) => {
               wx.forEach((weightX, i) => {
@@ -275,6 +319,7 @@ async function drawAll(
       fadeTo: FADE_TO,
       safeRadius: SAFE_RADIUS,
       drawn: DRAWN,
+      opaque: OPAQUE,
       maskableScale: MASKABLE_SCALE,
     },
   );
@@ -325,6 +370,8 @@ async function main(): Promise<void> {
     // Playwright makes the browser's profile in this process's temporary directory.
     const caller = process.env.TMPDIR;
     process.env.TMPDIR = tmp;
+    // Loaded here, so that the unit test that imports this file's constants loads no playwright.
+    const { chromium } = await import('playwright');
     let browser: Browser;
     try {
       browser = await chromium.launch({

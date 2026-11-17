@@ -2985,21 +2985,28 @@ small sizes):
   own, and committed; no test and no CI step runs the script. Nothing is fetched from outside, at
   build time or at run time. **The 16, 32 and 48 pixel files, and so the ICO, are drawn from the
   small picture; the 192 and 512 pixel files and both maskable files from the first one**: the
-  detailed picture blurs below 48 pixels (at 16 it is a ring with a light spot), and the window's
+  detailed picture blurs at 48 pixels and below (at 16 it is a ring with a light spot), and the window's
   taskbar button and title bar show the small sizes.
 - **How a size is reduced.** Chromium decodes the picture; for each pixel of an icon the script
   averages the picture's pixels under it, weighted by the area they cover, premultiplied and in
   linear light: a box filter at exactly the icon's pixel pitch, so that no pixel of the picture is
   skipped (nothing aliases), nothing rings, and the light of a thin line is kept. Halving on a
   canvas with Chromium's high-quality smoothing was tried first and rejected: it left a grey halo
-  around the tile on a light background and a duller 16 pixel icon. The transparent icons are the
-  whole picture in their box, transparent where the picture is (its rounded corners; the tile
-  itself is at alpha 251 to 254 of 255, the pictures' own). The test re-derives every file from its
+  around the tile on a light background and a duller 16 pixel icon. The large files are the whole
+  picture in their box, transparent where the picture is (its rounded corners; the tile itself is
+  at alpha 251 to 254 of 255, the pictures' own). **The small files are not the whole small
+  picture**: it has a transparent margin of 18 to 29 pixels (of 1254) around its tile, one pixel
+  of a 16 pixel file is 78 of them, and drawn whole the outer rows and columns were only partly
+  covered (alpha 162 to 199 at 16, an empty top row at 48), a soft grey rim on a light title bar.
+  The tile's box (its pixels of alpha 250 or more) is x 18 to 1232 and y 29 to 1228, 1215 × 1200
+  pixels; the files take its shorter side, 1200 pixels, scaled to the icon (1254 / 1200 = 1.045
+  of the whole picture) and centred on the tile. The tile fills the box, the rounded corners stay
+  transparent, and the middle of each side is opaque. The test re-derives every file from its
   picture in plain Node and compares, and tells the two pictures apart by the white of the `>_`
-  (the small picture's is bold: 2 to 2.5 % of a 16, 32 or 48 pixel icon is white; the large one's is thin: about 0.5 % of a 192 or 512 pixel one).
-  At 16 pixels the small picture is the cloud's ring, the window's frame and a light chevron and
-  bar of about five pixels; it reads as a terminal in a cloud, not crisply. At 32 and 48 the cloud,
-  the window and the `>_` read.
+  (the small picture's is bold: 2.7 to 3.1 % of a 16, 32 or 48 pixel icon is white; the large
+  one's is thin: about 0.5 % of a 192 or 512 pixel one). At 16 pixels the small picture is the
+  cloud's ring, the window's frame and a light chevron and bar of about seven pixels; it reads as
+  a terminal in a cloud, not crisply. At 32 and 48 the cloud, the window and the `>_` read.
 - **The maskable icons** have a full background of the large picture's tile colour, `#040925` (the
   average of its opaque pixels between 555 and 585 pixels from its middle), with the picture in the
   middle at 0.927 of the icon's width: drawn in full within 555 of its 1254 pixels from its middle,

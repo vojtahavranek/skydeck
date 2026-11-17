@@ -211,6 +211,23 @@ function picture(which: Which): Png {
   return png;
 }
 
+/** The box of a picture's opaque pixels (alpha 250 or more): its tile, without the transparent
+ *  margin the picture has around it and without the tile's soft edge. */
+function tileBox(png: Png): { minX: number; maxX: number; minY: number; maxY: number } {
+  const box = { minX: png.width, maxX: -1, minY: png.height, maxY: -1 };
+  for (let y = 0; y < png.height; y++) {
+    for (let x = 0; x < png.width; x++) {
+      if (alpha(png, x, y) >= OPAQUE) {
+        box.minX = Math.min(box.minX, x);
+        box.maxX = Math.max(box.maxX, x);
+        box.minY = Math.min(box.minY, y);
+        box.maxY = Math.max(box.maxY, y);
+      }
+    }
+  }
+  return box;
+}
+
 /** How much of the large picture's pixel `r` pixels from its middle a maskable icon draws. */
 function weight(r: number): number {
   return r <= FADE_FROM ? 1 : r >= FADE_TO ? 0 : (FADE_TO - r) / (FADE_TO - FADE_FROM);
@@ -314,17 +331,27 @@ function axis(t: number, count: number, inner: number, offset: number): [number,
  * cover, premultiplied and in linear light; what the picture does not cover is transparent, or,
  * with `maskable`, BACKGROUND (opaque; the picture faded out as a maskable icon draws it). Straight
  * RGBA, 8 bits. This is what scripts/icons.ts does in Chromium, written again here so that the
- * committed files can be compared to it.
+ * committed files can be compared to it. The small picture is not drawn whole: its tile's box
+ * (`tileBox`), the shorter side of it, is scaled to the icon and centred on the tile, so that the
+ * tile fills the box (`scale` is for the others).
  */
 function reduced(size: number, scale: number, which: Which, maskable: boolean): Uint8Array {
   const source = linearPicture(which, maskable);
   const count = picture(which).width;
-  const inner = size * scale;
-  const offset = (size - inner) / 2;
-  const columns = Array.from({ length: size }, (_, t) => axis(t, count, inner, offset));
+  let inner = size * scale;
+  let offsetX = (size - inner) / 2;
+  let offsetY = offsetX;
+  if (which === 'small') {
+    const box = tileBox(picture('small'));
+    inner = (size * count) / Math.min(box.maxX - box.minX + 1, box.maxY - box.minY + 1);
+    offsetX = size / 2 - (((box.minX + box.maxX + 1) / 2) * inner) / count;
+    offsetY = size / 2 - (((box.minY + box.maxY + 1) / 2) * inner) / count;
+  }
+  const columns = Array.from({ length: size }, (_, t) => axis(t, count, inner, offsetX));
+  const rows = Array.from({ length: size }, (_, t) => axis(t, count, inner, offsetY));
   const out = new Uint8Array(size * size * 4);
   for (let ty = 0; ty < size; ty++) {
-    const [y0, wy] = columns[ty] ?? [0, []];
+    const [y0, wy] = rows[ty] ?? [0, []];
     for (let tx = 0; tx < size; tx++) {
       const [x0, wx] = columns[tx] ?? [0, []];
       const sum = [0, 0, 0, 0];
@@ -575,10 +602,32 @@ describe('the PNG files', () => {
     }
   });
 
+  test("the small picture's tile is drawn to fill the box: its opaque box is x 18 to 1232, y 29 to 1228, the middle half of each side of the three small files is opaque, the corners are not", () => {
+    // The small picture has a transparent margin of 18 to 29 pixels (of 1254) around its tile; one
+    // pixel of a 16 pixel file is 78 of them, so drawn whole the outer rows and columns were only
+    // partly covered (alpha 162 to 199 at 16, an empty top row at 48): a soft grey rim on a light
+    // bar. The files take the shorter side of the tile's box (1200 pixels), centred on the tile.
+    assert.deepEqual(tileBox(picture('small')), { minX: 18, maxX: 1232, minY: 29, maxY: 1228 });
+    for (const size of SMALL_SIZES) {
+      const png = decodePng(read(`${ICONS}/icon-${size}.png`));
+      for (let t = Math.ceil(size / 4); t < Math.floor((3 * size) / 4); t++) {
+        for (const [x, y] of [
+          [t, 0],
+          [t, size - 1],
+          [0, t],
+          [size - 1, t],
+        ] as const) {
+          assert.ok(alpha(png, x, y) >= OPAQUE, `icon-${size}.png: pixel ${x},${y} is not opaque`);
+        }
+      }
+      assert.deepEqual(corners(png), [0, 0, 0, 0], `icon-${size}.png`);
+    }
+  });
+
   test('every one is its picture, reduced: the same pixels as an average of it written again here', () => {
     // The script averages the picture's pixels under each pixel, in linear light, in Chromium;
     // `reduced` does the same in Node. Only rounding and the premultiplying of the canvas differ:
-    // compared premultiplied, alpha within 2 and each channel within 3 of 255.
+    // compared premultiplied, alpha and each channel within 3 of 255 (the worst seen is under 2).
     for (const { file, size } of PNGS) {
       const maskable = MASKABLE.some((m) => m.file === file);
       const png = decodePng(read(`${ICONS}/${file}`));
