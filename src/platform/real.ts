@@ -544,6 +544,7 @@ function realRunner(guard: WindowsGuard): Runner {
           cwd: options.cwd,
           env: options.env,
           stdio: [options.input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+          detached: options.newSession === true, // setsid(2) on Linux
         });
         let stdout = '';
         let stderr = '';

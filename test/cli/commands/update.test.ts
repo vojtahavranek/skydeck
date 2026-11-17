@@ -3,7 +3,7 @@
 // any other; the window's server is absent here (test/cli/commands/update-server.test.ts has the
 // cases with one). Every root is a directory inside the test's sandbox (hazard 1).
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -78,6 +78,16 @@ const BEFORE_FETCH = ['rev-parse', 'symbolic-ref', 'for-each-ref', 'status', 're
 /** What a look at one commit on the upstream calls, after the fetch (U4). */
 const LOOK = ['rev-parse', 'merge-base', 'rev-list', 'log', 'ls-tree', 'ls-tree'];
 
+/** A fetch that succeeded, and the look again at the branch, HEAD and the status after it (C3). */
+const FETCHED = ['fetch', 'symbolic-ref', 'rev-parse', 'status'];
+/** What applying calls before and around the merge: the index lock, the untracked files, the merge, HEAD after it. */
+const APPLIED = ['rev-parse', 'ls-files', 'merge', 'rev-parse'];
+/** What applying calls up to a merge that failed, and the look after it. */
+const FAILED = ['rev-parse', 'ls-files', 'merge', 'rev-parse', 'status', 'ls-files'];
+/** The end of the line for a checkout that may not be as it was (ruled, review 2 S1 and S3). */
+const NOT_AS_IT_WAS =
+  'the checkout may not be as it was: set it right as docs/install.md says ("Updating"), then run skydeck window';
+
 /** The report of one new commit (U4). */
 const ONE_COMMIT = `1 new commit on origin/main (0123456..fedcba9):\n  fedcba9  the new commit\n`;
 
@@ -121,7 +131,7 @@ describe('skydeck update: what must hold, else it refuses — exit 1, one line, 
     const checked = await u.update(['--check']);
     assert.equal(checked.code, 0, checked.stderr);
     assert.equal(checked.stdout, `${ONE_COMMIT}run skydeck update to apply it\n`);
-    assert.deepEqual(u.trace(), [...BEFORE_FETCH, 'fetch', ...LOOK]);
+    assert.deepEqual(u.trace(), [...BEFORE_FETCH, ...FETCHED, ...LOOK]);
   });
 
   test('1. CLAUDECODE set but empty is set: refused all the same', async (t) => {
@@ -271,6 +281,36 @@ describe('skydeck update: what must hold, else it refuses — exit 1, one line, 
     assert.deepEqual(u.trace(), [...BEFORE_FETCH, 'fetch']);
   });
 
+  test('the checkout changed while the fetch ran (review 2 C3): a branch switched, HEAD moved — refused; a file changed — refusal 6; nothing after', async (t) => {
+    const cases: [ScriptedRepo['afterFetch'], string][] = [
+      [
+        { branch: 'other' },
+        'skydeck: this checkout changed while git fetch ran (other at 0123456); run skydeck update again\n',
+      ],
+      [
+        { branch: null },
+        'skydeck: this checkout changed while git fetch ran (detached HEAD at 0123456); run skydeck update again\n',
+      ],
+      [
+        { head: commitId(9) },
+        'skydeck: this checkout changed while git fetch ran (main at 0000009); run skydeck update again\n',
+      ],
+      [
+        { status: ' M README.md\0' },
+        'skydeck: this checkout has changes that are not committed (1 file, the first: README.md); commit or undo them first\n',
+      ],
+    ];
+    for (const [afterFetch, line] of cases) {
+      const u = updater(t, { afterFetch });
+      const r = await u.update();
+      assert.equal(r.code, 1, line);
+      assert.equal(r.stdout, '');
+      assert.equal(r.stderr, line);
+      assert.ok(!u.trace().includes('merge-base'), 'nothing after the look');
+      assert.ok(!existsSync(u.tp.places.dbPath));
+    }
+  });
+
   test('8. ahead of the upstream, or diverged: the count of its own commits; no merge', async (t) => {
     for (const ahead of [1, 3]) {
       const u = updater(t, { ancestor: false, ahead });
@@ -283,7 +323,7 @@ describe('skydeck update: what must hold, else it refuses — exit 1, one line, 
       );
       assert.deepEqual(u.trace(), [
         ...BEFORE_FETCH,
-        'fetch',
+        ...FETCHED,
         'rev-parse',
         'merge-base',
         'rev-list',
@@ -308,17 +348,17 @@ describe('skydeck update: what must hold, else it refuses — exit 1, one line, 
       [
         { answers: { [`rev-list --count ${OLD}..${NEW}`]: { code: null, timedOut: true } } },
         'skydeck: git rev-list failed: no answer within 10 s; nothing was changed\n',
-        [...BEFORE_FETCH, 'fetch', 'rev-parse', 'merge-base', 'rev-list'],
+        [...BEFORE_FETCH, ...FETCHED, 'rev-parse', 'merge-base', 'rev-list'],
       ],
       [
         { answers: { [`merge-base --is-ancestor ${OLD} ${NEW}`]: { code: 128 } } },
         'skydeck: git merge-base failed: exit 128; nothing was changed\n',
-        [...BEFORE_FETCH, 'fetch', 'rev-parse', 'merge-base'],
+        [...BEFORE_FETCH, ...FETCHED, 'rev-parse', 'merge-base'],
       ],
       [
         { fetched: 'not an id' },
         'skydeck: git rev-parse failed: its answer is not a commit id; nothing was changed\n',
-        [...BEFORE_FETCH, 'fetch', 'rev-parse'],
+        [...BEFORE_FETCH, ...FETCHED, 'rev-parse'],
       ],
     ];
     for (const [over, line, trace] of cases) {
@@ -371,6 +411,8 @@ describe('skydeck update: how git is run (U3)', () => {
       assert.equal(call.options?.cwd, undefined, 'no chdir');
       const sub = subCommand(call, u.root);
       assert.equal(call.options?.timeoutMs, sub === 'merge' ? 60_000 : 10_000, sub);
+      // The merge alone runs in a session of its own (ruled, review 2 S2).
+      assert.equal(call.options?.newSession, sub === 'merge' ? true : undefined, sub);
     }
     assert.deepEqual(
       u.runner.calls.map((c) => c.args.slice(2)),
@@ -384,6 +426,10 @@ describe('skydeck update: how git is run (U3)', () => {
         ],
         ['--no-optional-locks', 'status', '--porcelain', '-z', '--untracked-files=no'],
         ['rev-parse', '--verify', 'HEAD^{commit}'],
+        // the fetch (runInteractive), then the same look again (review 2 C3)
+        ['symbolic-ref', '--quiet', 'HEAD'],
+        ['rev-parse', '--verify', 'HEAD^{commit}'],
+        ['--no-optional-locks', 'status', '--porcelain', '-z', '--untracked-files=no'],
         ['rev-parse', '--verify', 'refs/remotes/origin/main^{commit}'],
         ['merge-base', '--is-ancestor', OLD, NEW],
         ['rev-list', '--count', `${OLD}..${NEW}`],
@@ -400,7 +446,10 @@ describe('skydeck update: how git is run (U3)', () => {
         ],
         ['ls-tree', '--full-tree', '-z', OLD, '--', 'src/store/migrations.ts'],
         ['ls-tree', '--full-tree', '-z', NEW, '--', 'src/store/migrations.ts'],
-        ['merge', '--ff-only', NEW],
+        ['rev-parse', '--git-path', 'index.lock'],
+        ['ls-files', '-z', '--others', '--exclude-standard'],
+        ['merge', '--ff-only', '--no-squash', NEW],
+        ['rev-parse', '--verify', 'HEAD^{commit}'],
       ],
     );
     const [fetch] = u.runner.interactiveCalls;
@@ -465,10 +514,10 @@ describe('skydeck update: what it reports (U4)', () => {
     }
     assert.deepEqual(u.trace(), [
       ...BEFORE_FETCH,
-      'fetch',
+      ...FETCHED,
       'rev-parse',
       ...BEFORE_FETCH,
-      'fetch',
+      ...FETCHED,
       'rev-parse',
     ]);
     assert.ok(!existsSync(u.tp.places.dbPath), 'the database was not opened');
@@ -486,7 +535,7 @@ describe('skydeck update: what it reports (U4)', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.equal(r.stdout, `${ONE_COMMIT}run skydeck update to apply it\n`);
     assert.equal(r.stderr, '');
-    assert.deepEqual(u.trace(), [...BEFORE_FETCH, 'fetch', ...LOOK]);
+    assert.deepEqual(u.trace(), [...BEFORE_FETCH, ...FETCHED, ...LOOK]);
     assert.ok(!existsSync(u.tp.places.dbPath));
   });
 
@@ -540,6 +589,23 @@ describe('skydeck update: what it reports (U4)', () => {
     const r2 = await up.update();
     assert.equal(r2.code, 0, r2.stderr);
     assert.equal(r2.stdout, 'skydeck is up to date (work at 0123456, as origin/work)\n');
+  });
+
+  test('a subject longer than 200 characters is clipped with … (review 2 C2); one of 200 is not', async (t) => {
+    const u = updater(t, {
+      behind: 2,
+      commits: [
+        { id: NEW, subject: 'x'.repeat(300_000) },
+        { id: commitId(1), subject: 'y'.repeat(200) },
+      ],
+    });
+
+    const r = await u.update(['--check']);
+
+    assert.equal(r.code, 0, r.stderr);
+    const lines = r.stdout.split('\n');
+    assert.equal(lines[1], `  fedcba9  ${'x'.repeat(199)}…`);
+    assert.equal(lines[2], `  0000001  ${'y'.repeat(200)}`);
   });
 
   test('a subject with an escape sequence, a line break and a bidirectional control comes out harmless', async (t) => {
@@ -598,12 +664,54 @@ describe('skydeck update: applying, no window server (U5)', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.equal(r.stdout, `${ONE_COMMIT}updated to fedcba9\n`);
     assert.equal(r.stderr, '');
-    assert.deepEqual(u.trace(), [...BEFORE_FETCH, 'fetch', ...LOOK, 'merge']);
+    assert.deepEqual(u.trace(), [...BEFORE_FETCH, ...FETCHED, ...LOOK, ...APPLIED]);
     assert.deepEqual(
       u.runner.interactiveCalls.filter((c) => c.command !== 'git'),
       [],
     );
     assert.deepEqual(u.tp.processes.calls, []);
+  });
+
+  test('U2 10: the index locked — refused after the report, before the server is looked at: no merge, the database not opened', async (t) => {
+    const u = updater(t);
+    mkdirSync(join(u.root, '.git'));
+    writeFileSync(join(u.root, '.git', 'index.lock'), '');
+
+    const r = await u.update();
+
+    assert.equal(r.code, 1);
+    assert.equal(r.stdout, ONE_COMMIT);
+    assert.equal(
+      r.stderr,
+      `skydeck: this checkout's git index is locked (${join(u.root, '.git', 'index.lock')}): another git command runs in it, or one was cut off and left the file; nothing was changed\n`,
+    );
+    assert.deepEqual(u.trace(), [...BEFORE_FETCH, ...FETCHED, ...LOOK, 'rev-parse']);
+    assert.ok(!existsSync(u.tp.places.dbPath), 'no server looked at: the database not opened');
+  });
+
+  test('U2 10: an index lock is looked for where git says (a path of its own), and --check does not look', async (t) => {
+    const u = updater(t, { indexLock: '/elsewhere/worktrees/x/index.lock' });
+    mkdirSync(join(u.root, '.git'));
+    writeFileSync(join(u.root, '.git', 'index.lock'), '');
+
+    const checked = await u.update(['--check']);
+    assert.equal(checked.code, 0, checked.stderr);
+    const r = await u.update();
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /updated to fedcba9\n$/);
+  });
+
+  test('the merge ends with 0 but HEAD is not the new commit (a branch whose mergeOptions say --squash): not applied, and not as it was', async (t) => {
+    const u = updater(t, { headAfterMerge: OLD });
+
+    const r = await u.update();
+
+    assert.equal(r.code, 1);
+    assert.equal(r.stdout, ONE_COMMIT);
+    assert.equal(
+      r.stderr,
+      `skydeck: the update could not be applied: git merge ended, but HEAD is not at fedcba9; ${NOT_AS_IT_WAS}\n`,
+    );
   });
 
   test("the merge fails: git's line comes out harmless (an escape sequence, a bidirectional control)", async (t) => {
@@ -637,14 +745,7 @@ describe('skydeck update: applying, no window server (U5)', () => {
       r.stderr,
       'skydeck: the update could not be applied: error: The following untracked working tree files would be overwritten by merge:; the checkout is as it was\n',
     );
-    assert.deepEqual(u.trace(), [
-      ...BEFORE_FETCH,
-      'fetch',
-      ...LOOK,
-      'merge',
-      'rev-parse',
-      'status',
-    ]);
+    assert.deepEqual(u.trace(), [...BEFORE_FETCH, ...FETCHED, ...LOOK, ...FAILED]);
     assert.deepEqual(
       u.runner.interactiveCalls.filter((c) => c.command !== 'git'),
       [],
@@ -665,36 +766,75 @@ describe('skydeck update: applying, no window server (U5)', () => {
       assert.equal(r.code, 1);
       assert.equal(
         r.stderr,
-        'skydeck: the update could not be applied: fatal: cannot write; the checkout may not be as it was: look at it with git status, then run skydeck window\n',
+        `skydeck: the update could not be applied: fatal: cannot write; ${NOT_AS_IT_WAS}\n`,
         JSON.stringify(afterFailedMerge),
       );
     }
   });
 });
 
-describe('skydeck update: the 60 s of the merge (ruled by the plan owner)', () => {
-  test('a merge the timeout ended is named, and the checkout looked at as after any failure', async (t) => {
-    for (const [afterFailedMerge, end] of [
-      [{ head: OLD, status: '' }, 'the checkout is as it was'],
-      [
-        { head: NEW, status: '' },
-        'the checkout may not be as it was: look at it with git status, then run skydeck window',
-      ],
+describe('skydeck update: a merge that did not end by itself, or did not start (ruled, review 2 S1, C4)', () => {
+  test('refused by git, HEAD old and no tracked change, but files git does not track came: not as it was (S1)', async (t) => {
+    const u = updater(t, {
+      merge: { code: 1, stderr: 'error: unable to write file src/b.ts\n' },
+      untracked: 'mine.txt\0',
+      untrackedAfterFailedMerge: 'mine.txt\0src/new.ts\0',
+    });
+
+    const r = await u.update();
+
+    assert.equal(r.code, 1);
+    assert.equal(
+      r.stderr,
+      `skydeck: the update could not be applied: error: unable to write file src/b.ts; ${NOT_AS_IT_WAS}\n`,
+    );
+  });
+
+  test('cut off by the 60 s or by a signal: never "as it was", whatever HEAD and the status say — no look, no window', async (t) => {
+    for (const [merge, why] of [
+      [{ code: null, timedOut: true }, 'git merge timed out'],
+      [{ code: null }, 'git merge was ended by a signal'],
     ] as const) {
-      const u = updater(t, { merge: { code: null, timedOut: true }, afterFailedMerge });
+      const u = updater(t, { merge, afterFailedMerge: { head: OLD, status: '' } });
       const r = await u.update();
       assert.equal(r.code, 1);
       assert.equal(r.stdout, ONE_COMMIT);
       assert.equal(
         r.stderr,
-        `skydeck: the update could not be applied: git merge timed out; ${end}\n`,
+        `skydeck: the update could not be applied: ${why}; ${NOT_AS_IT_WAS}\n`,
       );
-      const trace = u.trace();
-      assert.deepEqual(trace.slice(trace.indexOf('merge'), trace.indexOf('merge') + 2), [
-        'merge',
-        'rev-parse',
-      ]);
+      assert.equal(u.trace().at(-1), 'merge', 'nothing looked at after it');
     }
+  });
+
+  test('a merge that could not be started (git gone, a start that fails): looked at as one git refused', async (t) => {
+    for (const merge of [{ code: null, notFound: true }]) {
+      const u = updater(t, { merge });
+      const r = await u.update();
+      assert.equal(r.code, 1);
+      assert.equal(
+        r.stderr,
+        'skydeck: the update could not be applied: git was not found on PATH; skydeck update needs it; the checkout is as it was\n',
+      );
+      assert.deepEqual(u.trace().slice(-4), ['merge', 'rev-parse', 'status', 'ls-files']);
+    }
+    const u = updater(t);
+    const platform: Platform = {
+      ...u.platform,
+      runner: {
+        ...u.runner,
+        run: (command, args, options) =>
+          args.includes('merge')
+            ? Promise.reject(Object.assign(new Error('spawn git EAGAIN'), { code: 'EAGAIN' }))
+            : u.runner.run(command, args, options),
+      },
+    };
+    const r = await runUpdate(platform, u.tp.sandbox);
+    assert.equal(r.code, 1);
+    assert.equal(
+      r.stderr,
+      'skydeck: the update could not be applied: spawn git EAGAIN; the checkout is as it was\n',
+    );
   });
 });
 
@@ -730,7 +870,7 @@ describe('skydeck update: the database at step 1 (ruled by the plan owner)', () 
       r.stderr,
       "skydeck: the database was written by a newer skydeck, so the window's server is not looked at; it is left as it is\n",
     );
-    assert.deepEqual(u.trace(), [...BEFORE_FETCH, 'fetch', ...LOOK, 'merge']);
+    assert.deepEqual(u.trace(), [...BEFORE_FETCH, ...FETCHED, ...LOOK, ...APPLIED]);
     assert.deepEqual(asked, []);
     assert.deepEqual(
       u.runner.interactiveCalls.filter((c) => c.command !== 'git'),

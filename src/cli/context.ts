@@ -27,10 +27,21 @@ export type Io = {
    * the process then ends as the signal would have ended it. Returns the function that unsubscribes it.
    */
   onTerminate(callback: (signal: TerminateSignal) => void): () => void;
+  /**
+   * Until the returned function is called, SIGINT and SIGTERM do not end the process: each calls
+   * `callback` with its name instead, and the process goes on — for a command that must finish what
+   * it has begun (`skydeck update` once the window's server is being stopped, F8). SIGHUP is not
+   * held: with its terminal gone the command could not say what it did. Calling the returned
+   * function again does nothing.
+   */
+  holdSignals(callback: (signal: HeldSignal) => void): () => void;
 };
 
 /** The signals `Io.onTerminate` reports. */
 export type TerminateSignal = 'SIGTERM' | 'SIGHUP' | 'SIGINT';
+
+/** The signals `Io.holdSignals` holds. */
+export type HeldSignal = 'SIGTERM' | 'SIGINT';
 
 /** Everything a command may reach for, passed in so tests can substitute fakes. */
 export type Context = { io: Io; platform: Platform };
@@ -177,6 +188,26 @@ function processIo(): Io {
         }
       };
       return unsubscribe;
+    },
+    holdSignals(callback) {
+      const signals: HeldSignal[] = ['SIGTERM', 'SIGINT'];
+      // A listener of its own replaces Node's default for the signal, which ends the process.
+      const listener = (signal: HeldSignal): void => {
+        callback(signal);
+      };
+      for (const signal of signals) {
+        process.on(signal, listener);
+      }
+      let held = true;
+      return () => {
+        if (!held) {
+          return;
+        }
+        held = false;
+        for (const signal of signals) {
+          process.off(signal, listener);
+        }
+      };
     },
     keys() {
       const stdin = process.stdin;

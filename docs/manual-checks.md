@@ -1759,7 +1759,8 @@ running.
 
 Setup: the window open, as you work with it; do not close it for this check. In the window, write
 down how many sessions the title bar counts, and which slots the Open section shows. In your own
-WSL terminal: `cd ~/skydeck`, then `git status --short`, and write down what it prints. Lines that
+WSL terminal: `skydeck doctor`, and write down its `problem` lines (if any: they are not this
+check's); then `cd ~/skydeck`, then `git status --short`, and write down what it prints. Lines that
 start with `??` are files git does not track: they do not matter. When it prints any other line,
 stop here and write that down: the update would refuse (a change of your own to a tracked file),
 and this check changes nothing of yours.
@@ -1792,10 +1793,14 @@ and this check changes nothing of yours.
      the same slots;
    - one window only: no second skydeck window opened (the taskbar shows one skydeck button, as
      before);
-   - `skydeck doctor` prints no `problem` line.
+   - `skydeck doctor` prints no `problem` line but those you wrote down in the setup.
+
+   Press no Ctrl+C during step 2: once `stopped skydeck's window server` is printed the command
+   finishes what it began (install.md, "Updating"), and this check is about an update that runs
+   through.
 
 Write down: what step 1 printed (the count, whether the database line came); for step 2, every line
 the terminal printed, whether the window said that the server was not answering and how long it
 took to come back, the count and the slots after it, whether a second window opened, and
-`skydeck doctor`'s `problem` lines (none expected). When a second window opened, close it with its
+`skydeck doctor`'s `problem` lines that were not there in the setup (none expected). When a second window opened, close it with its
 ×: closing a window ends no session.

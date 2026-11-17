@@ -138,6 +138,54 @@ describe('processContext', () => {
     });
   }
 
+  test('holdSignals: SIGINT and SIGTERM call back and the process goes on; released, SIGINT ends it again', async (t) => {
+    const s = sandbox(t);
+    const script = `
+      import { processContext } from ${JSON.stringify(CONTEXT_MODULE)};
+      const { io } = processContext();
+      const release = io.holdSignals((signal) => process.stdout.write('held ' + signal + ';'));
+      process.kill(process.pid, 'SIGINT');
+      process.kill(process.pid, 'SIGTERM');
+      setTimeout(() => {
+        process.stdout.write('alive;');
+        release();
+        release();
+        process.kill(process.pid, 'SIGINT');
+        setTimeout(() => process.stdout.write(' and never this'), 3000);
+      }, 200);
+    `;
+
+    const result = await realPlatform().runner.run(
+      process.execPath,
+      ['--input-type=module', '--eval', script],
+      { env: s.env(), timeoutMs: 20_000 },
+    );
+
+    assert.equal(result.stdout, 'held SIGINT;held SIGTERM;alive;');
+    assert.equal(result.code, null, 'ended by SIGINT once released');
+    assert.equal(result.timedOut, false);
+  });
+
+  test('holdSignals does not hold SIGHUP: the process ends by it', async (t) => {
+    const s = sandbox(t);
+    const script = `
+      import { processContext } from ${JSON.stringify(CONTEXT_MODULE)};
+      const { io } = processContext();
+      io.holdSignals((signal) => process.stdout.write('held ' + signal));
+      setTimeout(() => process.stdout.write('still alive'), 3000);
+      process.kill(process.pid, 'SIGHUP');
+    `;
+
+    const result = await realPlatform().runner.run(
+      process.execPath,
+      ['--input-type=module', '--eval', script],
+      { env: s.env(), timeoutMs: 20_000 },
+    );
+
+    assert.equal(result.stdout, '');
+    assert.equal(result.code, null, 'ended by SIGHUP');
+  });
+
   test('isTTY and size describe the streams: pipes are not terminals and give 80x24', async (t) => {
     const { out } = await inChild(t, 'print({ tty: io.isTTY, size: io.size() });', '');
 

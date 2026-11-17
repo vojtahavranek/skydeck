@@ -2,7 +2,9 @@
  * The tests of `skydeck update` (F8): a scripted git for the fake runner, and the one way every
  * test runs the command — on a root inside its sandbox, never on this repository (hazard 1).
  */
+import { main } from '../../src/cli/main.ts';
 import type { Platform, RunResult } from '../../src/platform/types.ts';
+import type { Captured } from './capture.ts';
 import { insideSandbox } from './git-checkout.ts';
 import { run } from './install.ts';
 import type { Run } from './install.ts';
@@ -53,6 +55,15 @@ export interface ScriptedRepo {
   merge: Partial<RunResult>;
   /** What HEAD and `status` say after a merge that failed. */
   afterFailedMerge: { head: string; status: string };
+  /** What HEAD says after a merge that ended with 0 (default: the fetched commit). */
+  headAfterMerge: string | null;
+  /** `rev-parse --git-path index.lock`'s answer. */
+  indexLock: string;
+  /** `ls-files -z --others --exclude-standard` before the merge, and after one that failed (null: the same). */
+  untracked: string;
+  untrackedAfterFailedMerge: string | null;
+  /** What the branch, HEAD and the status are once the fetch has run (each default: as before). */
+  afterFetch: { branch?: string | null; head?: string; status?: string };
   /** The launcher's exit code (null: not started, or ended by a signal). */
   launcher: number | null;
   /** Answers that replace the script's, keyed by the arguments after `-C <root>` joined by spaces. */
@@ -79,6 +90,11 @@ export function scriptedRepo(root: string, over: Partial<ScriptedRepo> = {}): Sc
     migrations: {},
     merge: {},
     afterFailedMerge: { head: OLD, status: '' },
+    headAfterMerge: null,
+    indexLock: '.git/index.lock',
+    untracked: '',
+    untrackedAfterFailedMerge: null,
+    afterFetch: {},
     launcher: 0,
     answers: {},
     onCall: () => {},
@@ -106,7 +122,11 @@ const DEFAULT_MIGRATIONS = migrationsEntry('5'.repeat(40));
  * the test (an Error) for any other. The fetch and the launcher go through runInteractive.
  */
 export function scriptedGit(repo: ScriptedRepo): FakeRunner {
-  let merged = false;
+  /** null until the merge; then whether it ended with 0. */
+  let merged: boolean | null = null;
+  let fetched = false;
+  const branch = (): string | null =>
+    fetched && repo.afterFetch.branch !== undefined ? repo.afterFetch.branch : repo.branch;
   const answer = (call: RunCall): RunResult => {
     repo.onCall(call, false);
     const args = gitArgs(call, repo.root);
@@ -122,17 +142,38 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
               stderr: 'fatal: not a git repository (or any of the parent directories): .git\n',
             })
           : line(repo.toplevel);
-      case 'symbolic-ref --quiet':
-        return repo.branch === null ? runResult({ code: 1 }) : line(`refs/heads/${repo.branch}`);
+      case 'symbolic-ref --quiet': {
+        const name = branch();
+        return name === null ? runResult({ code: 1 }) : line(`refs/heads/${name}`);
+      }
+      case 'ls-files -z':
+        return runResult({
+          stdout:
+            merged === false ? (repo.untrackedAfterFailedMerge ?? repo.untracked) : repo.untracked,
+        });
       case 'for-each-ref --format=%(refname)%00%(upstream)%00%(upstream:remotename)%00%(upstream:short)%00': {
         const { ref, remote, short } = repo.upstream;
         return line(`${rest[1] ?? ''}\0${ref}\0${remote}\0${short}\0`);
       }
       case '--no-optional-locks status':
-        return runResult({ stdout: merged ? repo.afterFailedMerge.status : repo.status });
+        return runResult({
+          stdout:
+            merged === false
+              ? repo.afterFailedMerge.status
+              : fetched
+                ? (repo.afterFetch.status ?? repo.status)
+                : repo.status,
+        });
+      case 'rev-parse --git-path':
+        if (rest[1] === 'index.lock') return line(repo.indexLock);
+        break;
       case 'rev-parse --verify': {
         const rev = rest[1] ?? '';
-        if (rev === 'HEAD^{commit}') return line(merged ? repo.afterFailedMerge.head : repo.head);
+        if (rev === 'HEAD^{commit}') {
+          if (merged === null)
+            return line(fetched ? (repo.afterFetch.head ?? repo.head) : repo.head);
+          return line(merged ? (repo.headAfterMerge ?? repo.fetched) : repo.afterFailedMerge.head);
+        }
         if (rev === `${repo.upstream.ref}^{commit}`) return line(repo.fetched);
         break;
       }
@@ -161,9 +202,11 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
         const id = rest[2] ?? '';
         return runResult({ stdout: repo.migrations[id] ?? DEFAULT_MIGRATIONS });
       }
-      case `merge --ff-only`:
-        merged = true;
-        return runResult(repo.merge);
+      case `merge --ff-only`: {
+        const result = runResult(repo.merge);
+        merged = result.code === 0 && !result.timedOut;
+        return result;
+      }
     }
     throw new Error(`the scripted git has no answer for: git ${call.args.join(' ')}`);
   };
@@ -171,7 +214,10 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
     repo.onCall(call, true);
     if (call.command === 'git') {
       const args = gitArgs(call, repo.root);
-      if (args[0] === 'fetch') return repo.fetch;
+      if (args[0] === 'fetch') {
+        fetched = true;
+        return repo.fetch;
+      }
       throw new Error(`the scripted git has no interactive answer for: git ${call.args.join(' ')}`);
     }
     return repo.launcher;
@@ -186,4 +232,19 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
 export async function runUpdate(platform: Platform, s: Sandbox, args: string[] = []): Promise<Run> {
   insideSandbox(s, platform.appRoot);
   return run(platform, ['update', ...args]);
+}
+
+/**
+ * runUpdate on an io the test made itself (capture()), so that it can deliver signals during the
+ * run (`captured.signal`); the same check of the app root first.
+ */
+export async function runUpdateOn(
+  platform: Platform,
+  s: Sandbox,
+  captured: Captured,
+  args: string[] = [],
+): Promise<Run> {
+  insideSandbox(s, platform.appRoot);
+  const code = await main(['update', ...args], { io: captured.io, platform });
+  return { code, stdout: captured.stdout(), stderr: captured.stderr(), prompts: captured.prompts };
 }

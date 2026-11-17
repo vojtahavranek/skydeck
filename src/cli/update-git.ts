@@ -61,8 +61,15 @@ const GIT_NOT_FOUND = 'git was not found on PATH; skydeck update needs it';
 export interface Git {
   /** The checkout (`platform.appRoot`). */
   root: string;
-  /** `git -C <root> <args>` with a timeout (GIT_MS unless given); a SkydeckError when git is not found. */
-  run(args: readonly string[], timeoutMs?: number): Promise<RunResult>;
+  /**
+   * `git -C <root> <args>` with a timeout (GIT_MS unless given), in a session of its own with
+   * `newSession`; a SkydeckError when git is not found.
+   */
+  run(
+    args: readonly string[],
+    timeoutMs?: number,
+    options?: { newSession?: boolean },
+  ): Promise<RunResult>;
   /** run(), and its standard output; any failure is gitFailure's SkydeckError. */
   output(args: readonly string[]): Promise<string>;
   /** `git -C <root> <args>` with the terminal and no timeout: its exit code, null when it did not end by itself. */
@@ -71,8 +78,16 @@ export interface Git {
 
 export function gitOn(platform: Platform, root: string): Git {
   const env = gitEnv(platform.env);
-  const run = async (args: readonly string[], timeoutMs = GIT_MS): Promise<RunResult> => {
-    const result = await platform.runner.run('git', ['-C', root, ...args], { env, timeoutMs });
+  const run = async (
+    args: readonly string[],
+    timeoutMs = GIT_MS,
+    options: { newSession?: boolean } = {},
+  ): Promise<RunResult> => {
+    const result = await platform.runner.run('git', ['-C', root, ...args], {
+      env,
+      timeoutMs,
+      ...(options.newSession === true ? { newSession: true } : {}),
+    });
     if (result.notFound) throw new SkydeckError(GIT_NOT_FOUND);
     return result;
   };
@@ -150,4 +165,13 @@ export async function changedFiles(git: Git): Promise<string[]> {
     if (entry[0] === 'R' || entry[0] === 'C' || entry[1] === 'R' || entry[1] === 'C') i += 1;
   }
   return paths;
+}
+
+/**
+ * The files git does not track and does not ignore (`ls-files -z --others --exclude-standard`), as
+ * git lists them: read before the merge and after one that failed, so that a git that ended after
+ * writing new files is not taken for one that changed nothing (ruled by the plan owner, review 2 S1).
+ */
+export async function untrackedFiles(git: Git): Promise<string> {
+  return git.output(['ls-files', '-z', '--others', '--exclude-standard']);
 }

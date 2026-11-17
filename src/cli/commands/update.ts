@@ -18,7 +18,7 @@
 // Standard output carries the report and the result line; every other line goes to standard
 // error with the `skydeck: ` prefix. Foreign text (a branch, a remote, a path, a commit's subject,
 // git's message) is sanitised.
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { SkydeckError } from '../../platform/errors.ts';
 import type { RunResult } from '../../platform/types.ts';
@@ -28,6 +28,7 @@ import { computeBuild } from '../../window/build.ts';
 import { findServer, stopServer } from '../../window/lifecycle.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
+import { clip } from '../clip.ts';
 import type { Command } from '../command.ts';
 import type { Context } from '../context.ts';
 import { withDeck } from '../deck.ts';
@@ -41,6 +42,7 @@ import {
   gitOn,
   GIT_MS,
   MERGE_MS,
+  untrackedFiles,
 } from '../update-git.ts';
 import type { Git } from '../update-git.ts';
 import { windowTimes } from '../window-open.ts';
@@ -135,6 +137,27 @@ async function countOf(git: Git, args: readonly string[]): Promise<number> {
   return Number(text);
 }
 
+/** The ref HEAD names (`refs/heads/<branch>`); null for a detached HEAD (or one that names no branch). */
+async function headRef(git: Git): Promise<string | null> {
+  const args = ['symbolic-ref', '--quiet', 'HEAD'];
+  const head = await git.run(args);
+  if (head.code === 1 && !head.timedOut) return null;
+  if (head.code !== 0 || head.timedOut) throw gitFailure(args, head, GIT_MS);
+  const ref = head.stdout.trim();
+  return ref.startsWith('refs/heads/') ? ref : null;
+}
+
+/** U2 6: no tracked file changed, staged or unmerged (untracked files do not count). */
+async function refuseChanges(git: Git): Promise<void> {
+  const changed = await changedFiles(git);
+  const [first] = changed;
+  if (first !== undefined) {
+    throw new SkydeckError(
+      `this checkout has changes that are not committed (${counted(changed.length, 'file', 'files')}, the first: ${sanitize(first)}); commit or undo them first`,
+    );
+  }
+}
+
 /** U2 2–8 in their order, then U4's facts. Every refusal is a SkydeckError; nothing is changed. */
 async function whatIsNew(ctx: Context, git: Git): Promise<Update> {
   const { root } = git;
@@ -154,15 +177,12 @@ async function whatIsNew(ctx: Context, git: Git): Promise<Update> {
     );
   }
   // 4: on a branch.
-  const headArgs = ['symbolic-ref', '--quiet', 'HEAD'];
-  const head = await git.run(headArgs);
-  const detached = new SkydeckError(
-    'this checkout is not on a branch (detached HEAD); update it with git yourself',
-  );
-  if (head.code === 1 && !head.timedOut) throw detached;
-  if (head.code !== 0 || head.timedOut) throw gitFailure(headArgs, head, GIT_MS);
-  const ref = head.stdout.trim();
-  if (!ref.startsWith('refs/heads/')) throw detached;
+  const ref = await headRef(git);
+  if (ref === null) {
+    throw new SkydeckError(
+      'this checkout is not on a branch (detached HEAD); update it with git yourself',
+    );
+  }
   const branch = ref.slice('refs/heads/'.length);
   // 5: following a branch of a remote.
   // Each field ends with a NUL, so that a line break in one (a remote's name may hold one) cannot
@@ -186,13 +206,7 @@ async function whatIsNew(ctx: Context, git: Git): Promise<Update> {
     );
   }
   // 6: no tracked change (untracked files do not count).
-  const changed = await changedFiles(git);
-  const [first] = changed;
-  if (first !== undefined) {
-    throw new SkydeckError(
-      `this checkout has changes that are not committed (${counted(changed.length, 'file', 'files')}, the first: ${sanitize(first)}); commit or undo them first`,
-    );
-  }
+  await refuseChanges(git);
   const oldId = await commitOf(git, 'HEAD');
   // 7: the fetch, in the owner's terminal: a passphrase prompt works, Ctrl+C ends it.
   if ((await git.interactive(['fetch', '--quiet', '--', remote])) !== 0) {
@@ -200,6 +214,18 @@ async function whatIsNew(ctx: Context, git: Git): Promise<Update> {
       `git fetch from ${sanitize(remote)} failed (git's own message is above); nothing was changed`,
     );
   }
+  // The fetch can wait at a prompt while the checkout is used: what was looked at before it is
+  // looked at again (review 2 C3).
+  const refAfter = await headRef(git);
+  const headAfter = await commitOf(git, 'HEAD');
+  if (refAfter !== ref || headAfter !== oldId) {
+    const where =
+      refAfter === null ? 'detached HEAD' : sanitize(refAfter.slice('refs/heads/'.length));
+    throw new SkydeckError(
+      `this checkout changed while git fetch ran (${where} at ${short(headAfter)}); run skydeck update again`,
+    );
+  }
+  await refuseChanges(git);
   const newId = await commitOf(git, upstreamRef);
   const update: Update = {
     branch,
@@ -260,11 +286,20 @@ async function migrationsOf(git: Git, commit: string): Promise<string> {
   return entry.split('\t')[0]?.split(' ')[2] ?? '';
 }
 
+/** The longest subject the report shows, in UTF-16 units (review 2 C2). */
+const SUBJECT_MAX = 200;
+
+/** A commit's subject as the report shows it: sanitised, and clipped with `…` past SUBJECT_MAX. */
+function subjectLine(subject: string): string {
+  const text = sanitize(subject);
+  return text.length > SUBJECT_MAX ? `${clip(text, SUBJECT_MAX - 1)}…` : text;
+}
+
 /** U4's lines for an update that brings commits. */
 function report(update: Update): string[] {
   const lines = [
     `${counted(update.count, 'new commit', 'new commits')} on ${sanitize(update.upstream)} (${short(update.oldId)}..${short(update.newId)}):`,
-    ...update.commits.map((c) => `  ${short(c.id)}  ${sanitize(c.subject)}`),
+    ...update.commits.map((c) => `  ${short(c.id)}  ${subjectLine(c.subject)}`),
   ];
   if (update.count > update.commits.length) {
     lines.push(`  … and ${update.count - update.commits.length} more`);
@@ -283,6 +318,75 @@ interface Stopped {
   pages: number;
 }
 
+/**
+ * The command's lines, and the signals it holds once the server's stop has begun (ruled by the plan
+ * owner, review 2 S2): from the moment stopServer is called until the last line, SIGINT and SIGTERM
+ * do not end the command — it never ends silently with the server stopped and the checkout half
+ * written. `interrupted` says whether one came. Before the hold starts a signal ends the command as
+ * it always did (the fetch above all). SIGHUP is not held: with the terminal gone nobody would read
+ * what the command says (install.md says what a closed terminal leaves).
+ */
+interface Held {
+  /** Starts the hold (called right before stopServer). */
+  start(): void;
+  /** Ends it; again does nothing. */
+  release(): void;
+  interrupted(): boolean;
+  out(line: string): void;
+  err(line: string): void;
+}
+
+function held(ctx: Context): Held {
+  let release: (() => void) | null = null;
+  let interrupted = false;
+  return {
+    start() {
+      release ??= ctx.io.holdSignals(() => {
+        interrupted = true;
+      });
+    },
+    release() {
+      release?.();
+    },
+    interrupted: () => interrupted,
+    out(line) {
+      ctx.io.stdout(`${line}\n`);
+    },
+    err(line) {
+      ctx.io.stderr(`skydeck: ${line}\n`);
+    },
+  };
+}
+
+/** How the merge ended: by itself with a code, not at all (it did not start), or cut off. */
+type Merged =
+  | { kind: 'ended'; result: RunResult }
+  | { kind: 'not-started'; why: string }
+  | { kind: 'cut-off'; why: string };
+
+/**
+ * `merge --ff-only --no-squash <id>` in a session of its own (the terminal's Ctrl+C and hang-up do
+ * not reach it, ruled by the plan owner, S2). `--no-squash`: a `branch.<name>.mergeOptions` of
+ * `--squash` would make it exit 0 with HEAD where it was (review 2 C1).
+ */
+async function merge(git: Git, id: string): Promise<Merged> {
+  let result: RunResult;
+  try {
+    result = await git.run(['merge', '--ff-only', '--no-squash', id], MERGE_MS, {
+      newSession: true,
+    });
+  } catch (error) {
+    // git not found, or a start that failed (EAGAIN …): it changed nothing (review 2 C4).
+    return {
+      kind: 'not-started',
+      why: error instanceof Error ? sanitize(error.message) : 'git merge could not be started',
+    };
+  }
+  if (result.timedOut) return { kind: 'cut-off', why: 'git merge timed out' };
+  if (result.code === null) return { kind: 'cut-off', why: 'git merge was ended by a signal' };
+  return { kind: 'ended', result };
+}
+
 /** U5, in its order. */
 async function apply(ctx: Context, git: Git, update: Update): Promise<number> {
   const { platform } = ctx;
@@ -291,61 +395,120 @@ async function apply(ctx: Context, git: Git, update: Update): Promise<number> {
   const launcher = join(git.root, 'bin', 'skydeck');
   const cwd = platform.cwd;
   const env = definedEnv(platform.env);
-  const err = (line: string): void => ctx.io.stderr(`skydeck: ${line}\n`);
 
-  // 1. The server of this checkout is stopped; the database is closed again before step 2.
-  const step1 = await stopForUpdate(ctx, times);
+  // U2 10: an index lock would fail the merge after the server's stop (ruled by the plan owner).
+  await refuseLockedIndex(ctx, git);
+  // What a merge that failed is compared with, besides HEAD and the tracked files (S1).
+  const untrackedBefore = await untrackedFiles(git);
 
-  // 2. The fast-forward to the commit the report named.
-  const merge = await git
-    .run(['merge', '--ff-only', update.newId], MERGE_MS)
-    .catch((error: unknown): RunResult => {
-      if (!(error instanceof SkydeckError)) throw error;
-      return { code: null, stdout: '', stderr: error.message, timedOut: false, notFound: false };
-    });
-  // From here on this process loads nothing from the checkout (U6).
-  if (merge.code !== 0 || merge.timedOut) {
-    // A merge the 60 s ended has no line of git's: then it is named; the checkout is looked at as
-    // after any other failure (ruled by the plan owner).
-    const why = merge.timedOut ? 'git merge timed out' : failureReason(merge, MERGE_MS);
-    if (!(await asItWas(git, update.oldId))) {
-      err(
-        `the update could not be applied: ${why}; the checkout may not be as it was: look at it with git status, then run skydeck window`,
-      );
+  const hold = held(ctx);
+  try {
+    // 1. The server of this checkout is stopped; the database is closed again before step 2.
+    const step1 = await stopForUpdate(ctx, times, hold);
+    if (hold.interrupted()) {
+      // A signal during the stop: no merge; the window back on the old code (ruled, S2).
+      await bringBack(ctx, hold, step1, launcher, cwd, env);
+      hold.err('interrupted before the update was applied; the checkout was not changed');
       return EXIT.failure;
     }
-    await bringBack(ctx, step1, launcher, cwd, env);
-    err(`the update could not be applied: ${why}; the checkout is as it was`);
-    return EXIT.failure;
-  }
 
-  // 3. The window's server again, only when the stopped one had a page.
-  const done = await bringBack(ctx, step1, launcher, cwd, env);
-  // 4. The result.
-  const id = short(update.newId);
-  if (done === 'ok') {
-    ctx.io.stdout(`updated to ${id}\n`);
-    return EXIT.ok;
+    // 2. The fast-forward to the commit the report named. From its start on a signal abandons
+    // nothing: the merge ends, step 3 runs, the result line is printed.
+    const merged = await merge(git, update.newId);
+    // From here on this process loads nothing from the checkout (U6).
+    const notApplied = await failedMerge(git, update, merged, untrackedBefore);
+    if (notApplied !== null) {
+      if (!notApplied.asItWas) {
+        hold.err(
+          `the update could not be applied: ${notApplied.why}; the checkout may not be as it was: set it right as docs/install.md says ("Updating"), then run skydeck window`,
+        );
+        return EXIT.failure;
+      }
+      await bringBack(ctx, hold, step1, launcher, cwd, env);
+      hold.err(`the update could not be applied: ${notApplied.why}; the checkout is as it was`);
+      return EXIT.failure;
+    }
+
+    // 3. The window's server again, only when the stopped one had a page.
+    const done = await bringBack(ctx, hold, step1, launcher, cwd, env);
+    // 4. The result.
+    const id = short(update.newId);
+    if (done === 'ok') {
+      hold.out(`updated to ${id}`);
+      return EXIT.ok;
+    }
+    hold.err(
+      done === null
+        ? `updated to ${id}, but skydeck window could not be started or was ended by a signal; run skydeck window`
+        : `updated to ${id}, but skydeck window ended with exit ${done}; run skydeck window`,
+    );
+    return EXIT.failure;
+  } finally {
+    hold.release();
   }
-  err(
-    done === null
-      ? `updated to ${id}, but skydeck window could not be started or was ended by a signal; run skydeck window`
-      : `updated to ${id}, but skydeck window ended with exit ${done}; run skydeck window`,
+}
+
+/**
+ * Why the update was not applied, and whether the checkout is as it was; null when it was applied
+ * (the merge ended with 0 and HEAD is the new commit). A merge that did not end by itself — the 60
+ * s, a signal — is never "as it was", whatever HEAD and the status say: a cut-off checkout can hold
+ * the new commit's files untracked and the index lock (ruled by the plan owner, review 2 S1). One
+ * that ended with 0 but left HEAD elsewhere is not applied, and not as it was either (C1). One git
+ * refused, or that did not start, is looked at: HEAD and the status.
+ */
+async function failedMerge(
+  git: Git,
+  update: Update,
+  merged: Merged,
+  untrackedBefore: string,
+): Promise<{ why: string; asItWas: boolean } | null> {
+  switch (merged.kind) {
+    case 'cut-off':
+      return { why: merged.why, asItWas: false };
+    case 'not-started':
+      return { why: merged.why, asItWas: await asItWas(git, update.oldId, untrackedBefore) };
+    case 'ended': {
+      const { result } = merged;
+      if (result.code !== 0) {
+        return {
+          why: failureReason(result, MERGE_MS),
+          asItWas: await asItWas(git, update.oldId, untrackedBefore),
+        };
+      }
+      const head = await commitOf(git, 'HEAD').catch((): null => null);
+      if (head === update.newId) return null;
+      return {
+        why: `git merge ended, but HEAD is not at ${short(update.newId)}`,
+        asItWas: false,
+      };
+    }
+  }
+}
+
+/** U2 10: `rev-parse --git-path index.lock`, resolved against the root, must not exist. */
+async function refuseLockedIndex(ctx: Context, git: Git): Promise<void> {
+  const path = resolve(
+    git.root,
+    (await git.output(['rev-parse', '--git-path', 'index.lock'])).replace(/\n$/, ''),
   );
-  return EXIT.failure;
+  if (ctx.platform.files.lstat(path) !== null) {
+    throw new SkydeckError(
+      `this checkout's git index is locked (${sanitize(path)}): another git command runs in it, or one was cut off and left the file; nothing was changed`,
+    );
+  }
 }
 
 /**
  * U5 step 1 on the deck (opened here, and closed again when it returns): the window's server of
- * this checkout, when there is one, has its pages counted and is stopped. A server of another
- * checkout is left as it is; a server that does not answer is refused (U2 9). A database written by
- * a newer skydeck is no error here — its message asks for this command —: the server is not looked
- * at, and the update goes on without steps 1 and 3 (ruled by the plan owner). Any other error ends
- * the command and says what was left as it was: `nothing was changed` before stopServer was called,
- * `the checkout was not changed` once it was (a server asked to shut down, or signalled, that did
- * not end).
+ * this checkout, when there is one, has its pages counted and is stopped; the hold of `hold` starts
+ * right before stopServer is called. A server of another checkout is left as it is; a server that
+ * does not answer is refused (U2 9). A database written by a newer skydeck is no error here — its
+ * message asks for this command —: the server is not looked at, and the update goes on without
+ * steps 1 and 3 (ruled by the plan owner). Any other error ends the command and says what was left
+ * as it was: `nothing was changed` before stopServer was called, `the checkout was not changed`
+ * once it was (a server asked to shut down, or signalled, that did not end).
  */
-async function stopForUpdate(ctx: Context, times: WindowTimes): Promise<Stopped> {
+async function stopForUpdate(ctx: Context, times: WindowTimes, hold: Held): Promise<Stopped> {
   let stopping = false;
   try {
     return await withDeck(ctx, { refresh: false }, async (deck) => {
@@ -357,26 +520,25 @@ async function stopForUpdate(ctx: Context, times: WindowTimes): Promise<Stopped>
         case 'hung':
           throw new SkydeckError(hungServerLine(found, times));
         case 'other-checkout':
-          ctx.io.stderr(
-            `skydeck: the window's server runs from another checkout (${sanitize(found.ping.checkout)}); it is left as it is\n`,
+          hold.err(
+            `the window's server runs from another checkout (${sanitize(found.ping.checkout)}); it is left as it is`,
           );
           return { stopped: false, pages: 0 };
         case 'ours':
         case 'other-build': {
           const pages = await pagesOf(deck);
           stopping = true;
+          hold.start();
           const { stopped, keepers } = await stopServer(deck, times);
-          if (stopped) {
-            ctx.io.stderr(`skydeck: stopped skydeck's window server; ${keepRunning(keepers)}\n`);
-          }
+          if (stopped) hold.err(`stopped skydeck's window server; ${keepRunning(keepers)}`);
           return { stopped, pages };
         }
       }
     });
   } catch (error) {
     if (error instanceof DatabaseNewerError) {
-      ctx.io.stderr(
-        "skydeck: the database was written by a newer skydeck, so the window's server is not looked at; it is left as it is\n",
+      hold.err(
+        "the database was written by a newer skydeck, so the window's server is not looked at; it is left as it is",
       );
       return { stopped: false, pages: 0 };
     }
@@ -388,10 +550,17 @@ async function stopForUpdate(ctx: Context, times: WindowTimes): Promise<Stopped>
   }
 }
 
-/** After a merge that failed: whether HEAD is still `oldId` and no tracked file changed. */
-async function asItWas(git: Git, oldId: string): Promise<boolean> {
+/**
+ * After a merge git refused: whether HEAD is still `oldId`, no tracked file changed and the
+ * untracked files are those of before the merge; false when that cannot be told.
+ */
+async function asItWas(git: Git, oldId: string, untrackedBefore: string): Promise<boolean> {
   try {
-    return (await commitOf(git, 'HEAD')) === oldId && (await changedFiles(git)).length === 0;
+    return (
+      (await commitOf(git, 'HEAD')) === oldId &&
+      (await changedFiles(git)).length === 0 &&
+      (await untrackedFiles(git)) === untrackedBefore
+    );
   } catch (error) {
     if (error instanceof SkydeckError) return false;
     throw error;
@@ -406,6 +575,7 @@ async function asItWas(git: Git, oldId: string): Promise<boolean> {
  */
 async function bringBack(
   ctx: Context,
+  hold: Held,
   step1: Stopped,
   launcher: string,
   cwd: string,
@@ -413,9 +583,7 @@ async function bringBack(
 ): Promise<'ok' | number | null> {
   if (!step1.stopped) return 'ok';
   if (step1.pages === 0) {
-    ctx.io.stderr(
-      "skydeck: the window's server was stopped for the update; skydeck window starts it again\n",
-    );
+    hold.err("the window's server was stopped for the update; skydeck window starts it again");
     return 'ok';
   }
   const code = await ctx.platform.runner

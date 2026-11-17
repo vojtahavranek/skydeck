@@ -1,4 +1,4 @@
-import type { Io, TerminateSignal } from '../../src/cli/context.ts';
+import type { HeldSignal, Io, TerminateSignal } from '../../src/cli/context.ts';
 
 export interface CaptureOptions {
   /** Whether each stream reports itself as a terminal; default false. */
@@ -31,6 +31,12 @@ export interface Captured {
   openKeys: () => number;
   /** Calls every onTerminate callback with `signal`, as the real one does when the process gets it. */
   terminate: (signal: TerminateSignal) => void;
+  /**
+   * `signal` as the process would get it, for holdSignals: true when a hold took it (every holding
+   * callback was called), false when none holds it — SIGHUP never is — (the real process would then
+   * end, or call its onTerminate callbacks: `terminate` plays that).
+   */
+  signal: (signal: TerminateSignal) => boolean;
 }
 
 /** An `Io` that records what is written to it and answers reads from `options`. */
@@ -45,6 +51,7 @@ export function capture(options: CaptureOptions = {}): Captured {
   const resized = new Set<() => void>();
   let openKeys = 0;
   const terminating = new Set<(signal: TerminateSignal) => void>();
+  const holding = new Set<(signal: HeldSignal) => void>();
   return {
     io: {
       stdout: (text) => {
@@ -97,6 +104,15 @@ export function capture(options: CaptureOptions = {}): Captured {
           terminating.delete(listener);
         };
       },
+      holdSignals: (callback) => {
+        const listener = (signal: HeldSignal): void => {
+          callback(signal);
+        };
+        holding.add(listener);
+        return () => {
+          holding.delete(listener);
+        };
+      },
       onResize: (callback) => {
         // A wrapper per subscription, so that subscribing the same function twice is two subscriptions.
         const listener = (): void => {
@@ -116,6 +132,15 @@ export function capture(options: CaptureOptions = {}): Captured {
       for (const listener of [...terminating]) {
         listener(signal);
       }
+    },
+    signal: (signal) => {
+      if (holding.size === 0 || signal === 'SIGHUP') {
+        return false;
+      }
+      for (const listener of [...holding]) {
+        listener(signal);
+      }
+      return true;
     },
     resize: (next) => {
       size = next;

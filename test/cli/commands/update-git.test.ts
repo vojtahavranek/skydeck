@@ -142,6 +142,48 @@ describe('skydeck update with the real git: applying (U5, U8)', () => {
   });
 });
 
+describe('the merge in a session of its own (ruled by the plan owner, review 2 S2)', () => {
+  /** Fields 5 and 6 of a /proc/<pid>/stat line: the process group and the session. */
+  function groupAndSession(stat: string): { pgrp: string; session: string } {
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    return { pgrp: fields[2] ?? '', session: fields[3] ?? '' };
+  }
+
+  test("the merge's git is in neither this process's session nor its process group; the other calls are", async (t) => {
+    const r = real(t);
+    r.c.push('add a file', { 'a.txt': 'a\n' });
+    // git on the sandbox's PATH becomes a wrapper that records its own process group and session
+    // (as /proc/self/stat says them to the shell that is about to exec git), then runs git.
+    const record = join(r.tp.sandbox.root, 'git-calls.txt');
+    const wrapper = join(r.tp.sandbox.bin, 'git');
+    rmSync(wrapper);
+    writeFileSync(
+      wrapper,
+      `#!/bin/sh\nread -r skydeck_stat </proc/self/stat\nprintf '%s\\t%s\\n' "$*" "$skydeck_stat" >>'${record}'\nexec '${r.c.gitPath}' "$@"\n`,
+      { mode: 0o755 },
+    );
+    const mine = groupAndSession(readFileSync('/proc/self/stat', 'utf8'));
+
+    const u = await runUpdate({ ...r.platform, appRoot: r.c.root }, r.tp.sandbox);
+
+    assert.equal(u.code, 0, u.stderr);
+    const calls = readFileSync(record, 'utf8')
+      .split('\n')
+      .filter((line) => line !== '')
+      .map((line) => {
+        const [args = '', stat = ''] = line.split('\t');
+        return { args, ...groupAndSession(stat) };
+      });
+    const merges = calls.filter((c) => c.args.includes(' merge --ff-only '));
+    assert.equal(merges.length, 1, JSON.stringify(calls));
+    const [mergeCall] = merges;
+    assert.notEqual(mergeCall?.session, mine.session, 'not in this session');
+    assert.notEqual(mergeCall?.pgrp, mine.pgrp, 'not in this process group');
+    const top = calls.find((c) => c.args.endsWith('rev-parse --show-toplevel'));
+    assert.equal(top?.session, mine.session, 'the control: another call shares the session');
+  });
+});
+
 describe('skydeck update with the real git: the refusals (U2, U8)', () => {
   /** Asserts a refusal: exit 1, the line, no stdout, HEAD and the remote-tracking ref unmoved. */
   async function refused(r: Real, line: string, args: string[] = []): Promise<void> {
@@ -177,6 +219,26 @@ describe('skydeck update with the real git: the refusals (U2, U8)', () => {
     const u = await r.update(['--check']);
     assert.equal(u.code, 0, u.stderr);
     assert.match(u.stdout, /^1 new commit on origin\/main /);
+  });
+
+  test('U2 10: an index lock left in the checkout — refused before anything is changed (only when there is something to apply)', async (t) => {
+    const r = real(t);
+    r.c.push('remote work', { 'c.txt': 'c\n' });
+    const lock = join(r.c.root, '.git', 'index.lock');
+    writeFileSync(lock, '');
+    const head = r.c.id();
+
+    const checked = await r.update(['--check']);
+    assert.equal(checked.code, 0, checked.stderr);
+    const u = await r.update();
+
+    assert.equal(u.code, 1);
+    assert.match(u.stdout, /^1 new commit on origin\/main /);
+    assert.equal(
+      u.stderr,
+      `skydeck: this checkout's git index is locked (${lock}): another git command runs in it, or one was cut off and left the file; nothing was changed\n`,
+    );
+    assert.equal(r.c.id(), head);
   });
 
   test('a detached HEAD', async (t) => {

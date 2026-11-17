@@ -123,6 +123,11 @@ export interface RunOptions {
   /** The child's complete environment; omitted → the environment of this process. Tests always pass sandbox.env(). */
   env?: Readonly<Record<string, string>>;
   /**
+   * The child starts in a session of its own (setsid), so that the terminal's signals — Ctrl+C, a
+   * closed terminal — do not reach it (`skydeck update`'s merge, F8). Its pipes are as without.
+   */
+  newSession?: boolean;
+  /**
    * When it fires, the child is killed (SIGKILL), nothing it started is waited for, and run()
    * rejects with an Error named `AbortError`. Already aborted: nothing is started, run() rejects.
    * A signal that fires after run() has answered changes nothing.

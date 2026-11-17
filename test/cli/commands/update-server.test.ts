@@ -23,7 +23,15 @@ import { procStartOf, stillRuns } from '../../helpers/keeper.ts';
 import { realTestPlatform } from '../../helpers/platform.ts';
 import type { RealTestPlatform, RunCall } from '../../helpers/platform.ts';
 import type { Sandbox } from '../../helpers/sandbox.ts';
-import { OLD, runUpdate, scriptedGit, scriptedRepo, subCommand } from '../../helpers/update.ts';
+import { capture } from '../../helpers/capture.ts';
+import {
+  OLD,
+  runUpdate,
+  runUpdateOn,
+  scriptedGit,
+  scriptedRepo,
+  subCommand,
+} from '../../helpers/update.ts';
 import type { ScriptedRepo } from '../../helpers/update.ts';
 
 const FAKE_SERVE = fileURLToPath(new URL('../../fixtures/fake-serve/bin/skydeck', import.meta.url));
@@ -50,6 +58,8 @@ interface Harness {
   launches: RunCall[];
   /** Every signal the command asked for (it is refused). */
   signals: number[];
+  /** Called at every request on server.sock, before it is sent (a test acts during the stop). */
+  onRequest: (method: string, path: string) => void;
   platform(runner: Runner): Platform;
   /** The fake serve with `env` over its defaults (this checkout and its build, no page). */
   serve(env?: Record<string, string>): Promise<FakeServer>;
@@ -85,6 +95,7 @@ function harness(t: TestContext, times = 'pingMs=1500'): Harness {
     ...tp.platform.net,
     requestUnix(path, request) {
       events.push(`${request.method} ${request.path}`);
+      h.onRequest(request.method, request.path);
       return tp.platform.net.requestUnix(path, request);
     },
   };
@@ -95,6 +106,7 @@ function harness(t: TestContext, times = 'pingMs=1500'): Harness {
     events,
     launches: [],
     signals,
+    onRequest: () => {},
     platform: (runner) => ({
       ...tp.platform,
       appRoot: root,
@@ -273,6 +285,7 @@ describe('skydeck update with a window server of this checkout (U5)', () => {
     assert.deepEqual(h.events.slice(h.events.indexOf('git merge') + 1), [
       'git rev-parse',
       'git status',
+      'git ls-files',
       `launch ${h.root}/bin/skydeck window`,
     ]);
   });
@@ -291,9 +304,110 @@ describe('skydeck update with a window server of this checkout (U5)', () => {
     assert.equal(r.code, 1);
     assert.equal(
       r.stderr,
-      `${STOPPED}skydeck: the update could not be applied: error: unable to write file src/a.ts; the checkout may not be as it was: look at it with git status, then run skydeck window\n`,
+      `${STOPPED}skydeck: the update could not be applied: error: unable to write file src/a.ts; the checkout may not be as it was: set it right as docs/install.md says ("Updating"), then run skydeck window\n`,
     );
     assert.deepEqual(h.launches, []);
+  });
+});
+
+describe('signals once the stop has begun (ruled by the plan owner, review 2 S2)', () => {
+  const INTERRUPTED =
+    'skydeck: interrupted before the update was applied; the checkout was not changed\n';
+
+  test('a signal during the stop: the stop ends, no merge, the window back on the old code (a page was open), the line, exit 1', async (t) => {
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+      const h = harness(t);
+      await h.serve({ FAKE_SERVE_PAGES: '1' });
+      const captured = capture();
+      const held: boolean[] = [];
+      h.onRequest = (method, path) => {
+        if (path === '/shutdown') held.push(captured.signal(signal));
+      };
+
+      const r = await runUpdateOn(h.platform(scripted(h)), h.s, captured);
+
+      assert.deepEqual(held, [true], `${signal} held during the stop`);
+      assert.equal(r.code, 1);
+      assert.equal(r.stdout, ONE_COMMIT);
+      assert.equal(r.stderr, `${STOPPED}${INTERRUPTED}`);
+      assert.ok(!h.events.includes('git merge'), 'no merge');
+      inOrder(h.events, 'POST /shutdown', `launch ${h.root}/bin/skydeck window`);
+      assert.equal(captured.signal(signal), false, 'released at the end');
+    }
+  });
+
+  test('a signal during the stop of a server with no page: no merge, nothing started, the lines, exit 1', async (t) => {
+    const h = harness(t);
+    await h.serve({ FAKE_SERVE_PAGES: '0' });
+    const captured = capture();
+    h.onRequest = (method, path) => {
+      if (path === '/shutdown') captured.signal('SIGINT');
+    };
+
+    const r = await runUpdateOn(h.platform(scripted(h)), h.s, captured);
+
+    assert.equal(r.code, 1);
+    assert.equal(
+      r.stderr,
+      `${STOPPED}skydeck: the window's server was stopped for the update; skydeck window starts it again\n${INTERRUPTED}`,
+    );
+    assert.ok(!h.events.includes('git merge'));
+    assert.deepEqual(h.launches, []);
+  });
+
+  test('SIGHUP is not held (ruled): during the stop it would end the command as it always did', async (t) => {
+    const h = harness(t);
+    await h.serve({ FAKE_SERVE_PAGES: '1' });
+    const captured = capture();
+    const held: boolean[] = [];
+    h.onRequest = (method, path) => {
+      if (path === '/shutdown') held.push(captured.signal('SIGHUP'), captured.signal('SIGINT'));
+    };
+
+    await runUpdateOn(h.platform(scripted(h)), h.s, captured);
+
+    assert.deepEqual(held, [false, true], 'SIGHUP not held, SIGINT held at the same moment');
+  });
+
+  test('a signal during the merge abandons nothing: the merge’s result is used, the window brought back, "updated to", exit 0', async (t) => {
+    const h = harness(t);
+    await h.serve({ FAKE_SERVE_PAGES: '1' });
+    const captured = capture();
+    const held: boolean[] = [];
+    const runner = scripted(h, {
+      onCall: (call) => {
+        if (call.command === 'git' && subCommand(call, h.root) === 'merge') {
+          held.push(captured.signal('SIGINT'), captured.signal('SIGTERM'));
+        }
+      },
+    });
+
+    const r = await runUpdateOn(h.platform(runner), h.s, captured);
+
+    assert.deepEqual(held, [true, true]);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, `${ONE_COMMIT}updated to fedcba9\n`);
+    assert.equal(r.stderr, STOPPED);
+    inOrder(h.events, 'git merge', `launch ${h.root}/bin/skydeck window`);
+  });
+
+  test('before the stop nothing is held: a signal during the fetch would end the command as it always did', async (t) => {
+    const h = harness(t);
+    await h.serve({ FAKE_SERVE_PAGES: '1' });
+    const captured = capture();
+    const held: boolean[] = [];
+    const runner = scripted(h, {
+      onCall: (call) => {
+        if (call.command === 'git' && call.args.includes('fetch')) {
+          held.push(captured.signal('SIGINT'));
+        }
+      },
+    });
+
+    const r = await runUpdateOn(h.platform(runner), h.s, captured);
+
+    assert.deepEqual(held, [false], 'not held: the real process would have ended');
+    assert.equal(r.code, 0, r.stderr);
   });
 });
 
