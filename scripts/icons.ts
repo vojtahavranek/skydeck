@@ -1,28 +1,34 @@
-// `node scripts/icons.ts` (S2 12.12; plan E14, task 94; follow-up F10): draws the owner's picture,
-// scripts/icons/skydeck-source.png, into the PNG files of web/icons/ and web/icons/favicon.ico with
-// the pinned Playwright's Chromium. Run it by hand after changing the picture or the numbers below,
-// and commit what it wrote: there is no build step, and no test and no CI step runs it
-// (test/window/icons.test.ts holds its output, and reduces the picture again in Node to see that
-// the files are the picture's).
+// `node scripts/icons.ts` (S2 12.12; plan E14, task 94; follow-up F10): draws the owner's two
+// pictures, scripts/icons/skydeck-source.png and scripts/icons/skydeck-source-small.png, into the PNG
+// files of web/icons/ and web/icons/favicon.ico with the pinned Playwright's Chromium. Run it by
+// hand after changing a picture or the numbers below, and commit what it wrote: there is no build
+// step, and no test and no CI step runs it (test/window/icons.test.ts holds its output, and reduces
+// the pictures again in Node to see that the files are the pictures').
+//
+// Which picture. The large one (a cloud and three stacked terminal windows) is drawn into the 192
+// and 512 pixel files and the two maskable ones. Below 48 pixels it blurs into a ring with a spot,
+// so the 16, 32 and 48 pixel files, and the three images of favicon.ico, are drawn from the small
+// one: the same tile and cloud with one terminal window and a bold `>_`.
 //
 // How a size is made. Chromium decodes the picture; the script then averages, for each pixel of the
 // icon, the picture's pixels under it, weighted by the area they cover, premultiplied and in linear
 // light. That is the box filter at exactly the icon's pixel pitch: nothing aliases (no pixel is
 // skipped), nothing rings, and no halo of the tile's edge spreads onto the transparent corners (a
 // stepwise halving on a canvas with Chromium's high-quality smoothing, tried first, left a grey
-// halo outside the tile on a light background and a duller 16 pixel icon). The transparent
-// icons are the whole picture in their box. The maskable ones are the picture scaled by
-// MASKABLE_SCALE into the middle of a full background, with the tile's outermost RIM pixels left
-// out (the picture's tile has a lighter hairline and a shade along its edge) on a background that
-// runs from the tile's colour along its top edge to its colour along its bottom edge (the tile
-// is lighter at its top), so that the tile's edge does not show as a square inside a square.
+// halo outside the tile on a light background and a duller 16 pixel icon). The transparent icons
+// are the whole picture in their box. The maskable ones are the large picture scaled by
+// MASKABLE_SCALE into the middle of a full background of BACKGROUND, the tile's colour around the
+// ring where the picture is faded out: it is drawn in full within FADE_FROM pixels of its middle,
+// fades out to the background over the next ring and is not drawn beyond FADE_TO. The drawing
+// is well inside; the tile's own edge (a lighter hairline, and a tile lighter at its top) would
+// otherwise show as a faint frame, a tile inside a tile.
 //
 // Chromium is launched by the rules the page suite's test-page/helpers/browser.ts follows (whose
 // `browser(t)` needs a test context, so the script launches by itself): headless, with an
 // environment of its own (no DISPLAY; HOME, TMPDIR and an empty PATH in a new temporary directory
 // that the script removes at its end), so that the user's own profile is never touched and no
 // window opens on the desktop; no host name resolves, and every request but the one data: URL the
-// page is loaded from is aborted. The picture reaches the page as an argument, not as a request.
+// page is loaded from is aborted. The pictures reach the page as an argument, not as a request.
 // It writes only under this checkout's web/icons/.
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -32,35 +38,34 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import type { Browser, Page } from 'playwright';
 
-/** The owner's picture, relative to the checkout: kept as it was received, and not under web/ (it is
- *  not served and not part of the build). */
+/** The owner's pictures, relative to the checkout: kept as they were received, and not under web/
+ *  (they are not served and not part of the build). */
 export const SOURCE = 'scripts/icons/skydeck-source.png';
+export const SOURCE_SMALL = 'scripts/icons/skydeck-source-small.png';
 /** The sizes drawn on a transparent background, and those of them that go into favicon.ico. */
 export const SIZES = [16, 32, 48, 192, 512];
 export const IN_ICO = [16, 32, 48];
-/** The maskable ones: the picture in the middle, on the full background. */
+/** The sizes drawn from the small picture; the others are drawn from the large one. */
+export const SMALL = [16, 32, 48];
+/** The maskable ones: the large picture in the middle, on the full background. */
 export const MASKABLE = [192, 512];
-/** The tile's colour along its top edge and along its bottom edge (the average of the pixels 5 to
- *  14 inside it, in the middle 40 % of the side; the tile is lighter at its top): the maskable
- *  icons' background runs from the first, in their top row, to the second, in their bottom row.
- *  test/window/icons.test.ts measures both on the picture. */
-export const BACKGROUND_TOP = '#080e25';
-export const BACKGROUND_BOTTOM = '#030723';
-/** In a maskable icon the picture is drawn without the pixels within this many of one that is not
- *  opaque: the tile's own edge (a lighter hairline, a shade) would show as a frame on the
- *  background. None of the drawing is that close to the edge. */
-export const RIM = 5;
-/** How much of the icon's width the picture takes in a maskable icon: the largest scale, to three
- *  decimals, at which everything of the drawing is inside the safe zone (checked below). */
+/** The maskable icons' background: the large picture's tile around the ring between FADE_FROM and
+ *  FADE_TO (the average of its opaque pixels there; test/window/icons.test.ts measures it). */
+export const BACKGROUND = '#040925';
+/** In a maskable icon the large picture is drawn in full within FADE_FROM pixels of its middle (of
+ *  1254), fades out to the background over the next ring, and is not drawn beyond FADE_TO. The
+ *  drawing reaches 540.8 pixels (checked below) and the tile's own edge starts 594 out. */
+export const FADE_FROM = 555;
+export const FADE_TO = 585;
+/** How much of the icon's width the large picture takes in a maskable icon: the largest scale, to
+ *  three decimals, at which everything of the drawing is inside the safe zone (checked below). */
 export const MASKABLE_SCALE = 0.927;
 
 /** The safe zone of a maskable icon: a circle of this radius, in parts of the icon's width. */
 const SAFE_RADIUS = 0.4;
-/** The drawing is what differs from the background (that of its own height) by more than this (of
- *  255) in some channel, composited on it. The tile's edge, 36 at most, is not the drawing. */
+/** The drawing is what differs from the background by more than this (of 255) in some channel,
+ *  composited on it. */
 const DRAWN = 40;
-/** The tile is at alpha 252 to 253 of 255: a pixel from this alpha up is opaque. */
-const OPAQUE = 250;
 
 /** What a page under the page suite can reach (test-page/helpers/browser.ts): nothing. */
 const ISOLATION = [
@@ -68,10 +73,11 @@ const ISOLATION = [
   '--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
 ];
 
-/** One PNG to draw: `size` pixels, the picture at `scale` of that in the middle, on the background
- *  or on nothing. */
+/** One PNG to draw from `picture`: `size` pixels, the picture at `scale` of that in the middle, on
+ *  the background (and faded out as above) or on nothing. */
 interface Job {
   name: string;
+  picture: 'large' | 'small';
   size: number;
   scale: number;
   onBackground: boolean;
@@ -86,52 +92,18 @@ function colourOf(hex: string): number[] {
 }
 
 /**
- * Draws every job from the picture in the page: decodes the picture (Chromium), checks that the
- * numbers above hold for it, and returns each PNG (Chromium's encoder: IHDR, IDAT and IEND, no
- * metadata) as base64.
+ * Draws every job in the page: decodes the pictures (Chromium), checks that the numbers above hold
+ * for the large one, and returns each PNG (Chromium's encoder: IHDR, IDAT and IEND, no metadata) as
+ * base64.
  */
-async function drawAll(page: Page, picture: Buffer, jobs: Job[]): Promise<Map<string, Buffer>> {
+async function drawAll(
+  page: Page,
+  pictures: { large: Buffer; small: Buffer },
+  jobs: Job[],
+): Promise<Map<string, Buffer>> {
   const drawn = await page.evaluate(
-    async ({ base64, jobs, top, bottom, rim, safeRadius, drawn, opaque, maskableScale }) => {
-      const bitmap = await createImageBitmap(
-        new Blob([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], { type: 'image/png' }),
-      );
-      const count = bitmap.width;
-      if (bitmap.height !== count) {
-        throw new Error(`the picture is ${count} x ${bitmap.height} pixels, not square`);
-      }
-      const surface = new OffscreenCanvas(count, count);
-      const context = surface.getContext('2d', { willReadFrequently: true });
-      if (context === null) {
-        throw new Error('the page has no 2d canvas');
-      }
-      context.drawImage(bitmap, 0, 0);
-      const pixels = context.getImageData(0, 0, count, count).data;
-      const at = (i: number, c: number): number => pixels[i * 4 + c] ?? 0;
-
-      // The background at a height (0 at the top, 1 at the bottom), in bytes: top to bottom.
-      const backgroundAt = (f: number): number[] =>
-        top.map((value, c) => value + ((bottom[c] ?? 0) - value) * f);
-
-      // The scale holds for this picture: the drawing, scaled, stays inside the circle.
-      let farthest = 0;
-      for (let y = 0; y < count; y++) {
-        const background = backgroundAt((y + 0.5) / count);
-        for (let x = 0; x < count; x++) {
-          const i = y * count + x;
-          const a = at(i, 3) / 255;
-          if ([0, 1, 2].some((c) => Math.abs(a * (at(i, c) - (background[c] ?? 0))) > drawn)) {
-            farthest = Math.max(farthest, Math.hypot(x + 0.5 - count / 2, y + 0.5 - count / 2));
-          }
-        }
-      }
-      if (maskableScale * farthest > safeRadius * count) {
-        throw new Error(
-          `the drawing reaches ${farthest} of ${count / 2} pixels: at ${maskableScale} it leaves the circle of ${safeRadius}; the largest scale is ${(safeRadius * count) / farthest}`,
-        );
-      }
-
-      // Premultiplied linear light, 4 floats a pixel.
+    async ({ pictures, jobs, background, fadeFrom, fadeTo, safeRadius, drawn, maskableScale }) => {
+      // sRGB bytes to linear light, and back.
       const lut = Float64Array.from({ length: 256 }, (_, i) => {
         const v = i / 255;
         return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
@@ -144,48 +116,85 @@ async function drawAll(page: Page, picture: Buffer, jobs: Job[]): Promise<Map<st
             Math.round(255 * (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055)),
           ),
         );
-      const linear = new Float32Array(count * count * 4);
-      for (let i = 0; i < count * count; i++) {
-        const a = at(i, 3) / 255;
-        for (let c = 0; c < 3; c++) {
-          linear[i * 4 + c] = (lut[at(i, c)] ?? 0) * a;
+
+      const load = async (
+        base64: string,
+      ): Promise<{ count: number; pixels: Uint8ClampedArray }> => {
+        const bitmap = await createImageBitmap(
+          new Blob([Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))], { type: 'image/png' }),
+        );
+        const count = bitmap.width;
+        if (bitmap.height !== count) {
+          throw new Error(`a picture is ${count} x ${bitmap.height} pixels, not square`);
         }
-        linear[i * 4 + 3] = a;
-      }
-      // The same without the pixels near the tile's edge: only where every pixel within `rim` is
-      // opaque (a square window, in two passes), for the maskable icons.
-      const solid = new Uint8Array(count * count);
-      for (let i = 0; i < count * count; i++) {
-        solid[i] = at(i, 3) >= opaque ? 1 : 0;
-      }
-      const alongRow = new Uint8Array(count * count);
-      for (let y = 0; y < count; y++) {
-        for (let x = 0; x < count; x++) {
-          let all = 1;
-          for (let d = -rim; d <= rim && all === 1; d++) {
-            all = x + d >= 0 && x + d < count ? (solid[y * count + x + d] ?? 0) : 0;
-          }
-          alongRow[y * count + x] = all;
+        const surface = new OffscreenCanvas(count, count);
+        const context = surface.getContext('2d', { willReadFrequently: true });
+        if (context === null) {
+          throw new Error('the page has no 2d canvas');
         }
-      }
-      const tile = new Float32Array(linear);
-      for (let y = 0; y < count; y++) {
-        for (let x = 0; x < count; x++) {
-          let all = 1;
-          for (let d = -rim; d <= rim && all === 1; d++) {
-            all = y + d >= 0 && y + d < count ? (alongRow[(y + d) * count + x] ?? 0) : 0;
-          }
-          if (all === 0) {
-            tile.fill(0, (y * count + x) * 4, (y * count + x) * 4 + 4);
+        context.drawImage(bitmap, 0, 0);
+        return { count, pixels: context.getImageData(0, 0, count, count).data };
+      };
+
+      // A picture's pixels as premultiplied linear light, 4 floats a pixel, each times `weightAt`
+      // of its distance from the picture's middle.
+      const premultiply = (
+        { count, pixels }: { count: number; pixels: Uint8ClampedArray },
+        weightAt: (r: number) => number,
+      ): Float32Array => {
+        const out = new Float32Array(count * count * 4);
+        for (let y = 0; y < count; y++) {
+          for (let x = 0; x < count; x++) {
+            const i = y * count + x;
+            const w = weightAt(Math.hypot(x + 0.5 - count / 2, y + 0.5 - count / 2));
+            const a = ((pixels[i * 4 + 3] ?? 0) / 255) * w;
+            for (let c = 0; c < 3; c++) {
+              out[i * 4 + c] = (lut[pixels[i * 4 + c] ?? 0] ?? 0) * a;
+            }
+            out[i * 4 + 3] = a;
           }
         }
+        return out;
+      };
+
+      const large = await load(pictures.large);
+      const small = await load(pictures.small);
+
+      // The scale holds for the large picture: the drawing, scaled, stays inside the circle, and
+      // it is clear of the ring where the maskable icons fade the picture out.
+      let farthest = 0;
+      for (let i = 0; i < large.count * large.count; i++) {
+        const a = (large.pixels[i * 4 + 3] ?? 0) / 255;
+        if (
+          [0, 1, 2].some(
+            (c) => Math.abs(a * ((large.pixels[i * 4 + c] ?? 0) - (background[c] ?? 0))) > drawn,
+          )
+        ) {
+          const x = (i % large.count) + 0.5 - large.count / 2;
+          const y = Math.floor(i / large.count) + 0.5 - large.count / 2;
+          farthest = Math.max(farthest, Math.hypot(x, y));
+        }
       }
-      // The background of a row of an icon, in linear light: from `top` to `bottom`.
-      const topLinear = top.map((value) => lut[value] ?? 0);
-      const bottomLinear = bottom.map((value) => lut[value] ?? 0);
+      if (maskableScale * farthest > safeRadius * large.count) {
+        throw new Error(
+          `the drawing reaches ${farthest} of ${large.count / 2} pixels: at ${maskableScale} it leaves the circle of ${safeRadius}; the largest scale is ${(safeRadius * large.count) / farthest}`,
+        );
+      }
+      if (farthest >= fadeFrom) {
+        throw new Error(`the drawing reaches ${farthest} pixels: the fade starts at ${fadeFrom}`);
+      }
+
+      const sources = {
+        large: premultiply(large, () => 1),
+        small: premultiply(small, () => 1),
+        faded: premultiply(large, (r) =>
+          r <= fadeFrom ? 1 : r >= fadeTo ? 0 : (fadeTo - r) / (fadeTo - fadeFrom),
+        ),
+      };
+      const backgroundLinear = background.map((value) => lut[value] ?? 0);
 
       // The picture's pixels that the output pixel `t` (one axis) covers, with their weights.
-      const axis = (t: number, span: number, offset: number): [number, number[]] => {
+      const axis = (t: number, count: number, span: number, offset: number): [number, number[]] => {
         const k = span / count;
         const first = Math.max(0, Math.floor((t - offset) / k));
         const last = Math.min(count - 1, Math.ceil((t + 1 - offset) / k) - 1);
@@ -209,10 +218,11 @@ async function drawAll(page: Page, picture: Buffer, jobs: Job[]): Promise<Map<st
       const out: Record<string, string> = {};
       for (const job of jobs) {
         const { size } = job;
+        const count = (job.picture === 'small' ? small : large).count;
+        const source = job.onBackground ? sources.faded : sources[job.picture];
         const span = size * job.scale;
         const offset = (size - span) / 2;
-        const source = job.onBackground ? tile : linear;
-        const lines = Array.from({ length: size }, (_, t) => axis(t, span, offset));
+        const lines = Array.from({ length: size }, (_, t) => axis(t, count, span, offset));
         const rgba = new Uint8ClampedArray(size * size * 4);
         for (let ty = 0; ty < size; ty++) {
           const [y0, wy] = lines[ty] ?? [0, []];
@@ -231,10 +241,8 @@ async function drawAll(page: Page, picture: Buffer, jobs: Job[]): Promise<Map<st
             const o = (ty * size + tx) * 4;
             const covered = sum[3] ?? 0;
             if (job.onBackground) {
-              const f = (ty + 0.5) / size;
               for (let c = 0; c < 3; c++) {
-                const background = (topLinear[c] ?? 0) * (1 - f) + (bottomLinear[c] ?? 0) * f;
-                rgba[o + c] = encode((sum[c] ?? 0) + (1 - covered) * background);
+                rgba[o + c] = encode((sum[c] ?? 0) + (1 - covered) * (backgroundLinear[c] ?? 0));
               }
               rgba[o + 3] = 255;
             } else if (covered > 0) {
@@ -257,14 +265,16 @@ async function drawAll(page: Page, picture: Buffer, jobs: Job[]): Promise<Map<st
       return out;
     },
     {
-      base64: picture.toString('base64'),
+      pictures: {
+        large: pictures.large.toString('base64'),
+        small: pictures.small.toString('base64'),
+      },
       jobs,
-      top: colourOf(BACKGROUND_TOP),
-      bottom: colourOf(BACKGROUND_BOTTOM),
-      rim: RIM,
+      background: colourOf(BACKGROUND),
+      fadeFrom: FADE_FROM,
+      fadeTo: FADE_TO,
       safeRadius: SAFE_RADIUS,
       drawn: DRAWN,
-      opaque: OPAQUE,
       maskableScale: MASKABLE_SCALE,
     },
   );
@@ -299,7 +309,10 @@ async function main(): Promise<void> {
   const checkout = fileURLToPath(new URL('../', import.meta.url));
   const icons = join(checkout, 'web/icons/');
   mkdirSync(icons, { recursive: true });
-  const picture = readFileSync(join(checkout, SOURCE));
+  const pictures = {
+    large: readFileSync(join(checkout, SOURCE)),
+    small: readFileSync(join(checkout, SOURCE_SMALL)),
+  };
 
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'skydeck-icons-')));
   try {
@@ -337,15 +350,22 @@ async function main(): Promise<void> {
 
       // Everything is drawn first and written last, so that a run that stops writes nothing.
       const jobs: Job[] = [
-        ...SIZES.map((size) => ({ name: `icon-${size}.png`, size, scale: 1, onBackground: false })),
+        ...SIZES.map((size) => ({
+          name: `icon-${size}.png`,
+          picture: SMALL.includes(size) ? ('small' as const) : ('large' as const),
+          size,
+          scale: 1,
+          onBackground: false,
+        })),
         ...MASKABLE.map((size) => ({
           name: `icon-${size}-maskable.png`,
+          picture: 'large' as const,
           size,
           scale: MASKABLE_SCALE,
           onBackground: true,
         })),
       ];
-      const written = await drawAll(page, picture, jobs);
+      const written = await drawAll(page, pictures, jobs);
       const images = IN_ICO.map((size) => {
         const png = written.get(`icon-${size}.png`);
         if (png === undefined) {

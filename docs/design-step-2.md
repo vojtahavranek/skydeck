@@ -2965,21 +2965,28 @@ the manifest (`<link rel="manifest">`), whose `name` and `short_name` are `skyde
 check W3. Low priority: stage E (19).
 
 As built (stage E, plan E14; the picture changed by follow-up F10, 2026-11-17, on the owner's words
-"change the icon, use this [a picture], but use appropriate sizes"):
+"change the icon, use this [a picture], but use appropriate sizes", and a second picture for the
+small sizes):
 
-- **The picture** is the owner's: a dark navy rounded tile with a blue-to-violet cloud outline and
-  three stacked terminal windows, the front one with three coloured dots and a prompt (`>_`). It is
-  1254 × 1254 pixels, RGBA, transparent outside the tile, and it is kept exactly as it was received
-  (1,691,903 bytes; its `caBX` chunk, the content credentials of the image service that made it,
-  stays) in `scripts/icons/skydeck-source.png`, not under `web/`: it is not served and not part of the
-  build. `test/window/icons.test.ts` pins its sha256. Until F10 the source was a drawing of shapes,
-  `web/icons/skydeck.svg` (three cards on the page's accent colour); it is gone.
+- **The pictures** are the owner's, two of them, 1254 × 1254 pixels, RGBA, transparent outside
+  their dark navy rounded tile, kept exactly as they were received (their own `caBX` chunks, the
+  content credentials of the image service that made them, stay) in `scripts/icons/`, not under
+  `web/`: they are not served and not part of the build. `skydeck-source.png` (1,691,903 bytes) has
+  a blue-to-violet cloud outline and three stacked terminal windows, the front one with three
+  coloured dots and a prompt (`>_`). `skydeck-source-small.png` (1,372,751 bytes) was made after the
+  first one turned out a blur at 16 pixels: the same tile and cloud outline with ONE terminal window
+  and a bold white `>_`, no stacked windows, no dots. `test/window/icons.test.ts` pins both sha256.
+  Until F10 the source was a drawing of shapes, `web/icons/skydeck.svg` (three cards on the page's
+  accent colour); it is gone.
 - **The files** are `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-192.png` and `icon-512.png`
   on a transparent background, `icon-192-maskable.png` and `icon-512-maskable.png`, and
   `favicon.ico` (the 16, 32 and 48 pixel PNGs in one ICO). They were drawn once by
   `scripts/icons.ts` with the page suite's pinned Chromium, headless and in an environment of its
   own, and committed; no test and no CI step runs the script. Nothing is fetched from outside, at
-  build time or at run time.
+  build time or at run time. **The 16, 32 and 48 pixel files, and so the ICO, are drawn from the
+  small picture; the 192 and 512 pixel files and both maskable files from the first one**: the
+  detailed picture blurs below 48 pixels (at 16 it is a ring with a light spot), and the window's
+  taskbar button and title bar show the small sizes.
 - **How a size is reduced.** Chromium decodes the picture; for each pixel of an icon the script
   averages the picture's pixels under it, weighted by the area they cover, premultiplied and in
   linear light: a box filter at exactly the icon's pixel pitch, so that no pixel of the picture is
@@ -2987,27 +2994,29 @@ As built (stage E, plan E14; the picture changed by follow-up F10, 2026-11-17, o
   canvas with Chromium's high-quality smoothing was tried first and rejected: it left a grey halo
   around the tile on a light background and a duller 16 pixel icon. The transparent icons are the
   whole picture in their box, transparent where the picture is (its rounded corners; the tile
-  itself is at alpha 252 to 253 of 255, the picture's own). The test re-derives every file from the
-  picture in plain Node and compares. At 16 pixels the cloud's ring and a light spot where the
-  prompt is read; the three windows do not (a named limit: the picture holds more than 16 pixels
-  can).
-- **The maskable icons** have a full background that runs, top to bottom, from the colour of the
-  tile along its top edge, `#080e25`, to its colour along its bottom edge, `#030723` (the average
-  of the pixels 5 to 14 inside the border, in the middle 40 % of the side; the tile is lighter at
-  its top by about five steps), so that the tile does not show as a square inside a square. The
-  picture is in the middle at 0.927 of the icon's width, drawn without its outermost 5 pixels and
-  without anything that is not opaque: the tile carries a lighter hairline and a shade along its
-  edge, up to 36 steps from its colour, which any background would leave as a faint frame (the
-  first build, a flat `#050925` and the whole picture, did: steps of 22 between neighbouring
-  pixels). None of the drawing is that near the edge. 0.927 is the largest scale, to three
+  itself is at alpha 251 to 254 of 255, the pictures' own). The test re-derives every file from its
+  picture in plain Node and compares, and tells the two pictures apart by the white of the `>_`
+  (the small picture's is bold: 2 to 2.5 % of a 16, 32 or 48 pixel icon is white; the large one's is thin: about 0.5 % of a 192 or 512 pixel one).
+  At 16 pixels the small picture is the cloud's ring, the window's frame and a light chevron and
+  bar of about five pixels; it reads as a terminal in a cloud, not crisply. At 32 and 48 the cloud,
+  the window and the `>_` read.
+- **The maskable icons** have a full background of the large picture's tile colour, `#040925` (the
+  average of its opaque pixels between 555 and 585 pixels from its middle), with the picture in the
+  middle at 0.927 of the icon's width: drawn in full within 555 of its 1254 pixels from its middle,
+  faded out to the background over the next 30 and not drawn beyond. The drawing reaches 540.8
+  pixels from the middle, so nothing of it is touched; the tile's own edge (a lighter hairline and a
+  shade, up to 36 steps from its colour, starting 594 pixels from the middle at the nearest, and a
+  tile lighter at its top than at its bottom) is not drawn: left in, it showed as a faint frame
+  inside the background, a tile inside a tile (the first build, a flat `#050925` and the whole
+  picture, had steps of 22 between neighbouring pixels). 0.927 is the largest scale, to three
   decimals, at which everything of the drawing is inside the safe zone, the circle of 0.4 of the
-  icon's width. The drawing is what differs from the background of its own height by more than 40
-  (of 255) in some channel, composited on it; the farthest of it from the picture's middle is 540.8
-  of the 1254 pixels, so the scale can be at most 0.4 × 1254 / 540.8 = 0.9275. No pixel of a
-  maskable icon is transparent. In both files, outside the drawing, no step between neighbouring
-  pixels is above 3, and along ten lines across the tile's border none is above 2
-  (`test/window/icons.test.ts` measures it). `scripts/icons.ts` stops if the drawing, scaled,
-  leaves the circle.
+  icon's width. The drawing is what differs from the background by more than 40 (of 255) in some
+  channel, composited on it; the farthest of it from the picture's middle is 540.8 pixels, so the
+  scale can be at most 0.4 × 1254 / 540.8 = 0.9275. No pixel of a maskable icon is transparent.
+  In both files, outside the drawing, no step between neighbouring pixels is above 2
+  (`test/window/icons.test.ts` measures it, also along ten lines across the circle where the picture
+  fades out). `scripts/icons.ts` stops if the drawing, scaled, leaves the circle of 0.4 or reaches
+  the fade.
 - **The manifest and the page** are as before: `web/manifest.webmanifest` holds `name`,
   `short_name`, `display` and the seven PNGs, each `src` under the versioned path; it is served at
   `/manifest.webmanifest` with the build put in, and the ICO at `/favicon.ico` (8.2.1). `index.html`
