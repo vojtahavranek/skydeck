@@ -11,6 +11,7 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -371,6 +372,71 @@ describe('real files', () => {
       seen,
       paths.map(() => content.length),
     );
+  });
+
+  test('createTempBeside writes the text to a new hidden file beside the path, with exactly the mode, and returns it (F11)', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    const path = join(dir, '.claude.json');
+    writeFileSync(path, 'old');
+    // A umask that would take the owner's write bit: the mode must still be exactly 600.
+    const umask = process.umask(0o277);
+    let temp: string;
+    try {
+      temp = files.createTempBeside(path, 'new text', 0o600);
+    } finally {
+      process.umask(umask);
+    }
+
+    assert.equal(join(dir, basename(temp)), temp);
+    assert.match(basename(temp), /^\.\.claude\.json\.[0-9a-f]{12}\.tmp$/);
+    assert.equal(readFileSync(temp, 'utf8'), 'new text');
+    assert.equal(mode(temp), 0o600);
+    assert.equal(readFileSync(path, 'utf8'), 'old', 'the file itself is not touched');
+    assert.deepEqual(files.list(dir).sort(), [basename(temp), '.claude.json'].sort());
+  });
+
+  test('createTempBeside gives a new name each time and never opens a file that is there', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    const path = join(dir, 'f');
+
+    const first = files.createTempBeside(path, 'a', 0o600);
+    const second = files.createTempBeside(path, 'b', 0o600);
+
+    assert.notEqual(first, second);
+    assert.equal(readFileSync(first, 'utf8'), 'a');
+    assert.equal(readFileSync(second, 'utf8'), 'b');
+  });
+
+  test('createTempBeside into a directory that does not exist throws and leaves nothing', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+
+    assert.throws(() => files.createTempBeside(join(dir, 'no', 'f'), 'x', 0o600), {
+      code: 'ENOENT',
+    });
+    assert.deepEqual(files.list(dir), []);
+  });
+
+  test('stat and lstat report the inode; a file renamed over another has a new one (F11)', (t) => {
+    const { files } = realPlatform();
+    const dir = tmp(t);
+    const f = join(dir, 'f');
+    writeFileSync(f, 'a');
+    symlinkSync(f, join(dir, 'link'));
+
+    const before = files.lstat(f);
+    assert.equal(before?.ino, lstatSync(f, { bigint: true }).ino);
+    assert.equal(files.stat(join(dir, 'link'))?.ino, before?.ino, 'stat follows the link');
+    assert.equal(
+      files.lstat(join(dir, 'link'))?.ino,
+      lstatSync(join(dir, 'link'), { bigint: true }).ino,
+    );
+    writeFileSync(join(dir, 'g'), 'a');
+    renameSync(join(dir, 'g'), f);
+
+    assert.notEqual(files.lstat(f)?.ino, before?.ino);
   });
 
   test('a path that does not exist reads as null, [] and null', (t) => {

@@ -19,6 +19,7 @@ describe('resolvePlaces (home /h)', () => {
       stateDir: '/h/.local/state/skydeck',
       configDir: '/h/.config/skydeck',
       claudeHome: '/h/.claude',
+      claudeGlobalConfig: '/h/.claude.json',
       dbPath: '/h/.local/share/skydeck/skydeck.db',
       hookPath: '/h/.local/share/skydeck/skydeck-hook',
       nodeLink: '/h/.local/share/skydeck/node',
@@ -92,6 +93,32 @@ describe('resolvePlaces (home /h)', () => {
     assert.equal(resolvePlaces(env, '/h', null).claudeHome, '/c');
     assert.equal(resolvePlaces(env, '/h', '/k').claudeHome, '/k');
     assert.equal(resolvePlaces({}, '/h', '/k').claudeHome, '/k');
+  });
+
+  test("Claude Code's global config file: beside the default home, inside a home that is named (F11)", () => {
+    // Claude Code keeps it at ~/.claude.json, and inside $CLAUDE_CONFIG_DIR when that is set; a
+    // claudeHome in config.json stands for the CLAUDE_CONFIG_DIR its sessions run with.
+    assert.equal(resolvePlaces({}, '/h', null).claudeGlobalConfig, '/h/.claude.json');
+    assert.equal(
+      resolvePlaces({ CLAUDE_CONFIG_DIR: '/c' }, '/h', null).claudeGlobalConfig,
+      '/c/.claude.json',
+    );
+    assert.equal(
+      resolvePlaces({ CLAUDE_CONFIG_DIR: '/c' }, '/h', '/k').claudeGlobalConfig,
+      '/k/.claude.json',
+    );
+    assert.equal(resolvePlaces({}, '/h', '/k').claudeGlobalConfig, '/k/.claude.json');
+    for (const ignored of ['rel', '']) {
+      assert.equal(
+        resolvePlaces({ CLAUDE_CONFIG_DIR: ignored }, '/h', null).claudeGlobalConfig,
+        '/h/.claude.json',
+        JSON.stringify(ignored),
+      );
+    }
+    assert.equal(
+      resolvePlaces({ CLAUDE_CONFIG_DIR: '/c/' }, '/h', null).claudeGlobalConfig,
+      '/c/.claude.json',
+    );
   });
 
   test('a configured claudeHome is used as it is given: validating it is the job of parseConfig', () => {

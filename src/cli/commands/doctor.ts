@@ -13,6 +13,7 @@ import { join } from 'node:path';
 
 import { checkNodeVersion } from '../../../bin/node-version.mjs';
 import { lookAtClaudeFolders } from '../../claude/folders.ts';
+import { LEFT_ARROW_LABEL, readLeftArrow } from '../../claude/global-config.ts';
 import { HOOK_EVENTS, hookStatus, settingsPath } from '../../claude/settings.ts';
 import type { Config } from '../../platform/config.ts';
 import { SkydeckError } from '../../platform/errors.ts';
@@ -37,10 +38,11 @@ const SPEC: ArgSpec = {
     'skydeck doctor\n' +
     '\n' +
     'Checks the configuration, the hook entries and links, Node.js, the database, the spool,\n' +
-    "hook.log, what the last refresh skipped, Claude Code's folders, gh and the terminal, then\n" +
-    'what the window needs (python3, its server, the port, the keep-alive, Edge, the runtime\n' +
-    'directory, the vendored files) and its terminals. One line per check; exits 1 when any\n' +
-    'line is a problem (a line of the window only once the window has been used).\n',
+    "hook.log, what the last refresh skipped, Claude Code's folders and its ← shortcut, gh and\n" +
+    'the terminal, then what the window needs (python3, its server, the port, the keep-alive,\n' +
+    'Edge, the runtime directory, the vendored files) and its terminals. One line per check;\n' +
+    'exits 1 when any line is a problem (a line of the window only once the window has been\n' +
+    'used).\n',
   flags: {},
   min: 0,
   max: 0,
@@ -204,6 +206,7 @@ const CHECKS: readonly Check[] = [
   { name: 'scripted runs', needs: 'store', run: checkScripted },
   { name: 'last refresh', needs: 'store', run: checkRefreshProblems },
   { name: "Claude Code's folders", needs: 'config', run: checkClaudeFolders },
+  { name: "Claude Code's ← shortcut", needs: 'config', run: checkLeftArrow },
   { name: 'gh', needs: 'nothing', run: checkGh },
   { name: 'terminal', needs: 'config', run: checkTerminal },
 ];
@@ -397,6 +400,40 @@ function checkClaudeFolders({ platform, places }: Facts, report: Report): void {
   }
   for (const { path, reason } of projects.unreadable) {
     report('problem', `transcripts: cannot read ${path} (${reason})`);
+  }
+}
+
+/**
+ * Follow-up F11 (S2 7.9): whether Claude Code's ← shortcut is on, from its global config file. It
+ * is the user's choice, never a problem: on and unknown are info, off is ok. No value of the file
+ * is shown.
+ */
+function checkLeftArrow({ platform, places }: Facts, report: Report): void {
+  const how = `/config in Claude Code ("${LEFT_ARROW_LABEL}")`;
+  const { state, path, reason } = readLeftArrow(
+    platform.files,
+    platform.uid,
+    places.claudeGlobalConfig,
+  );
+  switch (state) {
+    case 'off':
+      report('ok', `Claude Code's ← shortcut is off (${path})`);
+      return;
+    case 'on':
+      report(
+        'info',
+        "Claude Code's ← shortcut is on: ← on an empty prompt sends a window terminal's session to " +
+          'the background, and the list then shows it running in another terminal; to turn it off: ' +
+          `skydeck install asks, or ${how}`,
+      );
+      return;
+    case 'unknown':
+      report(
+        'info',
+        `Claude Code's ← shortcut: cannot tell from ${path} (${reason ?? 'it cannot be read'}); ` +
+          `skydeck leaves it alone; to turn it off: ${how}`,
+      );
+      return;
   }
 }
 

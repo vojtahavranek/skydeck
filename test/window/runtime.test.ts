@@ -385,7 +385,7 @@ function statOverride(
   });
 }
 
-const LINGERING: FileInfo = { size: 0, mtimeNs: 0n, kind: 'file', mode: 0o644, uid: 0 };
+const LINGERING: FileInfo = { size: 0, mtimeNs: 0n, kind: 'file', mode: 0o644, uid: 0, ino: 1n };
 
 test("the rule takes $XDG_RUNTIME_DIR/skydeck-<store id> when it is the user's, mode 700, and the user lingers", (t) => {
   const { d, xdg } = xdgDeck(t);

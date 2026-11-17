@@ -8,6 +8,12 @@ export interface Places {
   stateDir: string; // spool/, locks/, hook.log
   configDir: string; // config.json
   claudeHome: string;
+  /**
+   * Claude Code's global config file (follow-up F11): `<homeDir>/.claude.json`, beside the default
+   * claudeHome; `<claudeHome>/.claude.json` when claudeHome is named (config.json or
+   * CLAUDE_CONFIG_DIR).
+   */
+  claudeGlobalConfig: string;
   dbPath: string; // <dataDir>/skydeck.db
   hookPath: string; // <dataDir>/skydeck-hook
   nodeLink: string; // <dataDir>/node
@@ -48,6 +54,9 @@ export function resolveConfigDir(env: Env, homeDir: string): string {
  * XDG_CONFIG_HOME + "/skydeck", defaulting to <homeDir>/.local/share, /.local/state, /.config.
  * claudeHome: `configuredClaudeHome` (from config.json, already checked to be absolute by
  * parseConfig, so used as given), else CLAUDE_CONFIG_DIR, else <homeDir>/.claude.
+ * claudeGlobalConfig by the same rule: Claude Code keeps `.claude.json` in the home directory, and
+ * inside CLAUDE_CONFIG_DIR when that is set; a claudeHome in config.json stands for the
+ * CLAUDE_CONFIG_DIR that Claude Code runs with (only that variable moves Claude Code's home).
  */
 export function resolvePlaces(
   env: Env,
@@ -58,12 +67,13 @@ export function resolvePlaces(
   const stateDir = skydeckDir(env, homeDir, 'state', 'XDG_STATE_HOME', join('.local', 'state'));
   const configDir = resolveConfigDir(env, homeDir);
   const spoolDir = join(stateDir, 'spool');
+  const namedClaudeHome = configuredClaudeHome ?? absoluteEnv(env, 'CLAUDE_CONFIG_DIR');
   return {
     dataDir,
     stateDir,
     configDir,
-    claudeHome:
-      configuredClaudeHome ?? absoluteEnv(env, 'CLAUDE_CONFIG_DIR') ?? join(homeDir, '.claude'),
+    claudeHome: namedClaudeHome ?? join(homeDir, '.claude'),
+    claudeGlobalConfig: join(namedClaudeHome ?? homeDir, '.claude.json'),
     dbPath: join(dataDir, 'skydeck.db'),
     hookPath: join(dataDir, 'skydeck-hook'),
     nodeLink: join(dataDir, 'node'),
