@@ -1614,10 +1614,10 @@ rest. (After a Ctrl+C the shell shows exit status 130 whatever the command print
 `bin/skydeck`, ends with 130 on Ctrl+C once node has ended. Its lines say what happened.) A
 terminal closed in the middle ends the command (there is no one left to read what it would say),
 but never cuts the fast-forward, which ends by itself: what is left is at worst a stopped server.
-In a new terminal, `git status` and `git log -1 --format=%h` (against the two ids of the command's
-first line, `(<old>..<new>)`): at the old commit and clean, the
-update was not applied — `skydeck window`, then `skydeck update` again; at the new commit and
-clean, it was — `skydeck window`; otherwise see "the checkout may not be as it was" below.
+In a new terminal, in the checkout, `git status`: clean and `behind '<upstream>' by <n> commits`,
+the update was not applied — `skydeck window`, then `skydeck update` again; clean and `up to date
+with '<upstream>'`, it was — `skydeck window`; otherwise see "the checkout may not be as it was"
+below.
 
 Each commit's line shows its subject's first 200 characters (a longer one ends with `…`).
 

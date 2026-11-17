@@ -192,6 +192,26 @@ describe('the merge in a session of its own (ruled by the plan owner, review 2 S
   });
 });
 
+describe("git's own refusals of the fast-forward: the first line that reaches the command's line (the re-check's T1)", () => {
+  test('a folder of the owner’s, untracked, where the new commit puts a file: git refuses and writes nothing — its first line, the checkout and the folder as they were', async (t) => {
+    const r = real(t);
+    const old = r.c.id();
+    r.c.push('add the file sub', { sub: 'from the remote\n' });
+    mkdirSync(join(r.c.root, 'sub'));
+    writeFileSync(join(r.c.root, 'sub', 'mine.txt'), 'my own\n');
+
+    const u = await r.update();
+
+    assert.equal(u.code, 1);
+    assert.equal(
+      u.stderr,
+      'skydeck: the update could not be applied: error: Updating the following directories would lose untracked files in them:; the checkout is as it was\n',
+    );
+    assert.equal(r.c.id(), old);
+    assert.equal(readFileSync(join(r.c.root, 'sub', 'mine.txt'), 'utf8'), 'my own\n');
+  });
+});
+
 describe('skydeck update with the real git: the refusals (U2, U8)', () => {
   /** Asserts a refusal: exit 1, the line, no stdout, HEAD and the remote-tracking ref unmoved. */
   async function refused(r: Real, line: string, args: string[] = []): Promise<void> {
