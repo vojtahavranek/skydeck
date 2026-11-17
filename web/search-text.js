@@ -1,8 +1,8 @@
 // The page's texts of search (S2 12.2, 12.8; plan task 93, E3, E7, E9; F9): the cut of a search
 // text after its 16th word, a closed block caption's ` · 1 needs you` and the pane's group card, a
 // title's parts with the words found in it, the switcher's headings and its footer. web/list.js,
-// web/cards.js and web/switcher.js draw them. Pure: no DOM, no clock, nothing logged, so that node:test and the root type check load it
-// (test/web/search-text.test.ts).
+// web/cards.js and web/switcher.js draw them. Pure: no DOM, no clock, nothing logged, so that
+// node:test and the root type check load it (test/web/search-text.test.ts).
 //
 // A search text and a title are foreign text: they are cut and split by one literal pattern and
 // sliced, never made into a pattern, and handed on as text, never as markup (plan 2.1). Where this

@@ -1,8 +1,8 @@
 /**
  * Blocks (S2 12.2, plan E6 as ruled 2026-11-16, follow-up F9; the code calls a block a stack): in
- * every section — Open, Recent, Earlier —, each on its own, the rows of one group sit together, open
- * unless the page closed the block. An open block is drawn as a card of its rows; a closed one as
- * its caption alone, none of its rows drawn (F9). Pure.
+ * every section — Open, Recent, Earlier —, each on its own, the rows of one group sit together,
+ * open unless the page closed the block. An open block is drawn as a card of its rows; a closed one
+ * as its caption alone, none of its rows drawn (F9). Pure.
  *
  * Which rows reach this rule is the caller's (`build.ts`): a section's rows, and none while
  * filtering (S2 12.8: a filter flattens every block; the caller then gives every row `stack: null`).

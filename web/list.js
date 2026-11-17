@@ -11,16 +11,17 @@
 //
 // Stage E (plan E task 97, E4–E7): the chips under the filter field (web/chips.js) and the blocks
 // of every section as the server sends them (E6 as ruled 2026-11-16; the protocol calls a block a
-// stack), drawn as CARDS since follow-up F9: a box of its own (`.list-block`) with a caption line at
-// its top (`.block-head`: the fold arrow, the group's name, its number of sessions) and, while open,
-// every session of the block as an ordinary row, none special; a closed block is its caption alone
-// (`data-open="false"`, no row: the server sends none of its rows, `section.closedStacks`), with
-// ` · 1 needs you` in the needs-you colour while sessions it hides need you. A CLOSED caption can
-// hold the selection (app.js's `caption`: no session is selected then); an open one cannot. ← and
-// → on a block, and done sessions while filtering. The list keeps the chips and the blocks the user closed as it keeps `showDone`: its
-// own state, sent whole in the page's `view` (`closed`, each entry a section and a group; a block
-// is open unless named there). Which rows match, which form a block, and whether the list is
-// filtering are the server's (`list.filtering`); the page decides no rule.
+// stack), drawn as CARDS since follow-up F9: a box of its own (`.list-block`) with a caption line
+// at its top (`.block-head`: the fold arrow, the group's name, its number of sessions) and, while
+// open, every session of the block as an ordinary row, none special; a closed block is its caption
+// alone (`data-open="false"`, no row: the server sends none of its rows, `section.closedStacks`),
+// with ` · 1 needs you` in the needs-you colour while sessions it hides need you. A CLOSED caption
+// can hold the selection (app.js's `caption`: no session is selected then); an open one cannot. ←
+// and → on a block, and done sessions while filtering. The list keeps the chips and the blocks the
+// user closed as it keeps `showDone`: its own state, sent whole in the page's `view` (`closed`,
+// each entry a section and a group; a block is open unless named there). Which rows match, which
+// form a block, and whether the list is filtering are the server's (`list.filtering`); the page
+// decides no rule.
 //
 // A render never loses a click (contract 2.9): app.js renders when a list arrives and when only
 // the zone changed — the focus a mousedown moves, before its mouseup —, so every element the list
@@ -30,7 +31,7 @@
 /** @import { ClosedBlock, HiddenBy, ListMessage, RowPayload, SearchChip, SectionPayload, StackPayload, TerminalPayload } from '../src/window/protocol.ts' */
 /** @import { ListAction, Zone } from './keys.js' */
 /** @import { RowText } from './list-text.js' */
-/** @typedef {{ section: SectionPayload['name'], group: string }} Caption a closed block's caption (F9) */
+/** A closed block's caption (F9). @typedef {{ section: SectionPayload['name'], group: string }} Caption */
 import { needYouText } from './attention-text.js';
 import { createChips } from './chips.js';
 import { serverNow } from './format.js';
@@ -50,8 +51,10 @@ import { captionNeedText } from './search-text.js';
  * @typedef {object} ListHooks
  * @property {(id: string, how: 'click' | 'key' | 'list') => void} select `list`: the list zone
  *   takes the keyboard first (F9: a click on a selected closed caption), so that no terminal does
- * @property {(section: SectionPayload['name'], group: string) => void} caption F9: selects the
- *   caption of the closed block of `group` in `section` (no session is selected then)
+ * @property {(section: SectionPayload['name'], group: string, change?: ViewChange) => void} caption
+ *   F9: selects the caption of the closed block of `group` in `section` (no session is selected
+ *   then); `change` is the list's view change that goes in the same `view` (← closing the block:
+ *   no view names a block closed while a session of it is selected, ruling 1)
  * @property {(id: string) => void} activate
  * @property {(change: ViewChange) => void} view
  * @property {(text: string) => void} [say] a line for the key bar (a refused click, F3)
@@ -68,10 +71,11 @@ const SEARCH_CHIPS = /** @type {const} */ (['running', 'open-pr', 'note']);
 /** E6: the most entries a view's `closed` holds (the parser's MAX_CLOSED; web/ imports only types
  *  from src/, so the page holds the number itself). */
 const MAX_CLOSED = 64;
-/** Ruled 2026-11-16 (review 2 of F3): what a click on a block's caption (F9; `×n` before) that
- *  would move the selection says. */
+/** Ruled 2026-11-16 (review 2 of F3): what a click that would close a block holding the selected
+ *  session says (on its caption since F9). */
 const HOLDS_SELECTED = 'this block holds the selected session; it stays open';
-/** Ruled 2026-11-16 (review 2 of F3): what ← and `×n` say on a block a start holds open. */
+/** Ruled 2026-11-16 (review 2 of F3): what ← and a click on the caption say on a block a start
+ *  holds open. */
 const HOLDS_STARTING = 'this block holds a session that is still starting; it stays open';
 /** F6 (L1, worded by the lead): what they say on a block that a terminal which ended before its
  *  session was known holds open — waiting never frees it; closing that terminal (the ended bar's
@@ -363,7 +367,7 @@ export function createList(root, hooks) {
    */
   const clicks = { first: /** @type {string | null} */ (null) };
   /**
-   * The current click sequence began on a block's caption (F9; `×4` and `+3 more` before) (E7, ruled on review 2):
+   * The current click sequence began on a block's caption (F9; E7, ruled on review 2):
    * its first click opened or closed the block, so the list may have moved under the pointer, and
    * the later clicks of the sequence (`detail` above 1) are not acted on anywhere in the list —
    * their press takes no keyboard, their click selects no row and toggles no block, a double click
@@ -400,8 +404,8 @@ export function createList(root, hooks) {
     },
     true,
   );
-  // (Defensive: in such a sequence no row's `clicks.first` is set and ×n stops its own dblclick,
-  // so nothing would act on it today; a listener added later stays covered.)
+  // (Defensive: in such a sequence no row's `clicks.first` is set and the caption has no dblclick
+  // of its own, so nothing would act on it today; a listener added later stays covered.)
   root.addEventListener(
     'dblclick',
     (event) => {
@@ -416,7 +420,8 @@ export function createList(root, hooks) {
   let current = null;
   /** @type {string | null} */
   let selected = null;
-  /** F9: the selected caption (app.js's), its section and group; null while none is. @type {Caption | null} */
+  /** F9: the selected caption (app.js's), its section and group; null while none is.
+   *  @type {Caption | null} */
   let selectedCaption = null;
   let showDone = false;
   /** Whether the page's view unfolds Earlier (`unfolded`): only the list sends it, app.js starts
@@ -554,8 +559,10 @@ export function createList(root, hooks) {
     if (first === null) {
       return;
     }
-    hooks.select(first, how); // first, so that no view names the block closed with it selected
+    // The block opened first, then its session selected: no view names the block closed while a
+    // session of it is selected (ruled (1), the mirror of ←).
     openBlock(section, group);
+    hooks.select(first, how);
   };
 
   /**
@@ -632,9 +639,9 @@ export function createList(root, hooks) {
   /**
    * Whether `row` is drawn with a terminal of the window that has not reported a session (its
    * `sessionId` is null in the list's `terminals`, S2 7.5): a start, or a program that ended before
-   * it reported. A COPY OF THE SERVER'S RULE (`src/window/view/build.ts`, `stacked`'s
-   * `unreported`; ruled 2026-11-16): the server draws a closed block open while one of its rows (F9:
-   * its first too) is such a row, and this page forgets that it closed it (render) and refuses to close it
+   * it reported. A COPY OF THE SERVER'S RULE (`src/window/view/build.ts`, `stacked`'s `unreported`;
+   * ruled 2026-11-16): the server draws a closed block open while one of its rows (F9: its first
+   * too) is such a row, and this page forgets that it closed it (render) and refuses to close it
    * (`heldLine`, which tells the two lines apart by MAY_START, a copy too). A change of one is a
    * change of the other.
    * @param {RowPayload} row
@@ -644,12 +651,12 @@ export function createList(root, hooks) {
     current?.terminals.find((candidate) => candidate.id === row.terminal)?.sessionId === null;
 
   /**
-   * What ← and a click on the caption say on the drawn block of `group` in `section` when one of its
-   * rows (F9: its first too) is one that `unreported` names — the server keeps it open, so they do nothing —, or null
-   * when none is: HOLDS_STARTING while such a member's terminal may still start (MAY_START; it also
-   * wins when both kinds hold the block, since it is the one that changes by itself), else
-   * HOLDS_ENDED (its terminal ended, was lost or never started before its session was known).
-   * @param {SectionPayload['name']} section
+   * What ← and a click on the caption say on the drawn block of `group` in `section` when one of
+   * its rows (F9: its first too) is one that `unreported` names — the server keeps it open, so they
+   * do nothing —, or null when none is: HOLDS_STARTING while such a member's terminal may still
+   * start (MAY_START; it also wins when both kinds hold the block, since it is the one that changes
+   * by itself), else HOLDS_ENDED (its terminal ended, was lost or never started before its session
+   * was known). @param {SectionPayload['name']} section
    * @param {string} group
    * @returns {string | null}
    */
@@ -942,13 +949,12 @@ export function createList(root, hooks) {
   };
 
   /**
-   * F9 (ruled (a), (b)): whether the selected caption `caption` can stay selected after this render:
-   * while filtering, yes (as a selected session the filter hides stays selected); else only while
-   * the page still names its block closed and the list draws that block (closed, or still open
-   * right after ←). app.js selects nothing when it cannot: its block was opened without a key
-   * (an unreported terminal of a session starting into it, the 65th closed block dropping it) or
-   * is gone (fewer than two sessions of its group left in the section).
-   * @param {Caption} caption
+   * F9 (ruled (a), (b)): whether the selected caption `caption` can stay selected after this
+   * render: while filtering, yes (as a selected session the filter hides stays selected); else only
+   * while the page still names its block closed and the list draws that block (closed, or still
+   * open right after ←). app.js selects nothing when it cannot: its block was opened without a key
+   * (an unreported terminal of a session starting into it, the 65th closed block dropping it) or is
+   * gone (fewer than two sessions of its group left in the section). @param {Caption} caption
    */
   const holds = (caption) =>
     filtering() ||
@@ -995,6 +1001,19 @@ export function createList(root, hooks) {
       };
       section.rows.forEach((row, at) => {
         captionsAt(at);
+        // Ruled (2): right after ←, before the list that draws it closed, the selected caption's
+        // card is still drawn open: it counts as its caption, at the card's place, its rows none.
+        const group = (row.stack ?? null)?.group;
+        if (
+          group !== undefined &&
+          selectedCaption?.section === section.name &&
+          selectedCaption.group === group
+        ) {
+          if (row.stack?.role === 'head') {
+            all.push({ kind: 'caption', section: section.name, group });
+          }
+          return;
+        }
         all.push({ kind: 'row', section: section.name, id: row.id });
       });
       captionsAt(section.rows.length);
@@ -1107,8 +1126,18 @@ export function createList(root, hooks) {
           if (held !== null) {
             hooks.say?.(held); // the server keeps it open: nothing moves
           } else if (sendable(stack.group)) {
-            hooks.caption(place.section, stack.group); // first: no session stays selected in it
-            shutBlock(place.section, stack.group);
+            // Ruled (1): the closing and the caption's `selected: null` go in ONE view, so that no
+            // view names the block closed while a session of it is still selected. The list's own
+            // state is set first, so that the caption holds when app.js draws it.
+            const group = stack.group;
+            if (isClosed(place.section, group)) {
+              hooks.caption(place.section, group);
+            } else {
+              closed = [...closed, { section: place.section, group }].slice(-MAX_CLOSED);
+              hooks.caption(place.section, group, {
+                closed: closed.map((one) => ({ section: one.section, group: one.group })),
+              });
+            }
           }
         } else {
           fold(true);
@@ -1129,8 +1158,8 @@ export function createList(root, hooks) {
         if (enterDown) {
           return; // an auto-repeat of an Enter that is still down
         }
-        // Set before any act (F9, ruled (d)): an Enter held on a caption opens the block and selects
-        // its first session once; its repeats never resume that session.
+        // Set before any act (F9, ruled (d)): an Enter held on a caption opens the block and
+        // selects its first session once; its repeats never resume that session.
         enterDown = true;
         if (selectedCaption !== null) {
           openCaption(selectedCaption.section, selectedCaption.group, 'key');

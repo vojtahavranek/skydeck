@@ -217,7 +217,7 @@ const send = (message) => connection?.send(message) ?? false;
 
 const list = createList(dom.list, {
   select: (id, how) => select(id, how),
-  caption: (section, group) => selectCaption(section, group),
+  caption: (section, group, change) => selectCaption(section, group, change),
   activate: (id) => activate(id),
   view: (change) => changeView(change),
   say: (text) => say(text),
@@ -720,20 +720,27 @@ function select(id, how) {
  * F9: selects the caption of the closed block of `group` in `section` (the list's keys: ↑ ↓ onto
  * it, ← on a session of its open card). No session is selected then: `view` and `focus` say
  * `selected: null`, so that the server sees none (S2 12.4's seen, notifications, the resume card),
- * and the pane shows the group card. The zone stays.
+ * and the pane shows the group card. The zone stays. `change` (← closing the block) goes in the
+ * same `view` (ruled (1): no view names the block closed with a session of it selected).
  * @param {SectionPayload['name']} section
  * @param {string} group
+ * @param {{ closed?: ClosedBlock[] }} [change]
  */
-function selectCaption(section, group) {
+function selectCaption(section, group, change) {
   state.newOpen = false;
   state.bringing = null;
   const same =
     state.selected === null && state.caption?.section === section && state.caption.group === group;
   const info = blockInfo(state.list, section, group) ?? { size: 0, needYou: 0 };
   state.caption = { section, group, ...info };
-  if (!same) {
+  if (change?.closed !== undefined) {
+    state.view = { ...state.view, closed: change.closed };
+  }
+  if (!same || change?.closed !== undefined) {
     state.selected = null;
     sendView();
+  }
+  if (!same) {
     sendFocus();
   }
   render();

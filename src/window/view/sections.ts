@@ -23,11 +23,12 @@ const NOTE_HEAD_LINES = 3;
  *  note can be any length, and the list message is sent whole on every change. */
 const NOTE_LINE_MAX = 1024;
 
-/** A terminal in these states may still come to hold a session (S2 7.5); one that ended, was lost or
- *  never started has no program that could. Shared inside the view model (ruled, #45): `rowPayload`'s
- *  `starting` and `buildListMessage`'s choice of a row's terminal read this one set. THE PAGE COPIES
- *  IT (web/pane.js, `MAY_START`, held equal by test/web/pane.test.ts: which line ← and `×n` say on
- *  a block an unreported terminal holds open, F6); a change of one is a change of the other. */
+/** A terminal in these states may still come to hold a session (S2 7.5); one that ended, was
+ *  lost or never started has no program that could. Shared inside the view model (ruled, #45):
+ *  `rowPayload`'s `starting` and `buildListMessage`'s choice of a row's terminal read this one set.
+ *  THE PAGE COPIES IT (web/pane.js, `MAY_START`, held equal by test/web/pane.test.ts: which line ←
+ *  and a caption click say on a block an unreported terminal holds open, F6); a change of one is a
+ *  change of the other. */
 export const MAY_START: ReadonlySet<TerminalState> = new Set([
   'starting',
   'running',

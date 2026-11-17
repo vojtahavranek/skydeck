@@ -1587,21 +1587,20 @@ Setup:
   Enter: Enter gives the keyboard to the list, where the next letter is a list key. No step
   presses Enter in the switcher on a session whose short id you have not looked at.
 - **One click on a row, on its title.** A double click on a session that is not running resumes
-  it. These checks click only the head of a block none of whose rows has a coloured bar at its
-  left (a session that needs you and stays selected for 1.5 seconds is marked seen), and the
-  throwaway session's row. A session's resume card shows `Resume here`: never click it in these
-  checks.
-- **Leave the window as you found it.** Write down at the start what the filter holds, which
-  chips are on (`Show done` among them), which blocks are closed (a row with `×<n>` followed by a
-  line `+… more in <group>`), whether Earlier is unfolded, and your keyboard layout. Each check
-  starts from an empty filter (Esc in its field) and no chip on (a click on each chip that is on).
-  At the end put back what you wrote down: the filter's text typed again into its field (look for
-  the caret first), each chip that was on clicked on again, each block you closed opened again and
-  each that was closed closed again (a click on its `×<n>`), Earlier folded or unfolded as it was,
-  and your own layout (Win+Space). Fold Earlier only while the selected session is not
-  in Earlier (a fold with the selection inside it selects the row above it, which may be a real
-  session); when the throwaway session's row is in Earlier, leave Earlier unfolded and write that
-  down.
+  it. These checks click only one session of a block none of whose sessions has a coloured bar at
+  its left (a session that needs you and stays selected for 1.5 seconds is marked seen), a block's
+  caption line, and the throwaway session's row. A session's resume card shows `Resume here`: never
+  click it in these checks.
+- **Leave the window as you found it.** Write down at the start what the filter holds, which chips
+  are on (`Show done` among them), which blocks are closed (a card drawn as its caption alone: `▸`,
+  the group's name and a number, no session under it), whether Earlier is unfolded, and your
+  keyboard layout. Each check starts from an empty filter (Esc in its field) and no chip on (a click
+  on each chip that is on). At the end put back what you wrote down: the filter's text typed again
+  into its field (look for the caret first), each chip that was on clicked on again, each block you
+  closed opened again (a click on its caption), Earlier folded or unfolded as it was, and your own
+  layout (Win+Space). Fold Earlier only while the selected session is not in Earlier (a fold with
+  the selection inside it selects the line above it, which may be a real session); when the
+  throwaway session's row is in Earlier, leave Earlier unfolded and write that down.
 
 ## W30. Search on your own sessions (real claude)
 
@@ -1612,7 +1611,7 @@ chip on. Write down how many sessions the title bar counts.
    `login` below). Click into the filter's field: its caret blinks. Type `orb-2107 login`, in lower
    case. Expected: the list follows each keystroke; at the end it lists only the sessions that
    have both words (in their title, group, note, directory or a pull request), done ones too with
-   their `done` mark; every section is unfolded, no block is drawn, and the footer of done
+   their `done` mark; every section is unfolded, no card is drawn (every session is a flat row with its group), and the footer of done
    sessions is gone. The title bar's counts did not change. Then Ctrl+A (in the field: it selects
    the field's text) and type `login orb-2107`: the same sessions. Press Esc: the field is empty,
    the list as before, and the key bar says `Focus: list`.
@@ -1629,39 +1628,67 @@ chip on. Write down how many sessions the title bar counts.
    (`No session matches the filter.` when none has one); click both off. Then `Show done`: the
    done sessions show with their `done` mark and the footer says `done sessions shown · hide`;
    click it again, and the footer is `<n> done hidden · show` again (or gone when none is done).
-4. **A block.** Blocks are open by default: a head with `×<n>` after its key, its other sessions
-   indented under it, and no line `+… more in <group>` after it. Look in Recent, and in
-   Earlier, for an open one. When Earlier is folded (none of its rows shows), a click on its header
-   unfolds it; when its rows show, do not click its header (that click folds it). Take an open
-   block none of whose rows has a coloured bar at its left (a session that needs you). Skip a
-   closed one (a head followed by a `+… more` line): ← on a closed head folds Earlier, which with
-   the selection inside Earlier selects the row above it, a real session. When there is no such
-   open block, write that down and go on with step 5. Click that block's head once, on its title
-   (the row with `×<n>`). Expected: the head is selected. Look at the key bar: it must say `Focus:
-   list`. When it says `Focus: terminal` (the head has a terminal in the window), press
-   Ctrl+Shift+L once and look again; until it says `Focus: list` press nothing else, and leave
-   this step out if it does not. That is a real session: from here to the end of this step press
-   only ← and →, never Enter (Enter would resume it), and press ← only while you see that the
-   selected row is that head with its sessions indented under it (the block open); when it is
-   not, press nothing more and write down what you see. When ← (or, later, a click on `×<n>`)
-   does nothing and the key bar says why — a line that begins `this block holds` —, write that
-   line down: it shows for about five seconds, and pressing ← once more shows it again (the block
-   stays as it is). Then press nothing more in this step (no →: on the still open head it would
-   unfold Earlier), and take another open block from its first click on, or go on with step 5. Press ←.
-   Expected: the block closes — its
-   indented sessions are gone, the line `+<n−1> more in <group>` follows the head, and the head
-   stays selected. Press →. Expected: it opens again, its sessions indented under the head, the
-   line gone, the head still selected. Look again that the head is selected with its sessions
-   indented under it, then press ← once more: it closes as before. Click the `+… more` line once.
-   Expected: the block opens, the head stays selected and the key bar still says `Focus: list`.
-   Then click the `×<n>` after the head's key: the block closes; wait a moment (two quick clicks
-   are a double click, which acts once) and click it again: it opens; neither click moved the
-   selection or the keyboard. The block is open again, as you found it. Then click the throwaway
-   session's row once (look at the short id): the next steps start from it.
-   When you unfolded Earlier in this step and the throwaway session's row is not in Earlier, fold
-   Earlier again now, with a click on its header. When its row is in Earlier, leave Earlier
-   unfolded until the end of step 6 (folding Earlier with the selection inside it selects the
-   row above it, which may be a real session).
+4. **A block's card.** Blocks are open by default and drawn as cards: a box with a thin edge; at its
+   top a caption line with the arrow `▾`, the group's name and the number of its sessions; the
+   block's sessions inside it as ordinary rows, none indented and none marked `×<n>`. This step
+   closes one card and opens it again, with the mouse and with ← and →. It types nothing into any
+   session or field, presses no Enter and no letter key, and no ↑ or ↓ (they move the selection to
+   the next line, which may be a session that needs you).
+
+   *Choose the card.* Look in Recent, and in Earlier, for an open card. When Earlier is folded (none
+   of its rows shows), a click on its header unfolds it; when its rows show, do not click its header
+   (that click folds it). Take an open card, in Recent or in Earlier, none of whose sessions has a
+   coloured bar at its left (a session that needs you) and none of which is the throwaway session.
+   Write down its group's name and the number of its sessions. Skip a closed block (a caption with
+   `▸` and no session under it): do not click it, and press no key while its caption is selected.
+   When there is no such open card, write that down and go on with step 5.
+
+   *With the mouse, the throwaway session still selected.* Look at the key bar's `Focus: …` and keep
+   it in mind. Click the card's caption once, anywhere on its line. Expected: the card closes to its
+   caption alone (`▸`, the name, the number, no session under it); the header still shows the
+   throwaway session's short id, and `Focus: …` is what you noted. Wait a moment (two quick clicks
+   are a double click, which acts once) and click the caption again. Expected: the card opens, its
+   sessions inside as before, and again neither the selection nor the keyboard moved. The card is
+   open, as you found it. When a line that begins `this block holds` shows instead, write it down
+   (the card stays open) and take another card.
+
+   *Select a session of the card.* Click one session of the card once, on its title. Expected: it is
+   selected. Look at the key bar: it must say `Focus: list`. When it says `Focus: terminal` (that
+   session has a terminal in the window), press Ctrl+Shift+L once and look again; until it says
+   `Focus: list` press nothing else, and when it does not, go on with "Put it back" below. That is a
+   real session: from here to the end of this step press only ← and →, never Enter (it would resume
+   it) and no letter key. Click the card's caption once. Expected: the card stays open, the same
+   session stays selected, and the key bar says `this block holds the selected session; it stays
+   open` (it shows for about five seconds).
+
+   *← closes the card and selects its caption.* Press ← only while you see all of this: the selected
+   line is a session of that card (the card is open, its caption above it, its sessions under it),
+   the card is in Recent or in Earlier, and the key bar says `Focus: list`. Never press ← with a
+   caption selected: it folds Earlier, and inside Earlier it selects the line above it, which may be
+   a real session. When anything differs, press nothing more and write down what you see. When ←
+   does nothing and the key bar says why — a line that begins `this block holds` —, write that line
+   down: it shows for about five seconds, and pressing ← once more, after the same look, shows it
+   again (the card stays open). Then press nothing more in this step (no →: on a session of the open
+   card it would unfold Earlier), and take another card from its first click on, or go on with step
+   5. Press ← once. Expected: the card closes to its caption alone; its caption is drawn as the
+   selected line and no session is selected; the right side shows a small card of the group — its
+   name, `<n> sessions` and `→ or Enter opens the group` — and no terminal; the key bar still says
+   `Focus: list`.
+
+   *→ opens it again.* Press → only while you see that the selected line is that caption (the
+   group's name you wrote down, with `▸`) and that the right side shows the group's card. → selects
+   a real session, the first session of the card, which is not the throwaway session; nothing is
+   typed into it, and no Enter is pressed. Press → once. Expected: the card opens, its sessions
+   inside as before, the first of them selected, and the key bar says `Focus: list`. The right side
+   shows that session (its resume card when it is not running: never click `Resume here`). Press
+   nothing more on it.
+
+   *Put it back.* The card is open, as you found it. When a card is still closed (a step above was
+   left out), click its caption once: it opens. Then click the throwaway session's row once (look at
+   the short id): the next steps start from it. When you unfolded Earlier in this step and the
+   throwaway session's row is not in Earlier, fold Earlier again now, with a click on its header.
+   When its row is in Earlier, leave Earlier unfolded until the end of step 6 (folding Earlier with
+   the selection inside it selects the line above it, which may be a real session).
 5. **The switcher, without Enter.** Look at the key bar's `Focus: …` and keep it in mind. Press
    Ctrl+Shift+P. Expected: a panel over the window with a field on top whose caret blinks,
    `Switch to a session…  (title, group, note, PR, directory, short id)` while it is empty;
@@ -1694,9 +1721,10 @@ chip on. Write down how many sessions the title bar counts.
    Earlier unfolded and write that down.
 
 Write down: whether any answer of the list came late enough to notice (the filter as you typed,
-the chips, the block, the switcher); whether the switcher's order — those that need you, then
+the chips, the card, the switcher); whether the switcher's order — those that need you, then
 Open, then the ones not running, then the done ones — is the one you want; what Enter did in
-step 6; every step that showed something else than described.
+step 6; what the right side showed while the caption was selected; every step that showed
+something else than described.
 
 ## W31. The filter's and the switcher's fields on your layouts
 

@@ -1119,56 +1119,75 @@ the keyboard, and while one has it no list key acts.
 
 **Blocks.** In every section — Open, Recent and Earlier —, each on its own, the sessions of one
 group sit together as a block when there are at least two: under Open only running ones, under
-Recent only recent ones (not running, last active in the last 7 days), so a group with sessions
-in two sections is two blocks. Every session of the group is in its block, one that has a
-terminal of the window and one that needs you too. A block sits where its first session sits in
-the section's order (under Open: by slot), and the others follow it in that order, indented, so
-the slot numbers under Open can run `1 3 2`. That first session is the block's head: it shows
-`×4` after its ticket key (or its group). A block is open until you close it. Closed, it shows
-only its head and the line `+3 more in ORB-2107`, which is no row: it is never selected, and ↑
-↓ pass over it and the sessions it hides. When sessions it hides need you the line says so, `+3
-more in ORB-2107 · 1 needs you`, that part in the colour of the title bar's `need you` count;
-the head's own mark is on its row, and the title bar counts the same whether a block is open or
-closed. A group is its exact text: `ORB-1` and `orb-1` are two. A session whose group no other
-session of its section has, or that has no group, is listed as before. A section's count counts
-every session in it, those of a closed block too.
+Recent only recent ones (not running, last active in the last 7 days), so a group with sessions in
+two sections is two blocks. Every session of the group is in its block, one that has a terminal of
+the window and one that needs you too. A block sits where its first session sits in the section's
+order (under Open: by slot), and the others follow it in that order, so the slot numbers under Open
+can run `1 3 2`. A group is its exact text: `ORB-1` and `orb-1` are two. A session whose group no
+other session of its section has, or that has no group, is listed as before. A section's count
+counts every session in it, those of a closed block too.
 
-- A click on `×4` closes or opens the block, and a click on the `+3 more` line opens it. A click
-  selects nothing and leaves the keyboard where it was. While a session of the block other than
-  its head is selected, a click on `×4` does not close it: the selection, the keyboard and the
-  right side stay, and the key bar says `this block holds the selected session; it stays open`
-  (← in the list closes it, selecting the head first). A double click on either acts once.
-- In the list (`Focus: list`): ← on the head or on another session of an open block closes it (on
-  another session it selects the head first), → on a closed head opens it. Otherwise ← and → fold
-  and unfold Earlier as before: on a session in no block, and also ← on a closed head and → on an
-  open head or on another session of a block.
-- A block you closed stays closed until you open it or reload the page, also when its sessions
-  leave and the block forms again later.
-- A closed block opens by itself while one of its sessions other than its head has a terminal of
-  the window whose program has not reported its session yet (a start, or a program that ended
-  before it reported, until you close its terminal), so that its row and its slot number show and
-  its slot chord reaches it; it then stays open. While such a session holds it open, ← and a click
-  on `×n` do nothing, and the key bar says why: `this block holds a session that is still
-  starting; it stays open` while its terminal may still start (wait, and the block can be closed
-  once the session is known), or `this block holds a terminal that ended at its start; close it
-  first` when its program ended before its session was known (select that session and press
-  Close on its ended bar).
-- Whatever selects a session that a closed block hides opens the block, and it stays open when
-  the selection leaves, until you close it again: Ctrl+Shift+1–9 on its slot, Ctrl+Shift+J when it
-  needs you, a click on its notification, a pick in the switcher, a resume that brings it, or a
-  newer session of its group that makes the selected one a hidden member. Ctrl+Tab skips a session
-  a closed block hides when no terminal of the window holds it (the page does not know a closed
-  block's sessions), as it skips a session that the filter or the folded Earlier hides and that no
-  terminal of the window holds; one that a terminal of the window holds it selects, and its block
-  opens.
-- `d` on a closed block's head marks that session only: the next one becomes the head (or the
-  last one stands alone), and the selection goes to the row after the block (stage D's rule takes
-  the row after it among those the list drew, and the block's other sessions were not drawn).
-  With done sessions shown the session stays listed, still the head, and stays selected.
+A block is drawn as a card: a box with a thin edge and rounded corners, a little off the colour of
+the list, with room around it. Its first line is its caption: an arrow (▾ while the block is open, ▸
+while it is closed), the group's name (cut with `…` when it is long) and, small and dim, the number
+of its sessions. An open block holds all its sessions inside the card as ordinary rows: none is
+indented, none is marked `×4`, and the ticket key or group is not repeated on them, since the
+caption says it. A block is open until you close it. Closed, it is its caption alone: no session is
+shown, the first one hidden like the others. When sessions it hides need you the caption says so, `▸
+ORB-2107 4 · 1 needs you`, that part in the colour of the title bar's `need you` count; the title
+bar counts the same whether a block is open or closed. While a filter or a chip is on, there are no
+cards: every session is a flat row with its group.
+
+- A click on the caption line closes or opens the block (the whole line is the control). It selects
+  nothing and leaves the keyboard where it was, with one exception: on a closed caption that is
+  itself selected (below) it opens the block and selects its first session, as → does. While a
+  session of the block is selected, a click does not close it: the selection, the keyboard and the
+  right side stay, and the key bar says `this block holds the selected session; it stays open` (← on
+  a session of the card closes it). A double click acts once.
+- In the list (`Focus: list`): ← on any session of an open block closes the block and selects its
+  caption. → on a session of a block unfolds Earlier, as on any session. A group the server would
+  refuse (below): nothing.
+- The caption of a closed block can be selected, like a row, but the caption of an open block
+  cannot: ↑ ↓ (and `j` `k`, Home, End, PgUp, PgDn) move through the sessions and the closed captions
+  in the list's order, and pass over the captions of open blocks. A selected caption is drawn like a
+  selected row. It stands for the block and selects no session, so nothing is marked seen, no
+  notification is held back and no session is acted on. The right side shows a small card of the
+  group — its name, `3 sessions`, ` · 1 needs you` when any of them needs you, and `→ or Enter opens
+  the group` — and no terminal. → or Enter opens the block and selects its first session, a real
+  one, and the keyboard stays on the list; ← folds Earlier, as on a session in no block (a held ←
+  does it once, and inside Earlier it selects the line above, a session or a closed caption). `d`,
+  `l`, F2, `g`, `n` and `p` do nothing there, and the key bar says `no session selected`. When the
+  block opens by itself while its caption is selected (below), or its group has fewer than two
+  sessions in the section any more, nothing is selected: ↑ ↓ start again from the first line.
+- A block you closed stays closed until you open it or reload the page, also when its sessions leave
+  and the block forms again later.
+- A closed block opens by itself while one of its sessions, the first too, has a terminal of the
+  window whose program has not reported its session yet (a start, or a program that ended before it
+  reported, until you close its terminal), so that its row and its slot number show and its slot
+  chord reaches it; it then stays open. While such a session holds it open, ← and a click on the
+  caption do nothing, and the key bar says why: `this block holds a session that is still starting;
+  it stays open` while its terminal may still start (wait, and the block can be closed once the
+  session is known), or `this block holds a terminal that ended at its start; close it first` when
+  its program ended before its session was known (select that session and press Close on its ended
+  bar).
+- Whatever selects a session that a closed block hides, its first one too, opens the block, and it
+  stays open when the selection leaves, until you close it again: Ctrl+Shift+1–9 on its slot,
+  Ctrl+Shift+J when it needs you, a click on its notification, a pick in the switcher, a resume that
+  brings it, → or Enter on its caption, or a newer session of its group that makes the selected one
+  a hidden member. Ctrl+Tab skips a session a closed block hides when no terminal of the window
+  holds it (the page does not know a closed block's sessions), as it skips a session that the filter
+  or the folded Earlier hides and that no terminal of the window holds; one that a terminal of the
+  window holds it selects, and its block opens.
+- `d` on a session of an open block marks that session only: the others stay a card, or the last one
+  stands alone as a plain row, and the selection goes to the row after it (stage D's rule). With
+  done sessions shown the session stays listed and stays selected.
 - While filtering, every session stands alone.
 
-(Until 2026-11-16 only Recent and Earlier stacked, closed by default, and running sessions
-never did; the owner asked for blocks in every section, open by default.)
+(Until 2026-11-16 only Recent and Earlier stacked, closed by default, and running sessions never
+did; the owner asked for blocks in every section, open by default. Until 2026-11-17 the first
+session of a block was its head with `×4` after its key, the others were indented under it, and a
+closed block showed its head and a line `+3 more in ORB-2107`; the owner found it hard to see what
+belongs where, and asked for the groups to be more visible: the cards.)
 
 Each window has its own filter, chips, closed blocks, folded Earlier and done shown. A reload (F5)
 forgets all of them: the page starts again with an empty filter, no chip on, Earlier folded, done
@@ -1432,18 +1451,15 @@ manifest names no start address).
 - **`d` while filtering.** The toast says `Marked done: hidden from the list. It comes back on new
   activity.` while the filter still lists the session, with its `done` mark.
 - **Blocks the window cannot close.** A block whose group is over 1,024 bytes (of UTF-8) cannot
-  be closed: ← and its `×n` do nothing on it, and it stays open. A window remembers at most 64
-  closed blocks: closing another opens the one closed first again.
-- **A long group's `×n`.** The group before a head's title is not shortened, so with a group of
-  about 46 characters or more the head's `×n` lies past the list's edge, where it cannot be
-  clicked. ← and → in the list, and a click on the `+n more` line, still close and open the block;
-  the line's ` · 1 needs you` always shows (the group is what gets shortened there).
+  be closed: ← on a session of it and a click on its caption do nothing, and it stays open. A
+  window remembers at most 64 closed blocks: closing another opens the one closed first again
+  (and when its caption was selected, nothing is selected).
 - **The automatic pull-request refresh** (design.md 7.3) follows the sessions the list's
   sections show, and a selected session the list does not show while a terminal of the window
   holds it (its header shows its pull requests). So the sessions a closed block hides — under
-  Open too — get no automatic refresh until you open the block (its head does), nor do the
-  switcher's, as those of a folded Earlier never did: open the block, or use `↻` in the
-  session's pull-request dialog.
+  Open too, and its first session too, since a closed block shows no session at all — get no
+  automatic refresh until you open the block, nor do the switcher's, as those of a folded Earlier
+  never did: open the block, or use `↻` in the session's pull-request dialog.
 - **A session that a terminal of the window went on in, and that ended before its first
   prompt**, has no transcript, so the list does not list it once its program has ended — for
   one, `/clear` in a resumed terminal (Claude Code goes on in a new session there), then `/exit`

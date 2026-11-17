@@ -381,7 +381,6 @@
 .block-head {
   display: flex;
   align-items: center;
-  gap: 6px;
   height: 28px;
   margin: 0 0 1px;
   padding: 0 10px 0 12px;
@@ -408,6 +407,7 @@
 .block-twist {
   flex: none;
   width: 16px;
+  margin-right: 6px;
   color: var(--faint);
   font-size: 10px;
   text-align: center;
@@ -425,6 +425,7 @@
 }
 .block-count {
   flex: none;
+  margin-left: 6px;
   color: var(--faint);
   font-weight: 400;
 }
@@ -432,5 +433,5 @@
   flex: none;
   color: var(--need);
   font-weight: 400;
-  white-space: pre; /* a flex item would drop its leading space */
+  white-space: pre; /* its leading space is the room before `·`: a flex item would drop it */
 }

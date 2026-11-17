@@ -2,10 +2,11 @@
 // header of stage D (S2 12.5, D11–D15, D17) in four lines of one line each, so that it has one
 // height for every session and window width (D12) — the title, the group chip, its ✎ or `+ group`,
 // the state, Note and Done; the directory, "opened <time> · last active <age>", where the title
-// comes from and the short id; the window's chip (S2 12.3), the open pull requests and the button of
-// the pull-request dialog; the note's first line —, the resume card, the card of a session running
-// in another terminal, the ended bar, the new form and (F9) the small card of a group whose closed
-// caption is selected in the list. Its interface is contract 2.9's with plan D 2.4's changes. Every server string reaches the DOM through textContent or a tooltip.
+// comes from and the short id; the window's chip (S2 12.3), the open pull requests and the button
+// of the pull-request dialog; the note's first line —, the resume card, the card of a session
+// running in another terminal, the ended bar, the new form and (F9) the small card of a group whose
+// closed caption is selected in the list. Its interface is contract 2.9's with plan D 2.4's
+// changes. Every server string reaches the DOM through textContent or a tooltip.
 //
 // How app.js calls it: on a change of what the right side shows, `hide()` (every card and the
 // header), then `header(row, selected, term, now)` (plan D 2.4) and at most one card. `act` is

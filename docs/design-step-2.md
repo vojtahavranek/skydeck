@@ -1408,7 +1408,11 @@ same profile, find the key there. A page that has neither a token nor a stored k
 window has no key; run skydeck window (or skydeck window --print-url for a browser tab)`.
 
 Page and server come from one checkout, so "same asset version" means "same protocol"; the
-protocol number exists for the reload decision and for tests.
+protocol number exists for the reload decision and for tests. Follow-up F9 (2026-11-17) followed
+this rule: it changed the list message (8.2.3: a row's `stack` lost two fields, a section gained
+`closedStacks`) and took no step of the protocol number; a page of the old build meets another
+asset version and reloads itself (`test-page/shell.test.ts`, "a server with another asset version
+→ the page reloads itself, once").
 
 #### 8.2.3 Messages
 
@@ -1426,8 +1430,8 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `t` | Fields | Effect |
 |---|---|---|
 | `ping` | `n` | `pong` with the same `n`, `bootId`, `serverId`. |
-| `view` | `filter`, `unfolded`, `showDone`, `selected`; from stage E, each optional (a page before stage E sends none): `chips` (12.8's Running, Open PR and Has note as `running`, `open-pr`, `note`, each once; Show done is `showDone`), `closed` (the blocks the user closed, 12.2: at most 64 entries, each exactly a `section` — `open`, `week` or `earlier` — and a `group`, a text, each section and group once; absent: no block closed. It replaced stage E's `opened` on 2026-11-16, follow-up F3: a view that still names `opened` is refused as any view with a field it does not know, and the server closes the page's connection, 1008 `message refused: view: unknown field`; the page and the server are one build, 8.2.2), `switcher` (the quick switcher's text while it is shown, else null; each change of it is a `view`) | The page's view state; the server answers with `list` at once and keeps sending `list` when it changes (12). |
-| `focus` | `focused`, `selected`, `area` (`cols`, `rows`: what the terminal area holds at the page's font) | Window focus, selection and terminal area, for seen (12.4), notifications (13), the size owner and the first size of a terminal the command line or a restore opens (8.2.6). Sent on every change and after `start`. |
+| `view` | `filter`, `unfolded`, `showDone`, `selected` (null while the page's selection is a closed block's caption, 12.2: from follow-up F9 no session is selected then); from stage E, each optional (a page before stage E sends none): `chips` (12.8's Running, Open PR and Has note as `running`, `open-pr`, `note`, each once; Show done is `showDone`), `closed` (the blocks the user closed, 12.2: at most 64 entries, each exactly a `section` — `open`, `week` or `earlier` — and a `group`, a text, each section and group once; absent: no block closed. It replaced stage E's `opened` on 2026-11-16, follow-up F3: a view that still names `opened` is refused as any view with a field it does not know, and the server closes the page's connection, 1008 `message refused: view: unknown field`; the page and the server are one build, 8.2.2), `switcher` (the quick switcher's text while it is shown, else null; each change of it is a `view`) | The page's view state; the server answers with `list` at once and keeps sending `list` when it changes (12). |
+| `focus` | `focused`, `selected` (null then too), `area` (`cols`, `rows`: what the terminal area holds at the page's font) | Window focus, selection and terminal area, for seen (12.4), notifications (13), the size owner and the first size of a terminal the command line or a restore opens (8.2.6). Sent on every change and after `start`. |
 | `attach` | `term`, `cols`, `rows` | Start a terminal stream (8.2.4). The page's size is a proposal (8.2.6). |
 | `detach` | `term` | Stop it. |
 | `input` | `term`, `data` | Typed text (UTF-8) for the terminal; `binary: true` when `data` is a byte string from xterm.js's binary channel (mouse reports). Makes this page the size owner. |
@@ -1473,7 +1477,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span and its `rows`); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line and folds nothing), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the head included —, `open`, `role` — `head` or `member` —, `head`, the head's session id, and from follow-up F3 `hiddenNeedYou`, how many of the members a closed block hides need you, 0 while it is open). |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view is filtering, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order; the field is optional for a reader, so that a scripted list of the test helpers that lacks it has no closed block); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line and folds nothing), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -2173,78 +2177,108 @@ rule (4.3; stage B, plan B7).
   mark of design 6.3 in words (`continued` and `2 processes` too) and the expiring one as `expires
   soon`: the row carries only that the session is expiring, not when its transcript is deleted
   (ruled by the plan owner, plan task 27).
-- No group headers: most groups have one member. The group (design 7.1) is printed dim at the
-  start of the title when the title does not already start with it. In every section the rows of
-  one group sit together as a block (`ORB-2107 ×4`, its other rows under it), open by default; a
-  click or ← closes it to `ORB-2107 ×4 … +3 more`, a click or → opens it again. A filter flattens
-  every block. (Ruled on 2026-11-16, follow-up F3, on the owner's words "it could group them
-  togather (expanded by default, could collaps) … by the state and after that by group"; until
-  then only Recent and Earlier stacked, closed by default, and running sessions never did.)
+- No group headers, except the caption of a block (below): most groups have one session. The
+  group (design 7.1) is printed dim at the start of the title when the title does not already
+  start with it. In every section the rows of one group sit together as a block, drawn as a card:
+  a box with a caption line — the group's name and the number of its sessions — and its sessions
+  inside as ordinary rows; open by default. A click on the caption, or ← on a session of the
+  card, closes it to its caption alone; a click on the caption, or → on it, opens it again. A
+  filter flattens every block: flat rows, each with its group, no card. (Ruled on 2026-11-16,
+  follow-up F3, on the owner's words "it could group them togather (expanded by default, could
+  collaps) … by the state and after that by group"; until then only Recent and Earlier stacked,
+  closed by default, and running sessions never did. Drawn as a card since follow-up F9,
+  2026-11-17, on the owner's words "I dont like the grouping. It looks like main session and some
+  subsessions like that. Also its hard to say what belongs where. The groups could be more visible
+  distingueshed."; before it the first session was the block's head, with `ORB-2107 ×4`, the
+  others indented under it, and a closed block was its head and a line `+3 more`.)
 - Slot numbers 1–9 show at the left of Open's rows.
 
-The rule of blocks is the server's (4.3; stage E, plan E6 as ruled on 2026-11-16 for follow-up
-F3). A block is what the code and the protocol call a stack (`stackRows`, the row's `stack`,
-`data-stack`). In every section — Open, Recent and Earlier —, each on its own, the rows of one
-group (the row's group as sanitised, compared as exact text) form a block when there are at least
-two: Open holds only blocks of running sessions, Recent only of recent ones (not running, last
+The rule of blocks is the server's (4.3; stage E, plan E6 as ruled on 2026-11-16 for follow-up F3,
+and follow-up F9). A block is what the code and the protocol call a stack (`stackRows`, the row's
+`stack`, `data-stack`). In every section — Open, Recent and Earlier —, each on its own, the rows of
+one group (the row's group as sanitised, compared as exact text) form a block when there are at
+least two: Open holds only blocks of running sessions, Recent only of recent ones (not running, last
 active within 7 days), and a group with rows in two sections is two blocks. Every row of the group
-is in its block, one that a terminal of the window holds (running, starting or ended: it may hold
-a slot) and one that needs you (12.4) too. A block sits where its first row sits in the section's
-order (12.1), its other rows right after it in that order; that first row is its head. A row whose
-group no other row of its section has, and a row without a group, are drawn as before; while a
-filter or a chip is set (12.8) no block is formed. A block is open unless the page's view names
-its section and group in `closed` (8.2.3): the page remembers the blocks the user closed, per
-window, until a reload; a block the user closed stays closed until it is opened or the page
-reloads, also when its rows leave and a block of that section and group forms again later (ruled
-on 2026-11-16, review 2 of follow-up F3). A closed block is open while the selected session is one
-of its members other than the head, and the page then forgets that it was closed, so that it stays
-open when the selection leaves (ruled): whatever selects a hidden member — a click, a slot chord,
-Ctrl+Shift+J, Ctrl+Tab, a notification's click, a pick in the switcher, the server's own selection
-after a resume (12.9, 12.8) — opens its block, so the selection is never on a row hidden in a
-block. A closed block is open too while one of its members other than the head is drawn with a
-terminal of the window that has not reported a session (7.5: a start not yet reported, which may
-stay so, or a program that ended before it reported, until its terminal is closed), so that such a
-row and its slot are on screen and its slot chord reaches it; the page forgets that it was closed,
-as for a selection, and while such a member holds the block open ← and a click on `×4` do nothing
-and the key bar says why (ruled on 2026-11-16; two lines from follow-up F6): `this block holds a
-session that is still starting; it stays open` while that member's terminal may still come to hold a
-session (it changes by itself), and `this block holds a terminal that ended at its start; close it
-first` when it can no longer start one (it ended, was lost or never started), since waiting never
-frees the block and the ended bar's Close does; when both kinds hold one block, the first. The
-page's rule is a copy of the server's (`build.ts` and `web/list.js` each say so): a terminal's
-`sessionId` null in `list.terminals` for the terminal a member's row is drawn with; and which of the
-two lines is told by the terminal's state, the page's set of the states that may still start, a copy
-of the server's `MAY_START` (`sections.ts` and `web/pane.js` each say so, and a unit test holds them
-equal). A closed block never hides that a session needs you: its line says how many of the members
-it hides need you (below), Ctrl+Shift+J reaches them (`needYou.order` holds them, 8.2.3), and the
-title bar's counts (12.1) are the same whether a block is open or closed. A section's count and time
-span are all its rows', a closed block's hidden members included. A view without `closed` closes no
-block: the page and the server are one build (8.2.2), and an open block hides no row.
+is in its block, one that a terminal of the window holds (running, starting or ended: it may hold a
+slot) and one that needs you (12.4) too. A block sits where its first row sits in the section's
+order (12.1), its other rows right after it in that order; the protocol calls that first row its
+head (8.2.3), but in the card no row is special. A row whose group no other row of its section has,
+and a row without a group, are drawn as before; while a filter or a chip is set (12.8) no block is
+formed. A block is open unless the page's view names its section and group in `closed` (8.2.3): the
+page remembers the blocks the user closed, per window, until a reload; a block the user closed stays
+closed until it is opened or the page reloads, also when its rows leave and a block of that section
+and group forms again later (ruled on 2026-11-16, review 2 of follow-up F3). A closed block is open
+while the selected session is ANY of its sessions (its first too since follow-up F9, which hides the
+first session of a closed block like the others), and the page then forgets that it was closed, so
+that it stays open when the selection leaves (ruled): whatever selects a hidden session — a click, a
+slot chord, Ctrl+Shift+J, Ctrl+Tab, a notification's click, a pick in the switcher, the server's own
+selection after a resume (12.9, 12.8), → or Enter on its caption — opens its block, so the selection
+is never on a row hidden in a block. A closed block is open too while any of its sessions — its
+first too — is drawn with a terminal of the window that has not reported a session (7.5: a start not
+yet reported, which may stay so, or a program that ended before it reported, until its terminal is
+closed), so that such a row and its slot are on screen and its slot chord reaches it; the page
+forgets that it was closed, as for a selection, and while such a session holds the block open ← on a
+session of it and a click on its caption do nothing and the key bar says why (ruled on 2026-11-16;
+two lines from follow-up F6): `this block holds a session that is still starting; it stays open`
+while that session's terminal may still come to hold a session (it changes by itself), and `this
+block holds a terminal that ended at its start; close it first` when it can no longer start one (it
+ended, was lost or never started), since waiting never frees the block and the ended bar's Close
+does; when both kinds hold one block, the first. The page's rule is a copy of the server's
+(`build.ts` and `web/list.js` each say so): a terminal's `sessionId` null in `list.terminals` for
+the terminal a session's row is drawn with; and which of the two lines is told by the terminal's
+state, the page's set of the states that may still start, a copy of the server's `MAY_START`
+(`sections.ts` and `web/pane.js` each say so, and a unit test holds them equal). A closed block
+never hides that a session needs you: its caption says how many of its sessions need you (below),
+Ctrl+Shift+J reaches them (`needYou.order` holds them, 8.2.3), and the title bar's counts (12.1) are
+the same whether a block is open or closed. A section's count and time span are all its rows', a
+closed block's included. A view without `closed` closes no block: the page and the server are one
+build (8.2.2), and an open block hides no row.
 
-How a block looks and is used (stage E, plan E7 as ruled on 2026-11-16). The head shows `×4`
-after its ticket key (or its group); an open block's other rows follow it, indented. A closed
-block shows its head with `×4`, followed by the line `+3 more in ORB-2107`, which is no row: it is
-never selected, and ↑ ↓ pass over it and the members it hides. When members it hides need you the
-line says how many: `+3 more in ORB-2107 · 1 needs you` (` · 2 need you`), that part alone in the
+How a block looks (stage E, plan E7 as ruled on 2026-11-16; as a card since follow-up F9,
+2026-11-17). Each block is a card: a box of its own with a 1 px border (`--card-edge`, chosen so
+that it is seen as an edge in the light and in the dark scheme), rounded corners, a background one
+step off the list's (`--panel2`) and 8 px of room around it. Its first line is its caption: the fold
+arrow (▾ while open, ▸ while closed), the group's name (cut with an ellipsis when it is long; it
+reaches the page as text only), the number of its sessions (small and dim) and, while the block is
+closed and sessions it hides need you, ` · 1 needs you` (` · 2 need you`), that part alone in the
 colour of the title bar's `need you` count, with no bar and no bold, which stay the marks of a row
-that needs you (12.4); the count is the server's (`hiddenNeedYou`), taken from the same fact as a
-row's own mark, never from a text, and the head's own mark is on its row. A click on `×4` or on
-the `+3 more` line closes or opens the block; it selects nothing and leaves the keyboard where it
-was. A click never moves the selection (ruled on 2026-11-16, review 2 of follow-up F3): while a
-member other than the head is selected, a click on `×4` leaves the block open, and the selection,
-the focus and the right side as they are, and the key bar says `this block holds the selected
-session; it stays open` (selecting the head would move the keyboard into the head's terminal
-from the terminal zone); ← in the list on a member still selects the head and closes (12.9).
-The keys are 12.9's. The page sends `closed` in every view (`[]` at least), at most 64 entries, the oldest dropped (that
-block opens again); a group the server would refuse — not well formed, or over 1,024 bytes
-(8.2.3) — is never sent, so its block cannot be closed: ← and `×4` do nothing on it, and it stays
-open (a named limit). Another named limit (review 2 of follow-up F3, left as it is): the group
-before a head's title is not shortened, so a group of about 46 characters or more pushes `×4`
-past the list's edge, where it cannot be clicked; ← and →, and a click on the `+3 more` line, still
-close and open the block, and the line's ` · 1 needs you` always shows (its group gives way). `d` on a closed block's head marks that session only: the next member
-becomes the head (or the last one stands alone), and stage D's selection after `d` (12.9) takes
-the row after it of those the list drew when `d` was pressed — for a closed block's head, the row
-after the block, whose members were not drawn (ruled). While filtering every row stands alone
+that needs you (12.4). The arrow, the count and that part always show; the name gives way. The count
+is the server's (`needYou` of the closed block, 8.2.3), taken from the same fact as a row's own
+mark, never from a text. An open card holds every session of the block as an ordinary row inside it:
+no `×4`, no indent, no row is special, and the group — the row's ticket key, or its group text — is
+not repeated on them, since the caption says it. A closed block is its caption alone: no row, its
+first session hidden like the others (follow-up F3's line `+3 more in ORB-2107` and the head's `×4`
+are gone). Which rows form a block, where it sits, their order and the slots are as before. With a
+filter or a chip set there is no card: the rows are flat, each with its group (12.8).
+
+How a block is used (plan E7 as ruled on 2026-11-16; follow-up F9). The caption of a CLOSED block
+can hold the selection: it stands for the block, and no session is selected then — the page tells
+the server `selected: null` in `view` and `focus` (8.2.3), so that nothing is seen (12.4), no
+notification is held back and no resume card is shown — and the pane shows a small card of the group
+(12.9). The caption of an OPEN block cannot hold it. A click on the caption line — the whole line is
+the control — opens or closes the block; it leaves the keyboard where it was, and the second click
+of a double click does nothing (12.9). A click never moves the selection (ruled on 2026-11-16,
+review 2 of follow-up F3), with one exception: a click on the selected closed caption itself opens
+the block and selects its first session, as → does (the list zone takes the keyboard first, so that
+no terminal gets it). While the block holds the selected session — any of its sessions —, a click
+that would close it leaves it open, and the selection, the focus and the right side as they are, and
+the key bar says `this block holds the selected session; it stays open` (closing it would put the
+selection on its caption, and a click moves no selection); ← on that session closes it (12.9). A
+selected caption whose block opens without a key — a session starts into it (its terminal has not
+reported a session, above), or the 65th closed block drops it from `closed` — or goes — fewer than
+two sessions of its group are left in its section — leaves NOTHING selected, never a session that
+the user did not choose; ↑ ↓ then start again from the first line. While a filter is typed a
+selected caption stays selected, as a selected session that the filter hides does (12.9): the pane
+keeps its card, and the caption is drawn selected again when the filter is cleared. The keys are
+12.9's. The page sends `closed` in every view (`[]` at least), at most 64 entries, the oldest
+dropped (that block opens again); a group the server would refuse — not well formed, or over 1,024
+bytes (8.2.3) — is never sent, so its block cannot be closed: ← on a session of it and a click on
+its caption do nothing, and it stays open (a named limit). A long group name is cut with an ellipsis
+in the caption, and the arrow, the count and ` · 1 needs you` always show (F3's other named limit, a
+`×4` pushed past the list's edge by a long group, ended with the card). `d` on a session of an open
+card marks that session only: the others stay a card, or the last one stands alone as a plain row,
+and stage D's selection after `d` (12.9) takes the row after it of those the list drew when `d` was
+pressed. On a selected caption `d` does nothing (12.9). While filtering every row stands alone
 (12.8).
 
 ### 12.3 The pull-request chip in the window
@@ -2625,7 +2659,7 @@ written without quote marks (`> restore`).
 
 - `/` filters the list: title, group, note, pull-request repository and number, directory, short
   id; several words must all match; while a filter is set it includes done sessions, unfolds
-  every section and flattens every block (12.2). A filter that leaves no row says so: `No session matches the filter.`
+  every section and flattens every block (12.2: flat rows, each with its group, no card). A filter that leaves no row says so: `No session matches the filter.`
   (ruled by the plan owner, plan task 27).
 - Chips: Running, Open PR, Has note, Show done.
 - Ctrl+Shift+P opens the quick switcher over all sessions, ranked: needs you, open (by slot), not
@@ -2702,9 +2736,9 @@ One rule matches for the filter and for the switcher:
   card (an expired one too), or in the key bar for a session the list does not show (one that went
   away). Enter resumes exactly the sessions with no terminal of the window that do not run
   elsewhere, and the footer's `Enter resume here` says so for the highlighted one: one rule for
-  both (ruled by the lead on 2026-11-15). A member of a closed block needs nothing more: the server opens the
-  block of the selected session (12.2), so the switcher is the way to a member Ctrl+Tab skips (one
-  that no terminal of the window holds, 12.9). The
+  both (ruled by the lead on 2026-11-15). A session of a closed block — its first too, since follow-up F9 —
+  needs nothing more: the server opens the block of the selected session (12.2), so the switcher
+  is the way to a session Ctrl+Tab skips (one that no terminal of the window holds, 12.9). The
   second click of a double click on an item acts on nothing — neither the item nor what lay under
   it once the switcher closed —, and one on `Switch…` opens the switcher once.
 - Each window has its own filter, chips, closed blocks, folded Earlier, done shown, selection and
@@ -2719,9 +2753,10 @@ count of those hidden by the filter (12.4) is then one too low for each such row
 marks no match in a title whose length lower-casing changes. The server's automatic refresh of
 pull requests (design 7.3) follows the rows the sections carry, and a selected session the list
 does not show while a terminal of the window holds it (its header shows its pull requests, 12.9),
-so the members a closed block hides — Open's running sessions too — get no automatic refresh until
-the block is opened (its head does), and neither do the switcher's items, as a folded Earlier's
-rows never did (ruled on 2026-11-16, follow-up F3: unchanged).
+so the sessions a closed block hides — Open's running sessions too, and since follow-up F9
+(2026-11-17) its first session too, which the card no longer draws — get no automatic refresh
+until the block is opened, and neither do the switcher's items, as a folded Earlier's rows never
+did (ruled on 2026-11-16, follow-up F3: unchanged by F9 but for its first session).
 
 ### 12.9 Keys and focus
 
@@ -2784,24 +2819,41 @@ back to the terminal). `/` gives the keyboard to the filter's field, where every
 Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also
 clears the field), so from the field the terminal is one more Esc away (ruled by the plan owner,
 plan task 27). Folding Earlier (← or a click on its header) with the selection inside it first
-selects the row above it; while a filter is set nothing folds. On a block (12.2; stage E, plan
-E7 as ruled on 2026-11-16), ← on an open head closes it, ← on a member selects the head and closes
-the block, as folding Earlier first selects the row above it (in the list zone, where the user sees
-the selection move; a click on `×n` never moves it, 12.2) — except on a block that a member's
-unreported terminal holds open, where ← does nothing, selects no head and says one of 12.2's two
-lines — `this block holds a session that is still starting; it stays open`, or `this block holds a
-terminal that ended at its start; close it first` —, and → on a closed head opens it (a click on
-`×n` that would close a block says first `this block holds the selected session; it stays open`
-when a member other than the head is selected, and only else one of those two lines; ruled on
-2026-11-16); on any other row — and ← on a closed head, → on an open head or on a member — ← and →
-fold and unfold Earlier. Ctrl+Shift+1–9 select the session of that slot also while a closed block
-hides it, and its block opens (12.2); a member whose terminal has not reported a session is never
-hidden (its block is drawn open, 12.2), so its slot chord finds its row as any drawn row's. Ctrl+Tab
-skips a member of a closed block
-that no terminal of the window holds (the page never knows a closed block's members), as it skips
-a row a filter or a folded Earlier hides; a member that a terminal of the window holds it selects,
-and its block opens, as for every other selection of a hidden member (ruled on 2026-11-16). While
-filtering (a word or a chip, 12.8) nothing folds and no block is formed, so ← and → do nothing. The chips under the filter field
+selects the line above it that can hold the selection — a row, or a closed caption (12.2) —; while a
+filter is set nothing folds. On a block (12.2; stage E, plan E7 as ruled on 2026-11-16; as cards
+since follow-up F9, 2026-11-17): ↑ ↓ (`j` `k`, Home, End, PgUp, PgDn) move through the rows and the
+closed captions in the list's order, over open captions, and with nothing selected they start at the
+first of them. ← on any session of an open card closes the block and selects its caption, as folding
+Earlier first selects the line above it (in the list zone, where the user sees the selection move; a
+click on the caption never moves it, 12.2) — except on a block that a session's unreported terminal
+holds open (its first session too), where ← does nothing, selects no caption and says one of 12.2's
+two lines — `this block holds a session that is still starting; it stays open`, or `this block holds
+a terminal that ended at its start; close it first` —, and on a block whose group is over 1,024
+bytes, where ← does nothing (12.2: it cannot be closed). → on a session of a card is as before: it
+unfolds Earlier. On a selected closed caption, → or Enter opens the block and selects its first
+session (a real session, selected as by a click; the keyboard stays in the list and nothing is
+typed), and ← folds Earlier — inside Earlier it selects the line above it, a row or a closed caption
+—; an auto-repeat of ← does nothing there, so that a held ← that has just closed a block goes no
+further and does not select a session the user did not choose, and a held Enter opens the block
+once, its repeats never resuming that session. `d`, `l` and F2, `g`, `n` and `p` do nothing on a
+selected caption: no session is selected, and the key bar says `no session selected`. The pane then shows a small card of the group — its name, `3 sessions`, ` · 1 needs
+you` in the needs-you colour while any of its sessions needs you, and `→ or Enter opens the group`
+—, no terminal, and nothing on it has the keyboard; the key help's line reads `fold or unfold
+Earlier; close or open a group`. The mouse: a click on a caption line opens or closes its block
+(12.2; the whole line is the control, and the second click of a double click does nothing); it never
+moves the selection, except on the selected closed caption itself, where it opens the block and
+selects its first session as → does — the list zone takes the keyboard first, so that no terminal
+gets it —, and with the block holding the selected session, any of its sessions, the click to close
+is refused with `this block holds the selected session; it stays open`. Ctrl+Shift+1–9 select the
+session of that slot also while a closed block hides it, and its block opens (12.2); a session whose
+terminal has not reported a session is never hidden (its block is drawn open, 12.2), so its slot
+chord finds its row as any drawn row's. Ctrl+Tab skips a session of a closed block — its first too —
+that no terminal of the window holds (the page never knows a closed block's sessions), as it skips a
+row a filter or a folded Earlier hides; a session that a terminal of the window holds it selects,
+and its block opens, as for every other selection of a hidden session (ruled on 2026-11-16).
+Ctrl+Shift+J, the switcher, a notification's click and a resume are as before: they open the block
+of a hidden session first, now also when it is the block's first. While filtering (a word or a chip,
+12.8) nothing folds and no block is formed, so ← and → do nothing. The chips under the filter field
 (12.8) take no keyboard on a click: the keyboard stays where it was (in the field, on the list, in
 the terminal). They are buttons: Tab from the filter field reaches them, Enter or Space presses
 one, and while one has the keyboard no list key acts, as on any button of the list zone. The selection is never on a row the
@@ -2816,8 +2868,8 @@ session without a terminal of the window shows nothing, never its card. The head
 a session takes its toast from the row, since it is in no section: `Marked done. Stays under Open
 while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
 the lead on 2026-11-15). The list keys (`l`, F2,
-`g`, `n`, `p`, `d`) act only on a row the list shows: on a hidden selection they say `no session
-selected` and send nothing. A named limit: when Ctrl+Tab, a slot chord or a click on its
+`g`, `n`, `p`, `d`) act only on a row the list shows: on a hidden selection, and on a selected
+caption, they say `no session selected` and send nothing. A named limit: when Ctrl+Tab, a slot chord or a click on its
 notification selects a session the list does not show that runs again in another terminal while an
 ended terminal of the window still names it, the right side first shows that ended terminal as
 stage A did (no header, no Resume), until the list that answers the new selection comes —
@@ -2837,9 +2889,10 @@ stays (ruled for plan D task 37). That list decides once: a row it still has (ru
 Open) moves nothing later either; a run of `d` marks one row each time (ruled 2026-11-15 on review 2
 of plan D task 37). The header's Done leaves the selection to the main rule. The second click of
 a double click on a button of the header, or on a pull request's × in its dialog, does nothing
-(ruled for plan D task 38), nor does it on a block's `+n more` line or `×n`, wherever the list
-has moved under it: such a double click opens or closes the block once, and its second click
-selects no row, takes no keyboard and resumes nothing (ruled for plan E task 97). A held
+(ruled for plan D task 38), nor does it on a block's caption, wherever the list has moved under
+it: such a double click opens or closes the block once, and its second click selects no row, takes
+no keyboard and resumes nothing (ruled for plan E task 97; the caption since follow-up F9, before it
+the `+n more` line and `×n`). A held
 `d` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
@@ -3015,11 +3068,12 @@ installed app's shortcut would hold no launch token (5.1).
   the right side and what the page reports stay as they
   were — the pane would be empty, and a focused page's selection is seen after 1.5 s, which would
   clear a mark the user never saw (ruled on review 2 of plan B task 55; showing a selected session
-  the list hides is stage E's). A session a closed block hides is selected, also without a terminal
-  of the window, and its block opens (12.2; follow-up F3): `needYou.order` holds it, while it
+  the list hides is stage E's). A session a closed block hides — since follow-up F9 its first session
+  too — is selected, also without a terminal of the window, and its block opens (12.2; follow-up
+  F3): `needYou.order` holds it, while it
   holds no session the filter or the fold leaves out. So one case of a closed block is refused:
   a session that no longer needs you (its notification not yet closed), has no terminal of the
-  window and sits in a closed block — the page cannot know a closed block's members, and
+  window and sits in a closed block — the page cannot know a closed block's sessions, and
   `needYou.order` no longer holds it —, with the same line, which names the closed block for it
   (F6). The
   page closes a session's notification once that session no longer needs you: at a list that holds
@@ -3792,7 +3846,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket where links open (W12), logged in; without `ticketUrl` the chip is plain text. The check copies the user's `config.json` aside first when there is one and gives it back at the end only when the file holds no change since but the check's own line (else the user mends it by hand); when there was none, it removes the file it created; it clears the label it set. | D | 12.5, 9.6 |
 | W28 | `+ PR` with a pull request of the user's own on the throwaway session: its item and its line in the pull-request dialog show its state within seconds (their `gh` login), the list's chip agrees, `skydeck show` agrees; × detaches it. | D | 12.3, 12.5 |
 | W29 | **Real claude**, on the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key; at the end the check clears the label, group and note it set. | D | 12.5, 12.9 |
-| W30 | On the user's own sessions (about 105), without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a block closed and opened with ← and → (blocks are open by default from follow-up F3), the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |
+| W30 | On the user's own sessions (about 105), without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a block's card closed with ← and opened again with → (blocks are open by default from follow-up F3, drawn as cards with a selectable caption from follow-up F9), a click on a caption, the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |
 | W31 | Czech and US layouts in the filter's and the switcher's fields: AltGr characters and dead keys type; Ctrl+Shift+P opens and closes the switcher on both. | E | 12.8, 12.9 |
 | W32 | `skydeck update` on the user's own installation, typed in a WSL terminal of the user's own with the window open: `--check` first (the list of new commits, or "up to date"; the window and the sessions stay as they are); then, only when it listed commits, the update itself: the window says for a few seconds that the server is not answering, then reloads itself; every session is there; no second window; `skydeck doctor` has no `problem` line that was not there before. It types into no session and presses no key in the window. | F8 | 16.5, 5.1 |
 
@@ -3862,7 +3916,7 @@ the header's "opened <time> · last active <age>" with where the title comes fro
 W27–W29.
 
 **Stage E — search.** Several words and the short id in the filter, done sessions while filtering,
-the chips, the quick switcher Ctrl+Shift+P, the blocks of one group (12.2, 12.8; in Recent and Earlier until follow-up F3, in every section and open by default since). The
+the chips, the quick switcher Ctrl+Shift+P, the blocks of one group (12.2, 12.8; in Recent and Earlier until follow-up F3, in every section and open by default since, drawn as cards since follow-up F9). The
 page's own icon (12.12). Checks W30, W31, and W3's icon on the taskbar button.
 
 ## 20. Left out of step 2 on purpose
