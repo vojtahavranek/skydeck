@@ -2527,7 +2527,11 @@ async function textCases(t: TestContext, chromium: Browser): Promise<void> {
       setGroup(d.deck, S2, markers[2] as string);
       setGroup(d.deck, S3, markers[2] as string);
       await until(async () => (await listRows(page)).length >= 2, 'the sessions listed');
-      await page.locator(`#list [data-id="${S2}"] .row-stack`).click(); // closes the block
+      // A click on the block's caption closes it (F9: the caption line is the control).
+      await page
+        .locator('#list .list-block[data-section="week"] > .block-head')
+        .filter({ has: page.locator('.block-name', { hasText: markers[2] as string }) })
+        .click();
       await until(
         async () =>
           JSON.stringify((await lastView(page))['closed']) ===

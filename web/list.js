@@ -49,8 +49,9 @@ import { captionNeedText } from './search-text.js';
  */
 /**
  * @typedef {object} ListHooks
- * @property {(id: string, how: 'click' | 'key' | 'list') => void} select `list`: the list zone
- *   takes the keyboard first (F9: a click on a selected closed caption), so that no terminal does
+ * @property {(id: string, how: 'click' | 'key' | 'list', change?: ViewChange) => void} select
+ *   `list`: the list zone takes the keyboard first (F9: a click on a selected closed caption), so
+ *   that no terminal does; `change` goes in the same `view` (F9: opening a caption, ruling 3)
  * @property {(section: SectionPayload['name'], group: string, change?: ViewChange) => void} caption
  *   F9: selects the caption of the closed block of `group` in `section` (no session is selected
  *   then); `change` is the list's view change that goes in the same `view` (← closing the block:
@@ -559,10 +560,17 @@ export function createList(root, hooks) {
     if (first === null) {
       return;
     }
-    // The block opened first, then its session selected: no view names the block closed while a
-    // session of it is selected (ruled (1), the mirror of ←).
-    openBlock(section, group);
-    hooks.select(first, how);
+    // Ruled (3), the mirror of ←: the block's leaving `closed` and its first session's selection go
+    // in ONE view, so that no view names the block closed while a session of it is selected. The
+    // list's own state is set first.
+    if (isClosed(section, group)) {
+      closed = closed.filter((one) => one.section !== section || one.group !== group);
+      hooks.select(first, how, {
+        closed: closed.map((one) => ({ section: one.section, group: one.group })),
+      });
+    } else {
+      hooks.select(first, how);
+    }
   };
 
   /**

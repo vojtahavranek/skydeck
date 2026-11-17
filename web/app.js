@@ -216,7 +216,7 @@ const actedOn = new WeakSet();
 const send = (message) => connection?.send(message) ?? false;
 
 const list = createList(dom.list, {
-  select: (id, how) => select(id, how),
+  select: (id, how, change) => select(id, how, change),
   caption: (section, group, change) => selectCaption(section, group, change),
   activate: (id) => activate(id),
   view: (change) => changeView(change),
@@ -691,21 +691,29 @@ function overLimit(action) {
  * Selects a session (S2 12.9): a click on a running row focuses its terminal, a click on another
  * row the list; moving with the list's keys keeps the list. `list` (F9, a click on a selected
  * closed caption): the list zone takes the keyboard before the session is shown, so that no
- * terminal takes it. A selected caption is no longer selected.
+ * terminal takes it. A selected caption is no longer selected. `change` (F9: the list opening a
+ * caption's block) goes in the same `view` (ruled (3): no view names a block closed while a
+ * session of it is selected).
  * @param {string} id
  * @param {'click' | 'key' | 'chord' | 'list'} how
+ * @param {{ closed?: ClosedBlock[] }} [change]
  */
-function select(id, how) {
+function select(id, how, change) {
   state.newOpen = false;
   if (state.bringing !== id) {
     state.bringing = null; // the user chose another session: the resume's mark ends (Z1)
   }
   state.caption = null;
+  if (change?.closed !== undefined) {
+    state.view = { ...state.view, closed: change.closed };
+  }
   if (state.selected !== id) {
     state.selected = id;
     state.mru = [id, ...state.mru.filter((other) => other !== id)];
     sendView();
     sendFocus();
+  } else if (change?.closed !== undefined) {
+    sendView();
   }
   if (how === 'list') {
     setZone('list');

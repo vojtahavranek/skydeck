@@ -799,31 +799,37 @@ test('attention in the page', async (t) => {
   );
 
   await t.test(
-    'a click on the notification of a session a closed block hides and no terminal of the window names — one that runs elsewhere and asks, one not running that ended unexpectedly, its terminal closed — selects it and its block opens (F3, G5); an id the list neither draws nor holds in `needYou.order` is still refused',
+    "a click on the notification of a session a closed block hides and no terminal of the window names — one that runs elsewhere and asks (a block's second), one not running that ended unexpectedly, its terminal closed (another block's FIRST) — selects it and its block opens (F3, G5, F9); an id the list neither draws nor holds in `needYou.order` is still refused",
     async (t) => {
-      // Open: S1 in the window (slot 1), the head of a block of `test`; S2 runs elsewhere and asks,
-      // its member. Recent: S4, the head of a block of `orb`; S3 ended unexpectedly (its window
-      // terminal was closed), its member. While a block is closed (and its member not selected)
-      // the list carries its head only, with `+1 more in … · 1 needs you`; `needYou.order` holds
-      // both members (G5). A session the list does not show for another reason is in neither.
+      // Open: a block of `test` — S1 in the window (slot 1), then S2, which runs elsewhere and
+      // asks. Recent: a block of `orb` — S3, which ended unexpectedly (its window terminal was
+      // closed), then S4. While a block is closed (none of its sessions selected) the list draws
+      // its caption alone (F9: `closedStacks`, none of its rows, its first neither), with
+      // ` · 1 needs you`; `needYou.order` holds both hidden sessions that need you (G5). A session
+      // the list does not show for another reason is in neither.
       const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
       const OUT = '4f9d7a5c-2b6e-4d0f-9a7b-6c5d4e3f2a1b';
-      const block = (group: string, head: string, open: boolean): Row => ({
+      const stack = (group: string, head: string, role: 'head' | 'member'): Row => ({
         group,
         size: 2,
-        open,
-        role: 'head',
+        role,
         head,
-        hiddenNeedYou: open ? 0 : 1,
+      });
+      const caption = (group: string, head: string): Row => ({
+        group,
+        size: 2,
+        needYou: 1,
+        head,
+        at: 0,
       });
       const blockWorld = (view: { filter: string; selected: string | null }): Row => {
-        // The server opens a block for its selected member.
-        const openTest = view.selected === S2;
-        const openOrb = view.selected === S3;
+        // The server opens a block for any of its sessions selected.
+        const openTest = view.selected === S1 || view.selected === S2;
+        const openOrb = view.selected === S3 || view.selected === S4;
         const first = running(S1, TERM_A, 1, {
           title: 'alpha',
           group: 'test',
-          stack: block('test', S1, openTest),
+          stack: stack('test', S1, 'head'),
         });
         const elsewhere = running(S2, '', 0, {
           title: 'beta',
@@ -832,46 +838,61 @@ test('attention in the page', async (t) => {
           slot: null,
           elsewhere: { pid: 4242, tty: null },
           attention: attention('asks', 1n),
-          stack: { ...block('test', S1, true), role: 'member' },
+          stack: stack('test', S1, 'member'),
         });
-        const fourth = row(S4, { title: 'delta', group: 'orb', stack: block('orb', S4, openOrb) });
         const ended = row(S3, {
           title: 'gamma',
           group: 'orb',
           attention: attention('ended', 2n),
-          stack: { ...block('orb', S4, true), role: 'member' },
+          stack: stack('orb', S3, 'head'),
         });
-        return listOf(
+        const fourth = row(S4, { title: 'delta', group: 'orb', stack: stack('orb', S3, 'member') });
+        const list = listOf(
           {
-            open: openTest ? [first, elsewhere] : [first],
-            week: openOrb ? [fourth, ended] : [fourth],
+            open: openTest ? [first, elsewhere] : [],
+            week: openOrb ? [ended, fourth] : [],
           },
           [terminal(TERM_A, S1, 1)],
           { count: 2, order: [S2, S3] },
         );
+        const sections = list['sections'] as Row[];
+        return {
+          ...list,
+          sections: sections.map((section) => ({
+            ...section,
+            count: section['name'] === 'earlier' ? 0 : 2,
+            closedStacks:
+              section['name'] === 'open' && !openTest
+                ? [caption('test', S1)]
+                : section['name'] === 'week' && !openOrb
+                  ? [caption('orb', S3)]
+                  : [],
+          })),
+        };
       };
       const w = await attentionWorld(t, chromium, blockWorld, (page) =>
         notificationDouble(page, 'granted'),
       );
       await titleIs(w.page, '(2) skydeck');
-      assert.equal(await selectedRow(w.page), S1);
+      assert.equal(await selectedRow(w.page), null, 'no row drawn: nothing selected');
       await pageFocus(w.page, false);
       w.send({ t: 'notify', sessionId: S2, title: 'beta', reason: 'asks', detail: null });
       w.send({ t: 'notify', sessionId: S3, title: 'gamma', reason: 'ended', detail: null });
       w.send({ t: 'notify', sessionId: OUT, title: 'out', reason: 'finished', detail: null });
       await recorded(w.page, (r) => r.made.length === 3, 'three notifications');
-      const moreLines = async (): Promise<string[]> =>
+      /** Each closed caption drawn: its name and its ` · 1 needs you`. */
+      const captions = async (): Promise<string[]> =>
         w.page.evaluate(() =>
-          [...document.querySelectorAll('#list .list-more')].map((line) => line.textContent ?? ''),
+          [...document.querySelectorAll('#list .list-block[data-open="false"] .block-head')].map(
+            (head) =>
+              `${head.querySelector('.block-name')?.textContent ?? ''}${head.querySelector('.block-need')?.textContent ?? ''}`,
+          ),
         );
-      assert.deepEqual(await moreLines(), [
-        '+1 more in test · 1 needs you',
-        '+1 more in orb · 1 needs you',
-      ]);
+      assert.deepEqual(await captions(), ['test · 1 needs you', 'orb · 1 needs you']);
 
       for (const [index, id, left] of [
-        [0, S2, ['+1 more in orb · 1 needs you']],
-        [1, S3, ['+1 more in test · 1 needs you']],
+        [0, S2, ['orb · 1 needs you']],
+        [1, S3, ['test · 1 needs you']],
       ] as const) {
         const from = w.sent.length;
         await clearKeyMessage(w.page);
@@ -883,7 +904,7 @@ test('attention in the page', async (t) => {
           id,
           { timeout: PAGE_WAIT_MS },
         );
-        assert.deepEqual(await moreLines(), [...left], `${id}'s block is open`);
+        assert.deepEqual(await captions(), [...left], `${id}'s block is open`);
         assert.equal(await shownText(w.page, '#key-message'), '', 'nothing refused');
       }
 
