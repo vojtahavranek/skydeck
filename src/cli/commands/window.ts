@@ -22,6 +22,7 @@ import { computeBuild } from '../../window/build.ts';
 import { controlClient } from '../../window/client.ts';
 import type { ControlClient } from '../../window/client.ts';
 import { findServer, startServe, stopServer } from '../../window/lifecycle.ts';
+import type { FoundServer } from '../../window/lifecycle.ts';
 import { pidLineState } from '../../window/pidline.ts';
 import type { PingAnswer } from '../../window/protocol.ts';
 import { readServerLock, resolveRuntimeDir, runtimeFiles } from '../../window/runtime.ts';
@@ -252,7 +253,21 @@ function bootIdOf(platform: Platform): string | null {
   }
 }
 
-function keepRunning(keepers: number): string {
+/**
+ * S2 5.1's line for a server findServer found `hung`: one that is still starting, or one that does
+ * not answer. `skydeck update` refuses with the same line (F8, U2).
+ */
+export function hungServerLine(
+  found: Extract<FoundServer, { kind: 'hung' }>,
+  times: WindowTimes,
+): string {
+  return found.starting === true
+    ? `the window's server (pid ${found.pid}) is starting and did not finish within ${(times.pingMs ?? PING_MS) / 1000} s; run skydeck window again, or skydeck window --restart to replace it`
+    : `the window's server (pid ${found.pid}) does not answer; skydeck window --restart stops it`;
+}
+
+/** The end of `--stop`'s line: how many terminals keep running (`skydeck update` says it too). */
+export function keepRunning(keepers: number): string {
   return keepers === 1
     ? '1 terminal in the window keeps running'
     : `${keepers} terminals in the window keep running`;
@@ -294,11 +309,7 @@ async function serverToUse(
           `the window's server runs from ${sanitize(found.ping.checkout)}; run skydeck window there, or skydeck window --restart here to replace it`,
         );
       case 'hung':
-        throw new SkydeckError(
-          found.starting === true
-            ? `the window's server (pid ${found.pid}) is starting and did not finish within ${(times.pingMs ?? PING_MS) / 1000} s; run skydeck window again, or skydeck window --restart to replace it`
-            : `the window's server (pid ${found.pid}) does not answer; skydeck window --restart stops it`,
-        );
+        throw new SkydeckError(hungServerLine(found, times));
       case 'other-build':
       case 'none':
         break;
@@ -355,7 +366,7 @@ const STATUS_MS = 5000;
  * for another field. 0 when it does not answer, or its answer holds no `pages` that is a whole
  * number ≥ 0.
  */
-async function pagesOf(deck: Deck): Promise<number> {
+export async function pagesOf(deck: Deck): Promise<number> {
   const sock = runtimeFiles(resolveRuntimeDir(deck, 'follow').dir).serverSock;
   let answer: { status: number; body: unknown };
   try {
