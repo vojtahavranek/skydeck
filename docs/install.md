@@ -1609,9 +1609,11 @@ stop ends it there: no fast-forward, the window brought back on the code it had 
 and `skydeck: interrupted before the update was applied; the checkout was not changed` (exit 1).
 One that comes later changes nothing: the fast-forward runs to its end (git runs it in a session of
 its own, which Ctrl+C does not reach), and so does the rest. A terminal closed in the middle ends
-the command (there is no one left to read what it would say), but not the fast-forward, which ends
-by itself: then `git status` in a new terminal — at the new commit and clean, `skydeck window`
-starts the window again; otherwise see "the checkout may not be as it was" below.
+the command (there is no one left to read what it would say), but never cuts the fast-forward,
+which ends by itself: what is left is at worst a stopped server. In a new terminal, `git status`:
+when it shows nothing of the update's (the checkout at the old commit, or at the new one, and
+clean), `skydeck window` starts the window again; otherwise see "the checkout may not be as it
+was" below.
 
 Each commit's line shows its subject's first 200 characters (a longer one ends with `…`).
 
@@ -1667,15 +1669,17 @@ More ends, each with exit 1:
   1. Make sure no git command runs in the checkout (one of yours in another terminal, an editor's).
   2. When `.git/index.lock` is there, remove it (`rm .git/index.lock`): a git that was cut off
      leaves it, and while it is there every git command that writes refuses.
-  3. `git reset --hard origin/main` (the upstream the command named in its first line): it puts
-     the branch, the index and every tracked file at the new commit.
+  3. `git reset --hard <upstream>`, with the upstream the command named in its first line (`… new
+     commits on origin/main (…)`: `git reset --hard origin/main`): it puts the branch, the index
+     and every tracked file at the new commit.
   4. `skydeck window`.
 
-  Nothing of yours is lost by step 3: the command does not start while a tracked file has a change
-  that is not committed (and looks again after the fetch), and a file of yours that git does not
-  track and that is in the new commit's way makes git refuse before it writes anything. Files git
-  does not track and files it ignores stay as they are. The only thing step 3 could drop is a
-  change to a tracked file made while the command ran.
+  Nothing of yours is lost by step 3. It discards changes to tracked files and staged files, and
+  you had none when you typed `skydeck update` (it refuses then, and looks again after the fetch),
+  so only one made while it ran would be lost. A file of yours that git does not track and that is
+  where the new commit puts one makes git refuse the fast-forward before it writes anything, so
+  every untracked file in the way here is the new commit's own. Files git does not track and files
+  it ignores stay as they are.
 - `updated to <id>, but skydeck window ended with exit <n>; run skydeck window`: the update is in,
   but the new `skydeck window` failed (its own lines above say why); run `skydeck window`.
 - `updated to <id>, but skydeck window could not be started or was ended by a signal; run skydeck
