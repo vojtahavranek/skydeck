@@ -1697,8 +1697,9 @@ and its `doctor` shows the same as a `problem` line of its report (`database …
 (the database … was written by a newer skydeck …); the checks that need it are skipped`).
 
 From the update that brings stage B's database (schema version 2) on, this is what every checkout
-from before it says. The way back is forward: its `update skydeck` is `skydeck update`, or `git
-pull` by hand (a checkout from before `skydeck update` has only `git pull`). `skydeck update` runs
+from before it says. The way back is forward: its `update skydeck` is `skydeck update` in a
+checkout that has the command (from the update that brings it on), and `git pull` in an older one
+(which prints the same `update skydeck` and has no `skydeck update`). `skydeck update` runs
 on such a database, although no other command does: it says `skydeck: the database was written by
 a newer skydeck, so the window's server is not looked at; it is left as it is`, brings the checkout
 up to date and starts no server. skydeck keeps no copy of the database
