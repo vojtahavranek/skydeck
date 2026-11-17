@@ -22,7 +22,7 @@ export const MERGE_MS = 60_000;
  * outer git) would bring settings in. The other variables (the transport's GIT_SSH_COMMAND, the
  * locale) stay: they are the owner's, as for `git pull`.
  */
-export const REPOSITORY_VARIABLES: readonly string[] = [
+const REPOSITORY_VARIABLES: readonly string[] = [
   'GIT_ALTERNATE_OBJECT_DIRECTORIES',
   'GIT_CONFIG',
   'GIT_CONFIG_PARAMETERS',
@@ -49,13 +49,13 @@ export function definedEnv(env: Env): Record<string, string> {
 }
 
 /** git's environment: the command's own without REPOSITORY_VARIABLES. */
-export function gitEnv(env: Env): Record<string, string> {
+function gitEnv(env: Env): Record<string, string> {
   return Object.fromEntries(
     Object.entries(definedEnv(env)).filter(([name]) => !REPOSITORY_VARIABLES.includes(name)),
   );
 }
 
-export const GIT_NOT_FOUND = 'git was not found on PATH; skydeck update needs it';
+const GIT_NOT_FOUND = 'git was not found on PATH; skydeck update needs it';
 
 /** git on one checkout. */
 export interface Git {
@@ -89,7 +89,7 @@ export function gitOn(platform: Platform, root: string): Git {
 }
 
 /** The first argument of `args` that is not an option: the sub-command. */
-export function subCommandOf(args: readonly string[]): string {
+function subCommandOf(args: readonly string[]): string {
   return args.find((arg) => !arg.startsWith('-')) ?? 'git';
 }
 

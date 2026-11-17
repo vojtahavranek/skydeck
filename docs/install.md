@@ -1697,10 +1697,11 @@ and its `doctor` shows the same as a `problem` line of its report (`database …
 (the database … was written by a newer skydeck …); the checks that need it are skipped`).
 
 From the update that brings stage B's database (schema version 2) on, this is what every checkout
-from before it says. The way back is forward: its `update skydeck` is `skydeck update` (or `git
-pull` by hand). `skydeck update` runs on such a database, although no other command does: it says
-`skydeck: the database was written by a newer skydeck, so the window's server is not looked at; it
-is left as it is`, brings the checkout up to date and starts no server. skydeck keeps no copy of the database
+from before it says. The way back is forward: its `update skydeck` is `skydeck update`, or `git
+pull` by hand (a checkout from before `skydeck update` has only `git pull`). `skydeck update` runs
+on such a database, although no other command does: it says `skydeck: the database was written by
+a newer skydeck, so the window's server is not looked at; it is left as it is`, brings the checkout
+up to date and starts no server. skydeck keeps no copy of the database
 from before an upgrade: putting one back would drop everything recorded since, and a copy of the
 file taken while the window's server has it open may not be whole. An upgrade only adds to the
 database; it changes nothing that is in it.
