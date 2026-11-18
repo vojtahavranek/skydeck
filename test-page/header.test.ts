@@ -1605,8 +1605,10 @@ async function flagsLine(page: Page): Promise<Flags> {
     let flags = null;
     if (shown(item) && getComputedStyle(item).display !== 'none') {
       const box = item.getBoundingClientRect();
+      // The text itself (its node, not the boxes around it, whose padding holds no text).
       const range = document.createRange();
-      range.selectNodeContents(item);
+      const node = document.createTreeWalker(item, NodeFilter.SHOW_TEXT).nextNode();
+      range.selectNodeContents(node ?? item);
       const text = range.getBoundingClientRect();
       flags = {
         visible: Math.max(0, Math.min(text.right, box.right) - Math.max(text.left, box.left)),
@@ -1639,7 +1641,7 @@ test("F16: the flags a session was started with, last on the header's second lin
   const chromium = await browser(t);
 
   await t.test(
-    'a running session with flags: one dim monospace item after the short id, the flags as recorded, its tooltip "Started with:" and the names not recognised; none without flags, nothing left behind; markup stays text',
+    'a running session with flags: one monospace item after the short id, in its lighter grey in both schemes, the line\'s gap before it with and without "id copied", the flags as recorded, its tooltip "Started with:" and the names not recognised; none without flags, nothing left behind; markup stays text',
     async (t) => {
       const s = await scripted(t, chromium, {
         sections: { open: [running(S1, TERM_A, 1, { title: 'with flags' })] },
@@ -1663,32 +1665,76 @@ test("F16: the flags a session was started with, last on the header's second lin
         'header-flags',
       ]);
       assert.equal((await flagsLine(page)).flags?.tip, `Started with: ${FLAGS_TEXT}`);
-      // The page's dim colour and its monospace font (the short id's), no box.
-      const look = await page.evaluate(() => {
-        const item = document.querySelector('#cards .header-flags') as HTMLElement;
-        const holder = [...item.querySelectorAll('*')].at(-1) ?? item;
-        const probe = document.createElement('span');
-        probe.style.color = 'var(--dim)';
-        item.closest('.card-header')?.append(probe);
-        const dim = getComputedStyle(probe).color;
-        probe.remove();
-        const style = getComputedStyle(holder);
-        const outer = getComputedStyle(item);
-        return {
-          color: style.color,
-          dim,
-          font: style.fontFamily,
-          idFont: getComputedStyle(document.querySelector('#cards .header-id') as Element)
-            .fontFamily,
-          boxes: [style, outer].map(
-            (one) => `${one.borderStyle}|${one.backgroundColor}|${one.borderRadius}`,
-          ),
-        };
-      });
-      assert.equal(look.color, look.dim, 'the dim colour');
-      assert.equal(look.font, look.idFont, 'the monospace font');
-      assert.match(look.font, /Cascadia Mono/);
-      for (const box of look.boxes) assert.equal(box, 'none|rgba(0, 0, 0, 0)|0px', 'no box');
+      // The short id's lighter grey (ruled: a side note) in both schemes, and its monospace font;
+      // no box. The mouse is kept off the short id: hovered, it takes the text's colour.
+      await page.mouse.move(2, 2);
+      for (const scheme of ['light', 'dark'] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        await sleep(100);
+        const look = await page.evaluate(() => {
+          const item = document.querySelector('#cards .header-flags') as HTMLElement;
+          const holder = [...item.querySelectorAll('*')].at(-1) ?? item;
+          const id = document.querySelector('#cards .header-id') as Element;
+          const dir = document.querySelector('#cards .header-dir') as Element;
+          const style = getComputedStyle(holder);
+          const outer = getComputedStyle(item);
+          return {
+            color: style.color,
+            idColor: getComputedStyle(id).color,
+            dirColor: getComputedStyle(dir).color,
+            font: style.fontFamily,
+            idFont: getComputedStyle(id).fontFamily,
+            boxes: [style, outer].map(
+              (one) => `${one.borderStyle}|${one.backgroundColor}|${one.borderRadius}`,
+            ),
+          };
+        });
+        assert.equal(look.color, look.idColor, `${scheme}: the short id's colour`);
+        assert.notEqual(look.color, look.dirColor, `${scheme}: not the folder's`);
+        assert.equal(look.font, look.idFont, `${scheme}: the monospace font`);
+        assert.match(look.font, /Cascadia Mono/);
+        for (const box of look.boxes) assert.equal(box, 'none|rgba(0, 0, 0, 0)|0px', 'no box');
+      }
+      await page.emulateMedia({ colorScheme: 'light' });
+
+      // The gap before the flags' text is the line's own (between the source and the short id),
+      // with the "copied" text empty and while it shows (a click on the short id).
+      const gaps = (): Promise<{ line: number; before: number; copied: string }> =>
+        page.evaluate(() => {
+          const head = document.querySelector('#cards .card-header') as HTMLElement;
+          const box = (selector: string): DOMRect =>
+            (head.querySelector(selector) as HTMLElement).getBoundingClientRect();
+          const copied = head.querySelector('.header-copied') as HTMLElement;
+          const range = document.createRange();
+          const item = head.querySelector('.header-flags') as HTMLElement;
+          // The text itself (its node, not the boxes around it, whose padding holds no text).
+          range.selectNodeContents(
+            document.createTreeWalker(item, NodeFilter.SHOW_TEXT).nextNode() ?? item,
+          );
+          const before = copied.textContent === '' ? box('.header-id') : box('.header-copied');
+          return {
+            line: box('.header-id').left - box('.header-source').right,
+            before: range.getBoundingClientRect().left - before.right,
+            copied: copied.textContent ?? '',
+          };
+        });
+      const quiet = await gaps();
+      assert.equal(quiet.copied, '');
+      assert.ok(quiet.line > 1, JSON.stringify(quiet));
+      assert.ok(
+        Math.abs(quiet.before - quiet.line) < 0.5,
+        `without "copied": ${JSON.stringify(quiet)}`,
+      );
+      await page.locator('#cards .header-id').click();
+      const shown = await eventually(async () => {
+        const now = await gaps();
+        return now.copied === '' ? null : now;
+      }, 'the "copied" text');
+      assert.ok(
+        Math.abs(shown.before - shown.line) < 0.5,
+        `with "copied": ${JSON.stringify(shown)}`,
+      );
+      await page.mouse.move(2, 2);
 
       // The names the recording knows only by name (ruled): after the kept flags, in the text
       // (cut at 40 over the whole) and on the tooltip's first line; its second line names them.

@@ -2006,9 +2006,9 @@ the throwaway folder there (`mkdir -p ~/skydeck-try`). Write down the time.
 2. **The header.** Look that it is the new one: the header shows a short id you have not seen, its
    folder ends in `skydeck-try`, "opened" a moment ago, and its terminal Claude Code's
    prompt. Expected within a few seconds (once Claude Code's start was recorded): the header's
-   second line ends, after the short id, in `--model haiku --permission-mode plan` — in the grey of
-   the times beside it, in the narrow font of the folder and the short id, with no word before it
-   and no box around it. The header has the same four lines and the same height as before it came:
+   second line ends, after the short id, in `--model haiku --permission-mode plan` — in the lighter
+   grey of the short id, in the narrow font of the folder and the short id, with no word before it
+   and no box around it, as far from the short id as the short id is from the text before it. The header has the same four lines and the same height as before it came:
    the terminal under it did not move down. Hold the mouse still over the flags for a second:
    the tooltip reads `Started with: --model haiku --permission-mode plan`, on one line.
 3. **Short of room.** Make the window narrower by dragging its right edge, slowly, and watch the
