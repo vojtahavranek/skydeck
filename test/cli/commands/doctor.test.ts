@@ -565,3 +565,107 @@ describe('doctor: the terminal line (S2 16.3, 16.4; plan task 77)', () => {
     ]);
   });
 });
+
+describe("doctor: Claude Code's ← shortcut (follow-up F11, L4)", () => {
+  // A made-up global config in the sandbox (`<claudeHome>/.claude.json`: the sandbox sets
+  // CLAUDE_CONFIG_DIR), never the real ~/.claude.json; CANARY stands where a secret would be.
+  const CANARY = 'canary-3a9b0c55';
+  const KEY = 'leftArrowOpensAgents';
+  const HOW = '/config in Claude Code ("← opens agents")';
+  const config = (extra: Record<string, unknown> = {}): string =>
+    JSON.stringify({ oauthAccount: { accountUuid: CANARY }, ...extra }, null, 2);
+  const arrowLines = (r: DoctorRun): string[] =>
+    r.lines.filter((line) => line.includes("Claude Code's ← shortcut"));
+
+  test('on: one info line that says what happens and how to turn it off; exit 0', async (t) => {
+    for (const extra of [{}, { [KEY]: true }]) {
+      const d = await installedMachine(t);
+      writeFileSync(d.places.claudeGlobalConfig, config(extra));
+
+      const r = await doctor(d);
+
+      assert.equal(r.code, 0, r.stdout);
+      assert.deepEqual(arrowLines(r), [
+        "info     Claude Code's ← shortcut is on: ← on an empty prompt sends a window terminal's " +
+          'session to the background, and the list then shows it running in another terminal; ' +
+          `to turn it off: skydeck install asks, or ${HOW}`,
+      ]);
+      assert.ok(!r.stdout.includes(CANARY), r.stdout);
+    }
+  });
+
+  test('off: an ok line naming the file; exit 0', async (t) => {
+    const d = await installedMachine(t);
+    const path = d.places.claudeGlobalConfig;
+    writeFileSync(path, config({ [KEY]: false }));
+
+    const r = await doctor(d);
+
+    assert.equal(r.code, 0, r.stdout);
+    assert.deepEqual(arrowLines(r), [`ok       Claude Code's ← shortcut is off (${path})`]);
+  });
+
+  test('unknown: an info line naming the file and why; exit 0; no value of the file shown', async (t) => {
+    const cases: [string | null, string][] = [
+      [null, 'it does not exist'],
+      [`{"oauthAccount": {"accountUuid": "${CANARY}"`, 'it is not JSON'],
+      [`["${CANARY}"]`, 'it is not a JSON object'],
+      [config({ [KEY]: CANARY }), `${KEY} is neither true nor false`],
+    ];
+    for (const [text, reason] of cases) {
+      const d = await installedMachine(t);
+      const path = d.places.claudeGlobalConfig;
+      if (text !== null) {
+        writeFileSync(path, text);
+      }
+
+      const r = await doctor(d);
+
+      assert.equal(r.code, 0, r.stdout);
+      assert.deepEqual(
+        arrowLines(r),
+        [
+          `info     Claude Code's ← shortcut: cannot tell from ${path} (${reason}); skydeck ` +
+            `leaves it alone; to turn it off: ${HOW}`,
+        ],
+        reason,
+      );
+      assert.ok(!r.stdout.includes(CANARY), r.stdout);
+      assert.equal(existsSync(path), text !== null, 'doctor creates nothing');
+    }
+  });
+
+  test("the line comes right after the lines of Claude Code's folders", async (t) => {
+    const d = await installedMachine(t);
+    writeFileSync(d.places.claudeGlobalConfig, config());
+
+    const r = await doctor(d);
+
+    const transcripts = r.lines.findIndex((line) => line.includes('transcripts: '));
+    const arrow = r.lines.findIndex((line) => line.includes("Claude Code's ← shortcut"));
+    assert.ok(transcripts >= 0 && arrow === transcripts + 1, r.stdout);
+  });
+
+  test('a file that cannot be looked at is still only info: doctor exits 0', async (t) => {
+    const d = await installedMachine(t);
+    const path = d.places.claudeGlobalConfig;
+    const real = d.platform.files;
+    const files: Files = {
+      ...real,
+      lstat: (p) => {
+        if (p === path) {
+          throw Object.assign(new Error(`EIO: i/o error, lstat '${p}'`), { code: 'EIO' });
+        }
+        return real.lstat(p);
+      },
+    };
+
+    const r = await doctor(d, { platform: { files } });
+
+    assert.equal(r.code, 0, r.stdout);
+    assert.deepEqual(arrowLines(r), [
+      `info     Claude Code's ← shortcut: cannot tell from ${path} (it cannot be read: EIO); ` +
+        `skydeck leaves it alone; to turn it off: ${HOW}`,
+    ]);
+  });
+});

@@ -4,7 +4,9 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
+  fchmodSync,
   fstatSync,
+  fsyncSync,
   linkSync,
   mkdirSync,
   openSync,
@@ -174,6 +176,7 @@ function infoOf(stats: BigIntStats): FileInfo {
     kind,
     mode: Number(stats.mode & 0o7777n),
     uid: Number(stats.uid),
+    ino: stats.ino,
   };
 }
 
@@ -278,6 +281,31 @@ function realFiles(): Files {
         }
       } finally {
         rmSync(temp, { force: true });
+      }
+    },
+    createTempBeside(path, text, mode) {
+      // Opened with O_EXCL, so a file that is there is never written into; the umask can only
+      // narrow the mode at creation, so fchmod sets it exactly before any byte is written.
+      const temp = siblingTemp(path);
+      const fd = openSync(temp, 'wx', mode);
+      let open = true;
+      try {
+        fchmodSync(fd, mode);
+        writeFileSync(fd, text);
+        fsyncSync(fd);
+        open = false;
+        closeSync(fd);
+        return temp;
+      } catch (error) {
+        if (open) {
+          try {
+            closeSync(fd);
+          } catch {
+            // the first error is the one that says what went wrong
+          }
+        }
+        unlinkIfThere(temp);
+        throw error;
       }
     },
     mkdirp(path, mode) {

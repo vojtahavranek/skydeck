@@ -220,8 +220,95 @@ brings it back, and a session with new activity shows again by itself. Nothing i
 The first run also reads all existing transcripts once, which takes some seconds; on a terminal it
 shows `reading transcripts n/m`.
 
+Last, install looks at **Claude Code's ← shortcut**. In a Claude Code session, ← on an empty prompt
+sends the session to the background and opens Claude Code's agent view. In skydeck's window ← also
+closes a group in the list, so a ← meant for the list but typed into a terminal sends that
+terminal's session away: the conversation goes on in a background session that the window lists
+as "running in another terminal", and what you type in the terminal then goes to a background
+session. Claude Code keeps the switch, `leftArrowOpensAgents`, in its global config file (not in
+`settings.json`): `~/.claude.json`, or the `.claude.json` inside `CLAUDE_CONFIG_DIR` when that is
+set (inside `claudeHome` when `config.json` sets it to anything but the default `~/.claude`). When
+the shortcut is on, install says so and asks (on stderr):
+
+```
+Claude Code's ← shortcut is on: ← on an empty prompt sends the session to the background and opens agent view.
+← also closes a group in skydeck's list, so a ← meant for the list can send a window terminal's session away.
+Turning it off sets only leftArrowOpensAgents in /home/you/.claude.json, after a backup; agent view itself stays (claude agents, /bg).
+Turn the shortcut off? [y/N]
+```
+
+`y` (or `yes`) turns off only the shortcut. Agent view stays: `claude agents` opens it, `/bg` sends
+a session there, and in a session you attached to from agent view ← on an empty prompt still
+detaches. After the `y`:
+
+```
+turned Claude Code's ← shortcut off in /home/you/.claude.json; the file as it was is kept in /home/you/.claude.json.skydeck-backup-20261113T090105Z
+the shortcut is off for sessions started from now on; a session already running keeps it until it is started again
+```
+
+Claude Code reads that file when a session starts, so a session that already runs keeps the shortcut
+until you start it again (`/exit`, then resume it). Whether a running session reads a changed file
+again, or writes its own older copy back when you change a setting in its `/config`, Claude Code's
+documentation does not say: `skydeck doctor` tells you which state the file is in. The file holds
+your account details and the MCP servers' settings, so install never prints anything of it; the
+new file and the backup are readable by you only (mode 600). Only that one key changes: every other
+key keeps its place and its value, the indentation and the final newline stay. install writes the
+new file beside the old one, reads it back, and renames it over the old one; when another session
+saved the file in the meantime, install reads it again, and after the third time it gives up (the
+file then stays as the other session left it):
+
+```
+/home/you/.claude.json kept changing while skydeck wrote it, so skydeck left it as it is; to turn the ← shortcut off: /config in Claude Code ("← opens agents")
+```
+
+Any other answer, or none (a run without a terminal), leaves the file alone:
+
+```
+the ← shortcut stays on; to turn it off later: /config in Claude Code ("← opens agents"), or skydeck install again
+```
+
+When the shortcut is off already, install prints `Claude Code's ← shortcut is off` and asks nothing.
+When it cannot tell, it asks nothing, changes nothing and says why:
+
+```
+Claude Code's ← shortcut: left /home/you/.claude.json alone (it does not exist); to turn it off: /config in Claude Code ("← opens agents")
+```
+
+The reason in brackets is one of `it does not exist` (Claude Code has not run yet, or keeps the file
+somewhere else), `it cannot be read: <code>` (such as `EACCES`), `it is not UTF-8 text` (a byte
+that is not UTF-8, which skydeck could not keep as it is), `it is not JSON`, `it is not a JSON
+object`, `leftArrowOpensAgents is neither true nor false`, `it is a symbolic link` (skydeck does not
+write through a link, into a dotfiles folder say), `it is not a regular file`, `it belongs to
+another user` and `it is read-only` (the shortcut is on and the file's owner write bit is off,
+mode 400 say: skydeck does not overrule that; a read-only file whose shortcut is off reads off);
+after the `y` also `leftArrowOpensAgents is in it more than once` and `skydeck cannot
+edit its text safely`. When the write fails, install says so on stderr, still ends with `skydeck is
+installed` and exits 0:
+
+```
+could not turn Claude Code's ← shortcut off: cannot write /home/you/.claude.json (EACCES); it was not changed; to turn it off: /config in Claude Code ("← opens agents")
+```
+
+(After `off:` there can also be `cannot write a backup of … (<code>); it was not changed`, `cannot
+find a free name for a backup of …; it was not changed`, `what skydeck wrote for … did not read
+back as written; it was not changed`, or, for a failure that did not come from the write itself,
+`an unexpected error (<name>); skydeck doctor says whether it is off`.) This step runs only after
+everything else install does has succeeded, and its outcome never changes install's exit code.
+
+The file is whole at every moment, the old text before the rename and the new one after it. An
+install that is killed in between (Ctrl+C at that moment, a crash) can leave
+`..claude.json.<12 hex digits>.tmp` beside it (two dots: the temporary file of the new text, mode
+600, a whole copy with your account details) and the backup; remove that temporary file when no
+install runs. A file with a second name (a hard link) loses it: the renamed file is a new one, and
+the other name keeps the old text.
+
+To turn the shortcut back on: in Claude Code, `/config`, the option "← opens agents"; or set
+`leftArrowOpensAgents` to `true` in the file (or remove the key) and start your sessions again. Do
+not copy the backup back: it would also undo whatever Claude Code saved in the file since.
+`skydeck uninstall` leaves the key as it is.
+
 Running `install` again changes nothing: it prints `hook entries already present` and makes no
-backup.
+backup. While the ← shortcut is on, it asks that question again.
 
 **4. Put `~/.local/bin` on `PATH`.** Install creates the folder and the link `~/.local/bin/skydeck`.
 
@@ -257,6 +344,7 @@ info     scripted runs dropped: 0
 ok       the last refresh skipped nothing
 ok       /home/you/.claude/sessions can be read
 ok       transcripts: 12 files under /home/you/.claude/projects
+ok       Claude Code's ← shortcut is off (/home/you/.claude.json)
 ok       gh version 2.69.0 (2025-03-19)
 ok       gh is logged in
 ok       terminal: here (sessions start in the terminal skydeck runs in)
@@ -295,6 +383,8 @@ npm run check
 |---|---|
 | `<claudeHome>/settings.json` (default `~/.claude/settings.json`) | Two hook entries are added: `SessionStart` and `SessionEnd`, each running `'<dataDir>/skydeck-hook' <event> >/dev/null 2>&1 \|\| true` with a timeout of 5 seconds. Everything else in the file keeps its key order, and its content except a number that cannot be written back exactly (the question names it; the backup has it). The file is parsed and written back in skydeck's formatting (two-space indentation, a newline at the end); when that changes more than the entries, the question has one more line (below). If the file does not exist but the folder does, install creates it. Hook entries that belong to something else are never touched. |
 | `<claudeHome>/settings.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>` | The file as it was before, readable by you only. The time is UTC; a second backup in the same second gets `-2`, and so on. Every install that changes the settings makes a new one. skydeck never removes one, not even with `uninstall --purge`. |
+| Claude Code's global config file, `~/.claude.json` (or `.claude.json` in a named `claudeHome`, see "Places") | Only after your `y` to the ← question: `leftArrowOpensAgents` is set to `false` (added after the last key, or its `true` replaced where it is). Nothing else in the file changes; it is mode 600 afterwards (a file you made read-only is never written). `uninstall` leaves it. |
+| `~/.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>` | That file as it was before the change, readable by you only, named as the settings backups are. skydeck never removes it, and `uninstall` does not name it: it holds your account details, so remove it yourself once you no longer need it. |
 | `<dataDir>/skydeck-hook` | Symbolic link to `<checkout>/bin/skydeck-hook`. |
 | `~/.local/bin/skydeck` | Symbolic link to `<checkout>/bin/skydeck`. The folder is created when missing. |
 | `<dataDir>/node` | Symbolic link to the Node.js binary that ran `install`. |
@@ -329,8 +419,10 @@ After your `y` it stops, and writes nothing, when the settings file is no longer
 so skydeck left it as it is; run skydeck install again`.
 
 skydeck never writes to transcripts or to Claude Code's live-session files. The settings file is the
-only thing of Claude Code's that it changes. A settings file that is a symbolic link (into a
-dotfiles folder, say) stays a link; the file it points to is changed.
+only thing of Claude Code's that it changes on its own account; the one other change is the key
+`leftArrowOpensAgents` in the global config file, made only after your `y`. A settings file that is
+a symbolic link (into a dotfiles folder, say) stays a link; the file it points to is changed. A
+global config file that is a symbolic link is never written.
 
 ## Configuration
 
@@ -342,6 +434,7 @@ dotfiles folder, say) stays a link; the file it points to is changed.
 | `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`, `locks/` (unused), a note while it is being edited, and `note-<session id>.md` after an editor that failed having changed it (`editor exited <n>; your text is in <path>`). |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
 | `claudeHome` | the key `claudeHome` of `config.json`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files, including the settings file and the backups. |
+| Claude Code's global config file | `~/.claude.json`, beside the default `claudeHome`; `<claudeHome>/.claude.json` when `config.json` or `CLAUDE_CONFIG_DIR` names `claudeHome` (a `claudeHome` in `config.json` that is the default `~/.claude` written out still means `~/.claude.json`, unless `CLAUDE_CONFIG_DIR` names that same `~/.claude`: then `~/.claude/.claude.json`) | Claude Code's global settings, among them `leftArrowOpensAgents` (the ← shortcut), which install offers to turn off and doctor reports. Claude Code keeps the file in the home directory, and inside `CLAUDE_CONFIG_DIR` when that is set; a `claudeHome` in `config.json` stands for the `CLAUDE_CONFIG_DIR` your sessions run with. |
 
 ### `config.json`
 
@@ -1572,6 +1665,7 @@ installation.
 | scripted runs dropped | `info`: how many events of scripted runs (print mode, SDK hosts, editor extensions) were dropped; they are not sessions a person works in. A scripted run that holds a session skydeck knows is not dropped (see "If something goes wrong"). |
 | last refresh | Something was skipped at the last command: a hook file, a process, or a transcript folder or file that could not be read. The line says what and why. |
 | Claude Code's folders | `<claudeHome>/sessions` or something under `<claudeHome>/projects` cannot be read. A folder that does not exist yet is only `info`. |
+| Claude Code's ← shortcut | Never a problem: it is your choice. `ok       Claude Code's ← shortcut is off (<file>)`; while it is on, `info     Claude Code's ← shortcut is on: ← on an empty prompt sends a window terminal's session to the background, and the list then shows it running in another terminal; to turn it off: skydeck install asks, or /config in Claude Code ("← opens agents")`; when the file cannot tell, `info     Claude Code's ← shortcut: cannot tell from <file> (<reason>); skydeck leaves it alone; to turn it off: /config in Claude Code ("← opens agents")`, with the reasons of install's line (Install, step 3). It shows nothing else of the file. After you turned the shortcut off, an `on` here means the key is `true` or gone again: you turned it on in `/config`, or a session that was running wrote its older copy of the file back (then turn it off again once that session has ended). |
 | `gh` | `gh` is not installed, or not logged in, or GitHub cannot be reached. Run `gh auth status`. |
 | terminal | With `"terminal": "wezterm"`: `wezterm cli --no-auto-start list` failed. Is a WezTerm window open? With `"here"` the line is `ok`, and with `"window"` too: `terminal: window (sessions start in the skydeck window; resume, new and restore need skydeck window to run)`; whether the server runs is the window's server line. |
 
@@ -1831,6 +1925,12 @@ yourself)`. Then it undoes the install, in this order:
 3. **Backups.** It names every backup of the settings file (`kept the backup ...`). It never removes
    one.
 
+It leaves Claude Code's ← shortcut as it is: that is your choice in Claude Code, and skydeck cannot
+tell who set the key. To turn the shortcut back on, use `/config` in Claude Code (the option "← opens
+agents"), or set `leftArrowOpensAgents` to `true` in `~/.claude.json` (or remove the key) and start
+your sessions again. The backup install made of that file stays, and is not named; it holds your
+account details, so remove it yourself when you no longer need it.
+
 The database, the spool and `config.json` stay. Sessions that are running keep running: skydeck
 never stops a process. `uninstall` creates nothing, except that one backup when it needs it.
 
@@ -1874,6 +1974,7 @@ kept the backup /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
 | What the hook recorded and the next command has not read yet | `<stateDir>/spool/`; files that could not be read go to `<stateDir>/spool/bad/`. |
 | The hook's own errors | `<stateDir>/hook.log` |
 | The settings file and its backups | `<claudeHome>/settings.json`, `<claudeHome>/settings.json.skydeck-backup-*` |
+| Claude Code's global config file and the backup of it | `~/.claude.json`, `~/.claude.json.skydeck-backup-*` (inside a named `claudeHome`, see "Places") |
 | The compile cache | `~/.cache/skydeck/compile-cache` (see "Environment variables") |
 | The window's server and keepers: their own diagnostics, never conversation content | `<stateDir>/server.log`, `<stateDir>/keepers.log` (at 1 MiB copied to `.1` and emptied) |
 | The window's sockets and `.pid` files (`server.json`, `server.sock`, `terms/`, the keep-alive's files, the `interop` link) | The runtime directory, which `skydeck doctor` names (see `XDG_RUNTIME_DIR` under "Environment variables") |
@@ -1894,6 +1995,7 @@ file.
 | `doctor`: `no SessionStart hook entry ...` | Run `skydeck install`. Claude Code may have rewritten its settings file. |
 | A session you expect is not in `skydeck ls` | A session that is not running and never received a prompt has no transcript and is not listed. One marked done needs `--all`. A scripted run (print mode, an SDK host, an editor extension) is not a session of its own and is not listed (`doctor` counts what it drops), and neither is a session whose transcript says it was not started by the interactive `claude` (its entry point is not `cli`). Run `skydeck doctor`. |
 | `skydeck: <id> is running (pid <n>)` when you resume | The session runs in another terminal. skydeck never resumes a session twice (exit 4). |
+| What you type into a window terminal shows up on another row, "running in another terminal" | ← on the terminal's empty prompt sent its session to the background (Claude Code's agent view). `skydeck doctor` says whether that shortcut is on; `skydeck install` offers to turn it off (Install, step 3). |
 | The same, but you see no such terminal | A scripted run (print mode such as `claude -p --resume <id>`, an SDK host, an editor extension) holds that session. skydeck shows it as `running`, `skydeck show <ref>` says `(scripted run)` next to the holder, and `resume` is refused until that process ends. |
 | `skydeck: <id> is being resumed (<n> s ago); try again in <m> s` | A resume of that session started less than a minute ago. When skydeck printed a command for you to run, the same hold applies for that minute. |
 | `skydeck: the window's server is not started from inside a Claude Code session: …` | `skydeck window` was run as a `!` command of a Claude Code session, or from a shell that inherited `CLAUDECODE`. Run it in a WSL terminal of your own. |

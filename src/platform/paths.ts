@@ -8,6 +8,12 @@ export interface Places {
   stateDir: string; // spool/, locks/, hook.log
   configDir: string; // config.json
   claudeHome: string;
+  /**
+   * Claude Code's global config file (follow-up F11): `<homeDir>/.claude.json`, beside the default
+   * claudeHome; `<claudeHome>/.claude.json` when claudeHome is named (config.json or
+   * CLAUDE_CONFIG_DIR), unless config.json names the default `<homeDir>/.claude`.
+   */
+  claudeGlobalConfig: string;
   dbPath: string; // <dataDir>/skydeck.db
   hookPath: string; // <dataDir>/skydeck-hook
   nodeLink: string; // <dataDir>/node
@@ -48,6 +54,11 @@ export function resolveConfigDir(env: Env, homeDir: string): string {
  * XDG_CONFIG_HOME + "/skydeck", defaulting to <homeDir>/.local/share, /.local/state, /.config.
  * claudeHome: `configuredClaudeHome` (from config.json, already checked to be absolute by
  * parseConfig, so used as given), else CLAUDE_CONFIG_DIR, else <homeDir>/.claude.
+ * claudeGlobalConfig by the same rule: Claude Code keeps `.claude.json` in the home directory, and
+ * inside CLAUDE_CONFIG_DIR when that is set; a claudeHome in config.json stands for the
+ * CLAUDE_CONFIG_DIR that Claude Code runs with (only that variable moves Claude Code's home),
+ * except when it is the default <homeDir>/.claude written out: those sessions run without it, so
+ * the file is <homeDir>/.claude.json, unless CLAUDE_CONFIG_DIR names that same directory.
  */
 export function resolvePlaces(
   env: Env,
@@ -58,12 +69,26 @@ export function resolvePlaces(
   const stateDir = skydeckDir(env, homeDir, 'state', 'XDG_STATE_HOME', join('.local', 'state'));
   const configDir = resolveConfigDir(env, homeDir);
   const spoolDir = join(stateDir, 'spool');
+  const defaultClaudeHome = join(homeDir, '.claude');
+  const envClaudeHome = absoluteEnv(env, 'CLAUDE_CONFIG_DIR');
+  let globalConfigDir = envClaudeHome ?? homeDir;
+  if (configuredClaudeHome !== null) {
+    // The default written out: those sessions run without CLAUDE_CONFIG_DIR, unless the variable
+    // names that very directory, when Claude Code keeps the file inside it.
+    const isDefault = (dir: string | null): boolean =>
+      dir !== null && samePath(dir, defaultClaudeHome);
+    if (!isDefault(configuredClaudeHome)) {
+      globalConfigDir = configuredClaudeHome;
+    } else {
+      globalConfigDir = isDefault(envClaudeHome) ? defaultClaudeHome : homeDir;
+    }
+  }
   return {
     dataDir,
     stateDir,
     configDir,
-    claudeHome:
-      configuredClaudeHome ?? absoluteEnv(env, 'CLAUDE_CONFIG_DIR') ?? join(homeDir, '.claude'),
+    claudeHome: configuredClaudeHome ?? envClaudeHome ?? defaultClaudeHome,
+    claudeGlobalConfig: join(globalConfigDir, '.claude.json'),
     dbPath: join(dataDir, 'skydeck.db'),
     hookPath: join(dataDir, 'skydeck-hook'),
     nodeLink: join(dataDir, 'node'),
@@ -74,6 +99,12 @@ export function resolvePlaces(
     configPath: join(configDir, 'config.json'),
     binLink: join(homeDir, '.local', 'bin', 'skydeck'),
   };
+}
+
+/** Two paths that name one directory as written: `/h/.claude/` and `/h//.claude` are `/h/.claude`. */
+function samePath(a: string, b: string): boolean {
+  const normal = (path: string): string => join(path).replace(/(?<=.)\/+$/, '');
+  return normal(a) === normal(b);
 }
 
 /** The first 8 hex digits of the sha256 of the store's path (S2 4.2). */

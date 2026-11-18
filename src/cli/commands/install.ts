@@ -2,16 +2,26 @@
 // in Claude Code's settings file (shown and asked first, with a backup), a first refresh, and the
 // one-time offer to mark old sessions as done (7.1, D20). Running it again changes nothing. It
 // writes nothing for the window (S2 16.1): it only says so when python3 3.9 or newer, which the
-// window's keepers need, is not found.
+// window's keepers need, is not found. Last, it offers to turn off Claude Code's ← shortcut
+// (follow-up F11, S2 7.9).
 //
-// The settings file is the one place where skydeck changes Claude Code's configuration
-// (principle 2), so that step adds nothing but the two entries, never touches other hooks, never
-// writes over a change it did not show, and records what uninstall needs to undo exactly this
-// change. Every check that can stop install runs before anything is created, so a refusal, or a
-// no, leaves nothing behind (ruled by the plan owner).
+// The settings file is the one place where skydeck changes Claude Code's configuration on its own
+// account (principle 2), so that step adds nothing but the two entries, never touches other hooks,
+// never writes over a change it did not show, and records what uninstall needs to undo exactly
+// this change. Every check that can stop install runs before anything is created, so a refusal, or
+// a no, leaves nothing behind (ruled by the plan owner). The ← step is the user's own choice made
+// through skydeck: after a yes it sets that one key in Claude Code's global config file, and it
+// never changes install's result.
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 
+import {
+  LEFT_ARROW_KEY,
+  LEFT_ARROW_LABEL,
+  readLeftArrow,
+  turnLeftArrowOff,
+} from '../../claude/global-config.ts';
+import type { TurnOffResult } from '../../claude/global-config.ts';
 import { addHookEntries, hookEntry, rewriteReport, settingsPath } from '../../claude/settings.ts';
 import type { RewriteReport, SettingsEdit } from '../../claude/settings.ts';
 import { SkydeckError } from '../../platform/errors.ts';
@@ -41,8 +51,9 @@ const SPEC: ArgSpec = {
     '\n' +
     "Creates skydeck's directories and database, links the hook, the skydeck command\n" +
     "(~/.local/bin/skydeck) and Node.js, adds the two hook entries to Claude Code's\n" +
-    'settings file after showing them and asking, reads in what is there, and offers once\n' +
-    'to mark old sessions as done. Running it again changes nothing.\n',
+    'settings file after showing them and asking, reads in what is there, offers once to\n' +
+    "mark old sessions as done, and offers to turn off Claude Code's ← shortcut. Running it\n" +
+    'again changes nothing.\n',
   flags: {},
   min: 0,
   max: 0,
@@ -105,6 +116,7 @@ export const command: Command = {
       if ((await probePython3(deck.platform)).kind !== 'found') {
         ctx.io.stdout(`${PYTHON3_NEEDED}\n`);
       }
+      await offerLeftArrowOff(ctx, deck);
       ctx.io.stdout('skydeck is installed\n');
       return EXIT.ok;
     });
@@ -316,6 +328,100 @@ async function offerFirstRun(ctx: Context, deck: Deck): Promise<void> {
   if (mark) {
     ctx.io.stdout(`marked ${count(old.length, 'session')} as done (skydeck ls --all shows them)\n`);
   }
+}
+
+/** How the user turns the shortcut off without skydeck. */
+const IN_CLAUDE_CODE = `/config in Claude Code ("${LEFT_ARROW_LABEL}")`;
+
+/**
+ * Follow-up F11 (S2 7.9): when Claude Code's ← shortcut is on, says what it does and why it bites
+ * in the window, and asks; after a yes, sets leftArrowOpensAgents to false in the global config
+ * file, with a backup made as for the settings file. Off: one line. Cannot be told: one line that
+ * names the file, left alone. It runs after every other step has succeeded and never changes
+ * install's result: whatever goes wrong is one line on stderr. No line holds a value of the file.
+ */
+async function offerLeftArrowOff(ctx: Context, deck: Deck): Promise<void> {
+  const { platform, places } = deck;
+  const path = places.claudeGlobalConfig;
+  const say = (text: string): void => {
+    ctx.io.stdout(`${sanitize(text)}\n`);
+  };
+  try {
+    const reading = readLeftArrow(platform.files, platform.uid, path);
+    if (reading.state === 'off') {
+      say(OFF_LINE);
+      return;
+    }
+    if (reading.state === 'unknown') {
+      say(leftAlone(path, reading.reason ?? 'it cannot be read'));
+      return;
+    }
+    for (const line of [
+      "Claude Code's ← shortcut is on: ← on an empty prompt sends the session to the background and opens agent view.",
+      "← also closes a group in skydeck's list, so a ← meant for the list can send a window terminal's session away.",
+      `Turning it off sets only ${LEFT_ARROW_KEY} in ${path}, after a backup; agent view itself stays (claude agents, /bg).`,
+    ]) {
+      ctx.io.stderr(`${sanitize(line)}\n`);
+    }
+    if (!isYes(await ctx.io.readLine('Turn the shortcut off? [y/N] '))) {
+      say(
+        `the ← shortcut stays on; to turn it off later: ${IN_CLAUDE_CODE}, or skydeck install again`,
+      );
+      return;
+    }
+    const base = backupBase(path, platform.clock);
+    const result = turnLeftArrowOff(platform.files, platform.uid, path, (text) =>
+      createBackup(platform.files, path, base, text),
+    );
+    for (const line of turnedOffLines(path, result)) {
+      say(line);
+    }
+  } catch (error) {
+    const line = `could not turn Claude Code's ← shortcut off: ${stepFailure(error)}; to turn it off: ${IN_CLAUDE_CODE}`;
+    ctx.io.stderr(`${sanitize(line)}\n`);
+  }
+}
+
+const OFF_LINE = "Claude Code's ← shortcut is off";
+
+function leftAlone(path: string, reason: string): string {
+  return `Claude Code's ← shortcut: left ${path} alone (${reason}); to turn it off: ${IN_CLAUDE_CODE}`;
+}
+
+function turnedOffLines(path: string, result: TurnOffResult): string[] {
+  switch (result.kind) {
+    case 'written':
+      return [
+        `turned Claude Code's ← shortcut off in ${path}; the file as it was is kept in ${result.backup}`,
+        'the shortcut is off for sessions started from now on; a session already running keeps it until it is started again',
+      ];
+    case 'off':
+      return [OFF_LINE];
+    case 'unknown':
+      return [leftAlone(path, result.reason)];
+    case 'kept-changing':
+      return [
+        `${path} kept changing while skydeck wrote it, so skydeck left it as it is; to turn the ← shortcut off: ${IN_CLAUDE_CODE}`,
+      ];
+  }
+}
+
+/**
+ * What went wrong, without a value of the file: a SkydeckError's own message (the writer's and the
+ * backup's name the path and an error code only). Anything else did not come from the write (which
+ * turns every failure of its own into a SkydeckError) but from the question, the clock or the
+ * output, perhaps after the write: its code or its name, and no claim about the file.
+ */
+function stepFailure(error: unknown): string {
+  if (error instanceof SkydeckError) {
+    return error.message;
+  }
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  let what = error instanceof Error ? error.name : typeof error;
+  if (typeof code === 'string' && /^E[A-Z0-9]+$/.test(code)) {
+    what = code;
+  }
+  return `an unexpected error (${what}); skydeck doctor says whether it is off`;
 }
 
 function isYes(answer: string | null): boolean {

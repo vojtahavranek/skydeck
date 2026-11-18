@@ -37,6 +37,8 @@ export interface FileInfo {
   /** Permission bits: stat.mode & 0o7777. */
   mode: number;
   uid: number;
+  /** The inode number: a file renamed over this path has another one. */
+  ino: bigint;
 }
 
 /** The file system. Every path is absolute. Errors other than "does not exist" are thrown. */
@@ -64,6 +66,13 @@ export interface Files {
    * exactly that mode from the start (never a wider one first); without, the umask default.
    */
   createExclusive(path: string, text: string, mode?: number): boolean;
+  /**
+   * Writes `text` to a new file beside `path`, `.<name>.<random>.tmp`, created exclusively (O_EXCL)
+   * with exactly `mode` from the start, whatever the umask, and synced to disk (fsync). Returns its
+   * path; `path` itself is not touched. The caller renames it over `path` or removes it. Throws
+   * when it cannot be written, and then leaves nothing behind.
+   */
+  createTempBeside(path: string, text: string, mode: number): string;
   /** mkdir -p; `mode` applies to directories it creates. */
   mkdirp(path: string, mode?: number): void;
   rename(from: string, to: string): void;

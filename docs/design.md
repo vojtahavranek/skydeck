@@ -30,8 +30,12 @@ section first.
 1. **The real Claude Code.** skydeck never re-implements the conversation. A session is always the
    real `claude` program in a terminal, with its status line and subagent display.
 2. **Read-only on Claude Code's data.** skydeck never writes to transcripts or to Claude Code's
-   live-session files. Its only write into Claude Code's configuration is the hook entries that
-   `skydeck install` adds to the user's settings file, and `skydeck uninstall` removes.
+   live-session files. Its only write into Claude Code's configuration on its own account is the
+   hook entries that `skydeck install` adds to the user's settings file, and `skydeck uninstall`
+   removes. The one other write is the user's own choice, made through install after a yes to its
+   question: the global key `leftArrowOpensAgents` set to `false` in Claude Code's global config
+   file, nothing else of that file changed (8; follow-up F11, design-step-2.md 7.9). Uninstall
+   leaves it: it is the user's setting in Claude Code, and skydeck cannot tell who set it.
 3. **A broken skydeck never disturbs a session.** The hook is silent, fast and always exits 0. It
    does not depend on Node.js or on the database.
 4. **No conversation content.** skydeck stores no prompt text and no assistant output — not in the
@@ -750,7 +754,9 @@ could not be resumed; see above`).
   the one case where content and not formatting changes) it names the place, as a path such as
   `env.TOKEN_ID` or `a.b[1]`. Neither refuses; (4) runs ingest, reconcile and the
   first transcript scan; (5) makes the first-run offer (7.1), once: a later install does not offer
-  it again, whatever the answer was. Running it again changes nothing. Hook entries that belong to
+  it again, whatever the answer was; (6) last, after every step before it has succeeded, offers
+  to turn off Claude Code's ← shortcut (follow-up F11, design-step-2.md 7.9), described below.
+  Running it again changes nothing. Hook entries that belong to
   something else are never touched. Every install that changes the settings file writes a new
   backup of it, `<settings file>.skydeck-backup-<YYYYMMDDTHHMMSSZ>` (UTC; `-2`, `-3`, … when that
   name is taken), readable by the user only; an older backup is never touched or reused, because
@@ -765,6 +771,35 @@ could not be resumed; see above`).
   file again, also right before writing it: if it is no longer what was shown (the user or another
   session saved it while the question was open), install stops and writes nothing. A write that
   fails is an error naming the file, and leaves no backup of its own behind.
+
+  Step (6) reads `leftArrowOpensAgents` from Claude Code's global config file (9.1,
+  `claudeGlobalConfig`): `off` when it is exactly `false`; `on` when it is absent or `true`;
+  `unknown` when there is no file, it cannot be read, it is not UTF-8 (the file is read as bytes
+  and decoded strictly: a byte that is not UTF-8 would be replaced in both the new file and the
+  backup), it is not a JSON object, the key holds anything else, or the path is a symbolic link,
+  not a regular file, or another user's (such a file is never written, so its state is not asked
+  for); and a file without its owner's write bit whose shortcut is on (one that is off reads `off`:
+  nothing would be written to it). The reader never creates the file and never follows a link. On `on` install prints three lines (what the shortcut does, that ← also
+  closes a group in the window's list, that agent view itself stays) and asks `Turn the shortcut
+  off? [y/N]`; a no, or no answer, is one line on how to do it later (`/config` in Claude Code,
+  "← opens agents", or install again). On `off` it prints one line, on `unknown` one line naming
+  the file, left alone; neither asks. After the yes it sets the key, and only it: the text is
+  edited, not parsed and written back (that would reorder numeric keys, lose digits and change
+  escapes), the key's `true` replaced where it is or the key added after the last member with
+  that member's own white space and colon, so indentation, line ends and the final newline stay;
+  the result is checked by parsing it (the same keys in the same order, every other value equal,
+  the key `false`). Each try reads the file fresh, writes the new text to a temporary file beside
+  it (O_EXCL, mode 600, fsync), reads that back and checks it again, makes a backup of the text it
+  replaces as for the settings file (`<file>.skydeck-backup-<YYYYMMDDTHHMMSSZ>`, mode 600, never
+  removed), and renames the temporary file over the file only while the file is still the one it
+  read (inode, size, modification time); otherwise it removes the temporary file and that backup
+  and tries again, three tries in all, then gives up with a line naming `/config`. The rename is
+  the only moment the file changes: a run killed before it leaves the file whole, and perhaps the
+  temporary file (`..<name>.<12 hex>.tmp`) and the backup beside it; a second hard link of the file
+  keeps the old text. No message names anything of the file but its path and this
+  key. Whatever goes wrong in this step is one line on stderr: install's exit code never depends
+  on it. Claude Code reads the file at session start; sessions started later have the shortcut off,
+  a running one keeps it, and may write its older copy back (not documented either way).
 - **`skydeck uninstall`**: restores the recorded backup only when the settings file still has the
   recorded hash and that backup still exists (when there was no file before install, it removes
   the file); in every other case it removes exactly the entries install wrote, that is the hook
@@ -773,7 +808,8 @@ could not be resumed; see above`).
   stays; install, doctor and uninstall use this one test). That path rewrites the file in
   skydeck's formatting too: when this changes more than the removed entries, it first keeps the
   file as it is in a new backup (named and protected like install's), says where, and names the
-  numbers that lost digits as install's question does. Removes the
+  numbers that lost digits as install's question does. It leaves `leftArrowOpensAgents` and the
+  backup install made of the global config file alone. Removes the
   links that still point where install pointed them. It never removes a backup, not even with
   `--purge`, and names each one. It creates nothing but that backup: no directory, database or
   file, also none the user removed after install. The database stays unless `--purge` is given,
@@ -800,8 +836,9 @@ could not be resumed; see above`).
   `hook.log`; scripted runs dropped; what the last refresh skipped (a spool file, a process, a
   transcript folder or file that could not be read); whether `<claudeHome>/sessions` and every
   folder and file under `<claudeHome>/projects` can be read (5.6; a folder that is a file or a
-  symbolic link to nothing is a problem); `gh` present and logged in; the terminal adapter. It does
-  not refresh and creates nothing. A check that fails unexpectedly is one problem line, not the end
+  symbolic link to nothing is a problem); Claude Code's ← shortcut, read as install reads it
+  (`ok` when off, `info` when on or unknown, never a problem: it is the user's choice); `gh`
+  present and logged in; the terminal adapter. It does not refresh and creates nothing. A check that fails unexpectedly is one problem line, not the end
   of the report; so is a configuration file that cannot be read or a database that is missing or
   cannot be opened, and the checks that do not need it still run.
 
@@ -817,6 +854,7 @@ could not be resumed; see above`).
 | `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`; `locks/` is created but unused (resume locks are in the database, 7.6). |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
 | `claudeHome` | the configuration key `claudeHome`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files. |
+| `claudeGlobalConfig` | `<claudeHome>/.claude.json` when the configuration key or `$CLAUDE_CONFIG_DIR` names `claudeHome`, else `~/.claude.json`; also `~/.claude.json` when the configuration key is the default `~/.claude` written out (those sessions run without `CLAUDE_CONFIG_DIR`), unless `$CLAUDE_CONFIG_DIR` names that same directory, when it is `~/.claude/.claude.json` | Claude Code's global config file (follow-up F11). Claude Code keeps it in the home directory, and inside `CLAUDE_CONFIG_DIR` when that is set; a configured `claudeHome` stands for the `CLAUDE_CONFIG_DIR` Claude Code runs with, since only that variable moves Claude Code's home. |
 
 `SKYDECK_HOME`, when set, replaces the first three with `$SKYDECK_HOME/data`, `/state`,
 `/config`; tests use it. The hook resolves `stateDir` by the same rule. The launcher keeps the
@@ -968,6 +1006,7 @@ and no `argv` or `name`. The column is free text, so this needs no migration.
 | `src/claude/transcripts.ts` | Finds and incrementally reads transcripts (5.6). | platform |
 | `src/claude/launch.ts` | The flag table; builds resume and new commands (7.6, 7.7). | — |
 | `src/claude/settings.ts` | Adds and removes hook entries; reads `cleanupPeriodDays`. | platform |
+| `src/claude/global-config.ts` | Reads `leftArrowOpensAgents` in the global config file and sets it to `false`, nothing else (8). | platform |
 | `src/sessions/` | Ingest, reconcile, the transcript scan, derived state and marks (6), the list model, reference resolution, the resume guard and lock, restore planning and running. | platform, text, store, claude, github (its pure functions: the scan attaches pull requests by key, the list computes the chip), terminals (as an interface) |
 | `src/github.ts` | Pull-request keys, batched status, cache rules (7.3). | platform, store |
 | `src/terminals/` | The terminal interface and its implementations: `here` (handoff file), `wezterm`. | platform, text |
@@ -1066,6 +1105,8 @@ inspecting local files, unless marked otherwise.
 | `claude -p` and SDK runs write no live-session file that is left behind: on 2026-11-13 all 178 files in `<claudeHome>/sessions/` on the development machine (left-over ones of killed processes included) had `entrypoint` `cli` and `kind` `interactive`, although `claude -p` runs on that machine every day. So the hook, not a live-session file, is what shows that a scripted run holds a session (5.3). A `claude -p` prompt is written to the transcript with `turnOrigin` `sdk`, so it is not user input (5.6). | observed (local files) |
 | In a hook's environment `$CLAUDE_CODE_ENTRYPOINT` is `cli` for an interactive session and `sdk-cli` for `claude -p`. Hooks fire for `-p` runs, and their command line contains `-p`. After `/clear`, the environment and the hook input both carry the new session id. | observed |
 | A session that never received a prompt has no transcript. | observed |
+| `←` on the empty prompt of a session started in a terminal moves its conversation into a background session with a new id and opens agent view in that terminal; what is typed there then goes to the background session. Its program runs under a `claude bg-pty-host` process whose parent is init, outside the terminal's process tree. The live-session file of the background session has `kind` `bg` and a `jobId` (in the one case seen, the first eight hex digits of the new session's id); the live-session file of the terminal's own program gets `parkedJobId` with the same value. skydeck reads none of these three fields. | observed (Claude Code 2.1.311, 2026-11-16, follow-up F11); `kind` `bg`, `jobId`, `parkedJobId` not documented |
+| `leftArrowOpensAgents`: a boolean, default `true`, a global config key kept in `~/.claude.json` ("Claude Code ignores this key in settings.json"; with `CLAUDE_CONFIG_DIR` set the file lives under that directory). `false`: "Claude Code turns the shortcut off; in a session you attached to from agent view, `←` on an empty prompt still detaches." Its `/config` label is "← opens agents"; `/config` writes these keys "and you can also edit them by hand". The file is "Read at session start", and Claude Code "writes back to it when you change a global config option in /config or trust a project folder". Whether a running session re-reads a hand edit, and whether its own write merges or overwrites one, is not documented; nor is any command that sets a global key without a session. The file holds the user's account details and the MCP servers' settings, mode 600. | documentation (read 2026-11-17) |
 
 ## 15. How changes are made
 
