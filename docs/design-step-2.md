@@ -3081,7 +3081,8 @@ check W3. Low priority: stage E (19).
 
 As built (stage E, plan E14; the picture changed by follow-up F10, 2026-11-17, on the owner's words
 "change the icon, use this [a picture], but use appropriate sizes", and a second picture for the
-small sizes; the small files redrawn by follow-up F12, 2026-11-18):
+small sizes; the small files redrawn by follow-up F12, 2026-11-18, and the 16 pixel one by
+follow-up F14 the same day):
 
 - **The pictures** are the owner's, two of them, 1254 × 1254 pixels, RGBA, transparent outside
   their dark navy rounded tile, kept exactly as they were received (their own `caBX` chunks, the
@@ -3122,38 +3123,49 @@ small sizes; the small files redrawn by follow-up F12, 2026-11-18):
   average). The mask is laid on the picture's pixels before the reduction, so its edge is
   anti-aliased like the rest, and no pixel of the picture under a crop is less than opaque, so the
   picture's own soft edge and transparent corners are never in a small file.
-  - **32 and 48 pixels: the drawing.** Its box (what is more than 40 of 255 from the navy, at least
-    60 pixels inside the tile) is x 115 to 1115 and y 202 to 1045, 1001 × 844 pixels. The crop is
-    centred on it and its side is the width plus 2 % each side, 1041.04 pixels, so the drawing
-    fills the square: at 32 pixels it covers 96 % of the icon's width and 81 % of its height and
-    starts at the left edge and ends at the right one.
-  - **16 pixels: the terminal window alone.** Its box is x 306 to 941 and y 546 to 1045, 636 × 500
-    pixels, its outer corner radius 107 pixels (a fitted circle). The crop is centred on it and its
-    side is the window's width plus 4 % each side, 686.88 pixels. What of the cloud's strokes
-    falls in the crop outside the window (beyond 3 pixels of its outline, so that the window's
-    soft edge is whole) is painted the tile's navy: at 16 pixels a cloud stroke is a smear that
-    takes the `>_` its room, and with the window alone the chevron and the bar are 22 white
-    pixels, where the picture's whole tile gave 7.
+  - **One rule for the three: the drawing, at 16, 32 and 48 pixels alike.** The drawing's box
+    (what is more than 40 of 255 from the navy, at least 60 pixels inside the tile) is x 115 to
+    1115 and y 202 to 1045, 1001 × 844 pixels. The crop is centred on it and its side is the width
+    plus 2 % each side, 1041.04 pixels, so the drawing fills the square: at 32 pixels it covers
+    96 % of the icon's width and 81 % of its height, and at every size it reaches the left and the
+    right edge (at 48 to within one pixel), the cloud's outline at its top and the terminal window
+    in front of it.
+  - **Why one rule, and what it costs** (follow-up F14). F12 drew the 16 pixel file from the
+    terminal window alone (its box x 306 to 941 and y 546 to 1045, plus 4 % each side, and what of
+    the cloud's strokes fell in that crop painted the navy), so that the `>_` had more room. The
+    owner asked for their picture there again, the cloud with the window: they want one picture
+    at every size. The cost: in the whole drawing the window is 0.61 of the icon's width (alone it
+    was 0.93), and the `>_` with it, so at 16 pixels the chevron and the bar are 10 white pixels,
+    where the window alone gave 22 (and the picture's whole tile, before F12, 7). A taskbar button
+    that Windows stretches from the 16 pixel file is therefore softer than with F12's file: the
+    cloud and the window still read as shapes, the `>_` as a light mark in the window.
   - **The numbers are measured from the picture**, and `test/window/icons.test.ts` measures them
-    again from it (the tile's navy, both boxes, both radii) and holds the script's constants to
-    what it finds. The test re-derives every file from its picture in plain Node and compares (the
+    again from it (the tile's navy, the drawing's box, the tile's corner radius) and holds the
+    script's constants to what it finds; it measures the window's box too, to find the window in
+    the 16 pixel file, whose top frame is its row 7, with 28 pixels of the cloud's blue to violet
+    above it. The test re-derives every file from its picture in plain Node and compares (the
     three small files within one step of 255 on this build, every file within two); tells the two
-    pictures apart by the white of the `>_` (the small picture's is bold: 3.8 to 8.6 % of a 16, 32
+    pictures apart by the white of the `>_` (the small picture's is bold: 3.8 to 3.9 % of a 16, 32
     or 48 pixel icon is white; the large one's is thin: about 0.5 % of a 192 or 512 pixel one); and
-    pins the four large files (192 and 512 pixels, and the two maskable ones) byte for byte as
-    they were before F12.
-  - **What it looks like.** At 32 and 48 pixels the cloud, the window and the `>_` read. At 16 a
-    terminal window with a light `>_` and a frame in the cloud's blue and violet. **Which file the
-    taskbar button takes is not verified. Most likely it is the 16 pixel one**, stretched to about
-    24 pixels: the button shows the terminal window alone, soft (a stretched bitmap is never
-    crisp), the window and the `>_` still reading. The evidence is review 2's reading of a
-    screenshot of the taskbar taken before F12 (2026-11-17), in which the button's 24 pixel icon
-    matches the earlier 16 pixel file stretched to 24 far better than the earlier 32 or 48 pixel
-    one reduced; not tried in Edge. If Windows takes the 32 pixel file instead, the button shows
-    the cloud with the window filling the tile. The title bar shows the 16 pixel file at a display
+    pins the six files F14 left as they were byte for byte: the 32 and 48 pixel ones as F12 drew
+    them, and the four large ones (192 and 512 pixels, and the two maskable ones), as they were
+    before F12 too.
+  - **What it looks like.** At 16, 32 and 48 pixels the same picture: on the navy, the cloud's
+    outline in blue to violet with the terminal window in front of it and the `>_` in the window.
+    At 32 and 48 pixels the three read; at 16 the cloud and the window's frame read and the `>_`
+    is a light mark. **Which file the taskbar button takes is not verified. Most likely it is the
+    16 pixel one**, stretched to about 24 pixels: the button shows the cloud with the window, soft
+    (a stretched bitmap is never crisp), the `>_` hardly reading. The evidence is F12's review 2
+    reading a screenshot of the taskbar taken before F12 (2026-11-17), in which the button's 24
+    pixel icon matches the 16 pixel file of that day stretched to 24 far better than the 32 or 48
+    pixel one reduced; not tried in Edge. After F12 the owner reported that the icon they saw was a
+    different icon from their picture; the only small file F12 made different in kind was the 16
+    pixel one, which is consistent with the button showing the 16 pixel file (not a confirmation:
+    the report did not say where they looked). If Windows takes the 32 pixel file instead, the
+    button shows the same picture, sharper. The title bar shows the 16 pixel file at a display
     scale of 100 %; at 125 or 150 % Edge may draw it from the 32 pixel one. **The taskbar's look
-    was not tried in Edge or on Windows**: it is judged from sheets drawn with the same Chromium
-    (a file resized as a browser does), and W3 asks the owner to write down which one they see.
+    was not tried in Edge or on Windows**: it is judged from sheets drawn with the same Chromium (a
+    file resized as a browser does), and W3 asks the owner to write down what they see.
 - **The maskable icons** have a full background of the large picture's tile colour, `#040925` (the
   average of its opaque pixels between 555 and 585 pixels from its middle), with the picture in the
   middle at 0.927 of the icon's width: drawn in full within 555 of its 1254 pixels from its middle,
