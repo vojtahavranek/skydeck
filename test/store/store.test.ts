@@ -117,9 +117,9 @@ function sessionPr(store: Store, sessionId = S1, url = URL1): SessionPrRow | und
 }
 
 describe('migrations', () => {
-  test('there are two migrations and the schema version is their count', () => {
-    assert.equal(MIGRATIONS.length, 2);
-    assert.equal(SCHEMA_VERSION, 2);
+  test('there are three migrations and the schema version is their count', () => {
+    assert.equal(MIGRATIONS.length, 3);
+    assert.equal(SCHEMA_VERSION, 3);
   });
 
   test('migration 1 is the SQL of design 9.2 character for character', () => {
@@ -137,6 +137,16 @@ describe('migrations', () => {
     const match = /^\*\*Migration 2\*\* [^\n]*:\n\n```sql\n([\s\S]*?)\n```$/m.exec(design);
     assert.ok(match, 'design-step-2.md 10.2 has no "Migration 2" SQL block');
     assert.equal(MIGRATIONS[1], match[1]);
+  });
+
+  test('migration 3 is the SQL of design-step-2.md 10.2 character for character', () => {
+    const design = readFileSync(
+      join(import.meta.dirname, '..', '..', 'docs', 'design-step-2.md'),
+      'utf8',
+    );
+    const match = /^\*\*Migration 3\*\* [^\n]*:\n\n```sql\n([\s\S]*?)\n```$/m.exec(design);
+    assert.ok(match, 'design-step-2.md 10.2 has no "Migration 3" SQL block');
+    assert.equal(MIGRATIONS[2], match[1]);
   });
 });
 
@@ -162,7 +172,7 @@ describe('openStore', () => {
     }
   });
 
-  test('a new database has the connection settings, mode 600, version 2 and every table', (t) => {
+  test('a new database has the connection settings, mode 600, version 3 and every table', (t) => {
     const { store, path } = fresh(t);
 
     assert.equal(store.path, path);
@@ -173,7 +183,7 @@ describe('openStore', () => {
       foreignKeys: 1,
     });
     assert.equal(mode(path), 0o600);
-    assert.equal(store.getKv('schema_version'), '2');
+    assert.equal(store.getKv('schema_version'), '3');
     const tables = rawRows(
       path,
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
@@ -243,7 +253,7 @@ describe('openStore', () => {
 
     const second = reopen();
 
-    assert.equal(second.getKv('schema_version'), '2');
+    assert.equal(second.getKv('schema_version'), '3');
     assert.equal(second.events().length, 1);
   });
 
@@ -755,6 +765,7 @@ describe('session_meta', () => {
       group: null,
       note: null,
       doneAtNs: null,
+      ticket: null,
       createdNs: T0,
       updatedNs: T0,
     });
@@ -764,6 +775,7 @@ describe('session_meta', () => {
       group: 'G',
       note: null,
       doneAtNs: null,
+      ticket: null,
       createdNs: T0,
       updatedNs: T0 + SEC,
     });
@@ -808,6 +820,31 @@ describe('session_meta', () => {
     assert.equal(store.meta(S2), null);
     assert.equal(store.meta(S1)?.label, 'x');
     assert.equal(store.allMeta().length, 1);
+  });
+
+  test('the ticket (F18) is set, replaced and cleared through `ticket`, in the column ticket_url; the other fields stay', (t) => {
+    const { store, path } = fresh(t);
+    store.updateMeta(S1, { label: 'x', note: 'n' }, T0);
+
+    assert.equal(
+      store.updateMeta(S1, { ticket: 'https://example.com/browse/ABC-1' }, T0 + SEC).ticket,
+      'https://example.com/browse/ABC-1',
+    );
+    const replaced = store.updateMeta(
+      S1,
+      { ticket: 'https://example.com/browse/ABC-2' },
+      T0 + 2n * SEC,
+    );
+    assert.equal(replaced.ticket, 'https://example.com/browse/ABC-2');
+    assert.equal(replaced.label, 'x');
+    assert.equal(replaced.note, 'n');
+    assert.deepEqual(
+      rawRows(path, 'SELECT ticket_url FROM session_meta').map((row) => row.ticket_url),
+      ['https://example.com/browse/ABC-2'],
+    );
+    assert.equal(store.updateMeta(S1, { label: 'y' }, T0 + 3n * SEC).ticket, replaced.ticket);
+    assert.equal(store.updateMeta(S1, { ticket: null }, T0 + 4n * SEC).ticket, null);
+    assert.equal(store.meta(S1)?.label, 'y');
   });
 
   test('the group is stored in the column group_name', (t) => {

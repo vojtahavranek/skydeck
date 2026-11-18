@@ -135,6 +135,10 @@ export interface ResizeMessage {
  *  session ids) of the banner's offer (S2 12.7); `dismiss-restore` is "Not now" for the earlier
  *  boot `bootId` (a lower-case UUID, the form of /proc/sys/kernel/random/boot_id).
  *
+ *  F18 (S2 12.5): `ticket` sets the session's ticket from `text` — a link or a key, as typed; the
+ *  server reads it (src/sessions/ticket.ts `readTicket`) —, held to the URL limit (4,096 bytes: a
+ *  link of up to 2,048 characters is sent whole); empty text removes it.
+ *
  *  F15 (S2 12.6): `favourite-add` saves `text` (a text field: at most 1,024 bytes) as one more
  *  favourite of the new form, last, or at place `at` (0 to MAX_FAVOURITES − 1; Undo's put-back of
  *  a removed one) when given; `favourite-remove` removes the favourite whose text is exactly
@@ -158,6 +162,7 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'note'; sessionId: string; text: string; base: string }
   | { t: 'act'; id: number; kind: 'done' | 'undone' | 'pr-refresh'; sessionId: string }
   | { t: 'act'; id: number; kind: 'pr-add' | 'pr-rm'; sessionId: string; url: string }
+  | { t: 'act'; id: number; kind: 'ticket'; sessionId: string; text: string }
   | { t: 'act'; id: number; kind: 'restore'; sessionIds: string[] }
   | { t: 'act'; id: number; kind: 'dismiss-restore'; bootId: string }
   | { t: 'act'; id: number; kind: 'favourite-add'; text: string; at?: number }
@@ -312,8 +317,19 @@ export interface SelectedPayload {
   /** The stored note is longer than the window edits (plan D5): `note` is null. */
   noteTooLong: boolean;
   /** S2 12.5's ticket address (`ticketAddress`, plan D 2.3), null without one. Task 34 sends
-   *  null; task 36 fills it. */
+   *  null; task 36 fills it. The group chip's link; F18's `ticket` is another thing. */
   ticketUrl: string | null;
+  /** Follow-up F18: the ticket the user set on the session, null for none (S2 12.5). */
+  ticket: TicketPayload | null;
+  /** Follow-up F18: `ticketUrl` is configured, so a bare key sets a ticket (the ticket dialog's
+   *  placeholder names one only then). */
+  ticketKeys: boolean;
+}
+/** Follow-up F18: a session's ticket — its address as stored, and the short name its chip shows
+ *  (`ticketText`, K2: sanitised text). */
+export interface TicketPayload {
+  url: string;
+  text: string;
 }
 /** The view model (S2 12), sent whole when it changed, at most once a second. */
 export interface ListMessage {
@@ -783,6 +799,8 @@ const ACTS: Readonly<Record<string, Check>> = {
   'pr-refresh': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   'pr-add': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
   'pr-rm': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
+  // F18 (S2 12.5): a link or a key, held to the URL limit.
+  ticket: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, text: PATH }),
   // Stage C (plan C 2.2).
   restore: object({ t: ANY, id: COUNT, kind: ANY, sessionIds: SESSION_IDS }),
   'dismiss-restore': object({ t: ANY, id: COUNT, kind: ANY, bootId: BOOT }),

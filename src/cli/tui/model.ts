@@ -8,7 +8,7 @@ import { sanitize } from '../../text/sanitize.ts';
 
 export type TuiMode = 'list' | 'detail' | 'filter' | 'input';
 export interface TuiInput {
-  purpose: 'label' | 'group' | 'pr';
+  purpose: 'label' | 'group' | 'ticket' | 'pr';
   text: string;
 }
 
@@ -31,6 +31,7 @@ export type TuiEffect =
   | { kind: 'refresh' }
   | { kind: 'label'; id: string; text: string } // text '' clears
   | { kind: 'group'; id: string; text: string }
+  | { kind: 'ticket'; id: string; text: string } // F18: a link or a key; '' removes it
   | { kind: 'note'; id: string }
   | { kind: 'done'; id: string; done: boolean } // done false = undo
   | { kind: 'pr-add'; id: string; url: string }
@@ -239,27 +240,30 @@ function move(model: TuiModel, delta: number): Step {
 }
 
 /**
- * The input `l`, `g` or `p` opens. The label and the group start as the user set them, so that
- * `enter` straight away changes nothing and clearing one takes a deliberate delete; a group that
- * only `groupPattern` took from the title is not the user's and starts empty. A pull-request URL
- * starts empty.
+ * The input `l`, `g`, `t` or `p` opens. The label, the group and the ticket (F18: its address)
+ * start as the user set them, so that `enter` straight away changes nothing and clearing one takes
+ * a deliberate delete; a group that only `groupPattern` took from the title is not the user's and
+ * starts empty. A pull-request URL starts empty.
  */
-function inputFor(key: 'l' | 'g' | 'p', row: ListRow): TuiInput {
+function inputFor(key: 'l' | 'g' | 't' | 'p', row: ListRow): TuiInput {
   switch (key) {
     case 'l':
       return { purpose: 'label', text: row.label ?? '' };
     case 'g':
       return { purpose: 'group', text: row.groupSource === 'meta' ? (row.group ?? '') : '' };
+    case 't':
+      return { purpose: 'ticket', text: row.ticket?.url ?? '' };
     case 'p':
       return { purpose: 'pr', text: '' };
   }
 }
 
-/** `l g n d p R`, which act on the selected row in the list and in the detail alike. */
+/** `l g t n d p R`, which act on the selected row in the list and in the detail alike. */
 function actOnRow(model: TuiModel, key: string): Step | null {
   switch (key) {
     case 'l':
     case 'g':
+    case 't':
     case 'p': {
       const row = selectedRow(model);
       if (row === undefined) {

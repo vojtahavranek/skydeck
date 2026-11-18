@@ -11,7 +11,7 @@ import { visibleRows } from './model.ts';
 import type { TuiModel } from './model.ts';
 
 const HELP =
-  'j/k move  enter detail  l label  g group  n note  d done  p PR  R resume  / filter  a all  r refresh  q quit';
+  'j/k move  enter detail  l label  g group  n note  t ticket  d done  p PR  R resume  / filter  a all  r refresh  q quit';
 const MARK_SELECTED = '> ';
 const MARK_OTHER = '  ';
 const CURSOR = '_';
@@ -171,6 +171,8 @@ function detailBody(row: ListRow): string[] {
     `since: ${isoFromNs(row.sinceNs)}`,
     `dir: ${row.dir ?? '-'}`,
     `group: ${row.group ?? '-'}`,
+    // F18: an address is printable ASCII (linkToOpen's); sanitised all the same, as `show` does.
+    ...(row.ticket === null ? [] : [`ticket: ${sanitize(row.ticket.url)}`]),
     `marks: ${row.marks.length === 0 ? '-' : row.marks.join(',')}`,
     ...row.prs.map((pr) => `pr: ${formatPrLine(pr)}`),
   ];

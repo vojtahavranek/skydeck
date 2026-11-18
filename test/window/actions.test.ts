@@ -13,8 +13,11 @@ import {
   setGroup,
   setLabel,
   setNote,
+  setTicket,
 } from '../../src/sessions/meta.ts';
+import { loadRows } from '../../src/sessions/load.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
+import { TICKET_REFUSALS } from '../../src/sessions/ticket.ts';
 import { lockKey } from '../../src/sessions/resume.ts';
 import type { Store } from '../../src/store/store.ts';
 import type { LaunchSpec, OpenResult, Terminal } from '../../src/terminals/types.ts';
@@ -971,6 +974,8 @@ function everyEdit(sessionId: string): ActMessage[] {
     { t: 'act', id: 46, kind: 'pr-refresh', sessionId },
     { t: 'act', id: 47, kind: 'pr-add', sessionId, url: PR7 },
     { t: 'act', id: 48, kind: 'pr-rm', sessionId, url: PR7 },
+    // F18.
+    { t: 'act', id: 49, kind: 'ticket', sessionId, text: 'https://example.com/browse/ABC-1' },
   ];
 }
 
@@ -982,6 +987,83 @@ async function commandSays(d: TestDeck, words: string[]): Promise<string> {
   assert.ok(said.startsWith('skydeck: ') && said.endsWith('\n'), JSON.stringify(said));
   return said.slice('skydeck: '.length, -1);
 }
+
+const ticket = (text: string, id = 34): ActMessage => ({
+  t: 'act',
+  id,
+  kind: 'ticket',
+  sessionId: S1,
+  text,
+});
+
+describe('the ticket (F18, S2 12.5)', () => {
+  test('a link is stored as linkToOpen gives it back; ok with no lines; changed() once', async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const h = harness(d);
+    assert.deepEqual(await h.act(ticket('  https://Example.com/browse/ABC-1  ')), ok(34));
+    assert.equal(d.deck.store.meta(S1)?.ticket, 'https://example.com/browse/ABC-1');
+    assert.deepEqual(h.told, ['changed']);
+    assert.deepEqual(h.logs, []);
+  });
+
+  test('a bare key is ticketUrl with the key filled in, and that address is stored: a later ticketUrl does not move it', async (t) => {
+    const d = testDeck(t, { config: { ticketUrl: 'https://example.com/browse/{key}' } });
+    knownSession(d);
+    assert.deepEqual(await harness(d).act(ticket('ABC-123')), ok(34));
+    assert.equal(d.deck.store.meta(S1)?.ticket, 'https://example.com/browse/ABC-123');
+
+    const later: Deck = {
+      ...d.deck,
+      config: { ...d.deck.config, ticketUrl: 'https://other.example.com/t/{key}' },
+    };
+    assert.equal(
+      loadRows(later).find((row) => row.id === S1)?.ticket?.url,
+      'https://example.com/browse/ABC-123',
+    );
+  });
+
+  test('a ticket replaces the one before; empty text, or only white space, removes it', async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const h = harness(d);
+    await h.act(ticket('https://example.com/browse/ABC-1'));
+    assert.deepEqual(await h.act(ticket('https://github.com/owner/repo/issues/5')), ok(34));
+    assert.equal(d.deck.store.meta(S1)?.ticket, 'https://github.com/owner/repo/issues/5');
+    for (const blank of ['', '   ']) {
+      setTicket(d.deck, S1, 'https://example.com/browse/ABC-1');
+      assert.deepEqual(await h.act(ticket(blank)), ok(34), JSON.stringify(blank));
+      assert.equal(d.deck.store.meta(S1)?.ticket, null);
+    }
+    assert.deepEqual(h.told, ['changed', 'changed', 'changed', 'changed']);
+  });
+
+  test("each refusal is readTicket's words, as skydeck ticket set prints them; nothing written, changed() never", async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const h = harness(d);
+    const cases: [string, string][] = [
+      ['ABC-123', TICKET_REFUSALS.keyWithoutTicketUrl],
+      ['javascript:alert(1)', TICKET_REFUSALS.notHttp],
+      ['https://example.com/a\nb', TICKET_REFUSALS.lineBreak],
+      ['https://example.com/\x1b[31mred', TICKET_REFUSALS.control],
+      [`https://example.com/${'a'.repeat(2049)}`, TICKET_REFUSALS.tooLong],
+      ['https://someone:secret@example.com/x', TICKET_REFUSALS.credentials],
+      ['ABC 123', TICKET_REFUSALS.notATicket],
+    ];
+    for (const [text, words] of cases) {
+      assert.equal(
+        await commandSays(d, ['ticket', 'set', S1, '--', text]),
+        words,
+        JSON.stringify(text),
+      );
+      assert.deepEqual(await h.act(ticket(text)), refused(34, words), JSON.stringify(text));
+    }
+    assert.equal(d.deck.store.meta(S1), null, 'nothing written');
+    assert.deepEqual(h.told, [], 'changed() never');
+    assert.deepEqual(h.logs, []);
+  });
+});
 
 describe('label and group (S2 12.5, design 7.1)', () => {
   test('the text is stored trimmed through cleanLabel and setLabel, cleanGroup and setGroup; ok with no lines; changed() once each', async (t) => {
@@ -1457,6 +1539,13 @@ describe("stage D's actions and what the parser refuses (plan 2.2)", () => {
       { t: 'act', id: 9, kind: 'undone', sessionId: S1.toUpperCase() },
       { t: 'act', id: 9, kind: 'pr-refresh', sessionId: `${S1} ` },
       { t: 'act', id: 9, kind: 'label', sessionId: S1, text: 'a\ud800b' },
+      // F18: the ticket's text is held to the URL limit; it is `text`, a string.
+      { t: 'act', id: 9, kind: 'ticket', sessionId: S1, text: `https://example.com/${over(4097)}` },
+      { t: 'act', id: 9, kind: 'ticket', sessionId: S1, text: null },
+      { t: 'act', id: 9, kind: 'ticket', sessionId: S1, url: 'https://example.com/x' },
+      { t: 'act', id: 9, kind: 'ticket', sessionId: S1 },
+      { t: 'act', id: 9, kind: 'ticket', sessionId: S1, text: 'a\ud800b' },
+      { t: 'act', id: 9, kind: 'ticket', sessionId: S1.toUpperCase(), text: 'ABC-1' },
     ] as unknown as ActMessage[];
     for (const action of hostile) {
       assert.deepEqual(await h.act(action), refused(9, 'skydeck cannot do that action'));

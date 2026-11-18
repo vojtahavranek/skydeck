@@ -19,7 +19,7 @@ import { initModel, visibleRows } from '../../../src/cli/tui/model.ts';
 import { isoFromNs } from '../../../src/platform/time.ts';
 import type { Net, Ns, RunResult } from '../../../src/platform/types.ts';
 import { loadRows } from '../../../src/sessions/load.ts';
-import { attachManualPr, markDone, setLabel } from '../../../src/sessions/meta.ts';
+import { attachManualPr, markDone, setLabel, setTicket } from '../../../src/sessions/meta.ts';
 import { refresh } from '../../../src/sessions/refresh.ts';
 import { handoffScript } from '../../../src/terminals/here.ts';
 import { shellQuote } from '../../../src/text/shell.ts';
@@ -258,6 +258,34 @@ test('g sets the group; an empty group clears it', async (t) => {
     'a frame shows the group G1',
   );
   assert.equal(lastLines(d).filter((line) => line === 'saved').length, 2);
+});
+
+test('t sets the ticket (F18); a refused text is the message; an empty text removes it', async (t) => {
+  const d = listDeck(t, [
+    't',
+    'https://example.com/browse/ABC-1',
+    '\r',
+    't',
+    ...Array<string>(40).fill('\x7f'),
+    'ABC-1',
+    '\r',
+    'q',
+  ]);
+
+  assert.equal(await main([], d.ctx), 0);
+
+  assert.equal(d.deck.store.meta(S1)?.ticket, 'https://example.com/browse/ABC-1');
+  assert.ok(
+    lastLines(d).some((line) => line.startsWith('a ticket key needs ticketUrl')),
+    lastLines(d).join('\n'),
+  );
+  assert.equal(d.stderr(), '');
+
+  const cleared = listDeck(t, ['t', ...Array<string>(40).fill('\x7f'), '\r', 'q']);
+  setTicket(cleared.deck, S1, 'https://example.com/browse/ABC-1');
+  assert.equal(await main([], cleared.ctx), 0);
+  assert.equal(cleared.deck.store.meta(S1)?.ticket, null);
+  assert.equal(lastLines(cleared).filter((line) => line === 'saved').length, 1);
 });
 
 test('p, a URL, enter attaches the pull request by hand', async (t) => {

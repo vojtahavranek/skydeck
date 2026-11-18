@@ -16,8 +16,10 @@ import {
   detachSessionPr,
   markDone,
   markUndone,
+  requireTicket,
   setGroup,
   setLabel,
+  setTicket,
 } from '../../sessions/meta.ts';
 import { describeError } from '../../sessions/problems.ts';
 import { refresh } from '../../sessions/refresh.ts';
@@ -78,7 +80,10 @@ type BackgroundWork = 'refresh' | 'automatic fetch';
  * first, set a label, marked a session done).
  */
 type ChangeMarks = { live: string; data: number };
-type Change = Extract<TuiEffect, { kind: 'label' | 'group' | 'done' | 'pr-add' | 'pr-rm' }>;
+type Change = Extract<
+  TuiEffect,
+  { kind: 'label' | 'group' | 'ticket' | 'done' | 'pr-add' | 'pr-rm' }
+>;
 
 /** Opens the deck (withDeck, refresh: true) and runs the list until quit or a --here resume; returns the exit code. */
 export function runInteractiveList(ctx: Context): Promise<number> {
@@ -251,7 +256,7 @@ class TerminalList {
     }
   }
 
-  /** Label, group, done and pull requests: written at once, the rows loaded again in the same order. */
+  /** Label, group, ticket, done and pull requests: written at once, the rows loaded again in the same order. */
   #change(effect: Change): void {
     let message: string | null;
     try {
@@ -271,6 +276,10 @@ class TerminalList {
         return SAVED;
       case 'group':
         setGroup(deck, effect.id, effect.text.trim() === '' ? null : cleanGroup(effect.text));
+        return SAVED;
+      case 'ticket':
+        // F18: as `skydeck ticket set` reads it; a refusal is the message, nothing written.
+        setTicket(deck, effect.id, requireTicket(effect.text, deck.config.ticketUrl));
         return SAVED;
       case 'done':
         if (effect.done) {

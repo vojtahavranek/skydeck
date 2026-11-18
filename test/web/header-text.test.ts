@@ -20,6 +20,8 @@ import {
   splitPrs,
   STARTED_WITH_MAX,
   startedWithText,
+  ticketChip,
+  ticketField,
   timesText,
   titleSourceText,
 } from '../../web/header-text.js';
@@ -89,6 +91,8 @@ function selected(note: string | null, noteTooLong = false): SelectedPayload {
     note,
     noteTooLong,
     ticketUrl: null,
+    ticket: null,
+    ticketKeys: false,
   };
 }
 
@@ -583,5 +587,62 @@ describe("startedWithText: the flags a session was started with, last on the hea
       text: '--verbose',
       tip: 'Started with: --verbose',
     });
+  });
+});
+
+describe('F18: the ticket chip and the ticket field', () => {
+  const ticket = { url: 'https://example.com/browse/ABC-123', text: 'ABC-123' };
+
+  test('ticketChip: the name, the whole address as its tooltip and as what a click opens', () => {
+    assert.deepEqual(ticketChip({ ...selected(null), ticket }), {
+      text: 'ABC-123',
+      tip: 'https://example.com/browse/ABC-123',
+      url: 'https://example.com/browse/ABC-123',
+    });
+  });
+
+  test('ticketChip: none without a ticket, without selected, or for one of the wrong shape', () => {
+    assert.equal(ticketChip(null), null);
+    assert.equal(ticketChip(selected(null)), null);
+    for (const wrong of [
+      'https://example.com/x',
+      {},
+      { url: 1, text: 'a' },
+      { url: 'https://example.com/x' },
+      { url: '', text: 'a' },
+    ]) {
+      assert.equal(
+        ticketChip({ ...selected(null), ticket: wrong } as unknown as SelectedPayload),
+        null,
+        JSON.stringify(wrong),
+      );
+    }
+  });
+
+  test('ticketChip: the name sanitised again; one with nothing left is the address', () => {
+    const chip = ticketChip({
+      ...selected(null),
+      ticket: { url: ticket.url, text: 'a\u001b[31mb\u202e' },
+    });
+    assert.equal(chip?.text, 'ab');
+    assert.equal(
+      ticketChip({ ...selected(null), ticket: { url: ticket.url, text: '\u0007 ' } })?.text,
+      ticket.url,
+    );
+  });
+
+  test('ticketField: the address set, or empty; the placeholder names a key only with ticketUrl', () => {
+    assert.deepEqual(ticketField({ ...selected(null), ticket, ticketKeys: true }), {
+      value: 'https://example.com/browse/ABC-123',
+      placeholder: 'a link, or a key like ABC-123',
+      help: "A link is kept as it is; a key becomes ticketUrl's link. The address is stored. Empty removes it.",
+    });
+    assert.deepEqual(ticketField({ ...selected(null), ticketKeys: false }), {
+      value: '',
+      placeholder: 'a link',
+      help: 'An http or https link, kept as it is (a key needs ticketUrl in config.json). Empty removes it.',
+    });
+    assert.equal(ticketField(null).placeholder, 'a link');
+    assert.equal(ticketField(null).value, '');
   });
 });

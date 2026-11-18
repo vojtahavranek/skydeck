@@ -50,6 +50,8 @@ test('selectedPayload: the command a resume would run, with the recorded flags a
     note: null,
     noteTooLong: false,
     ticketUrl: null,
+    ticket: null,
+    ticketKeys: false,
   });
 });
 
@@ -309,4 +311,25 @@ test("selectedPayload: ticketUrl uses the configuration's own groupPattern", (t)
     selectedPayload(d.deck, row({}, { group: 'see #7', groupSource: 'meta' })).ticketUrl,
     null,
   );
+});
+
+test("selectedPayload: ticket (F18) is the row's ticket, its address and its name; null without one", (t) => {
+  const d = testDeck(t);
+  const ticket = { url: 'https://github.com/owner/repo/issues/5', text: 'repo #5' };
+  assert.deepEqual(selectedPayload(d.deck, row({}, { ticket })).ticket, ticket);
+  assert.equal(selectedPayload(d.deck, row()).ticket, null);
+});
+
+test("selectedPayload: a ticket stands beside the group's link; neither changes the other", (t) => {
+  const d = testDeck(t, { config: { ticketUrl: 'https://example.com/browse/{key}' } });
+  const ticket = { url: 'https://example.com/issues/77', text: '77' };
+  const payload = selectedPayload(d.deck, row({}, { group: 'ABC-1', groupSource: 'meta', ticket }));
+  assert.equal(payload.ticketUrl, 'https://example.com/browse/ABC-1');
+  assert.deepEqual(payload.ticket, ticket);
+});
+
+test('selectedPayload: ticketKeys (F18) says whether ticketUrl is configured, so that a bare key sets a ticket', (t) => {
+  assert.equal(selectedPayload(testDeck(t).deck, row()).ticketKeys, false);
+  const d = testDeck(t, { config: { ticketUrl: 'https://example.com/browse/{key}' } });
+  assert.equal(selectedPayload(d.deck, row()).ticketKeys, true);
 });

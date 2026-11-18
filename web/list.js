@@ -316,7 +316,7 @@ export function createList(root, hooks) {
   const filterBar = element('list-filterbar', 'div');
   const filter = /** @type {HTMLInputElement} */ (element('list-filter', 'input'));
   filter.type = 'text';
-  filter.placeholder = 'Filter: title, group, note, PR, directory, short id   /';
+  filter.placeholder = 'Filter: title, group, note, PR, ticket, directory, short id   /';
   filter.autocomplete = 'off';
   filter.spellcheck = false;
   filter.setAttribute('aria-label', 'Filter the list');

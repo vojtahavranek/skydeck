@@ -120,6 +120,7 @@ function meta(sessionId: string, over: Partial<SessionMeta> = {}): SessionMeta {
     group: null,
     note: null,
     doneAtNs: null,
+    ticket: null,
     createdNs: T0,
     updatedNs: T0,
     ...over,

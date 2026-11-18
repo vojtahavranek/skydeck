@@ -70,6 +70,8 @@ export interface HolderJson {
 export interface ShowJson extends SessionJson {
   doneAt: string | null;
   note: string | null;
+  /** F18: the ticket the user set — its address and its name (ticketText) —, null for none. */
+  ticket: { url: string; text: string } | null;
   launch: string[] | null;
   unknownFlags: string[];
   links: LinkJson[];
@@ -148,7 +150,8 @@ function doneAt(row: ListRow): string | null {
 }
 
 /**
- * The session object, then the time it was marked done, the note (as stored), the launch command, the names of the flags in it
+ * The session object, then the time it was marked done, the note (as stored), the ticket the user
+ * set (F18), the launch command, the names of the flags in it
  * that skydeck does not know, the links of the session and the processes that hold it.
  */
 export function showJson(row: ListRow, links: readonly LinkRow[]): ShowJson {
@@ -157,6 +160,7 @@ export function showJson(row: ListRow, links: readonly LinkRow[]): ShowJson {
     ...sessionJson(row),
     doneAt: doneAt(row),
     note: row.note,
+    ticket: row.ticket === null ? null : { url: row.ticket.url, text: row.ticket.text },
     launch: launch === null ? null : [...launch],
     unknownFlags: launch === null ? [] : unknownFlags(launch),
     links: linksOf(row, links).map((link) => ({
@@ -219,7 +223,8 @@ function doneField(row: ListRow): string[] {
 /**
  * One session in full (design 7.5): its title, then one line per field. Nothing is left to a
  * relative time, so `nowNs` is not used; it is part of the contract of 2.9.4. `ticket` is the
- * session's ticket address (`ticketAddress`, S2 12.5), printed after the group when there is one.
+ * session's ticket address, printed after the group when there is one: the ticket the user set
+ * (F18), else the ticket link of its group (`ticketAddress`, S2 12.5) — the caller picks it.
  * `inWindow` holds the pids of the holders that run in the window (`holdersInWindow`, S2 11.4):
  * their lines end with `(in the skydeck window)`. A row's holders are processes of this boot, so
  * a pid names one of them.

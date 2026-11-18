@@ -278,6 +278,7 @@ function mapMeta(row: Row): SessionMeta {
     group: optStr(row, 'group_name'),
     note: optStr(row, 'note'),
     doneAtNs: optNs(row, 'done_at_ns'),
+    ticket: optStr(row, 'ticket_url'),
     createdNs: reqNs(row, 'created_ns'),
     updatedNs: reqNs(row, 'updated_ns'),
   };
@@ -741,6 +742,9 @@ class SqliteStore implements Store {
     }
     if (patch.doneAtNs !== undefined) {
       columns.push(['done_at_ns', patch.doneAtNs]);
+    }
+    if (patch.ticket !== undefined) {
+      columns.push(['ticket_url', patch.ticket]);
     }
     const names = columns.map(([name]) => name);
     this.#run(

@@ -70,6 +70,7 @@ export function meta(sessionId: string, over: Partial<SessionMeta> = {}): Sessio
     group: null,
     note: null,
     doneAtNs: null,
+    ticket: null,
     createdNs: T0,
     updatedNs: T0,
     ...over,
@@ -111,7 +112,8 @@ export function attached(
   };
 }
 
-/** `buildRows` with nothing else known (no meta, no pull request) and the default group pattern. */
+/** `buildRows` with nothing else known (no meta, no pull request), the default group pattern
+ *  and no ticketUrl (the defaults). */
 export function rows(
   sessions: readonly DerivedSession[],
   extra: {
@@ -119,6 +121,7 @@ export function rows(
     prs?: readonly PrRow[];
     sessionPrs?: readonly SessionPrRow[];
     groupPattern?: string;
+    ticketUrl?: string | null;
   } = {},
 ): ListRow[] {
   return buildRows({
@@ -127,6 +130,7 @@ export function rows(
     prs: extra.prs ?? [],
     sessionPrs: extra.sessionPrs ?? [],
     groupPattern: extra.groupPattern ?? DEFAULT_CONFIG.groupPattern,
+    ticketUrl: extra.ticketUrl === undefined ? DEFAULT_CONFIG.ticketUrl : extra.ticketUrl,
   });
 }
 

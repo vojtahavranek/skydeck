@@ -33,9 +33,9 @@ function cs(key: string, code: string): KeyLike {
 
 const ZONES: readonly Zone[] = ['list', 'terminal'];
 
-/** The list keys of stage D (S2 12.9, plan D 2.4): `l`, `g`, `n`, `p`, `d` and F2. */
+/** The list keys of stage D (S2 12.9, plan D 2.4): `l`, `g`, `n`, `p`, `d` and F2; and F18's `t`. */
 const STAGE_D_KEYS: readonly KeyLike[] = [
-  ...['l', 'g', 'n', 'p', 'd'].map((c) => ev(c, `Key${c.toUpperCase()}`)),
+  ...['l', 'g', 'n', 't', 'p', 'd'].map((c) => ev(c, `Key${c.toUpperCase()}`)),
   ev('F2', 'F2'),
 ];
 
@@ -288,6 +288,8 @@ describe('listKey (S2 12.9)', () => {
     ['F2', ev('F2', 'F2'), { kind: 'edit', what: 'label' }],
     ['g', ev('g', 'KeyG'), { kind: 'edit', what: 'group' }],
     ['n', ev('n', 'KeyN'), { kind: 'edit', what: 'note' }],
+    // Follow-up F18: the ticket.
+    ['t', ev('t', 'KeyT'), { kind: 'edit', what: 'ticket' }],
     ['p', ev('p', 'KeyP'), { kind: 'edit', what: 'pr' }],
     ['d', ev('d', 'KeyD'), { kind: 'done' }],
   ];
@@ -312,7 +314,7 @@ describe('listKey (S2 12.9)', () => {
 
   test('Ctrl, Alt or Meta with a list key is no list key', () => {
     for (const mod of ['ctrl', 'alt', 'meta'] as const) {
-      for (const c of ['l', 'g', 'n', 'p', 'd']) {
+      for (const c of ['l', 'g', 'n', 't', 'p', 'd']) {
         assert.equal(listKey(ev(c, `Key${c.toUpperCase()}`, mod)), null, `${mod}+${c}`);
       }
       assert.equal(listKey(ev('j', 'KeyJ', mod)), null);

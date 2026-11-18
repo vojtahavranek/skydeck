@@ -322,3 +322,44 @@ export function noteLine(row, selected) {
   }
   return { text: more ? `${first} …` : first, empty: false };
 }
+
+/**
+ * Follow-up F18: the ticket's chip at the start of the header's third line (S2 12.5), from
+ * `selected.ticket` (the server's address and short name, K2): the name, sanitised again — the
+ * address when nothing is left of it —, the whole address as its tooltip, and the address a click
+ * opens (`open-link`, which the server checks again). Null without a ticket, or for one of the
+ * wrong shape. Its text is one part, so that a later status can be a second one beside it.
+ * @param {SelectedPayload | null} selected `list.selected` when it is the row's session
+ * @returns {{ text: string, tip: string, url: string } | null}
+ */
+export function ticketChip(selected) {
+  const ticket = /** @type {unknown} */ (selected?.ticket);
+  if (typeof ticket !== 'object' || ticket === null) {
+    return null;
+  }
+  const { url, text } = /** @type {{ url?: unknown, text?: unknown }} */ (ticket);
+  if (typeof url !== 'string' || url === '' || typeof text !== 'string') {
+    return null;
+  }
+  const name = sanitize(text).trim();
+  return { text: name === '' ? url : name, tip: url, url };
+}
+
+/**
+ * Follow-up F18: the ticket dialog's field (S2 12.5): it starts with the ticket's address (empty
+ * without one); its placeholder `a link`, and `, or a key like ABC-123` only when the server takes
+ * a bare key (`selected.ticketKeys`: ticketUrl is configured); its line of help.
+ * @param {SelectedPayload | null} selected `list.selected` of the dialog's session
+ * @returns {{ value: string, placeholder: string, help: string }}
+ */
+export function ticketField(selected) {
+  const value = ticketChip(selected)?.url ?? '';
+  const keys = selected?.ticketKeys === true;
+  return {
+    value,
+    placeholder: keys ? 'a link, or a key like ABC-123' : 'a link',
+    help: keys
+      ? "A link is kept as it is; a key becomes ticketUrl's link. The address is stored. Empty removes it."
+      : 'An http or https link, kept as it is (a key needs ticketUrl in config.json). Empty removes it.',
+  };
+}

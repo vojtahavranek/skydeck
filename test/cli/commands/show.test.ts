@@ -11,7 +11,7 @@ import { main } from '../../../src/cli/main.ts';
 import { openDeck, resolveDeckPlaces } from '../../../src/sessions/deck.ts';
 import type { Deck } from '../../../src/sessions/deck.ts';
 import { loadRows } from '../../../src/sessions/load.ts';
-import { attachManualPr, setNote } from '../../../src/sessions/meta.ts';
+import { attachManualPr, setNote, setTicket } from '../../../src/sessions/meta.ts';
 import { refCases } from '../../helpers/command-cases.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
 import { SESSION, keeperSandbox, startProgram } from '../../helpers/keeper.ts';
@@ -360,7 +360,7 @@ test('show prints no ticket line without ticketUrl, or without a ticket key in t
   assert.doesNotMatch(noGroup.stdout(), /ticket:/);
 });
 
-test('show --json is unchanged by ticketUrl: no ticket key', async (t) => {
+test("show --json is unchanged by ticketUrl: the group's link is not in it, and `ticket` (F18) is null without one set", async (t) => {
   const d = twoSessions(t, { config: { ticketUrl: JIRA } });
   d.deck.store.updateMeta(S1, { group: 'ABC-12' }, T0);
 
@@ -370,7 +370,50 @@ test('show --json is unchanged by ticketUrl: no ticket key', async (t) => {
     d.stdout(),
     `${JSON.stringify(showJson(rowOf(d), d.deck.store.links()), null, 2)}\n`,
   );
-  assert.doesNotMatch(d.stdout(), /ticket|atlassian/);
+  assert.doesNotMatch(d.stdout(), /atlassian/);
+  assert.equal((JSON.parse(d.stdout()) as ShowJson).ticket, null);
+});
+
+// --- the ticket the user set (F18, K7) ---------------------------------------------------------
+
+test('show prints the ticket the user set after the group, with or without ticketUrl', async (t) => {
+  for (const config of [{}, { ticketUrl: JIRA }]) {
+    const d = twoSessions(t, { config });
+    setTicket(d.deck, S1, 'https://github.com/owner/repo/issues/5');
+    assert.equal(await main(['show', '0b5f'], d.ctx), EXIT.ok);
+    assert.ok(
+      d
+        .stdout()
+        .includes('\ngroup:     -\nticket:    https://github.com/owner/repo/issues/5\ndir:'),
+      d.stdout(),
+    );
+  }
+});
+
+test("the ticket the user set is the one ticket line: it stands in for the group's link, which the window's group chip keeps", async (t) => {
+  const d = twoSessions(t, { config: { ticketUrl: JIRA } });
+  d.deck.store.updateMeta(S1, { group: 'ABC-12' }, T0);
+  setTicket(d.deck, S1, 'https://github.com/owner/repo/issues/5');
+
+  assert.equal(await main(['show', '0b5f'], d.ctx), EXIT.ok);
+
+  assert.ok(
+    d.stdout().includes('\ngroup:     ABC-12\nticket:    https://github.com/owner/repo/issues/5\n'),
+    d.stdout(),
+  );
+  assert.equal(d.stdout().match(/^ticket:/gm)?.length, 1);
+});
+
+test('show --json carries the ticket the user set: its address and its name', async (t) => {
+  const d = twoSessions(t);
+  setTicket(d.deck, S1, 'https://example.com/browse/ABC-123');
+
+  assert.equal(await main(['show', '0b5f', '--json'], d.ctx), EXIT.ok);
+
+  assert.deepEqual((JSON.parse(d.stdout()) as ShowJson).ticket, {
+    url: 'https://example.com/browse/ABC-123',
+    text: 'ABC-123',
+  });
 });
 
 for (const args of [['show', S1], ['show', S1, '--json'], ['ls']]) {

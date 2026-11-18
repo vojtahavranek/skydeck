@@ -31,13 +31,15 @@ interface RowSpec {
   note?: string;
   dir?: string | null;
   prs?: PrRow[];
+  /** F18: the ticket's address. */
+  ticket?: string;
 }
 
 /** A row as step 1 loads it: its title a name set in Claude Code, its group and note in meta. */
 function row(spec: RowSpec = {}): ListRow {
   const id = spec.id ?? S1;
   const prs = spec.prs ?? [];
-  const hasMeta = spec.group !== undefined || spec.note !== undefined;
+  const hasMeta = spec.group !== undefined || spec.note !== undefined || spec.ticket !== undefined;
   return rowOf(
     ds({
       id,
@@ -45,7 +47,15 @@ function row(spec: RowSpec = {}): ListRow {
       transcript: { customTitle: spec.title ?? 'neutral' },
     }),
     {
-      metas: hasMeta ? [meta(id, { group: spec.group ?? null, note: spec.note ?? null })] : [],
+      metas: hasMeta
+        ? [
+            meta(id, {
+              group: spec.group ?? null,
+              note: spec.note ?? null,
+              ticket: spec.ticket ?? null,
+            }),
+          ]
+        : [],
       prs,
       sessionPrs: prs.map((pr) => attached(id, pr)),
     },
@@ -134,6 +144,13 @@ test('matchesWords: each field on its own is searched', () => {
     ['the number', { prs: [pr] }, '4321'],
     ['owner/repo#number', { prs: [pr] }, 'echo-owner/foxtrot-repo#4321'],
     ['repo#number', { prs: [pr] }, 'foxtrot-repo#4321'],
+    // F18: the ticket's short name and its address.
+    [
+      'the ticket name',
+      { ticket: 'https://github.com/golf/hotel-repo/issues/77' },
+      'hotel-repo #77',
+    ],
+    ['the ticket address', { ticket: 'https://example.com/india/ABC-123' }, 'example.com/india'],
   ];
   const plain = row();
   for (const [field, spec, word] of cases) {
@@ -351,6 +368,18 @@ test('searchable: the same row object gives the same object, a reloaded row a ne
   assert.notEqual(again, once);
   assert.deepEqual(again, once);
   assert.notEqual(searchable({ ...first }), once);
+});
+
+test('searchable: the ticket (F18) is two fields after the pull requests: its name, its address', () => {
+  const target = searchable(
+    row({ title: 'Fix Login', ticket: 'https://example.com/browse/ABC-12' }),
+  );
+  assert.deepEqual(target.fields, [
+    'fix login',
+    '/home/dev/plain',
+    'abc-12',
+    'https://example.com/browse/abc-12',
+  ]);
 });
 
 test('searchable: the id and the fields, lower-cased', () => {

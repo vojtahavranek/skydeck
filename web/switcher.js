@@ -30,7 +30,7 @@ import { switcherKey } from './keys.js';
 import { rowText, sanitize } from './list-text.js';
 import { cutWords, highlightParts, rankHeading, switcherFooter } from './search-text.js';
 
-const PLACEHOLDER = 'Switch to a session…  (title, group, note, PR, directory, short id)';
+const PLACEHOLDER = 'Switch to a session…  (title, group, note, PR, ticket, directory, short id)';
 const NO_MATCH = 'No session matches.';
 const NOT_CONNECTED = "skydeck's server is not connected";
 /** Command form (E12) without an offer: the one command, and when it is listed. */

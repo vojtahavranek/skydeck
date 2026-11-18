@@ -220,7 +220,7 @@ test('listJson of an empty model has no sessions', () => {
 
 // --- showJson --------------------------------------------------------------------------------------
 
-test('showJson: the session object, then note, launch, unknownFlags, links and holders', () => {
+test('showJson: the session object, then note, ticket (F18), launch, unknownFlags, links and holders', () => {
   const row = listRow({
     id: S1,
     note: 'a\nb',
@@ -236,6 +236,7 @@ test('showJson: the session object, then note, launch, unknownFlags, links and h
     ...SESSION_KEYS,
     'doneAt',
     'note',
+    'ticket',
     'launch',
     'unknownFlags',
     'links',
@@ -246,6 +247,12 @@ test('showJson: the session object, then note, launch, unknownFlags, links and h
     assert.deepEqual(json[key as keyof SessionJson], session[key as keyof SessionJson], key);
   }
   assert.equal(json.note, 'a\nb');
+  assert.equal(json.ticket, null);
+  assert.deepEqual(
+    showJson({ ...row, ticket: { url: 'https://example.com/browse/ABC-1', text: 'ABC-1' } }, [])
+      .ticket,
+    { url: 'https://example.com/browse/ABC-1', text: 'ABC-1' },
+  );
   assert.deepEqual(json.launch, ['claude', '--model', 'opus']);
   assert.deepEqual(json.unknownFlags, []);
   assert.deepEqual(json.holders, [

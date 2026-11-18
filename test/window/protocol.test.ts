@@ -142,6 +142,16 @@ const VALID: Record<string, PageMessage> = {
     sessionId: S1,
     url: 'https://github.com/a/b/pull/7',
   },
+  // Follow-up F18: the session's ticket — a link or a key (the server reads it), empty removes it.
+  'act ticket': {
+    t: 'act',
+    id: 15,
+    kind: 'ticket',
+    sessionId: S1,
+    text: 'https://example.com/browse/ABC-123',
+  },
+  'act ticket, a key': { t: 'act', id: 16, kind: 'ticket', sessionId: S1, text: 'ABC-123' },
+  'act ticket, empty (removes it)': { t: 'act', id: 17, kind: 'ticket', sessionId: S1, text: '' },
   // Follow-up F13: the page's colours again, after the title bar's switch or the system's scheme.
   theme: { t: 'theme', theme: { fg: '#24292f', bg: '#fbfbf9' } },
 };
@@ -156,6 +166,8 @@ const STAGE_D_ACTS = [
   'act pr-refresh',
   'act pr-add',
   'act pr-rm',
+  // Follow-up F18's, which edits a session as stage D's do.
+  'act ticket',
 ] as const;
 
 /** A value of another JSON type than `value`. */
@@ -228,6 +240,11 @@ describe('parsePageMessage: what is refused', () => {
     refused(page({ t: 'act', id: 1, kind: 'note', sessionId: S1, text: 'x' }));
     refused(page({ ...VALID['act pr-add'], text: 'https://github.com/a/b/pull/7' }));
     refused(page({ t: 'act', id: 1, kind: 'pr-rm', sessionId: S1 }));
+    // F18: a ticket is `text`, never `url`, and carries no base.
+    refused(page({ t: 'act', id: 1, kind: 'ticket', sessionId: S1, url: 'https://example.com/x' }));
+    refused(page({ ...VALID['act ticket'], base: '' }));
+    refused(page({ ...VALID['act ticket'], url: 'https://example.com/x' }));
+    refused(page({ t: 'act', id: 1, kind: 'Ticket', sessionId: S1, text: 'ABC-1' }));
   });
 
   test('every stage D act names a session by isSessionId exactly', () => {
@@ -251,6 +268,7 @@ describe('parsePageMessage: what is refused', () => {
       ['act note', 'base'],
       ['act pr-add', 'url'],
       ['act pr-rm', 'url'],
+      ['act ticket', 'text'],
     ] as const) {
       refused(parsePageMessage(lone(field, name)));
       assert.equal(parsePageMessage(lone(field, name).replace('\\ud800', 'x')).ok, true);
@@ -353,9 +371,9 @@ describe('parsePageMessage: what is refused', () => {
     refused(page({ ...VALID['act open-link'], id: -1 }));
   });
 
-  test("every act's id is a whole number from 0 (stage A's and stage D's kinds alike)", () => {
+  test("every act's id is a whole number from 0 (stage A's, stage D's and F18's kinds alike)", () => {
     const acts = Object.entries(VALID).filter(([, message]) => message.t === 'act');
-    assert.equal(acts.length, 13);
+    assert.equal(acts.length, 16);
     for (const [name, message] of acts) {
       for (const id of [-1, 1.5, 2 ** 53]) {
         refused(page({ ...message, id }));
@@ -399,6 +417,8 @@ describe('parsePageMessage: string limits, in UTF-8 bytes', () => {
     ['act note.base (plan D5)', VALID['act note'] as PageMessage, 'base', 65536],
     ['act pr-add.url (a URL)', VALID['act pr-add'] as PageMessage, 'url', 4096],
     ['act pr-rm.url (a URL)', VALID['act pr-rm'] as PageMessage, 'url', 4096],
+    // F18: a link of up to 2,048 characters (S2 9.6) is sent whole; the server reads the rest.
+    ['act ticket.text (a link or a key: a URL)', VALID['act ticket'] as PageMessage, 'text', 4096],
   ];
   for (const [name, message, field, limit] of cases) {
     test(`${name}: ${limit} bytes ok, one more refused`, () => {
@@ -632,6 +652,8 @@ describe('types (checked by npm run typecheck)', () => {
       note: 'first line\nsecond',
       noteTooLong: false,
       ticketUrl: null,
+      ticket: { url: 'https://example.com/browse/ABC-123', text: 'ABC-123' },
+      ticketKeys: true,
     },
     dirs: ['/home/u/project'],
   };
@@ -762,9 +784,27 @@ describe('types (checked by npm run typecheck)', () => {
         note: null,
         noteTooLong: false,
         ticketUrl: null,
+        ticket: null,
+        ticketKeys: false,
+      } satisfies SelectedPayload,
+      {
+        sessionId: S1,
+        command: null,
+        flagsKnown: true,
+        unknownFlags: [],
+        launchFlags: [],
+        ended: null,
+        expiring: false,
+        expired: false,
+        note: null,
+        noteTooLong: false,
+        ticketUrl: null,
+        // @ts-expect-error the ticket's short name is `text` (follow-up F18)
+        ticket: { url: 'https://example.com/browse/ABC-123', name: 'ABC-123' },
+        ticketKeys: false,
       } satisfies SelectedPayload,
     ];
-    assert.equal(misspelt.length, 6);
+    assert.equal(misspelt.length, 7);
   });
 
   test("stage D's act kinds compile with exactly plan D 2.2's fields", () => {
@@ -777,6 +817,8 @@ describe('types (checked by npm run typecheck)', () => {
       { t: 'act', id: 6, kind: 'pr-refresh', sessionId: S1 },
       { t: 'act', id: 7, kind: 'pr-add', sessionId: S1, url: 'https://github.com/a/b/pull/1' },
       { t: 'act', id: 8, kind: 'pr-rm', sessionId: S1, url: 'https://github.com/a/b/pull/1' },
+      // Follow-up F18.
+      { t: 'act', id: 9, kind: 'ticket', sessionId: S1, text: 'ABC-123' },
     ];
     for (const act of acts) {
       assert.deepEqual(parsePageMessage(JSON.stringify(act)), { ok: true, value: act });

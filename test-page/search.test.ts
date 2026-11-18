@@ -1195,7 +1195,7 @@ test('search and stacks in the list', async (t) => {
   );
 
   await t.test(
-    "a selected closed caption stands for its block, not for a session: the pane shows the group's card (`test`, `3 sessions`, ` · 1 needs you`, `→ or Enter opens the group`), no terminal is shown and none has the keyboard; `view` and `focus` say `selected: null`; d, l, F2, g, n and p say `no session selected` and send nothing; Ctrl+Shift+F, C and V act on no terminal, from the list and from the terminal zone, and nothing typed reaches a program; a filter typed keeps the caption selected and the group card; a click on the selected caption from the terminal zone opens the block, selects its first session and gives the keyboard to the list, not to that session's terminal",
+    "a selected closed caption stands for its block, not for a session: the pane shows the group's card (`test`, `3 sessions`, ` · 1 needs you`, `→ or Enter opens the group`), no terminal is shown and none has the keyboard; `view` and `focus` say `selected: null`; d, l, F2, g, n, t and p say `no session selected` and send nothing; Ctrl+Shift+F, C and V act on no terminal, from the list and from the terminal zone, and nothing typed reaches a program; a filter typed keeps the caption selected and the group card; a click on the selected caption from the terminal zone opens the block, selects its first session and gives the keyboard to the list, not to that session's terminal",
     async (t) => {
       const l = await launchedWithViews(t, chromium);
       const { page, d } = l;
@@ -1263,7 +1263,7 @@ test('search and stacks in the list', async (t) => {
       // The keys that act on a session: each says so and does nothing.
       const inputs = [S1, S2, S3].map((id) => inputOf(d.record, id));
       await mark(page, 'keys');
-      for (const key of ['d', 'l', 'F2', 'g', 'n', 'p']) {
+      for (const key of ['d', 'l', 'F2', 'g', 'n', 't', 'p']) {
         await clearKeyBar(page);
         await page.keyboard.press(key);
         await showsText(page, '#key-message', NO_SESSION);
@@ -1878,7 +1878,7 @@ test('search and stacks in the list', async (t) => {
   );
 
   await t.test(
-    'a selected caption whose block a session starting into it opens ((c2): a terminal that has not reported) leaves NOTHING selected, the pane empty, and no key acts until the owner moves: d, l, F2, g, n and p say `no session selected`, Enter does nothing, nothing selects a session; with nothing selected ↑ takes the first line — a closed caption, as good a first stop as a row; ← and a click on the held block say why they do nothing, the slot chord reaches its row; once reported the block stays open and ← closes it',
+    'a selected caption whose block a session starting into it opens ((c2): a terminal that has not reported) leaves NOTHING selected, the pane empty, and no key acts until the owner moves: d, l, F2, g, n, t and p say `no session selected`, Enter does nothing, nothing selects a session; with nothing selected ↑ takes the first line — a closed caption, as good a first stop as a row; ← and a click on the held block say why they do nothing, the slot chord reaches its row; once reported the block stays open and ← closes it',
     async (t) => {
       let reported = true;
       const rows: ScriptedRow[] = [
@@ -1915,7 +1915,7 @@ test('search and stacks in the list', async (t) => {
       await untilPane(page, 'none');
       assert.deepEqual(closedOf(world), shut('open', 'alpha'), 'the page forgot it closed test');
       const from = world.sent.length;
-      for (const key of ['d', 'l', 'F2', 'g', 'n', 'p']) {
+      for (const key of ['d', 'l', 'F2', 'g', 'n', 't', 'p']) {
         await clearKeyBar(page);
         await page.keyboard.press(key);
         await showsText(page, '#key-message', NO_SESSION);

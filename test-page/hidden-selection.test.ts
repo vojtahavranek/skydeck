@@ -298,7 +298,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
   );
 
   await t.test(
-    "a selected session without a terminal that the filter hides: the right side shows nothing (S2 12.9); the list keys d, l, F2, g, n, p say `no session selected` and send nothing; the New form's directory is the first known one, not the hidden session's",
+    "a selected session without a terminal that the filter hides: the right side shows nothing (S2 12.9); the list keys d, l, F2, g, n, t, p say `no session selected` and send nothing; the New form's directory is the first known one, not the hidden session's",
     async (t) => {
       const l = await launched(t, chromium);
       const { page } = l;
@@ -319,7 +319,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
       assert.equal(await page.locator('#cards .card:visible').count(), 0, 'no card');
 
       await mark(page, 'keys');
-      for (const key of ['d', 'l', 'F2', 'g', 'n', 'p']) {
+      for (const key of ['d', 'l', 'F2', 'g', 'n', 't', 'p']) {
         // The key bar's line stays 5 s: emptied first, so that each key must say it again (the
         // page's own timer only empties it).
         await page.evaluate(() => {

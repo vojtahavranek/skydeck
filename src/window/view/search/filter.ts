@@ -5,8 +5,8 @@
  * A search text is foreign input, typed on every keystroke and matched on the server's one
  * thread: it is split by one literal pattern and compared with `includes` and `startsWith`, never
  * made into a pattern. The cost is linear: rows × words × units searched, the units of all a row's
- * fields — the title, the group, the note, the directory, three per pull request — each at most
- * FIELD_UNITS; nothing bounds how many pull requests a row has.
+ * fields — the title, the group, the note, the directory, three per pull request, two for the
+ * ticket (F18) — each at most FIELD_UNITS; nothing bounds how many pull requests a row has.
  *
  * Imports (plan 2.1): values only from this directory and `text`'s `sanitize`; types from
  * `sessions` and `protocol.ts`.
@@ -80,9 +80,10 @@ export function searchable(row: ListRow): Searchable {
   if (known !== undefined) {
     return known;
   }
-  // Design 7.4's fields: the title, the group, the note, the directory, and per pull request
-  // "<owner>/<repo>", its number and "<owner>/<repo>#<number>". Every one but the note is
-  // sanitised already (buildRows).
+  // Design 7.4's fields: the title, the group, the note, the directory, per pull request
+  // "<owner>/<repo>", its number and "<owner>/<repo>#<number>", and the ticket's name and address
+  // (F18). Every one but the note is sanitised already (buildRows; an address is printable ASCII,
+  // linkToOpen's).
   const fields: string[] = [field(row.title)];
   if (row.group !== null) {
     fields.push(field(row.group));
@@ -95,6 +96,9 @@ export function searchable(row: ListRow): Searchable {
   }
   for (const pr of row.prs) {
     fields.push(field(pr.repo), String(pr.number), field(`${pr.repo}#${pr.number}`));
+  }
+  if (row.ticket !== null) {
+    fields.push(field(row.ticket.text), field(row.ticket.url));
   }
   const made: Searchable = Object.freeze({ fields: Object.freeze(fields), id: row.id });
   SEARCHABLE.set(row, made);

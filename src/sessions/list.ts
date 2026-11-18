@@ -15,6 +15,7 @@ import type {
   SessionPrRow,
 } from '../store/types.ts';
 import { sanitize } from '../text/sanitize.ts';
+import { readTicket, ticketText } from './ticket.ts';
 import type { DerivedSession, Mark, State } from './types.ts';
 
 export type TitleSource = 'label' | 'name' | 'generated' | 'fallback';
@@ -32,6 +33,12 @@ export interface PrView {
   okAtNs: Ns | null;
   error: string | null; // sanitised
   level: ChipLevel;
+}
+
+/** F18: the ticket the user set — its address as stored, and the short name of its chip (K2). */
+export interface TicketView {
+  url: string;
+  text: string; // ticketText's: sanitised
 }
 
 export interface ListRow {
@@ -54,6 +61,8 @@ export interface ListRow {
   done: boolean; // = session.hidden
   prs: PrView[]; // attached and not detached, sorted by url
   chip: { level: ChipLevel; count: number } | null;
+  /** F18: the ticket the user set, null for none. */
+  ticket: TicketView | null;
   session: DerivedSession;
 }
 
@@ -134,6 +143,18 @@ function prView(pr: PrRow): PrView {
   };
 }
 
+/**
+ * F18: the ticket of a stored address, its name worked out with `ticketUrl` (ticketText). The
+ * database can be changed by other means, so the address is read again by readTicket's rule for a
+ * whole link: one it refuses (not http or https, a control character, …) is none.
+ */
+function ticketOf(stored: string | null, ticketUrl: string | null): TicketView | null {
+  if (stored === null) return null;
+  const read = readTicket(stored, null);
+  if (!read.ok || read.address === null) return null;
+  return { url: read.address, text: ticketText(read.address, ticketUrl) };
+}
+
 /** The pull requests attached to each session (not detached, and known), sorted by url. */
 function attachedPrs(
   prs: readonly PrRow[],
@@ -162,7 +183,8 @@ function attachedPrs(
 /**
  * One row per derived session (none dropped, in the order given), every foreign string sanitised
  * (7.4): the title unless it is the label, the state detail, the directory, and the title and
- * error of each pull request. The store gives no order, so pull requests are sorted here.
+ * error of each pull request. The store gives no order, so pull requests are sorted here. The
+ * ticket's name is worked out with `ticketUrl` (F18, ticketOf).
  */
 export function buildRows(input: {
   sessions: readonly DerivedSession[];
@@ -170,6 +192,7 @@ export function buildRows(input: {
   prs: readonly PrRow[];
   sessionPrs: readonly SessionPrRow[];
   groupPattern: string;
+  ticketUrl: string | null;
 }): ListRow[] {
   const metaOf = new Map(input.metas.map((meta) => [meta.sessionId, meta]));
   const prsOf = attachedPrs(input.prs, input.sessionPrs);
@@ -209,6 +232,7 @@ export function buildRows(input: {
       done: session.hidden,
       prs: attached.map(prView),
       chip: chipFor(attached),
+      ticket: ticketOf(meta?.ticket ?? null, input.ticketUrl),
       session,
     };
   });
@@ -217,8 +241,8 @@ export function buildRows(input: {
 /**
  * 7.2: entrypoint other than cli → false; not running and no transcript → false (D27, also with
  * showAll); done (unless showAll) → false; expired with nothing the user attached (no label, no
- * group set by the user, no note, no pull request) → false. A group that only `groupPattern`
- * took from the title is not something the user attached.
+ * group set by the user, no note, no pull request, no ticket) → false. A group that only
+ * `groupPattern` took from the title is not something the user attached.
  */
 export function isListed(row: ListRow, showAll: boolean): boolean {
   const transcript = row.session.transcript;
@@ -233,13 +257,17 @@ export function isListed(row: ListRow, showAll: boolean): boolean {
     return false;
   }
   const nothingAttached =
-    row.label === null && row.groupSource !== 'meta' && !row.hasNote && row.prs.length === 0;
+    row.label === null &&
+    row.groupSource !== 'meta' &&
+    !row.hasNote &&
+    row.prs.length === 0 &&
+    row.ticket === null;
   return !(row.marks.includes('expired') && nothingAttached);
 }
 
 /**
- * Case-insensitive substring match on title, group, note, dir, and per PR "<repo>", "<number>",
- * "<repo>#<number>". Empty filter matches all.
+ * Case-insensitive substring match on title, group, note, dir, per PR "<repo>", "<number>",
+ * "<repo>#<number>", and the ticket's name and address (F18). Empty filter matches all.
  */
 export function matchesFilter(row: ListRow, filter: string): boolean {
   if (filter === '') {
@@ -249,6 +277,9 @@ export function matchesFilter(row: ListRow, filter: string): boolean {
   const texts: (string | null)[] = [row.title, row.group, row.note, row.dir];
   for (const pr of row.prs) {
     texts.push(pr.repo, String(pr.number), `${pr.repo}#${pr.number}`);
+  }
+  if (row.ticket !== null) {
+    texts.push(row.ticket.text, row.ticket.url);
   }
   return texts.some((text) => text !== null && text.toLowerCase().includes(needle));
 }

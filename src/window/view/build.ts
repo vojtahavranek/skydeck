@@ -180,6 +180,7 @@ function newSessionRow(terminal: TerminalInfo): ListRow {
     done: false,
     prs: [],
     chip: null,
+    ticket: null,
     session,
   };
 }

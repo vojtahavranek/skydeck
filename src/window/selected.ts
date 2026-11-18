@@ -3,7 +3,8 @@
  * would run (design 7.6's, built by the same function the resume uses), the flags it would not
  * pass on, how the session ended, and whether its transcript is expiring or gone; and what the
  * header and the dialogs of stage D need (plan D5, D6): the note as stored and the ticket address;
- * and the flags the session was started with, for the header (follow-up F16).
+ * the flags the session was started with, for the header (follow-up F16); and the ticket the user
+ * set (follow-up F18).
  * It only reads: no lock, no refresh, nothing stored — the page asks for it on every `list`.
  */
 import { buildResumeCommand, passedOnFlags, unknownFlags } from '../claude/launch.ts';
@@ -51,7 +52,9 @@ function noteOf(note: string | null): Pick<SelectedPayload, 'note' | 'noteTooLon
  * passes on again (`passedOnFlags`), also when no command can be printed. `note` and
  * `noteTooLong` as `noteOf` says (plan D5); `ticketUrl` is S2 12.5's
  * ticket address of the row's group (`ticketAddress` with the configuration's `groupPattern` and
- * `ticketUrl`), null without one. Takes no lock and reads nothing but `deck.config`.
+ * `ticketUrl`), null without one; `ticket` the row's ticket (F18: its address and its name, as
+ * buildRows read them), null without one; `ticketKeys` whether `ticketUrl` is configured (a bare
+ * key then sets a ticket). Takes no lock and reads nothing but `deck.config`.
  */
 export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload {
   const launch = row.session.launch;
@@ -77,5 +80,7 @@ export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload {
     expired: row.marks.includes('expired'),
     ...noteOf(row.note),
     ticketUrl: ticketAddress(row.group, deck.config.groupPattern, deck.config.ticketUrl),
+    ticket: row.ticket === null ? null : { url: row.ticket.url, text: row.ticket.text },
+    ticketKeys: deck.config.ticketUrl !== null,
   };
 }

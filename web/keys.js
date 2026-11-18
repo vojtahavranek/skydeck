@@ -2,7 +2,7 @@
 // key handler does with the keys it maps, the list keys, and which keys the page cancels.
 // Pure: functions of a KeyboardEvent-like object, no DOM, no state. Tested by
 // test/web/keys.test.ts on a US and a Czech layout. Stage A's `later` kind (A11) is gone: stage D
-// took the list keys (`l`, F2, `g`, `n`, `p`, `d`; plan D 2.4), stage B Ctrl+Shift+J
+// took the list keys (`l`, F2, `g`, `n`, `p`, `d`; plan D 2.4; follow-up F18 `t`), stage B Ctrl+Shift+J
 // (`next-attention`, plan B 2.8), and stage E Ctrl+Shift+P (`switcher`, plan E task 98), whose
 // field's own keys are `switcherKey`'s (E11).
 //
@@ -29,7 +29,7 @@
  * @typedef {{ kind: 'move', by: 1 | -1 | 'page-up' | 'page-down' } | { kind: 'pick' }
  *   | { kind: 'close' } | { kind: 'stay' }} SwitcherKey
  */
-/** @typedef {'label' | 'group' | 'note' | 'pr'} EditWhat */
+/** @typedef {'label' | 'group' | 'note' | 'ticket' | 'pr'} EditWhat */
 /**
  * @typedef {{ kind: 'move', by: 1 | -1 | 'home' | 'end' | 'page-up' | 'page-down' }
  *   | { kind: 'fold' } | { kind: 'unfold' } | { kind: 'enter' } | { kind: 'filter' }
@@ -122,7 +122,7 @@ export function terminalKey(e) {
  * takes no modifier. The reload keys are F5, Shift+F5, Ctrl+F5, Ctrl+R, Ctrl+Shift+R and the
  * BrowserRefresh key alone, with Shift or with Ctrl (S2 12.9, 15.3). The keys of stage D (plan D
  * 2.4): `l` and F2 edit the label, `g` the group, `n` the note, `p` the pull requests; `d` marks
- * done, or undone for a done row (app.js decides which).
+ * done, or undone for a done row (app.js decides which). Follow-up F18: `t` edits the ticket.
  * @param {KeyLike} e
  * @returns {ListAction | null}
  */
@@ -148,6 +148,8 @@ export function listKey(e) {
       return { kind: 'edit', what: 'group' };
     case 'n':
       return { kind: 'edit', what: 'note' };
+    case 't':
+      return { kind: 'edit', what: 'ticket' };
     case 'p':
       return { kind: 'edit', what: 'pr' };
     case 'd':

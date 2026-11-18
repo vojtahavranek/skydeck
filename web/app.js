@@ -658,12 +658,12 @@ function searchText(text, filter) {
 }
 
 /** The acts whose result a dialog starts from: after this page's own `ok`, it waits for the list
- *  that holds it (C1). */
-const EDITS = new Set(['label', 'group', 'note']);
+ *  that holds it (C1); F18's ticket too. */
+const EDITS = new Set(['label', 'group', 'note', 'ticket']);
 /** F15's actions (S2 12.6): the list that holds one can come up to a second after its answer. */
 const FAVOURITE_ACTS = new Set(['favourite-add', 'favourite-remove']);
 /** Each dialog's list key, for D3's sentence. */
-const KEY_OF = { label: 'l', group: 'g', note: 'n', pr: 'p' };
+const KEY_OF = { label: 'l', group: 'g', note: 'n', ticket: 't', pr: 'p' };
 
 /** The fields of an action that S2 8.2.3's limits hold, with their names for a refusal. */
 const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
@@ -683,6 +683,8 @@ const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
   ],
   'pr-add': [['url', 'the address', PATH_BYTES]],
   'pr-rm': [['url', 'the address', PATH_BYTES]],
+  // F18: a link or a key, held to the URL limit.
+  ticket: [['text', 'the ticket', PATH_BYTES]],
   // F15 (S2 12.6).
   'favourite-add': [['text', 'the flags', TEXT_BYTES]],
   'favourite-remove': [['text', 'the favourite', TEXT_BYTES]],
@@ -899,7 +901,8 @@ function selectedRow() {
  * Opens the dialog `what` for `sessionId` (D1–D3): the list keys on the selected row, and the
  * header's controls (task 38) through the cards' `edit` — the session's row from `sessionRow`, so
  * also one the list does not show (E13). The note's dialog needs the list's
- * `selected` of that session, which holds the whole note (D3); a label, group or note that this
+ * `selected` of that session, which holds the whole note (D3), and so does the ticket's (F18: its
+ * address, and whether a key is taken); a label, group, note or ticket that this
  * page's own act just changed waits for the list that holds it (C1). `key` is the key that opened
  * it ('' from the cards), `code` its physical key.
  * @param {EditWhat} what
@@ -917,7 +920,8 @@ function edit(what, sessionId, key, code) {
     return;
   }
   const selected = state.list?.selected?.sessionId === sessionId ? state.list.selected : null;
-  if ((what === 'note' && selected === null) || (what !== 'pr' && state.unlisted.has(sessionId))) {
+  const needsSelected = what === 'note' || what === 'ticket';
+  if ((needsSelected && selected === null) || (what !== 'pr' && state.unlisted.has(sessionId))) {
     // D3's sentence; from the header's controls (no key) it names the dialog's own key.
     say(`the ${what} is not here yet; press ${key === '' ? KEY_OF[what] : key} again`);
     return;

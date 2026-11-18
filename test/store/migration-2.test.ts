@@ -1,6 +1,8 @@
 // Migration 2 on a database in real use (stage B's plan, section 1b; S2 10.2, 16.5): a database as
 // step 1 and stage A leave it migrates to schema 2 with nothing of migration 1 changed, also at the
-// server's own open, and a connection opened before the migration keeps working after it.
+// server's own open, and a connection opened before the migration keeps working after it. Since
+// follow-up F18 the same open goes on with migration 3 (test/store/migration-3.test.ts), which adds
+// the column ticket_url to session_meta: what migration 1 made is otherwise unchanged.
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
@@ -12,7 +14,7 @@ import { Worker } from 'node:worker_threads';
 
 import { SkydeckError } from '../../src/platform/errors.ts';
 import { openDeck } from '../../src/sessions/deck.ts';
-import { MIGRATIONS } from '../../src/store/migrations.ts';
+import { MIGRATIONS, SCHEMA_VERSION } from '../../src/store/migrations.ts';
 import { isDatabaseFailure, openStore } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import { testPlatform } from '../helpers/platform.ts';
@@ -39,6 +41,27 @@ const ATTENTION_ENTRIES = [
 
 function isAttention(entry: { name: string }): boolean {
   return ATTENTION_ENTRIES.some((added) => added.name === entry.name);
+}
+
+/** The newest schema version, as kv holds it. */
+const NEWEST = String(SCHEMA_VERSION);
+
+/** Migration 3 (F18) adds the column ticket_url to session_meta: its entry and its rows after it. */
+function withMigration3(dump: DatabaseDump): DatabaseDump {
+  return {
+    schema: dump.schema.map((entry) =>
+      entry.type === 'table' && entry.name === 'session_meta' && entry.sql !== null
+        ? { ...entry, sql: entry.sql.replace(/\n\)$/, '\n, ticket_url TEXT)') }
+        : entry,
+    ),
+    tables: {
+      ...dump.tables,
+      session_meta: (dump.tables['session_meta'] ?? []).map((row) => ({
+        ...row,
+        ticket_url: null,
+      })),
+    },
+  };
 }
 
 /** A schema-1 database at a path in the sandbox. */
@@ -86,11 +109,13 @@ function opened(t: TestContext, path: string, options?: { busyTimeoutMs?: number
 }
 
 /**
- * `after` is `before` migrated: sqlite_master holds migration 1's entries unchanged and
- * migration 2's; every row of every table of migration 1 is as it was, but kv schema_version,
- * which is '2'; `attention` is empty.
+ * `after` is `before` migrated: sqlite_master holds migration 1's entries unchanged (but
+ * session_meta's, which migration 3 gives the column ticket_url) and migration 2's; every row of
+ * every table of migration 1 is as it was (session_meta's with ticket_url NULL), but kv
+ * schema_version, which is the newest; `attention` is empty.
  */
-function assertMigrated(before: DatabaseDump, after: DatabaseDump): void {
+function assertMigrated(schema1Dump: DatabaseDump, after: DatabaseDump): void {
+  const before = withMigration3(schema1Dump);
   assert.deepEqual(
     after.schema.filter((entry) => !isAttention(entry)),
     before.schema,
@@ -108,7 +133,7 @@ function assertMigrated(before: DatabaseDump, after: DatabaseDump): void {
     'no kv entry changed but schema_version',
   );
   assert.deepEqual(before.tables['kv']?.filter(version), [{ key: 'schema_version', value: '1' }]);
-  assert.deepEqual(after.tables['kv']?.filter(version), [{ key: 'schema_version', value: '2' }]);
+  assert.deepEqual(after.tables['kv']?.filter(version), [{ key: 'schema_version', value: NEWEST }]);
   assert.deepEqual(after.tables['attention'], []);
 }
 
@@ -198,13 +223,13 @@ test('schema1Database under a directory whose path holds a space and a `:`: ever
   assertInside(dumpDatabase(path), dir);
 });
 
-test('openStore migrates a schema-1 database to 2: nothing of migration 1 changes, attention is empty', (t) => {
+test('openStore migrates a schema-1 database to 2 (and on to the newest): nothing of migration 1 changes, attention is empty', (t) => {
   const path = schema1(t);
   const before = dumpDatabase(path);
 
   const store = opened(t, path);
 
-  assert.equal(store.getKv('schema_version'), '2');
+  assert.equal(store.getKv('schema_version'), NEWEST);
   assertMigrated(before, dumpDatabase(path));
   assert.deepEqual(store.connectionSettings(), {
     journalMode: 'wal',
@@ -232,8 +257,8 @@ test('opening a migrated database again changes nothing', (t) => {
   const meanwhile = opened(t, path); // a second connection while the first is open
 
   assert.deepEqual(dumpDatabase(path), migrated);
-  assert.equal(again.getKv('schema_version'), '2');
-  assert.equal(meanwhile.getKv('schema_version'), '2');
+  assert.equal(again.getKv('schema_version'), NEWEST);
+  assert.equal(meanwhile.getKv('schema_version'), NEWEST);
 });
 
 test("the server's own open (openDeck, guardSchema, 250 ms) migrates a schema-1 database, and its guarded connection writes into it", (t) => {
@@ -275,7 +300,7 @@ test('a connection opened before the migration, as an old interactive list holds
   assert.equal(eventsOf.all(SCHEMA1.s2).length, 2);
 
   const store = opened(t, path);
-  assert.equal(store.getKv('schema_version'), '2');
+  assert.equal(store.getKv('schema_version'), NEWEST);
 
   const later = SCHEMA1.t0 + 3_600_000_000_000n;
   const [row] = insertEvent.all(later, SCHEMA1.s2, SCHEMA1.bootId);
@@ -312,11 +337,11 @@ test('a migration waits for another connection that holds the write lock, and th
   const store = opened(t, path);
 
   await once(holder, 'exit');
-  assert.equal(store.getKv('schema_version'), '2');
+  assert.equal(store.getKv('schema_version'), NEWEST);
   assertMigrated(before, dumpDatabase(path));
 });
 
-test('two processes open a schema-1 database at once: the one that waited for the lock reads the version again, finds 2 and changes nothing', async (t) => {
+test('two processes open a schema-1 database at once: the one that waited for the lock reads the version again, finds 2, runs no migration 2 again and goes on with migration 3', async (t) => {
   const path = schema1(t);
   // The other one in the middle of migration 2: its table made, the version set, not committed.
   const other = uncommittedWrite(
@@ -329,8 +354,9 @@ test('two processes open a schema-1 database at once: the one that waited for th
   const store = opened(t, path); // reads 1, waits for the lock, reads 2 inside it
 
   await once(other, 'exit');
-  assert.equal(store.getKv('schema_version'), '2');
+  assert.equal(store.getKv('schema_version'), NEWEST);
   assert.deepEqual(store.attention(), []);
+  assert.equal(store.meta(SCHEMA1.s2)?.ticket, null, "migration 3's column is there");
   assert.deepEqual(
     dumpDatabase(path)
       .schema.filter(isAttention)

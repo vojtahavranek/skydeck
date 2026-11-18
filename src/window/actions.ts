@@ -3,7 +3,7 @@
  * one, close an ended terminal, open a link; from stage D edit a session (S2 12.5): its label,
  * group and note, done and undone, its pull requests; from stage C restore the banner's sessions
  * and dismiss its offer (S2 12.7); since F15 add and remove the new form's favourite flags (S2
- * 12.6). Every field of an action is the page's — any page that passed the handshake — so each
+ * 12.6); since F18 set or remove the session's ticket (S2 12.5). Every field of an action is the page's — any page that passed the handshake — so each
  * one is checked here again and goes through step 1's own rules: a resume
  * names a session and nothing more (the guard, the lock and the command builder decide the rest,
  * S2 11.1), a new session's directory, label, group and flags are checked as `skydeck new` checks
@@ -22,9 +22,11 @@ import {
   discardKeptNote,
   markDone,
   markUndone,
+  requireTicket,
   setGroup,
   setLabel,
   setNote,
+  setTicket,
 } from '../sessions/meta.ts';
 import type { Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
@@ -67,10 +69,13 @@ export interface ActionDeps {
 /** A result without its `t` and `id`, which `act` adds. */
 type Answer = Omit<ResultMessage, 't' | 'id'>;
 
-/** Stage D's actions (S2 12.5): each names a session the store knows. */
+/** Stage D's actions (S2 12.5), and F18's ticket: each names a session the store knows. */
 type EditAction = Extract<
   ActMessage,
-  { kind: 'label' | 'group' | 'note' | 'done' | 'undone' | 'pr-refresh' | 'pr-add' | 'pr-rm' }
+  {
+    kind:
+      'label' | 'group' | 'note' | 'done' | 'undone' | 'pr-refresh' | 'pr-add' | 'pr-rm' | 'ticket';
+  }
 >;
 
 const DONE: Answer = { ok: true, lines: [], error: null, sessionId: null };
@@ -169,7 +174,8 @@ function orNone(text: string): string | null {
  * none, `orNone`) → `prepareNew` → `launchPrepared`. A launch answers its outcome's lines (`ok` when
  * it started, with the session's id); a refusal (the window's, the guard, the lock, RefError,
  * prepareNew's) answers its message. `close-terminal` → `hub.close`; `open-link` → `linkToOpen`,
- * then `openLink`. Stage D's kinds (label, group, note, done, undone, pr-refresh, pr-add, pr-rm) →
+ * then `openLink`. Stage D's kinds (label, group, note, done, undone, pr-refresh, pr-add, pr-rm)
+ * and F18's `ticket` →
  * `edit` on a session the store knows (`requireKnown`); every write calls `changed()` once, a
  * refusal never. A resume is refused while the window has a terminal of the session whose program
  * may still run (ruled, review 2 of task 32), and before it opens its terminal it closes the
@@ -256,7 +262,9 @@ export function createActions(deps: ActionDeps): ActionHandler {
   /**
    * Stage D's edits (S2 12.5) through step 1's functions, as the commands make them: `label` and
    * `group` are none when blank, else cleanLabel / cleanGroup (their refusals are the commands'),
-   * then setLabel / setGroup; `note` saveNote; `done`, `undone` markDone, markUndone; `pr-add`
+   * then setLabel / setGroup; `ticket` (F18) requireTicket with the configuration's `ticketUrl`
+   * (its refusals are `skydeck ticket set`'s), then setTicket — empty text removes it; `note`
+   * saveNote; `done`, `undone` markDone, markUndone; `pr-add`
    * attachManualPr (origin manual, an earlier detach cleared), then the fetch in the background
    * (D8), answered `attached <url>` without waiting for it; `pr-rm` detachSessionPr; `pr-refresh`
    * the explicit refresh in the background, `ok` at once.
@@ -275,6 +283,9 @@ export function createActions(deps: ActionDeps): ActionHandler {
         setGroup(deck, sessionId, text === null ? null : cleanGroup(text));
         return wrote(action.kind);
       }
+      case 'ticket':
+        setTicket(deck, sessionId, requireTicket(action.text, deck.config.ticketUrl));
+        return wrote(action.kind);
       case 'note':
         return saveNote(action);
       case 'done':
@@ -341,6 +352,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'pr-refresh':
       case 'pr-add':
       case 'pr-rm':
+      case 'ticket':
         return edit(action);
       case 'restore':
         return deps.restore === undefined

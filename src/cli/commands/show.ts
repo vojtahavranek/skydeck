@@ -16,8 +16,8 @@ import { formatShow, showJson } from '../output.ts';
 const SPEC: ArgSpec = {
   usage: `skydeck show <ref> [--json] [--refresh]
 
-Prints one session: its state and marks, label and group, the ticket address when ticketUrl gives
-one, project directory, launch command (and the flags in it that skydeck does not know, which a
+Prints one session: its state and marks, label and group, its ticket (the one set with skydeck
+ticket, else the address ticketUrl gives for its group), project directory, launch command (and the flags in it that skydeck does not know, which a
 resume does not pass on), the sessions it continues, the processes that hold it, its pull requests
 and its note.
 
@@ -65,7 +65,8 @@ export const command: Command = {
               row,
               links,
               clock.nowNs(),
-              ticketAddress(row.group, groupPattern, ticketUrl),
+              // F18: the ticket the user set is the session's ticket; else its group's link.
+              row.ticket?.url ?? ticketAddress(row.group, groupPattern, ticketUrl),
               // S2 11.4: which holders run in the window, from the keepers' .pid lines alone.
               holdersInWindow(deck, row.session.holders),
             ),

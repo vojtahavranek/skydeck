@@ -7,6 +7,7 @@ import type { PrKey } from '../github.ts';
 import { SkydeckError, UsageError } from '../platform/errors.ts';
 import { sanitize } from '../text/sanitize.ts';
 import type { Deck } from './deck.ts';
+import { readTicket } from './ticket.ts';
 
 /** Sets the label; null clears it. The caller has cleaned the text with `cleanLabel`. */
 export function setLabel(deck: Deck, sessionId: string, label: string | null): void {
@@ -25,6 +26,25 @@ export function setGroup(deck: Deck, sessionId: string, group: string | null): v
 export function setNote(deck: Deck, sessionId: string, note: string | null): void {
   const stored = note === null || note.trim() === '' ? null : note;
   deck.store.updateMeta(sessionId, { note: stored }, deck.platform.clock.nowNs());
+}
+
+/**
+ * F18's K1 for a command and the window: the address `text` sets (readTicket with the
+ * configuration's `ticketUrl`), null when it removes the ticket; a UsageError with readTicket's
+ * words when it is refused.
+ */
+export function requireTicket(text: string, ticketUrl: string | null): string | null {
+  const read = readTicket(text, ticketUrl);
+  if (!read.ok) {
+    throw new UsageError(read.error);
+  }
+  return read.address;
+}
+
+/** Sets the ticket's address (F18), replacing the one before; null removes it. The caller has
+ *  read the text with `requireTicket`. */
+export function setTicket(deck: Deck, sessionId: string, address: string | null): void {
+  deck.store.updateMeta(sessionId, { ticket: address }, deck.platform.clock.nowNs());
 }
 
 /** The file `skydeck note`'s editor works on, and keeps when it fails: `<stateDir>/note-<id>.md`. */

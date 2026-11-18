@@ -343,6 +343,29 @@ test('g starts empty when the group was only taken from the title, or there is n
   assert.deepEqual(press(initModel([none], T0), 'g').model.input, { purpose: 'group', text: '' });
 });
 
+test('t (F18) opens the ticket input with the address set, or empty; the text goes out with enter', () => {
+  const ticket = { url: 'https://example.com/browse/ABC-1', text: 'ABC-1' };
+  const withTicket = initModel([listRow({ id: S1, ticket })], T0);
+  assert.deepEqual(press(withTicket, 't').model.input, { purpose: 'ticket', text: ticket.url });
+  assert.deepEqual(press(withTicket, 't', 'enter').effect, {
+    kind: 'ticket',
+    id: S1,
+    text: ticket.url,
+  });
+  assert.deepEqual(press(open(), 't').model.input, { purpose: 'ticket', text: '' });
+  assert.deepEqual(press(open(), 't', ...'ABC-9', 'enter').effect, {
+    kind: 'ticket',
+    id: S1,
+    text: 'ABC-9',
+  });
+  assert.equal(press(open(), 't', 'escape').model.input, null);
+});
+
+test('t in the detail opens the ticket input too', () => {
+  const detail = press(open(), 'enter').model;
+  assert.equal(press(detail, 't').model.mode, 'input');
+});
+
 test('backspace on empty input text does nothing', () => {
   const { model } = press(open(), 'p', 'backspace', 'backspace');
   assert.deepEqual(model.input, { purpose: 'pr', text: '' });
@@ -416,7 +439,7 @@ test('pull-request text is trimmed; with nothing left the effect is none and the
 
 test('with no visible rows, the action keys give none and nothing throws', () => {
   const empty = initModel([], T0);
-  for (const key of ['j', 'k', 'up', 'down', 'enter', 'l', 'g', 'n', 'd', 'p', 'R']) {
+  for (const key of ['j', 'k', 'up', 'down', 'enter', 'l', 'g', 'n', 't', 'd', 'p', 'R']) {
     const { model, effect } = press(empty, key);
     assert.deepEqual(effect, { kind: 'none' }, key);
     assert.equal(model.selected, null, key);

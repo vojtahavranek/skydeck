@@ -42,6 +42,8 @@ export interface SessionMeta {
   group: string | null; // column group_name
   note: string | null;
   doneAtNs: Ns | null;
+  /** F18: the ticket's address (column ticket_url, migration 3), null for none. */
+  ticket: string | null;
   createdNs: Ns;
   updatedNs: Ns;
 }
@@ -51,6 +53,7 @@ export interface MetaPatch {
   group?: string | null;
   note?: string | null;
   doneAtNs?: Ns | null;
+  ticket?: string | null;
 }
 
 export interface TranscriptRow {

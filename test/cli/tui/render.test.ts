@@ -14,7 +14,7 @@ const MIN = NS_PER_MINUTE;
 const SIZE = { columns: 80, rows: 10 };
 const URL1 = 'https://github.com/o/r/pull/1';
 const HELP =
-  'j/k move  enter detail  l label  g group  n note  d done  p PR  R resume  / filter  a all  r refresh  q quit';
+  'j/k move  enter detail  l label  g group  n note  t ticket  d done  p PR  R resume  / filter  a all  r refresh  q quit';
 
 const R1 = listRow({
   id: S1,

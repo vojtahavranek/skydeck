@@ -92,6 +92,10 @@ CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
   window_end_seq  INTEGER,  -- order of the latest end of a window terminal holding it, the
   window_end_ns   INTEGER   -- session then being marked ended-unexpectedly (12.4); its time
 );`,
+  // Migration 3 (follow-up F18): the SQL of design-step-2.md 10.2, character for character. It only
+  // adds a nullable column, so a reader of schema 2 (an old server until its next write, an old
+  // interactive list) still reads correctly; an older skydeck refuses the database at its open.
+  'ALTER TABLE session_meta ADD COLUMN ticket_url TEXT;  -- F18: the ticket the user set, its address; NULL for none',
 ];
 
 export const SCHEMA_VERSION: number = MIGRATIONS.length;

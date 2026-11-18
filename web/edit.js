@@ -1,5 +1,6 @@
 // The dialogs of stage D (S2 12.5, 12.9; plan D1–D3, D2, D17; plan D's contract 2.4): the label,
-// the group, the note and the pull requests of one session, edited in a dialog that lies over the
+// the group, the note, the ticket (follow-up F18: one field, a link or a key) and the pull requests
+// of one session, edited in a dialog that lies over the
 // page, as the mockup shows — a heading that names the session, the field (a text box for the
 // note), a line of help, Cancel and Save (Close and Attach in the pull-request dialog, ruled). The
 // pull-request dialog lists every attached pull request above its field (plan D task 38, D13): each
@@ -25,7 +26,7 @@
 
 /** @import { ListMessage, PrPayload, ResultMessage, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
 /** @import { EditWhat } from './keys.js' */
-import { foldText, prLineParts, prLineTip, prName, splitPrs } from './header-text.js';
+import { foldText, prLineParts, prLineTip, prName, splitPrs, ticketField } from './header-text.js';
 import { sessionRow } from './pane.js';
 
 /**
@@ -37,13 +38,20 @@ import { sessionRow } from './pane.js';
  */
 
 /** The heading's first word, by dialog. */
-const HEADINGS = { label: 'Label', group: 'Group', note: 'Note', pr: 'Pull requests' };
-/** The mockup's line of help, by dialog. */
+const HEADINGS = {
+  label: 'Label',
+  group: 'Group',
+  note: 'Note',
+  ticket: 'Ticket',
+  pr: 'Pull requests',
+};
+/** The mockup's line of help, by dialog; the ticket's depends on ticketUrl (`ticketField`). */
 const HELP = {
   label:
     'Shown as the title, and passed to Claude Code as the session name on the next start or resume. Empty clears it.',
   group: 'Empty: the ticket key at the start of the title is used.',
   note: 'Ctrl+Enter saves. Plain text, kept on this machine.',
+  ticket: '',
   pr: 'Pull requests a session touched are attached by themselves.',
 };
 const ESC_AGAIN = 'Esc again discards your text';
@@ -457,6 +465,8 @@ export function createEditor(root, deps) {
         return { kind: current.what, sessionId, text: value };
       case 'note':
         return { kind: 'note', sessionId, text: value, base: current.base };
+      case 'ticket':
+        return { kind: 'ticket', sessionId, text: value };
       case 'pr':
         return { kind: 'pr-add', sessionId, url: value };
     }
@@ -587,6 +597,7 @@ export function createEditor(root, deps) {
       let field = null;
       let base = '';
       let warning = '';
+      let helpText = HELP[what];
       if (what === 'note') {
         if (selected?.noteTooLong === true) {
           warning = `this note is longer than the window edits; use skydeck note ${row.shortId}`;
@@ -608,6 +619,12 @@ export function createEditor(root, deps) {
           field.value = row.groupSource === 'meta' ? (row.group ?? '') : '';
           field.placeholder =
             row.groupSource === 'title' && row.group !== null ? row.group : 'ticket key or topic';
+        } else if (what === 'ticket') {
+          // F18: the address as stored (empty without one); a key only when ticketUrl is set.
+          const ticket = ticketField(selected);
+          field.value = ticket.value;
+          field.placeholder = ticket.placeholder;
+          helpText = ticket.help;
         } else {
           field.placeholder = 'https://github.com/owner/repo/pull/123';
         }
@@ -649,7 +666,7 @@ export function createEditor(root, deps) {
       drawPrs();
       heading.textContent = `${HEADINGS[what]} — ${row.title}`;
       place.replaceChildren(...(field === null ? [] : [field]));
-      help.textContent = HELP[what];
+      help.textContent = helpText;
       help.hidden = field === null;
       say(warning);
       // Attach keeps the pull-request dialog open, so its other button closes it (ruled).

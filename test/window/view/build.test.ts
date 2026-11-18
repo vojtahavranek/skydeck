@@ -1105,6 +1105,8 @@ const CARD: SelectedPayload = {
   note: 'a note\r\nas stored',
   noteTooLong: false,
   ticketUrl: null,
+  ticket: null,
+  ticketKeys: false,
 };
 
 test("selected: the resume card of the view's selected session", () => {

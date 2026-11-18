@@ -2,9 +2,9 @@
 // header of stage D (S2 12.5, D11–D15, D17) in four lines of one line each, so that it has one
 // height for every session and window width (D12) — the title, the group chip, its ✎ or `+ group`,
 // the state, Note and Done; the directory, "opened <time> · last active <age>", where the title
-// comes from, the short id and (F16) the flags the session was started with; the window's chip
-// (S2 12.3), the open pull requests and the button
-// of the pull-request dialog; the note's first line —, the resume card, the card of a session
+// comes from, the short id and (F16) the flags the session was started with; (F18) the ticket's
+// chip, the window's chip (S2 12.3), the open pull requests and the buttons of the ticket's and
+// the pull-request dialogs; the note's first line —, the resume card, the card of a session
 // running in another terminal, the ended bar, the new form and (F9) the small card of a group whose
 // closed caption is selected in the list. Its interface is contract 2.9's with plan D 2.4's
 // changes. Every server string reaches the DOM through textContent or a tooltip.
@@ -37,6 +37,7 @@ import {
   prItemTip,
   splitPrs,
   startedWithText,
+  ticketChip,
   timesText,
   titleSourceText,
 } from './header-text.js';
@@ -405,9 +406,30 @@ export function createCards(root, deps) {
   const sub = element('div', 'header-sub');
   sub.append(dir, times, source, shortId, copied, flags);
 
-  // Line 3: the window's chip (S2 12.3), the open pull requests side by side as far as they fit
-  // (a click opens one), and the button of the pull-request dialog, never cut; while none is
-  // attached, the hint `no pull request` and `+ PR`.
+  // Line 3: (F18) the ticket's chip — its name and ` ↗`, the address as its tooltip; a click that
+  // selected no text opens it, as the group chip's link —, the window's chip (S2 12.3), the open
+  // pull requests side by side as far as they fit (a click opens one; they give way before the
+  // ticket's chip does), and the buttons of the ticket's and the pull-request dialogs, never cut;
+  // while none is attached, the hint `no pull request` and `+ PR`. Without a ticket its chip is
+  // not there and the rest keeps its place.
+  const ticketItem = element('span', 'header-ticket');
+  const ticketText = element('span', 'header-ticket-text');
+  const ticketArrow = element('span', 'header-ticket-arrow', ' ↗');
+  ticketItem.append(ticketText, ticketArrow);
+  ticketItem.hidden = true;
+  /**
+   * The address the ticket's chip opens, null while it is not shown.
+   * @type {string | null}
+   */
+  let ticketLink = null;
+  ticketItem.addEventListener('click', () => {
+    if (ticketLink !== null && !textSelected()) {
+      openLink(ticketLink);
+    }
+  });
+  const ticketButton = headerButton('header-ticket-button', '+ ticket', 'set a ticket (t)', () =>
+    editHere('ticket'),
+  );
   const chip = element('span', 'header-chip');
   const chipWords = element('span', 'header-chip-text');
   const chipMerged = element('span', 'header-chip-merged');
@@ -418,7 +440,7 @@ export function createCards(root, deps) {
     editHere('pr'),
   );
   const prsLine = element('div', 'header-prs');
-  prsLine.append(chip, prsNone, items, prsButton);
+  prsLine.append(ticketItem, chip, prsNone, items, ticketButton, prsButton);
   /** The addresses of the items drawn, in order: they are made again only when these change. */
   let itemsKey = '';
   items.addEventListener('click', (event) => {
@@ -813,7 +835,15 @@ export function createCards(root, deps) {
       setText(flagsText, started.text);
       setTip(flags, started.tip);
       setHidden(flags, started.text === '');
-      // Line 3: none attached exactly when there is no chip (S2 12.3).
+      // Line 3: F18's ticket, from `selected` (the server's address and name), first.
+      const ticketShown = ticketChip(selected);
+      ticketLink = ticketShown?.url ?? null;
+      setText(ticketText, ticketShown?.text ?? '');
+      setTip(ticketItem, ticketShown?.tip ?? '');
+      setHidden(ticketItem, ticketShown === null);
+      setText(ticketButton, ticketShown === null ? '+ ticket' : 'Ticket');
+      setTip(ticketButton, ticketShown === null ? 'set a ticket (t)' : 'the ticket (t)');
+      // None attached exactly when there is no chip (S2 12.3).
       const none = row.chip === null;
       setHidden(prsNone, !none);
       setText(prsButton, none ? '+ PR' : 'Pull requests');

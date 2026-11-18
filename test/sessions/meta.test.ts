@@ -19,6 +19,7 @@ import {
   setGroup,
   setLabel,
   setNote,
+  setTicket,
 } from '../../src/sessions/meta.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
@@ -40,6 +41,27 @@ function known(t: TestContext): TestDeck {
 const meta = (d: TestDeck, sessionId: string) => d.deck.store.meta(sessionId);
 const prsOf = (d: TestDeck, sessionId: string) =>
   d.deck.store.sessionPrs().filter((row) => row.sessionId === sessionId);
+
+describe('setTicket (F18)', () => {
+  test('sets the address at the clock time, replaces it, and null removes it; the other fields stay', (t) => {
+    const d = known(t);
+    setLabel(d.deck, S1, 'x');
+    setNote(d.deck, S1, 'remember');
+    d.clock.setNs(T0 + 5n * SEC);
+
+    setTicket(d.deck, S1, 'https://example.com/browse/ABC-1');
+    assert.equal(meta(d, S1)?.ticket, 'https://example.com/browse/ABC-1');
+    assert.equal(meta(d, S1)?.updatedNs, T0 + 5n * SEC);
+    setTicket(d.deck, S1, 'https://example.com/browse/ABC-2');
+    assert.equal(meta(d, S1)?.ticket, 'https://example.com/browse/ABC-2');
+    setTicket(d.deck, S1, null);
+
+    assert.equal(meta(d, S1)?.ticket, null);
+    assert.equal(meta(d, S1)?.label, 'x');
+    assert.equal(meta(d, S1)?.note, 'remember');
+    assert.equal(meta(d, S2), null, 'another session is not touched');
+  });
+});
 
 describe('setLabel, setGroup, setNote', () => {
   test('setLabel sets the label and creates the row at the clock time', (t) => {
@@ -64,6 +86,7 @@ describe('setLabel, setGroup, setNote', () => {
       group: 'ABC-9',
       note: 'remember',
       doneAtNs: null,
+      ticket: null,
       createdNs: T0,
       updatedNs: T0 + 5n * SEC,
     });

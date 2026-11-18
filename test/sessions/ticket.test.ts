@@ -317,6 +317,7 @@ describe('the modules of the ticket link (D18, design 11)', () => {
       ].map((match) => match[1]);
 
     assert.deepEqual(importsOf('text/link.ts'), []);
-    assert.deepEqual(importsOf('sessions/ticket.ts'), ['../text/link.ts']);
+    // F18: its ticket's name is sanitised (K2).
+    assert.deepEqual(importsOf('sessions/ticket.ts'), ['../text/link.ts', '../text/sanitize.ts']);
   });
 });
