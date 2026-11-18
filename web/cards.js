@@ -37,6 +37,7 @@ import {
   timesText,
   titleSourceText,
 } from './header-text.js';
+import { favouriteControls } from './favourites.js';
 import { rowText } from './list-text.js';
 import { groupCardText } from './search-text.js';
 
@@ -49,6 +50,9 @@ import { groupCardText } from './search-text.js';
  * @property {(sessionId: string) => void} done done, or undone for a done row (D15); the toast is
  *   app.js's
  * @property {(text: string) => void} say a line in the key bar
+ * @property {(listener: ((favourites: string[]) => void) | null) => void} watchFavourites F15:
+ *   the one listener of the favourites every list brings (S2 12.6) — the open new form's, null
+ *   while none is open; app.js calls it at once with the favourites it has, then at every list
  */
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -877,15 +881,18 @@ export function createCards(root, deps) {
       // Hidden, not removed: what had the keyboard in it is given back by app.js.
       setHidden(head, true);
       setHidden(card, true);
+      deps.watchFavourites(null); // a form that is no longer shown takes no list
     },
   };
 }
 
 /**
  * S2 12.6's new form: the directory (the known project directories as its list, most recent
- * first; any absolute path can be typed), the label, the group and claude's flags as typed. Enter
- * in a field or Start sends `act new`; the server's answer is shown in the form, which stays open
- * on a refusal so that the input can be fixed. Esc closes it (app.js, in the capture phase).
+ * first; any absolute path can be typed), the label, the group and claude's flags as typed, with
+ * F15's ★ at the end of the flags and the row of favourite flags under them (favourites.js). Enter
+ * in a field, on the ★ or the row, or Start sends `act new` with the flags field's text; the
+ * server's answer is shown in the form, which stays open on a refusal so that the input can be
+ * fixed. Esc closes it (app.js, in the capture phase). The field always starts empty.
  * @param {{ dir: string, dirs: string[] }} defaults
  * @param {CardsDeps} deps
  * @returns {HTMLFormElement}
@@ -934,9 +941,16 @@ function newFormOf(defaults, deps) {
   );
   start.type = 'submit';
   const actions = element('div', 'card-actions');
-  actions.append(start, element('span', 'card-hint', 'starts in this window · Esc closes'));
+  const hint = element('span', 'card-hint', 'starts in this window · Esc closes');
+  actions.append(start, hint);
   const lines = element('div', 'card-lines');
-  form.append(actions, lines);
+  // F15: the ★ at the end of the flags field, the chips of the favourites on the line under it.
+  const favourites = favouriteControls({ form, flags, hint, lines, act: deps.act });
+  const withStar = element('span', 'card-flags');
+  flags.replaceWith(withStar);
+  withStar.append(flags, favourites.star);
+  form.append(favourites.line, actions, lines);
+  deps.watchFavourites(favourites.update);
   let pending = false;
   form.addEventListener('keydown', refuseHeldEnter);
   form.addEventListener('submit', (event) => {

@@ -251,12 +251,25 @@ const terminalView = createTerminalView(dom.terminal, {
  * @type {typeof terminalView & { fits?: (width: number, height: number) => { cols: number, rows: number } | null }}
  */
 const fitting = terminalView;
+/**
+ * F15: the open new form's listener of the favourites (cards.js's `watchFavourites`; null while
+ * no form is open), and what a list says of them: its texts, [] for a list without the field.
+ * @type {((favourites: string[]) => void) | null}
+ */
+let favouritesListener = null;
+/** @param {ListMessage | null} list */
+const favouritesOf = (list) =>
+  Array.isArray(list?.favourites) ? list.favourites.filter((text) => typeof text === 'string') : [];
 const cards = createCards(dom.cards, {
   act: (action) => act(action),
   select: (id) => select(id, 'click'),
   edit: (what, sessionId) => edit(what, sessionId, '', ''),
   done: (sessionId) => markDone(sessionId, false),
   say: (text) => say(text),
+  watchFavourites: (listener) => {
+    favouritesListener = listener;
+    listener?.(favouritesOf(state.list));
+  },
 });
 const help = createHelp(dom.help);
 const toast = createToast(dom.toast);
@@ -653,6 +666,9 @@ const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
   ],
   'pr-add': [['url', 'the address', PATH_BYTES]],
   'pr-rm': [['url', 'the address', PATH_BYTES]],
+  // F15 (S2 12.6).
+  'favourite-add': [['text', 'the flags', TEXT_BYTES]],
+  'favourite-remove': [['text', 'the favourite', TEXT_BYTES]],
 });
 
 /**
@@ -1310,6 +1326,7 @@ function received(message) {
       // Stage C: before the render, whose keepKeyboard gives the zone the keyboard when a control
       // of the banner that had it went away (a restore began: Restore is gone).
       banner.render(message.banner ?? null);
+      favouritesListener?.(favouritesOf(message)); // F15: the open form's chips (S2 12.6)
       render();
       if (editor.shown()) {
         editor.update(message); // the dialog's session's row (task 38's list)
