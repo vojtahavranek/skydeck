@@ -119,9 +119,10 @@
 .list-section + .list-section {
   margin-top: -1px;
 }
-/* A section's first row, brought into view from below, rests right under its band (the band's
-   28 px), so that the band sits at the top edge over the one stuck there, with no strip of that
-   one above it; the other rows keep their 2.5em. */
+/* A section's first row (no card before it), brought into view from below, rests right under its
+   band (the band's 28 px), so that the band sits at the top edge over the one stuck there, with no
+   strip of that one above it; the other rows keep their 2.5em (a first row in a card rests under
+   its caption, its band stuck). */
 .list-section + .list-row {
   scroll-margin-top: 28px;
 }
