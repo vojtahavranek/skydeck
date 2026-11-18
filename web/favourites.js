@@ -291,6 +291,11 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
         plainHint();
       }
       refusedDrops(result);
+      const back = drawn.indexOf(favourite);
+      if (!result.ok && back >= 0) {
+        current = back; // nothing changed: the chip has the row's keyboard as before
+        paint();
+      }
     });
   };
 
