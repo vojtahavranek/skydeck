@@ -32,7 +32,7 @@ const SPLIT_CASES: readonly string[] = [
   '--model opus',
   '  --model    opus   --verbose  ',
   '--model\topus\n--verbose\r\n-c',
-  '--a --b --c　--d --e﻿--f',
+  '--a\u00a0--b\u2003--c\u3000--d\u2028--e\ufeff--f',
   "--append-system-prompt 'a b'",
   `"a 'b' c"`,
   `'say "hi"'`,
@@ -162,7 +162,7 @@ describe('withFavourite: added at the end of the field, one space between', () =
 
   test('white space at the end gives way to the one space', () => {
     assert.equal(withFavourite('--verbose   ', '-c'), '--verbose -c');
-    assert.equal(withFavourite('--verbose ', '-c'), '--verbose -c');
+    assert.equal(withFavourite('--verbose\u00a0', '-c'), '--verbose -c');
   });
 
   test('to a field that cannot be split: added as text all the same', () => {
@@ -248,7 +248,7 @@ describe('favouriteRefusal: which texts may be saved', () => {
 
   test('empty or blank: refused with its words', () => {
     assert.equal(favouriteRefusal('', []), FAVOURITE_REFUSALS.empty);
-    assert.equal(favouriteRefusal(' \t ', []), FAVOURITE_REFUSALS.empty);
+    assert.equal(favouriteRefusal(' \t\u00a0', []), FAVOURITE_REFUSALS.empty);
     assert.equal(FAVOURITE_REFUSALS.empty, 'there are no flags to save');
   });
 

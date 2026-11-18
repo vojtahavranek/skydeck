@@ -476,10 +476,10 @@
 .card-favourite {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 2px;
   max-width: 100%;
   min-width: 0;
-  padding: 0 4px 0 7px;
+  padding: 0 3px 0 7px;
   border: 1px solid var(--line2);
   border-radius: 10px;
   background: var(--panel);
@@ -509,7 +509,7 @@
 .card-favourite-x {
   flex: none;
   visibility: hidden;
-  width: 12px;
+  width: 10px;
   text-align: center;
   color: var(--faint);
 }

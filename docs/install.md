@@ -765,7 +765,12 @@ effect.
   can be resumed here.
 - **A new session**: Ctrl+Shift+N (in a browser tab the browser keeps Ctrl+Shift+N for itself:
   use the `+ New` button there), with its directory,
-  label, group and `claude` flags.
+  label, group and `claude` flags. Flags you use often can be favourites: the ★ at the end of the
+  flags field saves what you typed there, and each favourite is a chip under the field — a click
+  adds its flags to the field, a second click takes them out, and its × (on hover) removes it, with
+  `Undo` in the form's line next to Start. skydeck keeps them in its database, so every window and
+  every restart sees the same ones (at most 12, each at most 200 characters); the field always
+  starts empty.
 - **A session that ended** keeps its last screen, dimmed, under a bar with Resume and Close.
 - **Keys**: **Ctrl+Shift+H shows every key of the window**. The window takes only Ctrl+Shift
   chords with a letter or a digit, and Ctrl+Tab, besides the list's own keys while the list has the
