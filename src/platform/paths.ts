@@ -57,7 +57,8 @@ export function resolveConfigDir(env: Env, homeDir: string): string {
  * claudeGlobalConfig by the same rule: Claude Code keeps `.claude.json` in the home directory, and
  * inside CLAUDE_CONFIG_DIR when that is set; a claudeHome in config.json stands for the
  * CLAUDE_CONFIG_DIR that Claude Code runs with (only that variable moves Claude Code's home),
- * except when it is the default <homeDir>/.claude written out: those sessions run without it.
+ * except when it is the default <homeDir>/.claude written out: those sessions run without it, so
+ * the file is <homeDir>/.claude.json, unless CLAUDE_CONFIG_DIR names that same directory.
  */
 export function resolvePlaces(
   env: Env,
@@ -72,9 +73,15 @@ export function resolvePlaces(
   const envClaudeHome = absoluteEnv(env, 'CLAUDE_CONFIG_DIR');
   let globalConfigDir = envClaudeHome ?? homeDir;
   if (configuredClaudeHome !== null) {
-    // Compared as paths: `/h/.claude/` and `/h//.claude` are the default too.
-    const same = join(configuredClaudeHome).replace(/(?<=.)\/+$/, '') === defaultClaudeHome;
-    globalConfigDir = same ? homeDir : configuredClaudeHome;
+    // The default written out: those sessions run without CLAUDE_CONFIG_DIR, unless the variable
+    // names that very directory, when Claude Code keeps the file inside it.
+    const isDefault = (dir: string | null): boolean =>
+      dir !== null && samePath(dir, defaultClaudeHome);
+    if (!isDefault(configuredClaudeHome)) {
+      globalConfigDir = configuredClaudeHome;
+    } else {
+      globalConfigDir = isDefault(envClaudeHome) ? defaultClaudeHome : homeDir;
+    }
   }
   return {
     dataDir,
@@ -92,6 +99,12 @@ export function resolvePlaces(
     configPath: join(configDir, 'config.json'),
     binLink: join(homeDir, '.local', 'bin', 'skydeck'),
   };
+}
+
+/** Two paths that name one directory as written: `/h/.claude/` and `/h//.claude` are `/h/.claude`. */
+function samePath(a: string, b: string): boolean {
+  const normal = (path: string): string => join(path).replace(/(?<=.)\/+$/, '');
+  return normal(a) === normal(b);
 }
 
 /** The first 8 hex digits of the sha256 of the store's path (S2 4.2). */

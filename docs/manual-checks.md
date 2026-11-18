@@ -1931,8 +1931,10 @@ install would leave).
    until it is ended the window may list a row for `skydeck-try` as running in another terminal.
    End it now: look that the terminal shows the throwaway session (the header's short id, and
    `skydeck-try` as its folder) and has the keyboard (`Focus: terminal`), then type `/stop` ("To end
-   a session from inside it, run /stop"). When that is not possible, end it in W with `claude stop
-   <id>`, then `claude rm <id>`, with the id of the row for `skydeck-try`. Then in W type
+   a session from inside it, run /stop"). When Esc did not go back (agent view's table is still in
+   the terminal), type nothing there, not `/stop` either (a reply that is exactly `/stop` stops the
+   session it goes to), and end it in W with `claude stop <id>`, then `claude rm <id>`, with the id
+   of the row for `skydeck-try`; the same when typing `/stop` is not possible for another reason. Then in W type
    `skydeck doctor` and write down its line about the shortcut. `is on` means the key is `true` or
    gone again: a session that was running wrote its older copy of the file back (or the shortcut
    was turned on in `/config`); write down which sessions were running, and turn it off again once

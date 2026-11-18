@@ -279,8 +279,9 @@ somewhere else), `it cannot be read: <code>` (such as `EACCES`), `it is not UTF-
 that is not UTF-8, which skydeck could not keep as it is), `it is not JSON`, `it is not a JSON
 object`, `leftArrowOpensAgents is neither true nor false`, `it is a symbolic link` (skydeck does not
 write through a link, into a dotfiles folder say), `it is not a regular file`, `it belongs to
-another user` and `it is read-only` (its owner write bit is off, mode 400 say: skydeck does not
-overrule that); after the `y` also `leftArrowOpensAgents is in it more than once` and `skydeck cannot
+another user` and `it is read-only` (the shortcut is on and the file's owner write bit is off,
+mode 400 say: skydeck does not overrule that; a read-only file whose shortcut is off reads off);
+after the `y` also `leftArrowOpensAgents is in it more than once` and `skydeck cannot
 edit its text safely`. When the write fails, install says so on stderr, still ends with `skydeck is
 installed` and exits 0:
 
@@ -433,7 +434,7 @@ global config file that is a symbolic link is never written.
 | `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`, `locks/` (unused), a note while it is being edited, and `note-<session id>.md` after an editor that failed having changed it (`editor exited <n>; your text is in <path>`). |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
 | `claudeHome` | the key `claudeHome` of `config.json`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files, including the settings file and the backups. |
-| Claude Code's global config file | `~/.claude.json`, beside the default `claudeHome`; `<claudeHome>/.claude.json` when `config.json` or `CLAUDE_CONFIG_DIR` names `claudeHome` (a `claudeHome` in `config.json` that is the default `~/.claude` written out still means `~/.claude.json`) | Claude Code's global settings, among them `leftArrowOpensAgents` (the ← shortcut), which install offers to turn off and doctor reports. Claude Code keeps the file in the home directory, and inside `CLAUDE_CONFIG_DIR` when that is set; a `claudeHome` in `config.json` stands for the `CLAUDE_CONFIG_DIR` your sessions run with. |
+| Claude Code's global config file | `~/.claude.json`, beside the default `claudeHome`; `<claudeHome>/.claude.json` when `config.json` or `CLAUDE_CONFIG_DIR` names `claudeHome` (a `claudeHome` in `config.json` that is the default `~/.claude` written out still means `~/.claude.json`, unless `CLAUDE_CONFIG_DIR` names that same `~/.claude`: then `~/.claude/.claude.json`) | Claude Code's global settings, among them `leftArrowOpensAgents` (the ← shortcut), which install offers to turn off and doctor reports. Claude Code keeps the file in the home directory, and inside `CLAUDE_CONFIG_DIR` when that is set; a `claudeHome` in `config.json` stands for the `CLAUDE_CONFIG_DIR` your sessions run with. |
 
 ### `config.json`
 

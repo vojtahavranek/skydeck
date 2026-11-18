@@ -217,7 +217,17 @@ describe('the global config file: readLeftArrow (L1)', () => {
     assert.deepEqual(reading, { state: 'unknown', path, reason: 'it is a symbolic link' });
   });
 
-  test("a file without the owner's write bit: unknown (it is read-only for you)", (t) => {
+  test('a read-only file whose key is false is off: nothing would be written to it (review 2)', (t) => {
+    const d = testPlatform(t);
+    const path = configFile(d);
+    put(path, JSON.stringify(sample({ [LEFT_ARROW_KEY]: false })), 0o400);
+
+    const reading = readLeftArrow(d.platform.files, d.platform.uid, path);
+
+    assert.deepEqual(reading, { state: 'off', path, reason: null });
+  });
+
+  test("a file without the owner's write bit whose shortcut is on: unknown (it is read-only for you)", (t) => {
     for (const mode of [0o400, 0o444, 0o500]) {
       const d = testPlatform(t);
       const path = configFile(d);

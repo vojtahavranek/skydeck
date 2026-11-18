@@ -776,9 +776,10 @@ could not be resumed; see above`).
   `claudeGlobalConfig`): `off` when it is exactly `false`; `on` when it is absent or `true`;
   `unknown` when there is no file, it cannot be read, it is not UTF-8 (the file is read as bytes
   and decoded strictly: a byte that is not UTF-8 would be replaced in both the new file and the
-  backup), it is not a JSON object, the key holds anything else, or the path is a symbolic link, not a regular file, another user's, or without
-  its owner's write bit (such a file is never written, so its state is not asked for). The reader never creates the file and
-  never follows a link. On `on` install prints three lines (what the shortcut does, that ← also
+  backup), it is not a JSON object, the key holds anything else, or the path is a symbolic link,
+  not a regular file, or another user's (such a file is never written, so its state is not asked
+  for); and a file without its owner's write bit whose shortcut is on (one that is off reads `off`:
+  nothing would be written to it). The reader never creates the file and never follows a link. On `on` install prints three lines (what the shortcut does, that ← also
   closes a group in the window's list, that agent view itself stays) and asks `Turn the shortcut
   off? [y/N]`; a no, or no answer, is one line on how to do it later (`/config` in Claude Code,
   "← opens agents", or install again). On `off` it prints one line, on `unknown` one line naming
@@ -853,7 +854,7 @@ could not be resumed; see above`).
 | `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`; `locks/` is created but unused (resume locks are in the database, 7.6). |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
 | `claudeHome` | the configuration key `claudeHome`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files. |
-| `claudeGlobalConfig` | `<claudeHome>/.claude.json` when the configuration key or `$CLAUDE_CONFIG_DIR` names `claudeHome`, else `~/.claude.json`; also `~/.claude.json` when the configuration key is the default `~/.claude` written out (those sessions run without `CLAUDE_CONFIG_DIR`) | Claude Code's global config file (follow-up F11). Claude Code keeps it in the home directory, and inside `CLAUDE_CONFIG_DIR` when that is set; a configured `claudeHome` stands for the `CLAUDE_CONFIG_DIR` Claude Code runs with, since only that variable moves Claude Code's home. |
+| `claudeGlobalConfig` | `<claudeHome>/.claude.json` when the configuration key or `$CLAUDE_CONFIG_DIR` names `claudeHome`, else `~/.claude.json`; also `~/.claude.json` when the configuration key is the default `~/.claude` written out (those sessions run without `CLAUDE_CONFIG_DIR`), unless `$CLAUDE_CONFIG_DIR` names that same directory, when it is `~/.claude/.claude.json` | Claude Code's global config file (follow-up F11). Claude Code keeps it in the home directory, and inside `CLAUDE_CONFIG_DIR` when that is set; a configured `claudeHome` stands for the `CLAUDE_CONFIG_DIR` Claude Code runs with, since only that variable moves Claude Code's home. |
 
 `SKYDECK_HOME`, when set, replaces the first three with `$SKYDECK_HOME/data`, `/state`,
 `/config`; tests use it. The hook resolves `stateDir` by the same rule. The launcher keeps the

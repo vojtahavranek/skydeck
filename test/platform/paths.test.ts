@@ -142,6 +142,18 @@ describe('resolvePlaces (home /h)', () => {
     );
   });
 
+  test('the default written out in config.json and CLAUDE_CONFIG_DIR naming that same directory: the file inside it, as Claude Code keeps it (review 2, N1)', () => {
+    for (const variable of ['/h/.claude', '/h/.claude/', '/h//.claude']) {
+      for (const configured of ['/h/.claude', '/h/.claude/']) {
+        assert.equal(
+          resolvePlaces({ CLAUDE_CONFIG_DIR: variable }, '/h', configured).claudeGlobalConfig,
+          '/h/.claude/.claude.json',
+          `${variable} ${configured}`,
+        );
+      }
+    }
+  });
+
   test('a configured claudeHome is used as it is given: validating it is the job of parseConfig', () => {
     assert.equal(resolvePlaces({ CLAUDE_CONFIG_DIR: '/c' }, '/h', 'rel/k').claudeHome, 'rel/k');
   });

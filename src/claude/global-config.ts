@@ -135,11 +135,6 @@ function lookAt(files: Files, uid: number, path: string): Look {
       code === 'ENOENT' || code === 'ENOTDIR' ? 'it does not exist' : `it cannot be read: ${code}`,
     );
   }
-  // Its owner made it read-only: a statement skydeck does not overrule by renaming over it. (After
-  // the read: a file that cannot be read at all says so first.)
-  if ((info.mode & 0o200) === 0) {
-    return unknown('it is read-only');
-  }
   let text: string;
   try {
     text = STRICT_UTF8.decode(bytes);
@@ -151,6 +146,11 @@ function lookAt(files: Files, uid: number, path: string): Look {
     return unknown(object);
   }
   if (!Object.hasOwn(object, LEFT_ARROW_KEY) || object[LEFT_ARROW_KEY] === true) {
+    // Its owner made it read-only: a statement skydeck does not overrule by renaming over it. Only
+    // `on` would be written, so a read-only file that is off still reads off.
+    if ((info.mode & 0o200) === 0) {
+      return unknown('it is read-only');
+    }
     return { state: 'on', text, info };
   }
   if (object[LEFT_ARROW_KEY] === false) {
