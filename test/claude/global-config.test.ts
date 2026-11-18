@@ -261,6 +261,37 @@ describe('the global config file: readLeftArrow (L1)', () => {
     assert.deepEqual(reading, { state: 'unknown', path, reason: 'it belongs to another user' });
   });
 
+  test('a file that goes away between the look and the read: it does not exist (review 2)', (t) => {
+    const { d, path } = withFile(t, JSON.stringify(sample()));
+    const vanishing: Files = {
+      ...d.platform.files,
+      readBytes: () => {
+        throw Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), {
+          code: 'ENOENT',
+        });
+      },
+    };
+
+    const reading = readLeftArrow(vanishing, d.platform.uid, path);
+
+    assert.deepEqual(reading, { state: 'unknown', path, reason: 'it does not exist' });
+  });
+
+  test('a file that starts with a byte-order mark: unknown (not JSON), never written, its first bytes kept (review 2, N2)', (t) => {
+    const d = testPlatform(t);
+    const path = configFile(d);
+    const bytes = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('{"a": 1}\n')]);
+    writeFileSync(path, bytes, { mode: 0o600 });
+
+    const reading = readLeftArrow(d.platform.files, d.platform.uid, path);
+    const result = turnOff(d, path);
+
+    assert.deepEqual(reading, { state: 'unknown', path, reason: 'it is not JSON' });
+    assert.deepEqual(result, { kind: 'unknown', reason: 'it is not JSON' });
+    assert.deepEqual(readFileSync(path), bytes);
+    assert.deepEqual(leftovers(path), []);
+  });
+
   test('a file that is there but cannot be looked at: unknown with the code, never a throw', (t) => {
     const d = testPlatform(t);
     const path = configFile(d);

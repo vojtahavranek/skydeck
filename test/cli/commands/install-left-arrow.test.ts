@@ -381,6 +381,7 @@ describe("install: the ← step's lines are sanitized (the path comes from CLAUD
     ['on, then n', JSON.stringify(sample()), ['y', 'n']],
     ['on, then y', JSON.stringify(sample()), ['y', 'y']],
     ['unknown (no file)', null, ['y']],
+    ['on, then y, and the write fails (the line on stderr)', JSON.stringify(sample()), ['y', 'y']],
   ] as const) {
     test(`${why}: no raw ESC or C1 control reaches the terminal`, async (t) => {
       const d = testPlatform(t, {
@@ -390,8 +391,23 @@ describe("install: the ← step's lines are sanitized (the path comes from CLAUD
       if (text !== null) {
         put(d.places.claudeGlobalConfig, text);
       }
+      const real = d.platform.files;
+      const files: Files = why.includes('fails')
+        ? {
+            ...real,
+            rename(from, to) {
+              if (to === d.places.claudeGlobalConfig) {
+                throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+              }
+              real.rename(from, to);
+            },
+          }
+        : real;
 
-      const r = await run(d.platform, ['install'], { lines });
+      const r = await run({ ...d.platform, files }, ['install'], { lines });
+      if (why.includes('fails')) {
+        assert.match(r.stderr, /could not turn Claude Code's ← shortcut off: cannot write /);
+      }
 
       assert.equal(r.code, 0, r.stderr);
       assert.ok((r.stdout + r.stderr).includes('.claude.json'), 'the step named the file');
