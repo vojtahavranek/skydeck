@@ -863,11 +863,15 @@ open: a click on the title bar's theme switch (12.1), the same choice made in an
 the profile, or the system's scheme while the page follows it. The server keeps each page's latest
 for that page's next `focus`, and answers from it at once while that page is the one that had
 focus last, also when its window has lost the focus since (the system's scheme is changed in
-Windows' settings, outside the window). So a program that asks after a change is told the colours
-its terminal has then; before F13 the answer stayed the `start`'s until the page was loaded again,
-also after a change of the system's scheme. It does not answer XTVERSION
-in the first version (9.3). It never answers while it replays (7.3). The answers to a record's
-queries go to the keeper once that record has been applied.
+Windows' settings, outside the window). Any other page hands its colours over only at its next
+focus, as its `start`'s are — also when it is the only page open: after a reconnect while its
+window was in the background (its `start` said it was not focused), or after the page that had
+focus later has closed (a named limit: a program that asks meanwhile is told the colours the server
+had). So a program that asks after a change is told the colours its terminal has then; before F13
+the answer stayed the `start`'s until the page was loaded again, also after a change of the
+system's scheme. It does not answer XTVERSION in the first version (9.3). It never answers while
+it replays (7.3). The answers to a record's queries go to the keeper once that record has been
+applied.
 
 The serialise addon does not restore everything (section 21). The server adds what it misses at
 the end of every snapshot, from state it tracks with parser hooks that follow xterm.js 6.0.0's own

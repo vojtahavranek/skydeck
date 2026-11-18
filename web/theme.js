@@ -72,6 +72,13 @@ export function createThemeSwitch(button, deps) {
   // change another window made since is not missed.
   apply(readStored());
 
+  // A held key acts once, as everywhere in the page (S2 12.9): the repeats of a held Enter, which
+  // would each press the button, do nothing (a held Space presses it once, at its release).
+  button.addEventListener('keydown', (event) => {
+    if (event.repeat) {
+      event.preventDefault();
+    }
+  });
   button.addEventListener('click', () => {
     const next = nextTheme(current);
     apply(next);
