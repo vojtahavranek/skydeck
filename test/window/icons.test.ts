@@ -1,4 +1,4 @@
-// The page's own icon (S2 12.12; plan E14, task 94; follow-up F10): the owner's two pictures
+// The page's own icon (S2 12.12; plan E14, task 94; follow-ups F10 and F12): the owner's two pictures
 // scripts/icons/skydeck-source.png and scripts/icons/skydeck-source-small.png, the committed files of
 // web/icons/ and web/manifest.webmanifest, read from the checkout. scripts/icons.ts drew the PNG and
 // ICO files from the pictures once; no test runs it, so these cases hold what it wrote, and (by
@@ -15,6 +15,9 @@ import * as prettier from 'prettier';
 
 import {
   BACKGROUND as SCRIPT_BACKGROUND,
+  CORNER_RADIUS as SCRIPT_CORNER_RADIUS,
+  DRAWING_BOX as SCRIPT_DRAWING_BOX,
+  DRAWING_MARGIN as SCRIPT_DRAWING_MARGIN,
   FADE_FROM as SCRIPT_FADE_FROM,
   FADE_TO as SCRIPT_FADE_TO,
   IN_ICO as SCRIPT_IN_ICO,
@@ -24,6 +27,12 @@ import {
   SMALL as SCRIPT_SMALL,
   SOURCE,
   SOURCE_SMALL,
+  TILE_NAVY as SCRIPT_TILE_NAVY,
+  WINDOW_BOX as SCRIPT_WINDOW_BOX,
+  WINDOW_CLEARANCE as SCRIPT_WINDOW_CLEARANCE,
+  WINDOW_MARGIN as SCRIPT_WINDOW_MARGIN,
+  WINDOW_ONLY as SCRIPT_WINDOW_ONLY,
+  WINDOW_RADIUS as SCRIPT_WINDOW_RADIUS,
 } from '../../scripts/icons.ts';
 import { readBuild } from '../../src/window/build.ts';
 import { testPlatform } from '../helpers/platform.ts';
@@ -76,6 +85,57 @@ const DRAWN = 40;
 const SAFE_RADIUS = 0.4;
 /** The largest step between neighbouring pixels of a maskable file anywhere outside the drawing. */
 const GLOBAL_STEP = 2;
+
+/** A box of a picture's pixels, both ends included. */
+interface Box {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+/**
+ * What the three small files show of the small picture (follow-up F12: on a taskbar that is dark
+ * the navy tile is nearly invisible, so the drawing has to fill the tile). Each is a square crop
+ * of the picture, centred on a box and as wide as the box plus `margin` of it on each side, on the
+ * tile's navy, with rounded corners; measured from the picture by `drawingBoxOf` and
+ * `windowBoxOf` below.
+ *  - 32 and 48 pixels: the drawing (the cloud with the window in front of it), 2 % each side.
+ *  - 16 pixels: the terminal window alone, 4 % each side, and what of the cloud's strokes falls in
+ *    the crop outside the window is the tile's navy (a cloud stroke at 16 pixels is a smear).
+ */
+const DRAWING_BOX: Box = { minX: 115, maxX: 1115, minY: 202, maxY: 1045 };
+const WINDOW_BOX: Box = { minX: 306, maxX: 941, minY: 546, maxY: 1045 };
+const VIEWS = {
+  drawing: { box: DRAWING_BOX, margin: 0.02, erase: false },
+  window: { box: WINDOW_BOX, margin: 0.04, erase: true },
+} as const;
+type View = keyof typeof VIEWS;
+const viewOf = (size: number): View => (size === 16 ? 'window' : 'drawing');
+/** The tile's navy: the mean colour of the picture's pixels in a zone of the tile with nothing
+ *  drawn in it (x 50 to 99, y 300 to 899), rounded. */
+const NAVY = [1, 6, 43];
+/** The tile's corner radius, in parts of its shorter side (1200 pixels): a circle fitted to its
+ *  alpha edge is 273 pixels. The crops' rounded corners have the same relative radius. */
+const CORNER = 273 / 1200;
+/** The terminal window's outer corner radius (source pixels): a circle fitted to its left edge. */
+const WINDOW_RADIUS = 107;
+/** In the 16 pixel file the cloud is painted out beyond this many source pixels from the window's
+ *  outline (so that the window's soft edge is whole). */
+const CLEARANCE = 3;
+/** A pixel counts as the picture's drawing when it differs from the tile's navy by more than
+ *  this (of 255) in some channel. */
+const DRAWN_ON_NAVY = 40;
+/** The tile's own soft edge is skipped when the picture is measured: this many pixels in. */
+const TILE_INSET = 60;
+
+/** The sha256 of the four large files on main before follow-up F12: they stay byte for byte. */
+const LARGE_FILES = {
+  'icon-192.png': '9f3e27d105c2bab7c6330a8e18f6b920a450f81e58635968e4ac4d9c8520d34b',
+  'icon-512.png': '7c7e0e9603dc7a9ef19f33cf9f6de834858c39ed070f6e090da39045f76212b1',
+  'icon-192-maskable.png': '78df00e62defabd7f4712c913ad271a6db675c7bb02178898a1dab519d44531a',
+  'icon-512-maskable.png': 'd10ada442eaf1eaf4d3a02373895c0b2ef411c1027b66876c26773400bade98a',
+} as const;
 
 const SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
@@ -228,6 +288,173 @@ function tileBox(png: Png): { minX: number; maxX: number; minY: number; maxY: nu
   return box;
 }
 
+const navies = new WeakMap<Png, number[]>();
+/** The mean colour of the small picture's tile in a zone with nothing drawn in it, rounded. */
+function navyOf(png: Png): number[] {
+  let navy = navies.get(png);
+  if (navy === undefined) {
+    const sum = [0, 0, 0];
+    let n = 0;
+    for (let y = 300; y < 900; y++) {
+      for (let x = 50; x < 100; x++) {
+        rgb(png, x, y).forEach((value, c) => {
+          sum[c] = (sum[c] ?? 0) + value;
+        });
+        n++;
+      }
+    }
+    navy = sum.map((value) => Math.round(value / n));
+    navies.set(png, navy);
+  }
+  return navy;
+}
+
+/** Whether a pixel is drawn on the tile: opaque, and more than DRAWN_ON_NAVY from the navy (the
+ *  picture's own, measured, or NAVY for a file). */
+function drawnOnNavy(png: Png, x: number, y: number, navy: number[] = navyOf(png)): boolean {
+  return (
+    alpha(png, x, y) >= OPAQUE &&
+    rgb(png, x, y).some((value, c) => Math.abs(value - (navy[c] ?? 0)) > DRAWN_ON_NAVY)
+  );
+}
+
+/** The box of the small picture's drawing (the cloud and the window): what is drawn on the navy
+ *  at least TILE_INSET pixels inside the tile's box. */
+function drawingBoxOf(png: Png): Box {
+  const tile = tileBox(png);
+  const box = { minX: png.width, maxX: -1, minY: png.height, maxY: -1 };
+  for (let y = tile.minY + TILE_INSET; y <= tile.maxY - TILE_INSET; y++) {
+    for (let x = tile.minX + TILE_INSET; x <= tile.maxX - TILE_INSET; x++) {
+      if (drawnOnNavy(png, x, y)) {
+        box.minX = Math.min(box.minX, x);
+        box.maxX = Math.max(box.maxX, x);
+        box.minY = Math.min(box.minY, y);
+        box.maxY = Math.max(box.maxY, y);
+      }
+    }
+  }
+  return box;
+}
+
+/** The runs, as [first, last], of the positions `0..length-1` where `on` holds. */
+function runsOf(on: (t: number) => boolean, length: number): Array<[number, number]> {
+  const runs: Array<[number, number]> = [];
+  let start = -1;
+  for (let t = 0; t <= length; t++) {
+    const here = t < length && on(t);
+    if (here && start < 0) {
+      start = t;
+    } else if (!here && start >= 0) {
+      runs.push([start, t - 1]);
+      start = -1;
+    }
+  }
+  return runs;
+}
+
+/**
+ * The box of the terminal window in the small picture, from the runs of drawn pixels along
+ * probes that cross its frame: the column x = 620 gives the top (the first run that starts
+ * between y = 480 and 600, below the cloud's top) and the bottom (the end of the last run); the
+ * rows y = 700, 710, ... 740 give the left (the run that holds x = 330) and the right (the run
+ * that holds x = 915).
+ */
+function windowBoxOf(png: Png): Box {
+  const column = runsOf((y) => drawnOnNavy(png, 620, y), png.height);
+  const top = column.find(([start]) => start > 480 && start < 600);
+  const bottom = column.at(-1);
+  assert.ok(top !== undefined && bottom !== undefined, 'the window is found on the column 620');
+  let minX = png.width;
+  let maxX = -1;
+  for (const y of [700, 710, 720, 730, 740]) {
+    const row = runsOf((x) => drawnOnNavy(png, x, y), png.width);
+    const left = row.find(([start, end]) => start <= 330 && end >= 330);
+    const right = row.find(([start, end]) => start <= 915 && end >= 915);
+    assert.ok(left !== undefined && right !== undefined, `the window's frame is found in row ${y}`);
+    minX = Math.min(minX, left[0]);
+    maxX = Math.max(maxX, right[1]);
+  }
+  return { minX, maxX, minY: top[0], maxY: bottom[1] };
+}
+
+/**
+ * The radius, to a whole pixel from `from` to `to`, of the circle that a rounded corner's edge
+ * follows best (least squares). `edge` holds, for each row down from the corner's top, the
+ * row's middle (its distance from the top) and how far the edge is from the straight side there.
+ */
+function fitRadius(
+  edge: ReadonlyArray<[number, number]>,
+  from: number,
+  to: number,
+): { radius: number; rms: number } {
+  let best = { radius: from, rms: Number.POSITIVE_INFINITY };
+  for (let radius = from; radius <= to; radius++) {
+    let sum = 0;
+    for (const [y, offset] of edge) {
+      const model = y >= radius ? 0 : radius - Math.sqrt(radius * radius - (radius - y) ** 2);
+      sum += (model - offset) ** 2;
+    }
+    const rms = Math.sqrt(sum / edge.length);
+    if (rms < best.rms) {
+      best = { radius, rms };
+    }
+  }
+  return best;
+}
+
+/** The corner radius of the small picture's tile (alpha 250 or more), top left. */
+function tileRadiusOf(png: Png): { radius: number; rms: number } {
+  const tile = tileBox(png);
+  const edge: Array<[number, number]> = [];
+  for (let y = tile.minY; y < tile.minY + 400; y++) {
+    let x = 0;
+    while (alpha(png, x, y) < OPAQUE) {
+      x++;
+    }
+    edge.push([y - tile.minY + 0.5, x - tile.minX]);
+  }
+  return fitRadius(edge, 100, 400);
+}
+
+/** The corner radius of the terminal window's outer edge, top left, from its left edge. */
+function windowRadiusOf(png: Png, box: Box): { radius: number; rms: number } {
+  const edge: Array<[number, number]> = [];
+  for (let y = box.minY; y < box.minY + 160; y++) {
+    let x = 290;
+    while (x < 420 && !drawnOnNavy(png, x, y)) {
+      x++;
+    }
+    edge.push([y - box.minY + 0.5, x - box.minX]);
+  }
+  return fitRadius(edge, 30, 220);
+}
+
+/** The distance, negative inside, from the point (px, py) to the outline of the rounded
+ *  rectangle of half sides `halfW` and `halfH` and corner radius `radius`, centred on the origin. */
+function outsideRounded(
+  px: number,
+  py: number,
+  halfW: number,
+  halfH: number,
+  radius: number,
+): number {
+  const qx = Math.abs(px) - (halfW - radius);
+  const qy = Math.abs(py) - (halfH - radius);
+  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - radius;
+}
+
+/** A view's crop of the small picture, in its pixels: a square, as wide as the view's box plus
+ *  the view's margin each side, centred on the box. */
+function cropOf(view: View): { x: number; y: number; side: number } {
+  const { box, margin } = VIEWS[view];
+  const side = (box.maxX - box.minX + 1) * (1 + 2 * margin);
+  return {
+    x: (box.minX + box.maxX + 1) / 2 - side / 2,
+    y: (box.minY + box.maxY + 1) / 2 - side / 2,
+    side,
+  };
+}
+
 /** How much of the large picture's pixel `r` pixels from its middle a maskable icon draws. */
 function weight(r: number): number {
   return r <= FADE_FROM ? 1 : r >= FADE_TO ? 0 : (FADE_TO - r) / (FADE_TO - FADE_FROM);
@@ -289,13 +516,14 @@ const encode = (v: number): number =>
   );
 
 const premultiplied = new Map<string, Float32Array>();
-/** A picture's pixels as premultiplied linear light, 4 floats each (r, g, b, alpha); `faded`, as
- *  a maskable icon draws it (each pixel times `weight` of its distance from the middle). */
-function linearPicture(which: Which, faded: boolean): Float32Array {
-  const key = `${which}${faded ? ' faded' : ''}`;
+/** The large picture's pixels as premultiplied linear light, 4 floats each (r, g, b, alpha);
+ *  `faded`, as a maskable icon draws it (each pixel times `weight` of its distance from the
+ *  middle). */
+function linearPicture(faded: boolean): Float32Array {
+  const key = faded ? 'large faded' : 'large';
   let out = premultiplied.get(key);
   if (out === undefined) {
-    const png = picture(which);
+    const png = picture('large');
     out = new Float32Array(png.width * png.height * 4);
     for (let y = 0; y < png.height; y++) {
       for (let x = 0; x < png.width; x++) {
@@ -306,6 +534,63 @@ function linearPicture(which: Which, faded: boolean): Float32Array {
           out[i * 4 + c] = (LINEAR[png.pixels[i * 4 + c] ?? 0] ?? 0) * a;
         }
         out[i * 4 + 3] = a;
+      }
+    }
+    premultiplied.set(key, out);
+  }
+  return out;
+}
+
+/**
+ * What a small file shows of the small picture, as premultiplied linear light, 4 floats a pixel:
+ * the picture on the tile's navy (every pixel of the picture, solid or not, is the picture's own
+ * colour where the tile is opaque and NAVY elsewhere) under the rounded square of the view's
+ * crop: alpha is the square's coverage of the pixel (1 inside, 0 outside, a ramp of one pixel
+ * across the edge, from the distance of the pixel's middle to the rounded outline), and the
+ * colour is multiplied by it. With `erase`, what lies outside the window's outline, grown by
+ * CLEARANCE, is NAVY too.
+ */
+function smallSource(view: View, erase: boolean): Float32Array {
+  const key = `small ${view}${erase ? ' erased' : ''}`;
+  let out = premultiplied.get(key);
+  if (out === undefined) {
+    const png = picture('small');
+    const crop = cropOf(view);
+    const win = WINDOW_BOX;
+    const [cx, cy] = [(win.minX + win.maxX + 1) / 2, (win.minY + win.maxY + 1) / 2];
+    out = new Float32Array(png.width * png.height * 4);
+    for (let y = 0; y < png.height; y++) {
+      for (let x = 0; x < png.width; x++) {
+        const i = y * png.width + x;
+        const coverage = Math.min(
+          1,
+          Math.max(
+            0,
+            0.5 -
+              outsideRounded(
+                x + 0.5 - crop.x - crop.side / 2,
+                y + 0.5 - crop.y - crop.side / 2,
+                crop.side / 2,
+                crop.side / 2,
+                CORNER * crop.side,
+              ),
+          ),
+        );
+        const clear =
+          erase &&
+          outsideRounded(
+            x + 0.5 - cx,
+            y + 0.5 - cy,
+            (win.maxX - win.minX + 1) / 2 + CLEARANCE,
+            (win.maxY - win.minY + 1) / 2 + CLEARANCE,
+            WINDOW_RADIUS + CLEARANCE,
+          ) > 0;
+        const solid = alpha(png, x, y) >= OPAQUE && !clear;
+        for (let c = 0; c < 3; c++) {
+          const value = solid ? (png.pixels[i * 4 + c] ?? 0) : (NAVY[c] ?? 0);
+          out[i * 4 + c] = (LINEAR[value] ?? 0) * coverage;
+        }
+        out[i * 4 + 3] = coverage;
       }
     }
     premultiplied.set(key, out);
@@ -331,21 +616,31 @@ function axis(t: number, count: number, inner: number, offset: number): [number,
  * cover, premultiplied and in linear light; what the picture does not cover is transparent, or,
  * with `maskable`, BACKGROUND (opaque; the picture faded out as a maskable icon draws it). Straight
  * RGBA, 8 bits. This is what scripts/icons.ts does in Chromium, written again here so that the
- * committed files can be compared to it. The small picture is not drawn whole: its tile's box
- * (`tileBox`), the shorter side of it, is scaled to the icon and centred on the tile, so that the
- * tile fills the box (`scale` is for the others).
+ * committed files can be compared to it. The small picture is not drawn whole: the view's crop of
+ * it (`cropOf`, `smallSource`) is scaled to the icon (`scale` is for the others); `erase` is
+ * `smallSource`'s, by default the view's own.
  */
-function reduced(size: number, scale: number, which: Which, maskable: boolean): Uint8Array {
-  const source = linearPicture(which, maskable);
+function reduced(
+  size: number,
+  scale: number,
+  which: Which,
+  maskable: boolean,
+  erase = VIEWS[viewOf(size)].erase,
+): Uint8Array {
   const count = picture(which).width;
+  let source: Float32Array;
   let inner = size * scale;
   let offsetX = (size - inner) / 2;
   let offsetY = offsetX;
   if (which === 'small') {
-    const box = tileBox(picture('small'));
-    inner = (size * count) / Math.min(box.maxX - box.minX + 1, box.maxY - box.minY + 1);
-    offsetX = size / 2 - (((box.minX + box.maxX + 1) / 2) * inner) / count;
-    offsetY = size / 2 - (((box.minY + box.maxY + 1) / 2) * inner) / count;
+    const view = viewOf(size);
+    const crop = cropOf(view);
+    source = smallSource(view, erase);
+    inner = (size * count) / crop.side;
+    offsetX = (-crop.x * size) / crop.side;
+    offsetY = (-crop.y * size) / crop.side;
+  } else {
+    source = linearPicture(maskable);
   }
   const columns = Array.from({ length: size }, (_, t) => axis(t, count, inner, offsetX));
   const rows = Array.from({ length: size }, (_, t) => axis(t, count, inner, offsetY));
@@ -392,6 +687,47 @@ function whites(png: Png): number {
   for (let y = 0; y < png.height; y++) {
     for (let x = 0; x < png.width; x++) {
       if (alpha(png, x, y) >= OPAQUE && rgb(png, x, y).every((value) => value >= 200)) {
+        n++;
+      }
+    }
+  }
+  return n;
+}
+
+/** The number of white pixels (see `whites`) the 16 pixel file has at least: what its build has. */
+const MIN_WHITE_16 = 22;
+
+/**
+ * How many pixels of a 16 pixel file (straight RGBA, `size` pixels square) are a stroke of the
+ * cloud outside the terminal window's outline. A pixel is a stroke when it is at least half
+ * opaque, its blue is its strongest channel, 128 or more, and at least 60 above the weaker of its
+ * red and green: the cloud's cyan to violet, not the navy, the white of the `>_` or a grey. It is
+ * outside when its middle is more than half a pixel beyond the outline (the window's frame has
+ * the same colours, and its soft edge is a pixel wide).
+ */
+function strokesOutsideWindow(rgba: ArrayLike<number>, size: number): number {
+  const crop = cropOf('window');
+  const scale = size / crop.side;
+  const win = WINDOW_BOX;
+  const cx = ((win.minX + win.maxX + 1) / 2 - crop.x) * scale;
+  const cy = ((win.minY + win.maxY + 1) / 2 - crop.y) * scale;
+  let n = 0;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const [r = 0, g = 0, b = 0, a = 0] = Array.from(
+        { length: 4 },
+        (_, c) => rgba[(y * size + x) * 4 + c],
+      );
+      const stroke = a >= 128 && b >= 128 && b >= Math.max(r, g) && b - Math.min(r, g) >= 60;
+      const outside =
+        outsideRounded(
+          x + 0.5 - cx,
+          y + 0.5 - cy,
+          ((win.maxX - win.minX + 1) / 2) * scale,
+          ((win.maxY - win.minY + 1) / 2) * scale,
+          WINDOW_RADIUS * scale,
+        ) > 0.5;
+      if (stroke && outside) {
         n++;
       }
     }
@@ -479,6 +815,70 @@ describe('the large picture, as the maskable icons use it', () => {
     assert.ok(
       (MASKABLE_SCALE + 0.001) * farthest > bound,
       `${MASKABLE_SCALE + 0.001} would still hold: the scale is not the largest`,
+    );
+  });
+});
+
+describe('the small picture, as the three small files use it', () => {
+  test("the tile's navy, the drawing's box and the window's box are measured from the picture: the numbers the crops are made from", () => {
+    // A pixel is "drawn" when it is opaque and more than DRAWN_ON_NAVY (40 of 255) from the navy in
+    // some channel; the drawing's box is what is drawn at least TILE_INSET (60) pixels inside the
+    // tile's box, the window's is read along the probes of `windowBoxOf`.
+    const png = picture('small');
+
+    assert.deepEqual(tileBox(png), { minX: 18, maxX: 1232, minY: 29, maxY: 1228 });
+    assert.deepEqual(navyOf(png), NAVY);
+    assert.deepEqual(drawingBoxOf(png), DRAWING_BOX);
+    assert.deepEqual(windowBoxOf(png), WINDOW_BOX);
+  });
+
+  test("the crops: the drawing's width and the window's, plus 2 % and 4 % each side, centred on each", () => {
+    const drawing = cropOf('drawing');
+    const win = cropOf('window');
+
+    assert.ok(Math.abs(drawing.side - 1001 * 1.04) < 1e-9, `${drawing.side}`);
+    assert.ok(Math.abs(win.side - 636 * 1.08) < 1e-9, `${win.side}`);
+    assert.ok(Math.abs(drawing.x + drawing.side / 2 - 615.5) < 1e-9);
+    assert.ok(Math.abs(drawing.y + drawing.side / 2 - 624) < 1e-9);
+    assert.ok(Math.abs(win.x + win.side / 2 - 624) < 1e-9);
+    assert.ok(Math.abs(win.y + win.side / 2 - 796) < 1e-9);
+    // Both lie inside the tile, so that the picture's own soft edge is never in a small file.
+    const tile = tileBox(picture('small'));
+    for (const crop of [drawing, win]) {
+      assert.ok(crop.x >= tile.minX && crop.y >= tile.minY);
+      assert.ok(crop.x + crop.side <= tile.maxX + 1 && crop.y + crop.side <= tile.maxY + 1);
+    }
+  });
+
+  test("the rounded corners: the tile's radius is 273 of its 1200 pixel side (to 6 pixels: the fit depends on the alpha taken for the edge), the window's outer edge 107 pixels", () => {
+    // A circle fitted by least squares to the corner's edge: where the edge is taken (alpha 250 or
+    // more here; the crops' radius, 0.2275 of their side, came from a fit at another alpha) moves
+    // the radius by a few pixels of 1200, which is a tenth of a pixel at 32.
+    const tile = tileRadiusOf(picture('small'));
+    const win = windowRadiusOf(picture('small'), WINDOW_BOX);
+
+    assert.ok(Math.abs(tile.radius - 273) <= 6, `the tile's corner fits ${tile.radius}`);
+    assert.ok(tile.rms < 4, `rms ${tile.rms} of 1200`);
+    assert.equal(win.radius, WINDOW_RADIUS);
+    assert.ok(win.rms < 1, `rms ${win.rms}`);
+    assert.equal(CORNER * 1200, 273);
+  });
+
+  test('scripts/icons.ts holds these numbers, and draws the 16 pixel file from the window and the other two from the drawing', () => {
+    assert.deepEqual(SCRIPT_DRAWING_BOX, DRAWING_BOX);
+    assert.deepEqual(SCRIPT_WINDOW_BOX, WINDOW_BOX);
+    assert.equal(SCRIPT_DRAWING_MARGIN, VIEWS.drawing.margin);
+    assert.equal(SCRIPT_WINDOW_MARGIN, VIEWS.window.margin);
+    assert.equal(SCRIPT_CORNER_RADIUS, CORNER);
+    assert.equal(SCRIPT_WINDOW_RADIUS, WINDOW_RADIUS);
+    assert.equal(SCRIPT_WINDOW_CLEARANCE, CLEARANCE);
+    assert.equal(
+      SCRIPT_TILE_NAVY,
+      `#${NAVY.map((value) => value.toString(16).padStart(2, '0')).join('')}`,
+    );
+    assert.deepEqual(
+      SCRIPT_WINDOW_ONLY,
+      SMALL_SIZES.filter((size) => viewOf(size) === 'window'),
     );
   });
 });
@@ -602,12 +1002,10 @@ describe('the PNG files', () => {
     }
   });
 
-  test("the small picture's tile is drawn to fill the box: its opaque box is x 18 to 1232, y 29 to 1228, the middle half of each side of the three small files is opaque, the corners are not", () => {
-    // The small picture has a transparent margin of 18 to 29 pixels (of 1254) around its tile; one
-    // pixel of a 16 pixel file is 78 of them, so drawn whole the outer rows and columns were only
-    // partly covered (alpha 162 to 199 at 16, an empty top row at 48): a soft grey rim on a light
-    // bar. The files take the shorter side of the tile's box (1200 pixels), centred on the tile.
-    assert.deepEqual(tileBox(picture('small')), { minX: 18, maxX: 1232, minY: 29, maxY: 1228 });
+  test('the three small files fill their square: the middle half of each side is opaque, the corners are not', () => {
+    // Each is a rounded square cropped from the picture, so that the outer rows and columns are
+    // covered whole: one pixel of a 16 pixel file is 78 of the picture's, and a soft grey rim on a
+    // light taskbar is what a partly covered edge gives.
     for (const size of SMALL_SIZES) {
       const png = decodePng(read(`${ICONS}/icon-${size}.png`));
       for (let t = Math.ceil(size / 4); t < Math.floor((3 * size) / 4); t++) {
@@ -621,6 +1019,33 @@ describe('the PNG files', () => {
         }
       }
       assert.deepEqual(corners(png), [0, 0, 0, 0], `icon-${size}.png`);
+    }
+  });
+
+  test('32 and 48 pixels: the drawing reaches within 2 pixels of the left and the right edge', () => {
+    // The crop is the drawing's width plus 2 % each side: 0.6 of a pixel at 32 and 0.9 at 48 are
+    // navy before the cloud's outline starts. A pixel is the drawing's when it is opaque and more
+    // than DRAWN_ON_NAVY from the navy in some channel.
+    for (const size of [32, 48]) {
+      const png = decodePng(read(`${ICONS}/icon-${size}.png`));
+      let left = size;
+      let right = -1;
+      for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+          if (drawnOnNavy(png, x, y, NAVY)) {
+            left = Math.min(left, x);
+            right = Math.max(right, x);
+          }
+        }
+      }
+      assert.ok(
+        left <= 2,
+        `icon-${size}.png: the drawing starts ${left} pixels from the left edge`,
+      );
+      assert.ok(
+        size - 1 - right <= 2,
+        `icon-${size}.png: the drawing ends ${size - 1 - right} pixels from the right edge`,
+      );
     }
   });
 
@@ -662,6 +1087,34 @@ describe('the PNG files', () => {
       } else {
         assert.ok(share <= 0.01, `${file}: ${share} white: not the large picture's thin \`>_\``);
       }
+    }
+  });
+
+  test('16 pixels: the `>_` has at least 22 white pixels (the file before had 7)', () => {
+    // The window alone fills the 16 pixels, and the `>_` with it: 22 pixels are opaque and 200 or
+    // more in every channel in the file as built.
+    assert.ok(
+      whites(decodePng(read(`${ICONS}/icon-16.png`))) >= MIN_WHITE_16,
+      `fewer than ${MIN_WHITE_16} white pixels`,
+    );
+  });
+
+  test("16 pixels: no stroke of the cloud is left outside the window's outline, and the check sees the cloud where it was not painted out", () => {
+    assert.equal(strokesOutsideWindow(decodePng(read(`${ICONS}/icon-16.png`)).pixels, 16), 0);
+    // The same crop without the painting out (the pixels at the top right corner): the check is
+    // not one that nothing could fail.
+    assert.ok(strokesOutsideWindow(reduced(16, 1, 'small', false, false), 16) >= 1);
+  });
+
+  test("the four large files are main's, byte for byte (follow-up F12 changes the three small ones and favicon.ico only)", () => {
+    for (const [file, sha256] of Object.entries(LARGE_FILES)) {
+      assert.equal(
+        createHash('sha256')
+          .update(read(`${ICONS}/${file}`))
+          .digest('hex'),
+        sha256,
+        file,
+      );
     }
   });
 
