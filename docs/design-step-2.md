@@ -198,7 +198,7 @@ Added to design 11:
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
 | `src/window/view/search/` | The rules of search as pure functions (stage E, plan E1): the filter's words and chips (12.8), the blocks (12.2; the code calls them stacks), the switcher's ranking (12.8); `build.ts` calls them. No pattern is ever built from a search text. | values: its own files and `text`'s `sanitize` only; types: sessions, `protocol.ts`, `hub.ts`, `view/sections.ts` |
-| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS. No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
+| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the theme switch's stored choice on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
 
@@ -857,7 +857,15 @@ DECRQM, CPR, DSR, DECRQSS) is sent to the keeper as input; the page never answer
 answers OSC 10 and OSC 11 (foreground and background colour) itself, from the colours of the theme
 the last focused page reports (the headless terminal has no colours); a reported colour is used
 only when it is exactly `#rrggbb`, else — and until a page has sent its theme — xterm.js's
-default colour is (foreground `#ffffff`, background `#000000`). It does not answer XTVERSION
+default colour is (foreground `#ffffff`, background `#000000`). A page reports its colours in
+`start` (8.2.2) and, from follow-up F13, again in `theme` (8.2.3) whenever they change while it is
+open: a click on the title bar's theme switch (12.1), the same choice made in another window of
+the profile, or the system's scheme while the page follows it. The server keeps each page's latest
+for that page's next `focus`, and answers from it at once while that page is the one that had
+focus last, also when its window has lost the focus since (the system's scheme is changed in
+Windows' settings, outside the window). So a program that asks after a change is told the colours
+its terminal has then; before F13 the answer stayed the `start`'s until the page was loaded again,
+also after a change of the system's scheme. It does not answer XTVERSION
 in the first version (9.3). It never answers while it replays (7.3). The answers to a record's
 queries go to the keeper once that record has been applied.
 
@@ -1354,7 +1362,9 @@ the server's proof.
    connections use mode `key`.
 6. Only then the page sends `{ "t": "start", "assetVersion": "<the version it was loaded with>",
    "windowId": "<random per page>", "focused": true, "theme": { "fg": "…", "bg": "…" } }`, and the
-   connection is open for 8.2.3's messages. A page whose `assetVersion` is not the server's
+   connection is open for 8.2.3's messages. `theme` is the terminal's foreground and background
+   as the page draws them at that moment (the system's scheme, or the title bar's switch, 12.1);
+   a later change is sent as 8.2.3's `theme` (follow-up F13). A page whose `assetVersion` is not the server's
    reloads itself (it was loaded from an older server), without sending `start`. It does so once
    per version of the server's (it remembers that version for the tab): a page that still differs
    after that reload is not served by that server at all — most likely something else answers the
@@ -1463,6 +1473,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `detach` | `term` | Stop it. |
 | `input` | `term`, `data` | Typed text (UTF-8) for the terminal; `binary: true` when `data` is a byte string from xterm.js's binary channel (mouse reports). Makes this page the size owner. |
 | `resize` | `term`, `cols`, `rows` | The page's fitted size (8.2.6). |
+| `theme` | `theme` (`fg`, `bg`: each a text, checked exactly as `start.theme`, 8.2.2) | From follow-up F13: the page's colours changed while it is open — a click on the title bar's theme switch, the same choice made in another window of the profile, or the system's scheme while the page follows it (12.1). The server keeps them for the page's next `focus`, and answers OSC 10 and 11 from them at once while the page is the one that had focus last (7.2). |
 | `act` | `id`, `kind`, and the fields of the next table | An action (11, 12). The server answers `result` with the same `id`. |
 
 | `act` kind | Fields | Effect |
@@ -1717,6 +1728,13 @@ XTVERSION is not answered in the first version. Claude Code recognises xterm.js 
 starts with `xterm.js` and then changes wheel scrolling, glyph-atlas resets and link clicks
 (section 21); an honest answer `xterm.js(6.0.0)` would turn that on. Whether that helps is check
 W5; the answer is a one-line change in the screen side.
+
+The colours OSC 10 and 11 are answered with are the page's (7.2). From follow-up F13 a program that
+asks after a click on the title bar's theme switch (12.1), or after a change of the system's scheme,
+is told the colours its terminal has then. A program that asked before keeps what it was told until
+it asks again (Claude Code, whose `/theme` can match the terminal's light or dark background, asks
+at least when a session starts): nothing tells a running program that the colours changed — no
+notification of a theme change is sent to programs, which is not part of F13. Check W34.
 
 ### 9.4 Widths
 
@@ -2187,6 +2205,32 @@ fold; a session that needs you is counted there and in no other count, so that t
 (3 + 3 + 2 above). The window title's `(3)` is the same count. Which rows need you, and in which
 order Ctrl+Shift+J goes, the server sends with each `list` (8.2.3 `needYou`): the page decides no
 rule (4.3; stage B, plan B7).
+
+**The theme switch** (follow-up F13, on the owner's question of 2026-11-18: "I set up to follow the
+OS environment but if I wanned to switch, I probably cannot?"). The page is light or dark as the
+system is (Windows' Settings, Personalization, Colors: the `prefers-color-scheme` media query), and
+changes with it while it is open. A small button in the title bar, right before `Switch…` and drawn
+as it is, shows a half circle and the state's word: `Auto` (the system's, the default), `Light` or
+`Dark`. A click goes to the next (Auto → Light → Dark → Auto); its tooltip says the state and what
+a click does (`Theme: follows the system. Click for light.`, `Theme: light. Click for dark.`,
+`Theme: dark. Click to follow the system.`); its word keeps the room of the widest, so that a click
+moves nothing. Forced dark is exactly the system's dark and forced light exactly the system's
+light: every colour of the page and `color-scheme` (scroll bars, form controls); at a click every
+terminal of the page is repainted in the new colours — background, text, the sixteen colours, the
+selection —, a hidden one too, as after a change of the system's scheme. A click moves no keyboard
+(the title bar takes none, 12.9) and changes no selection; there is no key chord, no `config.json`
+key and no command-line flag for it. The choice is the page's: one key of its `localStorage`
+(`skydeck-theme`, `light` or `dark`; none for Auto), so it holds across reloads and restarts of the
+window and in every window of the profile, and another window of the profile follows a change at
+once (the `storage` event). A stored value that is neither, or storage that throws or is missing,
+is Auto; the button then still works for the life of the page. A classic script of its own
+(`web/theme-early.js`, loaded in `<head>` ahead of the style sheets, which the policy allows as it
+is, 8.2.1) puts the stored choice on `<html data-theme>` before the first paint, so that no frame
+shows the other theme. Nothing of it is sent to or kept by the server but the colours, which the
+page reports again for OSC 10 and 11 (8.2.3 `theme`; 7.2, 9.3). In each style sheet with a dark
+scheme (`style.css`, `terminal-view.css`, `attention.css`) the dark values are written twice — the
+system's, scoped to "not forced light", and a twin for forced dark — and a unit test holds the two
+equal declaration by declaration. Check W34.
 
 ### 12.2 Rows
 
@@ -3974,6 +4018,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W30 | On the user's own sessions (about 105), without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a block's card closed with ← and opened again with → (blocks are open by default from follow-up F3, drawn as cards with a selectable caption from follow-up F9), a click on a caption, the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |
 | W31 | Czech and US layouts in the filter's and the switcher's fields: AltGr characters and dead keys type; Ctrl+Shift+P opens and closes the switcher on both. | E | 12.8, 12.9 |
 | W32 | `skydeck update` on the user's own installation, typed in a WSL terminal of the user's own with the window open: `--check` first (the list of new commits, or "up to date"; the window and the sessions stay as they are); then, only when it listed commits, the update itself: the window says for a few seconds that the server is not answering, then reloads itself; every session is there; no second window; `skydeck doctor` has no `problem` line that was not there before. It types into no session and presses no key in the window. | F8 | 16.5, 5.1 |
+| W34 | **Real claude**: the title bar's theme switch in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme set to match the terminal (`/theme`), a new throwaway session started in each forced state picks the matching one, and one already running keeps its own. At the end the switch, Windows' mode and Claude Code's theme are as they were. | F13 | 12.1, 7.2, 9.3 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
