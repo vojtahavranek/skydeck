@@ -472,7 +472,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
   );
 
   await t.test(
-    'a mouse click on the switch leaves the keyboard where it was: in the terminal (what is typed next goes to its program) and in the list; Enter on the switch, given the keyboard by Tab, goes on by one state',
+    'a mouse click on the switch leaves the keyboard where it was: in the terminal (what is typed next goes to its program) and in the list; Enter on the switch, given the keyboard by Tab, goes on by one state, a held Enter or Space by one only',
     async (t) => {
       const { page, d, problems } = await opened(t, chromium);
       await clickRow(page, S1);
@@ -509,6 +509,20 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       await page.keyboard.press('Enter');
       await shows(page, 'system', 'Enter on the switch');
       assert.equal(await active(page), '#theme-button');
+
+      // A held key acts once (S2 12.9): six keydowns of one held Enter, or of a held Space, go on
+      // by one state and tell the server once (review 2, C2).
+      for (const [key, theme] of [
+        ['Enter', 'light'],
+        ['Space', 'dark'],
+      ] as const) {
+        const before = d.sent.length;
+        for (let i = 0; i < 6; i++) await page.keyboard.down(key);
+        await page.keyboard.up(key);
+        await sleep(300);
+        await shows(page, theme, `a held ${key}`);
+        assert.equal(themesSent(d, before).length, 1, `a held ${key}: one theme message`);
+      }
       assert.deepEqual(problems, []);
     },
   );
@@ -554,16 +568,21 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
     }));
   }
 
-  /** Holds every load of app.js for `ms` (the page's modules come late; the early script not). */
-  async function slowModules(page: Page, ms: number): Promise<void> {
-    await page.route('**/assets/*/web/app.js', async (route) => {
+  /**
+   * Holds every load of theme-early.js and of app.js for `ms`, then lets the request go on to the
+   * routes registered before (the control's empty early script) or to the server. Holding the early
+   * script too is what tells a blocking script in <head> from one that is late — `async`, `defer`, or
+   * at the end of <body> would let a frame be painted before it ran (review 2, S1).
+   */
+  async function slow(page: Page, ms: number): Promise<void> {
+    await page.route('**/assets/*/web/{app,theme-early}.js', async (route) => {
       await sleep(ms);
-      await route.continue();
+      await route.fallback();
     });
   }
 
   await t.test(
-    'the choice survives a reload, and no frame is drawn in the other theme: from the first painted frame on, every frame is in the stored theme, even while the page’s modules are held back 600 ms; without the early script the first frames are the system’s (so the measure would see a flash)',
+    'the choice survives a reload, and no frame is drawn in the other theme: from the first painted frame on, every frame is in the stored theme, also while the early script and the page’s modules are each held back 600 ms; without the early script the first frames are the system’s (so the measure would see a flash)',
     async (t) => {
       const { page, d, problems } = await opened(t, chromium);
       await clickSwitch(page);
@@ -573,8 +592,10 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       const darkBg = '#16181c';
       const lightBg = '#f3f4f6';
 
-      for (const held of [0, 600]) {
-        if (held > 0) await slowModules(page, held);
+      /** Reloads (the early script and app.js held back `held` ms when it is not 0) and asserts
+       *  that every frame from the first paint on has `bg` and `scheme`. */
+      const reloadIn = async (held: number, bg: string, scheme: Scheme): Promise<void> => {
+        if (held > 0) await slow(page, held);
         await page.reload();
         await connection(page, 'open');
         const { frames, firstPaint } = await framesOf(page);
@@ -583,11 +604,13 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
           (frames[0]?.at ?? Infinity) <= firstPaint + 1,
           `the first recorded frame (${frames[0]?.at}) comes no later than the first paint (${firstPaint})`,
         );
-        const other = frames.filter((frame) => frame.bg !== darkBg || frame.scheme !== 'dark');
-        assert.deepEqual(other, [], `held ${held} ms: no frame in another theme`);
-        await shows(page, 'dark', `after the reload (held ${held} ms)`);
-      }
-      await page.unrouteAll();
+        const other = frames.filter((frame) => frame.bg !== bg || frame.scheme !== scheme);
+        assert.deepEqual(other, [], `${scheme}, held ${held} ms: no frame in another theme`);
+        await shows(page, scheme, `after the reload (held ${held} ms)`);
+        await page.unrouteAll();
+      };
+
+      for (const held of [0, 600]) await reloadIn(held, darkBg, 'dark');
       assert.deepEqual(
         d.starts().at(-1)?.['theme'],
         DARK_COLOURS,
@@ -599,21 +622,14 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       await clickSwitch(page);
       await clickSwitch(page); // Light
       await shows(page, 'light', 'before the second reload');
-      await page.reload();
-      await connection(page, 'open');
-      const second = await framesOf(page);
-      assert.deepEqual(
-        second.frames.filter((frame) => frame.bg !== lightBg || frame.scheme !== 'light'),
-        [],
-        'forced light: no frame in dark',
-      );
+      for (const held of [0, 600]) await reloadIn(held, lightBg, 'light');
 
-      // The control: the early script left out, the modules held back: the first frames follow
-      // the system (dark), then web/theme.js applies the stored light.
+      // The control: the early script served empty, it and the modules held back: the first frames
+      // follow the system (dark), then web/theme.js applies the stored light.
       await page.route('**/assets/*/web/theme-early.js', (route) =>
         route.fulfill({ status: 200, contentType: 'text/javascript', body: '' }),
       );
-      await slowModules(page, 600);
+      await slow(page, 600);
       await page.reload();
       await connection(page, 'open');
       const control = await framesOf(page);
@@ -773,8 +789,22 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       await expect([LIGHT_COLOURS], 'a click to Light');
       await clickSwitch(page); // Dark
       await expect([DARK_COLOURS], 'a click to Dark');
-      await systemScheme(page, 'dark');
-      await systemScheme(page, 'light');
+      // Each flip is waited for until a `change` listener of the test's own has run (it was added
+      // after the page's, so the page's has run too): two flips with no frame between them would
+      // run no listener at all (review 2, S2).
+      await page.evaluate(() => {
+        Reflect.set(globalThis, 'testFlips', 0);
+        matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+          Reflect.set(globalThis, 'testFlips', Number(Reflect.get(globalThis, 'testFlips')) + 1);
+        });
+      });
+      const flips = (): Promise<number> =>
+        page.evaluate(() => Number(Reflect.get(globalThis, 'testFlips')));
+      for (const scheme of ['dark', 'light'] as const) {
+        const before = await flips();
+        await systemScheme(page, scheme);
+        await until(async () => (await flips()) > before, `the page saw the flip to ${scheme}`);
+      }
       await sleep(300);
       assert.deepEqual(themesSent(d, from), [], 'no message for flips while forced');
       await clickSwitch(page); // Auto, light system

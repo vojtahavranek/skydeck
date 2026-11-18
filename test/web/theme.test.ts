@@ -176,6 +176,8 @@ describe('one set of dark values (H4): the media block and its twin', () => {
         return;
       }
       assert.equal(queries, 1, 'one dark block');
+      // No other rule reads the switch: what forced dark draws is the twin's variables only.
+      assert.equal(css.match(/data-theme/g)?.length, 2, 'data-theme only in the two rules');
       const dark = declarations(system[0]?.[1] ?? '');
       assert.ok(dark.length > 0, 'the dark block declares something');
       assert.deepEqual(declarations(forced[0]?.[1] ?? ''), dark, 'the twin is the same');
