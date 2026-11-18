@@ -1690,15 +1690,21 @@ test("F16: the flags a session was started with, last on the header's second lin
       assert.match(look.font, /Cascadia Mono/);
       for (const box of look.boxes) assert.equal(box, 'none|rgba(0, 0, 0, 0)|0px', 'no box');
 
-      // The names the recording knows only by name: the tooltip's second line.
+      // The names the recording knows only by name (ruled): after the kept flags, in the text
+      // (cut at 40 over the whole) and on the tooltip's first line; its second line names them.
       s.set({ selected: { [S1]: { launchFlags: FLAGS, unknownFlags: ['--frob', '-Z'] } } });
-      await eventually(
-        async () =>
-          (await flagsLine(page)).flags?.tip ===
-          `Started with: ${FLAGS_TEXT}\nNot recognised, not passed again on resume: --frob -Z`,
-        'the second line of the tooltip',
+      await flagsShow(page, `${FLAGS_TEXT} --f…`);
+      assert.equal(
+        (await flagsLine(page)).flags?.tip,
+        `Started with: ${FLAGS_TEXT} --frob -Z\nNot recognised, not passed again on resume: --frob -Z`,
       );
-      assert.equal((await flagsLine(page)).flags?.text, FLAGS_TEXT);
+      // Only names it does not know: an item with those names, never nothing.
+      s.set({ selected: { [S1]: { launchFlags: [], unknownFlags: ['--frob'] } } });
+      await flagsShow(page, '--frob');
+      assert.equal(
+        (await flagsLine(page)).flags?.tip,
+        'Started with: --frob\nNot recognised, not passed again on resume: --frob',
+      );
 
       // A flag's value is text: markup in it is shown, never made.
       const markup = '<img src=x onerror="window.flagged=1"><b>bold</b>';
@@ -1716,9 +1722,9 @@ test("F16: the flags a session was started with, last on the header's second lin
       );
       assert.equal(await page.evaluate(() => 'flagged' in window), false);
 
-      // No flag passed again (none recorded, or only names it does not know): no item, and the
-      // line holds exactly what it held before F16.
-      for (const selected of [{ launchFlags: [] }, { launchFlags: [], unknownFlags: ['--frob'] }]) {
+      // No flag recorded (none known, none by name): no item, and the line holds exactly what it
+      // held before F16.
+      for (const selected of [{ launchFlags: [] }, { launchFlags: [], unknownFlags: [] }]) {
         s.set({ selected: { [S1]: selected } });
         await flagsShow(page, null);
         const parts = await page.evaluate(() =>

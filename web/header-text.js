@@ -254,17 +254,21 @@ function strings(value) {
 
 /**
  * Follow-up F16: the flags the session was started with, the last item of the header's second
- * line — `selected.launchFlags` (the recorded ones a resume passes on again) in the order recorded,
- * joined by one space, a value with spaces as it was recorded (not quoted) — cut to
- * STARTED_WITH_MAX characters, the last of them `…`, when longer. Its tooltip holds them uncut,
- * `Started with: <flags>`, and when there are flags the recording knows only by name, a second
- * line `Not recognised, not passed again on resume: <names>`. "Started with": a model changed
- * inside the session later is not seen. `text` and `tip` are '' when no flag is passed again.
+ * line — `selected.launchFlags` (the recorded ones a resume passes on again) in the order
+ * recorded, then `selected.unknownFlags` (the ones the recording knows only by name, bare, as
+ * recorded; ruled by the lead: a session started with a flag never shows nothing), joined by one
+ * space, a value with spaces as it was recorded (not quoted) — cut to STARTED_WITH_MAX characters
+ * over the whole, the last of them `…`, when longer. Its tooltip holds the whole text uncut,
+ * `Started with: <flags>`, and when there are names, a second line `Not recognised, not passed
+ * again on resume: <names>`. "Started with": a model changed inside the session later is not
+ * seen. `text` and `tip` are '' when no flag was recorded. Each field is read on its own: a
+ * missing one, or one of the wrong shape, holds none.
  * @param {SelectedPayload | null} selected `list.selected` when it is the row's session
  * @returns {{ text: string, tip: string }}
  */
 export function startedWithText(selected) {
-  const flags = strings(selected?.launchFlags) ?? [];
+  const unknown = strings(selected?.unknownFlags) ?? [];
+  const flags = [...(strings(selected?.launchFlags) ?? []), ...unknown];
   if (flags.length === 0) {
     return { text: '', tip: '' };
   }
@@ -274,7 +278,6 @@ export function startedWithText(selected) {
     characters.length <= STARTED_WITH_MAX
       ? whole
       : `${characters.slice(0, STARTED_WITH_MAX - 1).join('')}…`;
-  const unknown = strings(selected?.unknownFlags) ?? [];
   const tip = [
     `Started with: ${whole}`,
     unknown.length === 0 ? '' : `Not recognised, not passed again on resume: ${unknown.join(' ')}`,

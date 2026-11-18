@@ -462,11 +462,17 @@ describe("noteLine: the note's line of the header (S2 12.5, D12)", () => {
 describe("startedWithText: the flags a session was started with, last on the header's second line (follow-up F16)", () => {
   const NONE = { text: '', tip: '' };
 
-  test('nothing without flags: no selected, none recorded, none a resume passes on again', () => {
+  test('nothing without flags: no selected, none recorded', () => {
     assert.deepEqual(startedWithText(null), NONE);
     assert.deepEqual(startedWithText(flagged([])), NONE);
-    // Flags the recording knows only by name are not passed again: no item for them alone.
-    assert.deepEqual(startedWithText(flagged([], ['--frob'])), NONE);
+    assert.deepEqual(startedWithText(flagged([], [])), NONE);
+  });
+
+  test('a session started only with flags the recording knows by name shows those names (ruled: it was started with a flag, so never nothing)', () => {
+    assert.deepEqual(startedWithText(flagged([], ['--frob'])), {
+      text: '--frob',
+      tip: 'Started with: --frob\nNot recognised, not passed again on resume: --frob',
+    });
   });
 
   test('the flags in the order recorded, as one text; the tooltip says "Started with:"', () => {
@@ -508,11 +514,26 @@ describe("startedWithText: the flags a session was started with, last on the hea
     assert.equal(startedWithText(flagged(['-d', '🙂'.repeat(37)])).text, `-d ${'🙂'.repeat(37)}`);
   });
 
-  test('the second line of the tooltip names the flags not recognised, which a resume does not pass again', () => {
+  test('the names not recognised come after the kept flags in the text and on the first line of the tooltip; its second line names them again, not passed on resume', () => {
     assert.deepEqual(startedWithText(flagged(['--model', 'opus'], ['--frob', '-Z'])), {
-      text: '--model opus',
-      tip: 'Started with: --model opus\nNot recognised, not passed again on resume: --frob -Z',
+      text: '--model opus --frob -Z',
+      tip: 'Started with: --model opus --frob -Z\nNot recognised, not passed again on resume: --frob -Z',
     });
+  });
+
+  test('the cut at 40 characters is over the whole text, the names included; the tooltip uncut', () => {
+    const kept = ['--model', 'opus', '--permission-mode', 'plan']; // 35 characters
+    const shown = startedWithText(flagged(kept, ['--frobnicate']));
+    assert.equal(shown.text, '--model opus --permission-mode plan --f…');
+    assert.equal([...shown.text].length, 40);
+    assert.equal(
+      shown.tip,
+      'Started with: --model opus --permission-mode plan --frobnicate\nNot recognised, not passed again on resume: --frobnicate',
+    );
+    const names = Array.from({ length: 8 }, (_, at) => `--unknown-${at}`);
+    const many = startedWithText(flagged([], names));
+    assert.equal([...many.text].length, 40);
+    assert.equal(many.text, '--unknown-0 --unknown-1 --unknown-2 --u…');
   });
 
   test("the server's strings are sanitised again; markup stays text", () => {
@@ -521,19 +542,24 @@ describe("startedWithText: the flags a session was started with, last on the hea
         flagged(['--model', 'op\x1b[31mus\x07', '--name-x', '<b>x</b>\n'], ['--a\tb']),
       ),
       {
-        text: '--model opus --name-x <b>x</b> ',
-        tip: 'Started with: --model opus --name-x <b>x</b> \nNot recognised, not passed again on resume: --a b',
+        text: '--model opus --name-x <b>x</b>  --a b',
+        tip: 'Started with: --model opus --name-x <b>x</b>  --a b\nNot recognised, not passed again on resume: --a b',
       },
     );
   });
 
-  test('a payload without the field, or with one of the wrong shape, shows nothing (a list of another server)', () => {
+  test('a field missing, or of the wrong shape, holds no flag (a list of another server)', () => {
     const { launchFlags: _gone, ...older } = flagged(['--model', 'opus']);
     assert.deepEqual(startedWithText(older as SelectedPayload), NONE);
     assert.deepEqual(startedWithText(flagged('--model opus')), NONE);
     assert.deepEqual(startedWithText(flagged(['--model', 7])), NONE);
     assert.deepEqual(startedWithText(flagged(null)), NONE);
-    // Unknown names of the wrong shape: no second line.
+    // The names stand on their own: kept flags of the wrong shape do not hide them.
+    assert.deepEqual(startedWithText(flagged(['--model', 7], ['--frob'])), {
+      text: '--frob',
+      tip: 'Started with: --frob\nNot recognised, not passed again on resume: --frob',
+    });
+    // Unknown names of the wrong shape: none, and no second line.
     assert.deepEqual(startedWithText(flagged(['--verbose'], '--frob')), {
       text: '--verbose',
       tip: 'Started with: --verbose',

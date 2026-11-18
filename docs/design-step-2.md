@@ -2509,24 +2509,26 @@ the plan owner, review of plan task 29).
 
 **The flags it was started with** (asked for by the owner on 2026-11-18, follow-up F16; the details
 ruled by the lead that day). The last item of the second line, after the short id: the flags the
-session was started with as the hook recorded them (design 5.3) and a resume passes them on again
-(design 7.6; `passedOnFlags`), in the order recorded, as one text — `--model opus --permission-mode
-plan`; a value is shown as recorded, one with spaces not quoted — in the page's dim colour and its
-monospace font, with no label before it and no box. At most 40 characters, the last of them `…`
-beyond that; its tooltip holds them uncut, `Started with: <flags>`, and when the recording knows
-some flags only by name (the ones in no table, which a resume does not pass on), a second line
-`Not recognised, not passed again on resume: <names>`. "Started with": a model changed inside the
+session was started with as the hook recorded them (design 5.3) — first the ones a resume passes on
+again (design 7.6; `passedOnFlags`) with their values, in the order recorded, then the ones the
+recording knows only by name (in no table: a resume does not pass them on), bare, as recorded
+(ruled by the lead: a session started with a flag never shows nothing) — as one text, `--model
+opus --permission-mode plan`; a value is shown as recorded, one with spaces not quoted. In the
+page's dim colour and its monospace font, with no label before it and no box. At most 40
+characters over the whole, the last of them `…` beyond that; its tooltip holds the whole text
+uncut, `Started with: <flags>`, and when there are names it does not know, a second line `Not
+recognised, not passed again on resume: <names>`. "Started with": a model changed inside the
 session later (`/model`) is not seen, and the tooltip claims no more. Not messy (the owner's
 condition): it never adds a line and never moves what the line showed before it — it takes only
 the room the other parts leave (its gap included), so when the line is short of room it is the
 first thing cut, down to nothing before the directory or the short id lose a character. A session
-with no flag a resume passes on again shows nothing — no empty item, no separator left behind —,
-one started only with flags skydeck does not know too (the resume card names those). It is shown
-for the session the pane shows, whatever its state (running in the window, in another terminal, an
-ended terminal of the window), except while the pane shows the resume card, which prints the flags
-in "Will run" (12.6): no flag is printed twice in one view. The flags reach the page as `list`'s
-`selected.launchFlags` (8.2.3), sanitised by the server and again by the page, and are shown only as
-text; nothing new is stored, and `skydeck show`, `ls` and the list's rows are unchanged.
+with no recorded flag shows nothing: no empty item, no separator left behind. It is shown for the
+session the pane shows, whatever its state (running in the window, in another terminal, an ended
+terminal of the window), except while the pane shows the resume card, which prints the flags in
+"Will run" and names the ones it does not pass on (12.6): no flag is printed twice in one view.
+The flags reach the page as `list`'s `selected.launchFlags` and `selected.unknownFlags` (8.2.3),
+sanitised by the server and again by the page, and are shown only as text; nothing new is stored,
+and `skydeck show`, `ls` and the list's rows are unchanged.
 
 Editing (stage D) uses the step 1 rules and functions: a label or group that design 7.1 refuses is
 refused with the same message; a note is edited in a text box instead of `$VISUAL`, saved as typed
@@ -3996,7 +3998,6 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W30 | On the user's own sessions (about 105), without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a block's card closed with ← and opened again with → (blocks are open by default from follow-up F3, drawn as cards with a selectable caption from follow-up F9), a click on a caption, the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |
 | W31 | Czech and US layouts in the filter's and the switcher's fields: AltGr characters and dead keys type; Ctrl+Shift+P opens and closes the switcher on both. | E | 12.8, 12.9 |
 | W32 | `skydeck update` on the user's own installation, typed in a WSL terminal of the user's own with the window open: `--check` first (the list of new commits, or "up to date"; the window and the sessions stay as they are); then, only when it listed commits, the update itself: the window says for a few seconds that the server is not answering, then reloads itself; every session is there; no second window; `skydeck doctor` has no `problem` line that was not there before. It types into no session and presses no key in the window. | F8 | 16.5, 5.1 |
-| W35 | **Real claude**, a throwaway session started from the New form with `--model` and one more flag: the header's second line ends in those flags, dim, after the short id, nothing else of the line moved; its tooltip says `Started with: …`; in a narrower window they are cut first; once it ended and was closed, the resume card's "Will run" has them and the header not; resumed, the header shows them again. | F16 | 12.5 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
