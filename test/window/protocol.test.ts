@@ -32,10 +32,13 @@ import type {
   RestoreStreamLine,
   ResultMessage,
   RowPayload,
+  SelectedPayload,
   ServerMessage,
   SizeMessage,
   SnapMessage,
+  StartMessage,
   StatusAnswer,
+  ThemeMessage,
   TokenAnswer,
   TokenState,
   ViewMessage,
@@ -139,6 +142,8 @@ const VALID: Record<string, PageMessage> = {
     sessionId: S1,
     url: 'https://github.com/a/b/pull/7',
   },
+  // Follow-up F13: the page's colours again, after the title bar's switch or the system's scheme.
+  theme: { t: 'theme', theme: { fg: '#24292f', bg: '#fbfbf9' } },
 };
 
 /** The stage D act kinds that name a session (plan D 2.2), one valid message of each. */
@@ -620,6 +625,7 @@ describe('types (checked by npm run typecheck)', () => {
       command: 'cd /home/u/project && claude --resume 11111111-1111-4111-8111-111111111111',
       flagsKnown: true,
       unknownFlags: [],
+      launchFlags: ['--model', 'opus'],
       ended: 'exited',
       expiring: false,
       expired: false,
@@ -743,8 +749,22 @@ describe('types (checked by npm run typecheck)', () => {
         // @ts-expect-error a note act's base is `base`
         baseText: '',
       } satisfies ActMessage,
+      {
+        sessionId: S1,
+        command: null,
+        flagsKnown: true,
+        unknownFlags: [],
+        // @ts-expect-error the flags a session was started with are `launchFlags` (follow-up F16)
+        startFlags: ['--model', 'opus'],
+        ended: null,
+        expiring: false,
+        expired: false,
+        note: null,
+        noteTooLong: false,
+        ticketUrl: null,
+      } satisfies SelectedPayload,
     ];
-    assert.equal(misspelt.length, 5);
+    assert.equal(misspelt.length, 6);
   });
 
   test("stage D's act kinds compile with exactly plan D 2.2's fields", () => {
@@ -1231,5 +1251,56 @@ describe("stage C's types (checked by npm run typecheck)", () => {
     assert.equal(wrong.length, 3);
     const all = [requests, answer, stream, statuses];
     assert.deepEqual(JSON.parse(JSON.stringify(all)), all);
+  });
+});
+
+describe('parsePageMessage: the theme message (follow-up F13)', () => {
+  const theme = VALID['theme'] as ThemeMessage;
+
+  test('its colours are checked as strictly as start.theme: exactly fg and bg, each a text', () => {
+    assert.deepEqual(page({ t: 'theme', theme: { fg: 'not a colour', bg: '' } }), {
+      ok: true,
+      value: { t: 'theme', theme: { fg: 'not a colour', bg: '' } },
+    });
+    for (const wrong of [
+      { ...theme.theme, [MARKER]: 1 },
+      { fg: '#ffffff' },
+      { bg: '#000000' },
+      {},
+      { fg: '#ffffff', bg: null },
+      { fg: 1, bg: '#000000' },
+      { fg: '#ffffff', bg: ['#000000'] },
+      { fg: 'a'.repeat(1025), bg: '#000000' },
+      { fg: '#ffffff', bg: '\ud800' },
+      null,
+      '#ffffff',
+      ['#ffffff', '#000000'],
+    ]) {
+      refused(page({ ...theme, theme: wrong }));
+    }
+    assert.equal(page({ ...theme, theme: { fg: 'a'.repeat(1024), bg: '#000000' } }).ok, true);
+  });
+
+  test('the same check as start’s theme: what one refuses the other refuses', () => {
+    const start = VALID['start'] as StartMessage;
+    for (const colours of [
+      { fg: '#ffffff', bg: '#000000' },
+      { fg: '#ffffff' },
+      { fg: '#ffffff', bg: '#000000', [MARKER]: 1 },
+      { fg: 'é'.repeat(513), bg: '#000000' },
+      { fg: 'é'.repeat(512), bg: '#000000' },
+    ]) {
+      assert.equal(
+        page({ ...theme, theme: colours }).ok,
+        page({ ...start, theme: colours }).ok,
+        JSON.stringify(Object.keys(colours)),
+      );
+    }
+  });
+
+  test('no other field, and the theme is not optional', () => {
+    refused(page({ t: 'theme' }));
+    refused(page({ t: 'theme', fg: '#ffffff', bg: '#000000' }));
+    refused(page({ ...theme, focused: true }));
   });
 });

@@ -18,6 +18,8 @@ import {
   prName,
   prLineTip,
   splitPrs,
+  STARTED_WITH_MAX,
+  startedWithText,
   timesText,
   titleSourceText,
 } from '../../web/header-text.js';
@@ -80,6 +82,7 @@ function selected(note: string | null, noteTooLong = false): SelectedPayload {
     command: null,
     flagsKnown: true,
     unknownFlags: [],
+    launchFlags: [],
     ended: null,
     expiring: false,
     expired: false,
@@ -87,6 +90,11 @@ function selected(note: string | null, noteTooLong = false): SelectedPayload {
     noteTooLong,
     ticketUrl: null,
   };
+}
+
+/** `selected` with the flags of follow-up F16. */
+function flagged(launchFlags: unknown, unknownFlags: unknown = []): SelectedPayload {
+  return { ...selected(null), launchFlags, unknownFlags } as SelectedPayload;
 }
 
 /** Every level of design 7.3 and its words in the dialog (D13). */
@@ -447,6 +455,133 @@ describe("noteLine: the note's line of the header (S2 12.5, D12)", () => {
     assert.deepEqual(noteLine(row({ hasNote: true, noteHead: [] }), null), {
       text: '…',
       empty: false,
+    });
+  });
+});
+
+describe("startedWithText: the flags a session was started with, last on the header's second line (follow-up F16)", () => {
+  const NONE = { text: '', tip: '' };
+
+  test('nothing without flags: no selected, none recorded', () => {
+    assert.deepEqual(startedWithText(null), NONE);
+    assert.deepEqual(startedWithText(flagged([])), NONE);
+    assert.deepEqual(startedWithText(flagged([], [])), NONE);
+  });
+
+  test('a session started only with flags the recording knows by name shows those names (ruled: it was started with a flag, so never nothing)', () => {
+    assert.deepEqual(startedWithText(flagged([], ['--frob'])), {
+      text: '--frob',
+      tip: 'Started with: --frob\nNot recognised, not passed again on resume: --frob',
+    });
+  });
+
+  test('the flags in the order recorded, as one text; the tooltip says "Started with:"', () => {
+    assert.deepEqual(startedWithText(flagged(['--model', 'opus', '--permission-mode', 'plan'])), {
+      text: '--model opus --permission-mode plan',
+      tip: 'Started with: --model opus --permission-mode plan',
+    });
+  });
+
+  test('a value with spaces is shown as recorded: not quoted, its spaces kept', () => {
+    assert.deepEqual(startedWithText(flagged(['--append-system-prompt', 'be  brief', '-d'])), {
+      text: '--append-system-prompt be  brief -d',
+      tip: 'Started with: --append-system-prompt be  brief -d',
+    });
+  });
+
+  test(`at most ${STARTED_WITH_MAX} characters, the last of them … beyond that; the tooltip uncut`, () => {
+    assert.equal(STARTED_WITH_MAX, 40);
+    const exact = ['--model', 'x'.repeat(40 - '--model '.length)];
+    assert.equal(startedWithText(flagged(exact)).text, `--model ${'x'.repeat(32)}`);
+    assert.equal(startedWithText(flagged(exact)).text.length, 40);
+    const over = ['--model', 'x'.repeat(33)];
+    const shown = startedWithText(flagged(over));
+    assert.equal(shown.text, `--model ${'x'.repeat(31)}…`);
+    assert.equal([...shown.text].length, 40);
+    assert.equal(shown.tip, `Started with: --model ${'x'.repeat(33)}`);
+    const long = ['--settings', `/home/u/${'s'.repeat(200)}.json`, '--model', 'opus'];
+    const cutLong = startedWithText(flagged(long));
+    assert.equal([...cutLong.text].length, 40);
+    assert.ok(cutLong.text.endsWith('…'));
+    assert.equal(cutLong.tip, `Started with: ${long.join(' ')}`);
+  });
+
+  test('characters are counted as characters: a pair of surrogates is one and never split', () => {
+    const smiles = ['--append-system-prompt', '🙂'.repeat(30)];
+    const shown = startedWithText(flagged(smiles));
+    assert.equal([...shown.text].length, 40);
+    assert.equal(shown.text, `--append-system-prompt ${'🙂'.repeat(16)}…`);
+    assert.equal(startedWithText(flagged(['-d', '🙂'.repeat(37)])).text, `-d ${'🙂'.repeat(37)}`);
+  });
+
+  test('a character as it is seen: a joined emoji and a letter with its combining mark count as one each and are never split', () => {
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'; // one family emoji, five code points
+    const shown = startedWithText(flagged(['--append-system-prompt', family.repeat(30)]));
+    assert.equal(shown.text, `--append-system-prompt ${family.repeat(16)}…`);
+    const marked = 'e\u0301'; // é as e and a combining acute accent
+    assert.equal(
+      startedWithText(flagged(['-d', marked.repeat(37)])).text,
+      `-d ${marked.repeat(37)}`,
+    );
+    assert.equal(
+      startedWithText(flagged(['-d', marked.repeat(38)])).text,
+      `-d ${marked.repeat(36)}…`,
+    );
+  });
+
+  test('the names not recognised come after the kept flags in the text and on the first line of the tooltip; its second line names them again, not passed on resume', () => {
+    assert.deepEqual(startedWithText(flagged(['--model', 'opus'], ['--frob', '-Z'])), {
+      text: '--model opus --frob -Z',
+      tip: 'Started with: --model opus --frob -Z\nNot recognised, not passed again on resume: --frob -Z',
+    });
+  });
+
+  test('the cut at 40 characters is over the whole text, the names included; the tooltip uncut', () => {
+    const kept = ['--model', 'opus', '--permission-mode', 'plan']; // 35 characters
+    const shown = startedWithText(flagged(kept, ['--frobnicate']));
+    assert.equal(shown.text, '--model opus --permission-mode plan --f…');
+    assert.equal([...shown.text].length, 40);
+    assert.equal(
+      shown.tip,
+      'Started with: --model opus --permission-mode plan --frobnicate\nNot recognised, not passed again on resume: --frobnicate',
+    );
+    const names = Array.from({ length: 8 }, (_, at) => `--unknown-${at}`);
+    const many = startedWithText(flagged([], names));
+    assert.equal([...many.text].length, 40);
+    assert.equal(many.text, '--unknown-0 --unknown-1 --unknown-2 --u…');
+  });
+
+  test("the server's strings are sanitised again; markup stays text", () => {
+    assert.deepEqual(
+      startedWithText(
+        flagged(['--model', 'op\x1b[31mus\x07', '--name-x', '<b>x</b>\n'], ['--a\tb']),
+      ),
+      {
+        text: '--model opus --name-x <b>x</b>  --a b',
+        tip: 'Started with: --model opus --name-x <b>x</b>  --a b\nNot recognised, not passed again on resume: --a b',
+      },
+    );
+  });
+
+  test('a field missing, or of the wrong shape, holds no flag (a list of another server)', () => {
+    const { launchFlags: _gone, ...older } = flagged(['--model', 'opus']);
+    assert.deepEqual(startedWithText(older as SelectedPayload), NONE);
+    assert.deepEqual(startedWithText(flagged('--model opus')), NONE);
+    assert.deepEqual(startedWithText(flagged(['--model', 7])), NONE);
+    assert.deepEqual(startedWithText(flagged(null)), NONE);
+    // The names stand on their own: kept flags of the wrong shape do not hide them.
+    assert.deepEqual(startedWithText(flagged(['--model', 7], ['--frob'])), {
+      text: '--frob',
+      tip: 'Started with: --frob\nNot recognised, not passed again on resume: --frob',
+    });
+    // Unknown names of the wrong shape: none, and no second line.
+    assert.deepEqual(startedWithText(flagged(['--verbose'], '--frob')), {
+      text: '--verbose',
+      tip: 'Started with: --verbose',
+    });
+    assert.deepEqual(startedWithText(flagged(['--verbose'], [3])), {
+      text: '--verbose',
+      tip: 'Started with: --verbose',
     });
   });
 });

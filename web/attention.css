@@ -7,10 +7,14 @@
   --need-finished: #1f8a4c;
   --need-ended: var(--crash);
 }
+/* Dark: the system's, or forced (style.css says how; the two rules are the same). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --need-finished: #4cc27a;
   }
+}
+:root[data-theme='dark'] {
+  --need-finished: #4cc27a;
 }
 
 .notify-on {

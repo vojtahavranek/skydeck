@@ -198,7 +198,7 @@ Added to design 11:
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
 | `src/window/view/search/` | The rules of search as pure functions (stage E, plan E1): the filter's words and chips (12.8), the blocks (12.2; the code calls them stacks), the switcher's ranking (12.8); `build.ts` calls them. No pattern is ever built from a search text. | values: its own files and `text`'s `sanitize` only; types: sessions, `protocol.ts`, `hub.ts`, `view/sections.ts` |
-| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS. No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
+| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the theme switch's stored choice on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
 
@@ -862,7 +862,15 @@ DECRQM, CPR, DSR, DECRQSS) is sent to the keeper as input; the page never answer
 answers OSC 10 and OSC 11 (foreground and background colour) itself, from the colours of the theme
 the last focused page reports (the headless terminal has no colours); a reported colour is used
 only when it is exactly `#rrggbb`, else — and until a page has sent its theme — xterm.js's
-default colour is (foreground `#ffffff`, background `#000000`). It does not answer XTVERSION
+default colour is (foreground `#ffffff`, background `#000000`). A page reports its colours in
+`start` (8.2.2) and, from follow-up F13, again in `theme` (8.2.3) whenever they change while it is
+open: a click on the title bar's theme switch (12.1), the same choice made in another window of
+the profile, or the system's scheme while the page follows it. The server keeps each page's latest
+for that page's next `focus`, and answers from it at once while that page is the one that had
+focus last, also when its window has lost the focus since (the system's scheme is changed in
+Windows' settings, outside the window). So a program that asks after a change is told the colours
+its terminal has then; before F13 the answer stayed the `start`'s until the page was loaded again,
+also after a change of the system's scheme. It does not answer XTVERSION
 in the first version (9.3). It never answers while it replays (7.3). The answers to a record's
 queries go to the keeper once that record has been applied.
 
@@ -1359,7 +1367,9 @@ the server's proof.
    connections use mode `key`.
 6. Only then the page sends `{ "t": "start", "assetVersion": "<the version it was loaded with>",
    "windowId": "<random per page>", "focused": true, "theme": { "fg": "…", "bg": "…" } }`, and the
-   connection is open for 8.2.3's messages. A page whose `assetVersion` is not the server's
+   connection is open for 8.2.3's messages. `theme` is the terminal's foreground and background
+   as the page draws them at that moment (the system's scheme, or the title bar's switch, 12.1);
+   a later change is sent as 8.2.3's `theme` (follow-up F13). A page whose `assetVersion` is not the server's
    reloads itself (it was loaded from an older server), without sending `start`. It does so once
    per version of the server's (it remembers that version for the tab): a page that still differs
    after that reload is not served by that server at all — most likely something else answers the
@@ -1470,6 +1480,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `detach` | `term` | Stop it. |
 | `input` | `term`, `data` | Typed text (UTF-8) for the terminal; `binary: true` when `data` is a byte string from xterm.js's binary channel (mouse reports). Makes this page the size owner. |
 | `resize` | `term`, `cols`, `rows` | The page's fitted size (8.2.6). |
+| `theme` | `theme` (`fg`, `bg`: each a text, checked exactly as `start.theme`, 8.2.2) | From follow-up F13: the page's colours changed while it is open — a click on the title bar's theme switch, the same choice made in another window of the profile, or the system's scheme while the page follows it (12.1). The server keeps them for the page's next `focus`, and answers OSC 10 and 11 from them at once while the page is the one that had focus last (7.2). |
 | `act` | `id`, `kind`, and the fields of the next table | An action (11, 12). The server answers `result` with the same `id`. |
 
 | `act` kind | Fields | Effect |
@@ -1514,7 +1525,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view is filtering and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired) and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters: about 2.4 KB, at most about 14 KiB when JSON escapes every character to six bytes; absent, as in a list of a server before F15, is none); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line and folds nothing), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view is filtering and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line and folds nothing), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -1727,6 +1738,16 @@ XTVERSION is not answered in the first version. Claude Code recognises xterm.js 
 starts with `xterm.js` and then changes wheel scrolling, glyph-atlas resets and link clicks
 (section 21); an honest answer `xterm.js(6.0.0)` would turn that on. Whether that helps is check
 W5; the answer is a one-line change in the screen side.
+
+The colours OSC 10 and 11 are answered with are the page's (7.2). From follow-up F13 a program that
+asks after a click on the title bar's theme switch (12.1), or after a change of the system's scheme,
+is told the colours its terminal has then. A program that asked before keeps what it was told until
+it asks again: nothing tells a running program that the colours changed — no notification of a
+theme change is sent to programs, which is not part of F13. Claude Code's `/theme` has an "Auto
+(match terminal)" theme; its documentation (read 2026-11-18) says only "Selecting the auto option
+detects your terminal's light or dark background, so the theme follows OS appearance changes
+whenever your terminal does". How and when it detects — whether through OSC 11, at a session's
+start or again while it runs — is not documented; W5 and W34 write down what is seen.
 
 ### 9.4 Widths
 
@@ -2187,6 +2208,29 @@ bar at the bottom. The list has three sections:
   A click on its header folds and unfolds it, as ← and → do, and leaves the keyboard on the list
   (ruled by the plan owner, plan task 27).
 
+Each section's header is a band (follow-up F17, 2026-11-18; the owner, shown six pictures: "Lets go
+for X"): across the whole width of the list column, edge to edge and square, on the page's own
+background (`--bg`: a step darker than the list's `--panel`, so the band looks sunk into the list),
+with a 1 px line above and below it in the line colour, 28 px high with them — within 1 px of the
+header it replaced (27.85 px), and below the rows' scroll margin, so that a row or a caption the
+keyboard scrolls into view is never left under it. Before the title a small bar (3 × 12 px, rounded)
+marks the section: Open's in the accent colour, Recent's in `--dim`, Earlier's in `--faint`. The
+title is 12 px, bold, in capitals: Open's and Recent's in the text colour, Earlier's in `--dim`
+(`--faint` reads too weakly on the darker ground); the count follows it, dim; a folded Earlier's
+span sits at the right end. Earlier's fold arrow keeps its place before the bar, at least 5 px apart
+from it, so that the two never read as one sign. While its section scrolls, the band stays at the
+top of the list and nothing of a row or a card shows through it. Two bands that meet (Open with no
+row, right above the next section) share one line. A section's first row (no card before it) that
+the keyboard brings into view from below rests right under its band, so that the band sits at the
+list's top edge over the one stuck there, with no strip of that one above it (the other rows keep
+their scroll margin). The bar is decoration: it is not announced, and it is no control of its own (a
+click on it is a click on its header). Why a band: since F9 the cards of the blocks have a stronger
+edge than a faint rule, and the old header — a small faint title with no line — was lost among them
+(the owner: "the resent open and eatlier are not much visible now"); the band is the one thing
+stronger than the cards, in the dark scheme too, and adds next to no height (half a pixel for the
+three). Its words stay at least 4.5 : 1 against the band and Open's bar at least 3 : 1, in both
+schemes (`test/web/section-band.test.ts`).
+
 Done sessions are hidden (design 7.1), with a footer "17 done hidden · show". Filtering and the
 switcher search done ones too (12.8).
 
@@ -2198,6 +2242,32 @@ fold; a session that needs you is counted there and in no other count, so that t
 (3 + 3 + 2 above). The window title's `(3)` is the same count. Which rows need you, and in which
 order Ctrl+Shift+J goes, the server sends with each `list` (8.2.3 `needYou`): the page decides no
 rule (4.3; stage B, plan B7).
+
+**The theme switch** (follow-up F13, on the owner's question of 2026-11-18: "I set up to follow the
+OS environment but if I wanned to switch, I probably cannot?"). The page is light or dark as the
+system is (Windows' Settings, Personalization, Colors: the `prefers-color-scheme` media query), and
+changes with it while it is open. A small button in the title bar, right before `Switch…` and drawn
+as it is, shows a half circle and the state's word: `Auto` (the system's, the default), `Light` or
+`Dark`. A click goes to the next (Auto → Light → Dark → Auto); its tooltip says the state and what
+a click does (`Theme: follows the system. Click for light.`, `Theme: light. Click for dark.`,
+`Theme: dark. Click to follow the system.`); its word keeps the room of the widest, so that a click
+moves nothing. Forced dark is exactly the system's dark and forced light exactly the system's
+light: every colour of the page and `color-scheme` (scroll bars, form controls); at a click every
+terminal of the page is repainted in the new colours — background, text, the sixteen colours, the
+selection —, a hidden one too, as after a change of the system's scheme. A click moves no keyboard
+(the title bar takes none, 12.9) and changes no selection; there is no key chord, no `config.json`
+key and no command-line flag for it. The choice is the page's: one key of its `localStorage`
+(`skydeck-theme`, `light` or `dark`; none for Auto), so it holds across reloads and restarts of the
+window and in every window of the profile, and another window of the profile follows a change at
+once (the `storage` event). A stored value that is neither, or storage that throws or is missing,
+is Auto; the button then still works for the life of the page. A classic script of its own
+(`web/theme-early.js`, loaded in `<head>` ahead of the style sheets, which the policy allows as it
+is, 8.2.1) puts the stored choice on `<html data-theme>` before the first paint, so that no frame
+shows the other theme. Nothing of it is sent to or kept by the server but the colours, which the
+page reports again for OSC 10 and 11 (8.2.3 `theme`; 7.2, 9.3). In each style sheet with a dark
+scheme (`style.css`, `terminal-view.css`, `attention.css`) the dark values are written twice — the
+system's, scoped to "not forced light", and a twin for forced dark — and a unit test holds the two
+equal declaration by declaration. Check W34.
 
 ### 12.2 Rows
 
@@ -2498,7 +2568,8 @@ and no mark.
 For the selected session: the title (a click edits the label, stage D), the group chip (dashed
 `+ group` when none; its tooltip says when the group comes from the title; a ✎ beside it edits
 it), the state pill, the project directory, "opened <time> · last active <age>", the short id (a
-click copies the whole id), where the title comes from, and buttons Note and Done / Undone. Then
+click copies the whole id), where the title comes from, from follow-up F16 the flags the session
+was started with (below), and buttons Note and Done / Undone. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — the window's
 chip (12.3), then the open ones side by side as far as they fit (`repo #n · failing`; a click
@@ -2516,6 +2587,42 @@ area under it does not jump between sessions and the page knows its size before 
 shown: the directory is one line, cut with an ellipsis when it is long (the whole path stays in
 the page, is selected and copied whole, and is its tooltip); the short id is never cut (ruled by
 the plan owner, review of plan task 29).
+
+**The flags it was started with** (asked for by the owner on 2026-11-18, follow-up F16; the details
+ruled by the lead that day and on its reviews). The last item of the second line, after the short
+id: the flags the session was started with as the hook recorded them (design 5.3) — first the ones
+a resume passes on again (design 7.6; `passedOnFlags`) with their values, in the order recorded,
+then the ones the recording knows only by name (in no table: a resume does not pass them on), bare,
+as recorded (ruled: a session started with a flag never shows nothing) — as one text, `--model opus
+--permission-mode plan`; a value is shown as recorded, one with spaces not quoted. They are the
+flags of the latest start that has a recorded command line (a resume in another terminal with other
+flags replaces them); a session whose start was never recorded shows nothing, as one started
+without flags (its resume card says the original flags are unknown). The recording keeps neither a
+prompt nor any flag a resume removes (design 7.6: the ones that pick, name, move or place the
+session, such as `--resume`, `--continue`, `--session-id`, `--name`, `--worktree`, `--tmux` and
+`--bg`), so those are never shown, also when they were typed into the New form. In the short id's
+lighter grey (ruled: a side note, not the folder's grey) and its monospace font, with no label
+before it and no box, the line's own gap before it whether "id copied" shows or not. At most 40
+characters over the whole — characters as they are seen, a joined emoji or a letter with its mark
+being one —, the last of them `…` beyond that; its tooltip holds the whole text uncut, `Started
+with: <flags>`, and when there are names it does not know, a second line `Not recognised, not
+passed again on resume: <names>`. "Started with": a model changed inside the session later
+(`/model`) is not seen, and the tooltip claims no more. Not messy (the owner's condition): it never
+adds a line and never moves what the line showed before it — it takes only the room the other parts
+leave (its gap included), so when the line is short of room it is the first thing cut, down to
+nothing before the directory or the short id lose a character; and it shows only once it has the
+room of six characters (then six or more, the last of them `…` when cut, or all of a shorter text),
+and nothing before, never a bare `-…`. A session with no recorded flag shows
+nothing: no empty item, no separator left behind. It is shown for the session the pane shows,
+whatever its state (running in the window, in another terminal, an ended terminal of the window, a
+session not running), except while the resume card prints the command under "Will run" (12.6),
+which holds the flags and names the ones it does not pass on: no flag is printed twice in one view.
+A resume card without the command — a word skydeck cannot print or no known directory ("skydeck
+cannot show the exact command"), or an expired session, whose card has no "Will run" — leaves the
+item shown (ruled on review 2), so the flags are never shown nowhere either. The flags reach the
+page as `list`'s `selected.launchFlags` and `selected.unknownFlags` (8.2.3), sanitised by the server
+and again by the page, and are shown only as text; nothing new is stored, and `skydeck show`, `ls`
+and the list's rows are unchanged.
 
 Editing (stage D) uses the step 1 rules and functions: a label or group that design 7.1 refuses is
 refused with the same message; a note is edited in a text box instead of `$VISUAL`, saved as typed
@@ -4046,7 +4153,10 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W30 | On the user's own sessions (about 105), without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a block's card closed with ← and opened again with → (blocks are open by default from follow-up F3, drawn as cards with a selectable caption from follow-up F9), a click on a caption, the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |
 | W31 | Czech and US layouts in the filter's and the switcher's fields: AltGr characters and dead keys type; Ctrl+Shift+P opens and closes the switcher on both. | E | 12.8, 12.9 |
 | W32 | `skydeck update` on the user's own installation, typed in a WSL terminal of the user's own with the window open: `--check` first (the list of new commits, or "up to date"; the window and the sessions stay as they are); then, only when it listed commits, the update itself: the window says for a few seconds that the server is not answering, then reloads itself; every session is there; no second window; `skydeck doctor` has no `problem` line that was not there before. It types into no session and presses no key in the window. | F8 | 16.5, 5.1 |
-| W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (`skydeck show`; from follow-up F16 also the header); removed with ×, `Undo` puts it back at its place. It types no prompt and touches no real session. | F15 | 12.6, 10.2 |
+| W33 | **Real claude**: `skydeck install` asks whether to turn Claude Code's ← shortcut off (three lines and `Turn the shortcut off? [y/N]`); `y` sets only `leftArrowOpensAgents` to `false` in `~/.claude.json`, after a backup, and `skydeck doctor` then says the shortcut is off; in a throwaway session of the window started after it, ← on its empty prompt leaves the terminal as it is (no agent view). It changes that one key of the user's on purpose (asked for on 2026-11-17) and prints neither file. | F11 | 7.9 |
+| W34 | **Real claude**: the title bar's theme switch in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme "Auto (match terminal)" (looked at in `/theme`, never in its files), a new throwaway session started in each forced state picks the matching one, and whether one already running changes its theme at a switch is written down (not documented). At the end the switch, Windows' mode and Claude Code's theme are as they were. | F13 | 12.1, 7.2, 9.3 |
+| W35 | **Real claude**, a throwaway session started from the New form with `--model` and one more flag: the header's second line ends in those flags, in the short id's grey, after the short id, nothing else of the line moved; its tooltip says `Started with: …`; in a narrower window they are cut first; once it ended and was closed, the resume card's "Will run" has them and the header not; resumed, the header shows them again. | F16 | 12.5 |
+| W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (the header's flags, F16, and `skydeck show`); removed with ×, `Undo` puts it back at its place. It types no prompt and touches no real session. | F15 | 12.6, 10.2 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

@@ -732,6 +732,13 @@ export function createPages(deps: PagesDeps): Pages {
         }
         deps.seen?.focus(conn, message.focused, message.selected);
         return;
+      case 'theme':
+        // Follow-up F13: the page's colours changed while it is open. Kept for its next focus;
+        // the hub answers OSC 10 / 11 from them at once while it is the page that had focus last
+        // (S2 7.2), also when its window has lost the focus since.
+        conn.theme = { fg: message.theme.fg, bg: message.theme.bg };
+        if (conn.focusedAt !== 0 && conn.focusedAt === focusOrder) hub.setTheme(conn.theme);
+        return;
       case 'attach':
         onAttach(conn, message.term, message.cols, message.rows);
         return;

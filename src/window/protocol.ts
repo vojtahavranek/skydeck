@@ -162,6 +162,14 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'dismiss-restore'; bootId: string }
   | { t: 'act'; id: number; kind: 'favourite-add'; text: string; at?: number }
   | { t: 'act'; id: number; kind: 'favourite-remove'; text: string };
+/** Follow-up F13: the page's colours changed while it is open — the title bar's theme switch was
+ *  clicked here or in another window of the profile, or the system's scheme changed while the page
+ *  follows it. The same colours as `start.theme`, checked the same way; the server answers OSC 10
+ *  and 11 from the latest the page that had focus last reported (S2 7.2). */
+export interface ThemeMessage {
+  t: 'theme';
+  theme: ThemePayload;
+}
 export type PageMessage =
   | HelloMessage
   | StartMessage
@@ -172,7 +180,8 @@ export type PageMessage =
   | DetachMessage
   | InputMessage
   | ResizeMessage
-  | ActMessage;
+  | ActMessage
+  | ThemeMessage;
 
 // ---------------------------------------------------------------------------------------------
 // server → page
@@ -288,6 +297,11 @@ export interface SelectedPayload {
   command: string | null; // printableCommand of the command a resume would run, null when it cannot be printed
   flagsKnown: boolean;
   unknownFlags: string[];
+  /** Follow-up F16: the flags of the session's recorded launch that a resume passes on again, with
+   *  their values, in the order recorded, each token sanitised (`passedOnFlags`); [] without a
+   *  recorded launch. The header shows them, then `unknownFlags`, as the flags it was started
+   *  with (S2 12.5). */
+  launchFlags: string[];
   ended: 'exited' | 'unexpectedly' | 'mid-turn' | null;
   expiring: boolean;
   expired: boolean;
@@ -741,6 +755,8 @@ const CLOSED: Check = (value, where) => {
 };
 
 const AREA = object({ cols: SIZE, rows: SIZE });
+/** A page's colours (`start.theme`, and follow-up F13's `theme`): exactly fg and bg, each a text. */
+const THEME = object({ fg: TEXT, bg: TEXT });
 
 /** `t` and `kind` were read before a message's own check runs. */
 const ACTS: Readonly<Record<string, Check>> = {
@@ -795,7 +811,7 @@ const MESSAGES: Readonly<Record<string, Check>> = {
     assetVersion: TEXT,
     windowId: WINDOW,
     focused: BOOLEAN,
-    theme: object({ fg: TEXT, bg: TEXT }),
+    theme: THEME,
   }),
   ping: object({ t: ANY, n: COUNT }),
   view: object(
@@ -831,6 +847,8 @@ const MESSAGES: Readonly<Record<string, Check>> = {
     if (check === undefined) return `${where}.kind: unknown`;
     return check(value, `${where}.${kind}`);
   },
+  // Follow-up F13.
+  theme: object({ t: ANY, theme: THEME }),
 };
 
 function parseJson(text: string): { ok: true; value: unknown } | { ok: false } {

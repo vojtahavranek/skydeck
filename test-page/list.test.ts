@@ -424,6 +424,346 @@ async function scripted(
   };
 }
 
+// ---------------------------------------------------------------------------------------------
+// The section headers' bands (follow-up F17)
+
+/** A box of the page, in CSS pixels (the suite's pages draw at a pixel ratio of 1). */
+interface Box {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+/** What the page draws of one section header; colours as the page computes them, `rgb(…)`. */
+interface Band extends Box {
+  section: string;
+  ground: string;
+  position: string;
+  stuckAt: string;
+  radius: string;
+  margins: string;
+  /** Each side's line: `<width> <style> <colour>`. */
+  lines: { top: string; right: string; bottom: string; left: string };
+  title: { colour: string; size: string; weight: string; transform: string };
+  count: { colour: string };
+  span: Box & { colour: string; text: string };
+  twist: Box;
+  mark: Box & {
+    colour: string;
+    radius: string;
+    hidden: string | null;
+    tabIndex: number;
+    hasTabindex: boolean;
+  };
+}
+
+/**
+ * The bands drawn, and the list column they span: the list body's box less its scroll bar
+ * (`width` is its clientWidth), and the list's own ground (the list zone's background).
+ */
+async function bands(page: Page): Promise<{ column: Box & { ground: string }; bands: Band[] }> {
+  return readPage(
+    page,
+    () => {
+      const box = (element: Element): Box => {
+        const r = element.getBoundingClientRect();
+        return { top: r.top, bottom: r.bottom, left: r.left, right: r.right };
+      };
+      const body = document.querySelector('#list .list-body');
+      const zone = document.querySelector('#list-zone');
+      if (!(body instanceof HTMLElement) || zone === null) throw new Error('no list body');
+      const b = body.getBoundingClientRect();
+      const left = b.left + body.clientLeft;
+      const column = {
+        top: b.top + body.clientTop,
+        bottom: b.top + body.clientTop + body.clientHeight,
+        left,
+        right: left + body.clientWidth,
+        ground: getComputedStyle(zone).backgroundColor,
+      };
+      const part = (band: Element, name: string): Element => {
+        const found = band.querySelector(`.${name}`);
+        if (found === null) throw new Error(`no .${name} in the band`);
+        return found;
+      };
+      return {
+        column,
+        bands: [...document.querySelectorAll('#list .list-section')]
+          .filter((band) => band instanceof HTMLElement && band.checkVisibility())
+          .map((band) => {
+            const style = getComputedStyle(band);
+            const side = (name: string): string =>
+              ['width', 'style', 'color']
+                .map((what) => style.getPropertyValue(`border-${name}-${what}`))
+                .join(' ');
+            const title = getComputedStyle(part(band, 'section-title'));
+            const mark = part(band, 'section-mark');
+            const span = part(band, 'section-span');
+            return {
+              section: (band as HTMLElement).dataset['section'] ?? '',
+              ...box(band),
+              ground: style.backgroundColor,
+              position: style.position,
+              stuckAt: style.top,
+              radius: style.borderRadius,
+              margins: style.margin,
+              lines: {
+                top: side('top'),
+                right: side('right'),
+                bottom: side('bottom'),
+                left: side('left'),
+              },
+              title: {
+                colour: title.color,
+                size: title.fontSize,
+                weight: title.fontWeight,
+                transform: title.textTransform,
+              },
+              count: { colour: getComputedStyle(part(band, 'section-count')).color },
+              span: {
+                ...box(span),
+                colour: getComputedStyle(span).color,
+                text: span.textContent ?? '',
+              },
+              twist: box(part(band, 'section-twist')),
+              mark: {
+                ...box(mark),
+                colour: getComputedStyle(mark).backgroundColor,
+                radius: getComputedStyle(mark).borderRadius,
+                hidden: mark.getAttribute('aria-hidden'),
+                tabIndex: (mark as HTMLElement).tabIndex,
+                hasTabindex: mark.hasAttribute('tabindex'),
+              },
+            };
+          }),
+      };
+    },
+    null,
+  );
+}
+
+/** The page's colours now (`var(--x)` or any colour), as it computes them: `rgb(…)`. */
+async function colours<K extends string>(
+  page: Page,
+  wanted: Record<K, string>,
+): Promise<Record<K, string>> {
+  return readPage(
+    page,
+    (wanted) => {
+      const probe = document.createElement('span');
+      document.body.append(probe);
+      const found: Record<string, string> = {};
+      for (const [name, css] of Object.entries(wanted)) {
+        probe.style.color = css;
+        found[name] = getComputedStyle(probe).color;
+      }
+      probe.remove();
+      return found;
+    },
+    wanted as Record<string, string>,
+  ) as Promise<Record<K, string>>;
+}
+
+/** `rgb(r, g, b)` as its three numbers; fails on a colour with an alpha below 1. */
+function rgb(colour: string): [number, number, number] {
+  const match = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(colour);
+  assert.ok(match !== null, `an opaque colour: ${colour}`);
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** The whole pixels inside `box`: a clip for a screenshot. */
+function inside(box: Box): { x: number; y: number; width: number; height: number } {
+  const x = Math.ceil(box.left);
+  const y = Math.ceil(box.top);
+  return { x, y, width: Math.floor(box.right) - x, height: Math.floor(box.bottom) - y };
+}
+
+/**
+ * The colours of the pixels of `clip`, row by row, each `r,g,b`, as the screenshot has them; the
+ * browser decodes the picture, in a blank page of the same context (as
+ * test-page/terminal-frame.test.ts does).
+ */
+async function pixels(
+  page: Page,
+  clip: { x: number; y: number; width: number; height: number },
+): Promise<string[][]> {
+  const png = await page.screenshot({ clip, animations: 'disabled' });
+  const blank = await page.context().newPage();
+  try {
+    return await blank.evaluate(async (base64) => {
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const context = canvas.getContext('2d');
+      if (context === null) throw new Error('no canvas');
+      context.drawImage(bitmap, 0, 0);
+      const data = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+      return Array.from({ length: bitmap.height }, (_, y) =>
+        Array.from({ length: bitmap.width }, (_, x) => {
+          const i = (y * bitmap.width + x) * 4;
+          return `${data[i]},${data[i + 1]},${data[i + 2]}`;
+        }),
+      );
+    }, png.toString('base64'));
+  } finally {
+    await blank.close();
+  }
+}
+
+/** Which pixel columns of `clip` the page draws something in other than `ground` (`rgb(…)`). */
+async function inkColumns(
+  page: Page,
+  clip: { x: number; y: number; width: number; height: number },
+  ground: string,
+): Promise<boolean[]> {
+  const plain = rgb(ground).join(',');
+  const rows = await pixels(page, clip);
+  return Array.from({ length: clip.width }, (_, x) => rows.some((row) => row[x] !== plain));
+}
+
+/**
+ * Bands that overlap only in part (`''` when none do): a band stuck at the top showing as a strip
+ * above the band of the next section, which rests below it. Bands that meet share their one line
+ * (1 px), and a band stuck over another covers it whole.
+ */
+async function bandStrips(page: Page): Promise<string> {
+  return readPage(
+    page,
+    () => {
+      const boxes = [...document.querySelectorAll('#list .list-section')]
+        .filter((band) => band instanceof HTMLElement && band.checkVisibility())
+        .map((band) => ({
+          section: (band as HTMLElement).dataset['section'] ?? '',
+          box: band.getBoundingClientRect(),
+        }));
+      for (const [i, a] of boxes.entries()) {
+        for (const b of boxes.slice(i + 1)) {
+          const overlap = Math.min(a.box.bottom, b.box.bottom) - Math.max(a.box.top, b.box.top);
+          if (overlap > 1.5 && overlap < Math.min(a.box.height, b.box.height) - 0.5) {
+            return `${a.section} ${a.box.top}–${a.box.bottom} shows above ${b.section} ${b.box.top}–${b.box.bottom}`;
+          }
+        }
+      }
+      return '';
+    },
+    null,
+  );
+}
+
+/**
+ * Where the selected line (a row, or a closed block's caption) is: `clear` when it is inside the
+ * list's body (to 1 px: a scroll position is whole pixels, the body's box is not) and no band
+ * covers any part of it, else what covers it.
+ */
+async function selectedClear(page: Page): Promise<string> {
+  return readPage(
+    page,
+    () => {
+      const line = document.querySelector('#list [data-selected="true"]');
+      const body = document.querySelector('#list .list-body');
+      if (!(line instanceof HTMLElement) || !(body instanceof HTMLElement)) return 'no line';
+      const r = line.getBoundingClientRect();
+      const { top, bottom } = body.getBoundingClientRect();
+      if (r.top < top - 1 || r.bottom > bottom + 1) {
+        return `outside the body: ${r.top}–${r.bottom} in ${top}–${bottom}`;
+      }
+      for (const band of document.querySelectorAll('#list .list-section')) {
+        const b = band.getBoundingClientRect();
+        if (b.bottom > r.top + 0.5 && b.top < r.bottom - 0.5) {
+          return `under the band ${(band as HTMLElement).dataset['section']}: line ${r.top}–${r.bottom}, band ${b.top}–${b.bottom}`;
+        }
+      }
+      return 'clear';
+    },
+    null,
+  );
+}
+
+/** The selected line: a row's session id, or `caption <group>` for a closed block's caption. */
+async function selectedLine(page: Page): Promise<string> {
+  return readPage(
+    page,
+    () => {
+      const line = document.querySelector('#list [data-selected="true"]');
+      if (!(line instanceof HTMLElement)) return '';
+      return line.classList.contains('block-head')
+        ? `caption ${line.querySelector('.block-name')?.textContent ?? ''}`
+        : (line.dataset['id'] ?? '');
+    },
+    null,
+  );
+}
+
+/** Ids of rows of a section: `<n>` from 1 up, the section's own first digits before it. */
+const bandIds = (prefix: number, count: number): string[] =>
+  Array.from(
+    { length: count },
+    (_, i) => `${String(prefix * 1000 + i).padStart(8, '0')}-0000-4000-8000-000000000000`,
+  );
+
+/**
+ * A list of every kind of line under every band: Open's sessions running in another terminal;
+ * Recent with the blocks `orb` (its rows 4 to 6) and `web` (rows 12 to 14), drawn as open cards,
+ * or `web` as its caption alone (the server's answer to a view that names it closed: F9); Earlier
+ * unfolded, with an open card of `old` (its rows 2 to 4), or folded (its count and span).
+ */
+function bandList(
+  open: number,
+  week: number,
+  earlier: number | 'folded',
+  webClosed = false,
+): Record<string, unknown> {
+  const blocks = (ids: string[], cards: [group: string, from: number, to: number][]) =>
+    ids.map((id, i) => {
+      const card = cards.find(([, from, to]) => i >= from && i <= to);
+      if (card === undefined) return fullRow(id, { lastActivityNs: ago(BigInt(i + 1) * MIN) });
+      const [group, from, to] = card;
+      return fullRow(id, {
+        lastActivityNs: ago(BigInt(i + 1) * MIN),
+        group,
+        groupSource: 'meta',
+        stack: {
+          group,
+          size: to - from + 1,
+          role: i === from ? 'head' : 'member',
+          head: ids[from] ?? '',
+        },
+      });
+    });
+  const recent = blocks(bandIds(2, week), [
+    ['orb', 4, 6],
+    ['web', 12, 14],
+  ]);
+  const list = fullList({
+    open: bandIds(1, open).map((id, i) =>
+      fullRow(id, {
+        state: 'running',
+        sinceNs: ago(BigInt(i + 1) * MIN),
+        elsewhere: { pid: 4100 + i, tty: null, dir: null },
+      }),
+    ),
+    week: webClosed ? recent.filter((row) => row.group !== 'web') : recent,
+    earlier: earlier === 'folded' ? 'folded' : blocks(bandIds(3, earlier), [['old', 2, 4]]),
+  });
+  const [, section] = list['sections'] as SectionPayload[];
+  if (section !== undefined && webClosed) {
+    section.count = week;
+    section.closedStacks = [
+      { group: 'web', size: 3, needYou: 0, head: bandIds(2, week)[12] ?? '', at: 12 },
+    ];
+  }
+  return list;
+}
+
+/** Whether a view names Recent's block `web` closed (F9: `view.closed`). */
+const namesWebClosed = (view: Record<string, unknown>): boolean =>
+  Array.isArray(view['closed']) &&
+  view['closed'].some(
+    (block: { section?: unknown; group?: unknown }) =>
+      block.section === 'week' && block.group === 'web',
+  );
+
 test('the list', async (t) => {
   const chromium = await browser(t);
 
@@ -1559,6 +1899,340 @@ test('the list', async (t) => {
         S1,
         { timeout: PAGE_WAIT_MS },
       );
+      assert.deepEqual(await s.page.evaluate(() => Reflect.get(globalThis, 'pageErrors')), []);
+    },
+  );
+
+  await t.test(
+    "the section headers are bands (F17), light and dark: the page's --bg as their ground, off the list's; the list column's full width, 28 px, a 1 px --line above and below, square, sticky and opaque; before each title a mark in its section's colour (Open --accent, Recent --dim, Earlier --faint), the titles --text but Earlier's --dim, the count dim, a folded Earlier's span at the right end; Earlier's arrow at least 5 px from its mark, its box 6 px from the mark's; the mark is decoration",
+    async (t) => {
+      const unfolded = (view: Record<string, unknown>): boolean =>
+        Array.isArray(view['unfolded']) && view['unfolded'].includes('earlier');
+      const s = await scripted(
+        t,
+        chromium,
+        (view) => bandList(3, 8, unfolded(view) ? 6 : 'folded'),
+        45,
+      );
+      await untilDrawn(s.page, (rows) => rows.length === 11, 'Open and Recent');
+      assert.deepEqual(await headers(s.page), [
+        'open Open 3',
+        'week Recent 8',
+        'earlier Earlier 4 9d–30d ago',
+      ]);
+      assert.deepEqual(await headerTips(s.page), [
+        'week section-title: last active in the last 7 days',
+      ]);
+      await s.page.mouse.move(1200, 600); // over the right side: nothing of the list is hovered
+
+      /** Earlier's arrow (its ink, from the screenshot) and its mark: the blank columns between. */
+      const arrowGap = async (band: Band): Promise<number> => {
+        const clip = inside({
+          top: band.top + 1,
+          bottom: band.bottom - 1,
+          left: band.twist.left,
+          right: band.mark.right,
+        });
+        const ink = await inkColumns(s.page, clip, band.ground);
+        const markFrom = Math.floor(band.mark.left) - clip.x;
+        const arrow = ink.slice(0, markFrom).lastIndexOf(true);
+        const mark = ink.indexOf(true, markFrom);
+        assert.ok(arrow !== -1, `the arrow is drawn: ${JSON.stringify(ink)}`);
+        assert.ok(mark !== -1, `the mark is drawn: ${JSON.stringify(ink)}`);
+        return mark - arrow - 1;
+      };
+
+      for (const scheme of ['light', 'dark'] as const) {
+        await s.page.emulateMedia({ colorScheme: scheme });
+        const want = await colours(s.page, {
+          bg: 'var(--bg)',
+          panel: 'var(--panel)',
+          line: 'var(--line)',
+          text: 'var(--text)',
+          dim: 'var(--dim)',
+          faint: 'var(--faint)',
+          accent: 'var(--accent)',
+        });
+        assert.notEqual(want.bg, want.panel, `${scheme}: --bg is not the list's --panel`);
+        const marks: Record<string, string> = {
+          open: want.accent,
+          week: want.dim,
+          earlier: want.faint,
+        };
+        const titles: Record<string, string> = {
+          open: want.text,
+          week: want.text,
+          earlier: want.dim,
+        };
+        for (const folded of [true, false]) {
+          const { column, bands: drawnBands } = await bands(s.page);
+          assert.equal(column.ground, want.panel, `${scheme}: the list's own ground`);
+          assert.deepEqual(
+            drawnBands.map((band) => band.section),
+            ['open', 'week', 'earlier'],
+          );
+          for (const band of drawnBands) {
+            const what = `${scheme}, ${band.section}${folded ? '' : ', Earlier unfolded'}`;
+            assert.equal(band.ground, want.bg, `${what}: the page's --bg`);
+            rgb(band.ground); // opaque: no alpha
+            assert.equal(band.position, 'sticky', what);
+            assert.equal(band.stuckAt, '0px', what);
+            assert.ok(
+              Math.abs(band.left - column.left) < 0.5 && Math.abs(band.right - column.right) < 0.5,
+              `${what}: edge to edge of the list column (${band.left}–${band.right} in ${column.left}–${column.right})`,
+            );
+            assert.ok(Math.abs(band.bottom - band.top - 28) < 0.01, `${what}: 28 px high`);
+            assert.equal(band.lines.top, `1px solid ${want.line}`, what);
+            assert.equal(band.lines.bottom, `1px solid ${want.line}`, what);
+            assert.match(band.lines.left, /^0px none /, what);
+            assert.match(band.lines.right, /^0px none /, what);
+            assert.equal(band.radius, '0px', `${what}: square`);
+            assert.equal(band.margins, '0px', `${what}: no room around it`);
+            assert.equal(band.mark.colour, marks[band.section], `${what}: the mark's colour`);
+            assert.ok(Math.abs(band.mark.right - band.mark.left - 3) < 0.01, `${what}: 3 px wide`);
+            assert.ok(
+              Math.abs(band.mark.bottom - band.mark.top - 12) < 0.01,
+              `${what}: 12 px high`,
+            );
+            assert.notEqual(band.mark.radius, '0px', `${what}: the mark is rounded`);
+            assert.ok(
+              Math.abs(band.mark.top + band.mark.bottom - band.top - band.bottom) <= 1,
+              `${what}: the mark is in the band's middle`,
+            );
+            // The arrow's box, then the gap as built (6 px, read from the layout: whatever font
+            // draws the arrow, a narrower gap fails here), then the mark.
+            assert.ok(
+              Math.abs(band.mark.left - band.twist.right - 6) < 0.01,
+              `${what}: the arrow's box ${band.mark.left - band.twist.right} px before the mark`,
+            );
+            assert.equal(band.mark.hidden, 'true', `${what}: the mark is not announced`);
+            assert.equal(band.mark.tabIndex, -1, `${what}: no keyboard stop`);
+            assert.equal(band.mark.hasTabindex, false, what);
+            assert.equal(band.title.colour, titles[band.section], `${what}: the title's colour`);
+            assert.equal(band.title.size, '12px', what);
+            assert.equal(band.title.weight, '700', what);
+            assert.equal(band.title.transform, 'uppercase', what);
+            assert.equal(band.count.colour, want.dim, `${what}: the count is dim`);
+          }
+          const earlier = drawnBands[2];
+          assert.ok(earlier !== undefined);
+          if (folded) {
+            assert.equal(earlier.span.text, '9d–30d ago');
+            assert.equal(earlier.span.colour, want.dim, `${scheme}: the span is dim`);
+            assert.ok(
+              Math.abs(earlier.right - 10 - earlier.span.right) <= 1,
+              `${scheme}: the span at the right end (${earlier.span.right} in ${earlier.right})`,
+            );
+          }
+          // The arrow's ink at least 5 px from the mark (F17's rule; it depends on the font that
+          // draws ▸ and ▾, so the gap as built is held by the boxes above).
+          const gap = await arrowGap(earlier);
+          assert.ok(gap >= 5, `${scheme}, folded ${folded}: arrow and mark ${gap} px apart`);
+
+          // A click on Earlier's mark is a click on its header: it unfolds (then folds) Earlier.
+          await s.page.locator('#list .list-section[data-section="earlier"] .section-mark').click();
+          await untilDrawn(
+            s.page,
+            (rows) => rows.length === (folded ? 17 : 11),
+            folded ? 'Earlier unfolded by a click on its mark' : 'Earlier folded again',
+          );
+          await s.page.mouse.move(1200, 600);
+        }
+      }
+      assert.deepEqual(await s.page.evaluate(() => Reflect.get(globalThis, 'pageErrors')), []);
+    },
+  );
+
+  await t.test(
+    'two bands that meet share one line of 1 px (F17), light and dark: Open with no row, right above Recent',
+    async (t) => {
+      const s = await scripted(t, chromium, () => bandList(0, 3, 'folded'), 48);
+      await untilDrawn(s.page, (rows) => rows.length === 3, "Recent's rows");
+      await s.page.mouse.move(1200, 600);
+      for (const scheme of ['light', 'dark'] as const) {
+        await s.page.emulateMedia({ colorScheme: scheme });
+        const want = await colours(s.page, { line: 'var(--line)' });
+        const [open, week] = (await bands(s.page)).bands;
+        assert.ok(open?.section === 'open' && week?.section === 'week', 'Open, then Recent');
+        assert.ok(
+          Math.abs(week.top - (open.bottom - 1)) < 0.01,
+          `${scheme}: Recent's band starts on Open's bottom line (${open.bottom}, ${week.top})`,
+        );
+        // One column of pixels down both bands and a little beyond, in their left padding.
+        const top = Math.floor(open.top) - 2;
+        const column = await pixels(s.page, {
+          x: Math.round(open.left + 4),
+          y: top,
+          width: 1,
+          height: Math.ceil(week.bottom) + 2 - top,
+        });
+        const line = rgb(want.line).join(',');
+        const runs: number[] = [];
+        let run = 0;
+        for (const [colour] of column) {
+          if (colour === line) {
+            run++;
+          } else if (run > 0) {
+            runs.push(run);
+            run = 0;
+          }
+        }
+        if (run > 0) runs.push(run);
+        assert.deepEqual(runs, [1, 1, 1], `${scheme}: three lines of 1 px, the middle one shared`);
+      }
+    },
+  );
+
+  await t.test(
+    'a stuck band is opaque (F17), light and dark: its pixels do not change while the rows and a card scroll under it, which they do with the bands hidden',
+    async (t) => {
+      const s = await scripted(t, chromium, () => bandList(4, 40, 'folded'), 46);
+      await untilDrawn(s.page, (rows) => rows.length === 44, 'Open and Recent');
+      await s.page.mouse.move(1200, 600);
+      /** Scrolls the list body to `top` and waits for two frames. */
+      const scrollTo = async (top: number): Promise<void> => {
+        await readPage(
+          s.page,
+          (top) =>
+            new Promise<void>((done) => {
+              const body = document.querySelector('#list .list-body');
+              if (body instanceof HTMLElement) body.scrollTop = top;
+              requestAnimationFrame(() => requestAnimationFrame(() => done()));
+            }),
+          top,
+        );
+      };
+      await scrollTo(0);
+      const { column, bands: atRest } = await bands(s.page);
+      const week = atRest.find((band) => band.section === 'week');
+      assert.ok(week !== undefined);
+      // Recent's band stuck, its rows and then its card of `orb` (rows 4 to 6) passing under it.
+      const from = Math.round(week.top - column.top) + 20;
+      const offsets = [0, 13, 61, 110, 127, 150];
+      for (const scheme of ['light', 'dark'] as const) {
+        await s.page.emulateMedia({ colorScheme: scheme });
+        /** The pixels of the stuck band at each offset, and where the band was. */
+        const shots = async (): Promise<Buffer[]> => {
+          const found: Buffer[] = [];
+          for (const offset of offsets) {
+            await scrollTo(from + offset);
+            const stuck = (await bands(s.page)).bands.find((band) => band.section === 'week');
+            assert.ok(stuck !== undefined);
+            assert.ok(
+              Math.abs(stuck.top - column.top) < 0.5,
+              `${scheme}: Recent's band stuck at the top at +${offset} (${stuck.top})`,
+            );
+            found.push(await s.page.screenshot({ clip: inside(stuck), animations: 'disabled' }));
+          }
+          return found;
+        };
+        const drawnShots = await shots();
+        for (const [i, shot] of drawnShots.entries()) {
+          assert.ok(shot.equals(drawnShots[0] as Buffer), `${scheme}: the band at +${offsets[i]}`);
+        }
+        // The same places with every band hidden: the rows and the card under them differ.
+        const hide = await s.page.addStyleTag({
+          content: '#list .list-section { visibility: hidden !important; }',
+        });
+        const bare = await shots();
+        await hide.evaluate((style) => (style as Element).remove());
+        assert.equal(
+          new Set(bare.map((shot) => shot.toString('base64'))).size,
+          offsets.length,
+          `${scheme}: what passes under the band changes at every offset`,
+        );
+      }
+    },
+  );
+
+  await t.test(
+    "the keyboard never leaves the selected line under a stuck band (F17), light and dark: ↓ from the first line through every row and caption of the three sections, and ↑ back; ↑ onto a section's first row brings its band to the top edge, no band showing as a strip above it",
+    async (t) => {
+      const s = await scripted(
+        t,
+        chromium,
+        (view) => bandList(4, 24, 16, namesWebClosed(view)),
+        47,
+      );
+      await s.page.setViewportSize({ width: 1280, height: 480 });
+      await untilDrawn(s.page, (rows) => rows.length === 44, 'every row');
+      // The block `web` closed by a click on its caption (the selection does not move): its
+      // caption, a line of its own.
+      await s.page
+        .locator('#list .list-block[data-section="week"]', { hasText: 'web' })
+        .locator('.block-head')
+        .click();
+      await untilDrawn(s.page, (rows) => rows.length === 41, 'the block web closed');
+      const week = bandIds(2, 24);
+      const lines = [
+        ...bandIds(1, 4),
+        ...week.slice(0, 12),
+        'caption web',
+        ...week.slice(15),
+        ...bandIds(3, 16),
+      ];
+      /** Waits until the selected line is no longer `from`; the new one. */
+      const movedFrom = async (from: string): Promise<string> => {
+        const deadline = performance.now() + PAGE_WAIT_MS;
+        for (;;) {
+          const now = await selectedLine(s.page);
+          if (now !== from) return now;
+          if (performance.now() > deadline) assert.fail(`the selection stays on ${from}`);
+          await sleep(20);
+        }
+      };
+      /** The rows right after a band (no card before them), by their section. */
+      const firstRows = new Map([
+        [week[0] ?? '', 'week'],
+        [bandIds(3, 16)[0] ?? '', 'earlier'],
+      ]);
+      /** The first rows found with their band at the top, `<scheme> <section>`. */
+      const flush = new Set<string>();
+      const scrollTop = async (): Promise<number> =>
+        readPage(s.page, () => document.querySelector('#list .list-body')?.scrollTop ?? -1, null);
+      await toZone(s.page, 'list');
+      await s.page.keyboard.press('Home');
+      await movedFrom('');
+      for (const scheme of ['light', 'dark'] as const) {
+        await s.page.emulateMedia({ colorScheme: scheme });
+        const walked = [await selectedLine(s.page)];
+        for (const [key, arrow] of [
+          ['ArrowDown', '↓'],
+          ['ArrowUp', '↑'],
+        ] as const) {
+          for (let i = 1; i < lines.length; i++) {
+            const from = walked.at(-1) ?? '';
+            const before = await scrollTop();
+            await s.page.keyboard.press(key);
+            const now = await movedFrom(from);
+            walked.push(now);
+            const what = `${scheme}: after ${i} × ${arrow}, on ${now}`;
+            assert.equal(await selectedClear(s.page), 'clear', what);
+            // ↑ that scrolled the list: no band shows as a strip above another; onto a section's
+            // first row (no card before it), that section's band sits at the list's top edge.
+            if (key === 'ArrowUp' && (await scrollTop()) !== before) {
+              assert.equal(await bandStrips(s.page), '', what);
+              const section = firstRows.get(now);
+              if (section !== undefined) {
+                const { column, bands: drawnBands } = await bands(s.page);
+                const band = drawnBands.find((candidate) => candidate.section === section);
+                assert.ok(
+                  band !== undefined && Math.abs(band.top - column.top) < 0.5,
+                  `${what}: its band at the top (${band?.top} against ${column.top})`,
+                );
+                flush.add(`${scheme} ${section}`);
+              }
+            }
+          }
+        }
+        assert.deepEqual(walked, [...lines, ...lines.toReversed().slice(1)], scheme);
+      }
+      assert.deepEqual(
+        [...flush].sort(),
+        ['dark earlier', 'dark week', 'light earlier', 'light week'],
+        'each first row reached by ↑ with a scroll',
+      );
+      assert.equal(await zone(s.page), 'Focus: list');
       assert.deepEqual(await s.page.evaluate(() => Reflect.get(globalThis, 'pageErrors')), []);
     },
   );
