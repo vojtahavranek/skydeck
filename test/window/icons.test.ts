@@ -955,7 +955,7 @@ describe('the PNG files', () => {
 
   test('the three small files fill their square: the middle half of each side is at alpha 252 or more, the corners are transparent', () => {
     // Each is a rounded square cropped from the picture, so that the outer rows and columns are
-    // covered whole: one pixel of a 16 pixel file is 78 of the picture's, and a soft grey rim on a
+    // covered whole: one pixel of a 16 pixel file is 65 of the picture's, and a soft grey rim on a
     // light taskbar is what a partly covered edge gives.
     for (const size of SMALL_SIZES) {
       const png = decodePng(read(`${ICONS}/icon-${size}.png`));
@@ -976,12 +976,15 @@ describe('the PNG files', () => {
     }
   });
 
-  test('16, 32 and 48 pixels: the drawing reaches within 1 pixel of the left and the right edge', () => {
+  test('16, 32 and 48 pixels: the drawing reaches the left and the right edge (at 48 pixels, to within 1 pixel)', () => {
     // The crop is the drawing's width plus 2 % each side: 0.3 of a pixel at 16, 0.6 at 32 and 0.9
     // at 48 are navy before the cloud's outline starts, so the drawing starts and ends at the edge
     // at 16 and 32 (0 pixels away) and one pixel from it at 48. A pixel is the drawing's when it
-    // is opaque and more than DRAWN_ON_NAVY from the navy in some channel.
+    // is opaque and more than DRAWN_ON_NAVY from the navy in some channel. The bound is that and no
+    // more: one pixel at 16 is the whole difference between the crop and the picture's whole tile
+    // (1.5 pixels of navy each side at 16, its drawing one pixel from each edge).
     for (const size of SMALL_SIZES) {
+      const bound = size === 48 ? 1 : 0;
       const png = decodePng(read(`${ICONS}/icon-${size}.png`));
       let left = size;
       let right = -1;
@@ -994,12 +997,12 @@ describe('the PNG files', () => {
         }
       }
       assert.ok(
-        left <= 1,
-        `icon-${size}.png: the drawing starts ${left} pixels from the left edge`,
+        left <= bound,
+        `icon-${size}.png: the drawing starts ${left} pixels from the left edge, more than ${bound}`,
       );
       assert.ok(
-        size - 1 - right <= 1,
-        `icon-${size}.png: the drawing ends ${size - 1 - right} pixels from the right edge`,
+        size - 1 - right <= bound,
+        `icon-${size}.png: the drawing ends ${size - 1 - right} pixels from the right edge, more than ${bound}`,
       );
     }
   });
@@ -1058,7 +1061,9 @@ describe('the PNG files', () => {
     // the left: its top frame is row 7, and rows 0 to 5 lie wholly above the window, where only
     // the cloud is drawn (its top is 1.5 pixels down). The file as built has 28 such pixels. In
     // F12's file, the window alone, row 7 is inside the window, at its `>_`, and the rows above
-    // hold the window's own frame (its top in row 2): it fails here.
+    // hold the window's own frame (its top in row 2): there the frame's row fails, while the count
+    // alone would pass (36 pixels of that hue in rows 0 to 5, the window's own frame). The two
+    // hold only together: the window where the crop puts it, and the cloud above it.
     const png = decodePng(read(`${ICONS}/icon-16.png`));
     const win = windowInFile(16);
     const frame = Math.ceil(win.top);

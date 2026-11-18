@@ -1774,12 +1774,16 @@ the short id).
      screenshot of the taskbar taken before F12 (2026-11-17); not tried in Edge): the same
      picture, the cloud with the window, filling the square nearly to its edges, so that it is as
      large as the other buttons' icons, and soft at a display scale of 100 % (a stretched bitmap is
-     never crisp): the cloud and the window read as shapes, the `>_` hardly. If Windows takes the
-     32 pixel file: the same picture, sharper. Since follow-up F12 the drawing fills the tile;
-     before it the same drawing sat inside a margin of the same navy, which on a dark taskbar is
-     nearly invisible, so the icon looked small. Write down whether you see the cloud with the
-     window, whether the picture is sharp or soft, and whether it is as large as the buttons
-     beside it.
+     never crisp): the cloud and the window read as shapes, the `>_` hardly. It is softer than the
+     window alone that the button showed between F12 and F14: that `>_` had 22 white pixels at 16
+     pixels, this one has 10. After F12 the icon seen was reported as a different icon from the
+     picture; the only small file F12 made different in kind was the 16 pixel one, which is
+     consistent with the button showing the 16 pixel file (not a confirmation: the report did not
+     say where it was seen). If Windows takes the 32 pixel file: the same picture, sharper.
+     Since follow-up F12 the drawing fills the tile; before it the same drawing sat inside a margin
+     of the same navy, which on a dark taskbar is nearly invisible, so the icon looked small. Write
+     down whether you see the cloud with the window, whether the picture is sharp or soft, and
+     whether it is as large as the buttons beside it.
 
    The taskbar's look was NOT tried in Edge when F12 and F14 were made: the files were judged from
    sheets drawn with the same browser engine (Chromium), and this check is the first time they are
@@ -1804,11 +1808,10 @@ the short id).
    down.
 
 Write down: the icon the button and the title bar showed, after the update, after the restart (and
-when the window was opened anew, after a WSL restart, or "left out"); whether the button showed
-the cloud with the window or still the window alone (the icon before F14), and whether the
-picture was sharp or soft, and
-whether it was as large as the buttons beside it; whether Edge's menu offered to install the page
-as an app, in its own words.
+when the window was opened anew, after a WSL restart, or "left out"); what the button showed (the
+cloud with the window, or still the window alone, the icon before F14), sharp or soft, and as
+large as the buttons beside it or not; whether Edge's menu offered to install the page as an app,
+in its own words.
 
 ## Updating skydeck
 

@@ -3127,19 +3127,22 @@ follow-up F14 the same day):
     pins the six files F14 left as they were byte for byte: the 32 and 48 pixel ones as F12 drew
     them, and the four large ones (192 and 512 pixels, and the two maskable ones), as they were
     before F12 too.
-  - **What it looks like.** At every size the same picture: on the navy, the cloud's outline in
-    blue to violet with the terminal window in front of it and the `>_` in the window. At 32 and
-    48 pixels the three read; at 16 the cloud and the window's frame read and the `>_` is a light
-    mark. **Which file the taskbar button takes is not verified. Most likely it is the 16 pixel
-    one**, stretched to about 24 pixels: the button shows the cloud with the window, soft (a
-    stretched bitmap is never crisp), the `>_` hardly reading. The evidence is F12's review 2
+  - **What it looks like.** At 16, 32 and 48 pixels the same picture: on the navy, the cloud's
+    outline in blue to violet with the terminal window in front of it and the `>_` in the window.
+    At 32 and 48 pixels the three read; at 16 the cloud and the window's frame read and the `>_`
+    is a light mark. **Which file the taskbar button takes is not verified. Most likely it is the
+    16 pixel one**, stretched to about 24 pixels: the button shows the cloud with the window, soft
+    (a stretched bitmap is never crisp), the `>_` hardly reading. The evidence is F12's review 2
     reading a screenshot of the taskbar taken before F12 (2026-11-17), in which the button's 24
     pixel icon matches the 16 pixel file of that day stretched to 24 far better than the 32 or 48
-    pixel one reduced; not tried in Edge. If Windows takes the 32 pixel file instead, the button
-    shows the same picture, sharper. The title bar shows the 16 pixel file at a display scale of
-    100 %; at 125 or 150 % Edge may draw it from the 32 pixel one. **The taskbar's look was not
-    tried in Edge or on Windows**: it is judged from sheets drawn with the same Chromium (a file
-    resized as a browser does), and W3 asks the owner to write down what they see.
+    pixel one reduced; not tried in Edge. After F12 the owner reported that the icon they saw was a
+    different icon from their picture; the only small file F12 made different in kind was the 16
+    pixel one, which is consistent with the button showing the 16 pixel file (not a confirmation:
+    the report did not say where they looked). If Windows takes the 32 pixel file instead, the
+    button shows the same picture, sharper. The title bar shows the 16 pixel file at a display
+    scale of 100 %; at 125 or 150 % Edge may draw it from the 32 pixel one. **The taskbar's look
+    was not tried in Edge or on Windows**: it is judged from sheets drawn with the same Chromium (a
+    file resized as a browser does), and W3 asks the owner to write down what they see.
 - **The maskable icons** have a full background of the large picture's tile colour, `#040925` (the
   average of its opaque pixels between 555 and 585 pixels from its middle), with the picture in the
   middle at 0.927 of the icon's width: drawn in full within 555 of its 1254 pixels from its middle,
