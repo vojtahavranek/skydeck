@@ -43,7 +43,15 @@
   text-align: center;
 }
 
-/* Section headers: Open, Recent (key `week`), Earlier (folded by default: its count and span). */
+/* Section headers: Open, Recent (key `week`), Earlier (folded by default: its count and span).
+   Each is a band (S2 12.1, follow-up F17): across the whole list column, edge to edge and square,
+   on the page's --bg (sunken against the list's --panel, and stronger than the cards' edges), a
+   line above and below, 28 px high with them — within 1 px of the header it replaced (27.85 px),
+   and under the rows' scroll-margin-top, so that a row the keyboard brings into view is never
+   under it.
+   Sticky and opaque: nothing of a row or a card shows through a stuck band. Before the title the
+   section's mark, then the title in capitals (Open and Recent --text, Earlier --dim), its count
+   dim, and a folded Earlier's span at the right end. */
 .list-section {
   position: sticky;
   top: 0;
@@ -51,19 +59,26 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 9px 10px 4px;
-  background: var(--panel);
-  color: var(--faint);
-  font-size: 11px;
-  font-weight: 650;
+  height: 28px;
+  padding: 0 10px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
   letter-spacing: 0.6px;
   text-transform: uppercase;
   user-select: none;
 }
+/* Earlier's fold arrow, in the same 10 px on every band, so that the marks and the titles line up;
+   the gap after it keeps the arrow apart from the mark. */
 .section-twist {
+  flex: none;
   width: 10px;
 }
 .list-section[data-section='earlier'] {
+  color: var(--dim);
   cursor: pointer;
 }
 .list-section[data-section='earlier'] .section-twist::before {
@@ -72,15 +87,44 @@
 .list-section[data-section='earlier'][data-folded='true'] .section-twist::before {
   content: '▸';
 }
+/* The mark: a small bar in the section's strength — Open the accent, Recent --dim, Earlier
+   --faint. */
+.section-mark {
+  flex: none;
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--faint);
+}
+.list-section[data-section='open'] .section-mark {
+  background: var(--accent);
+}
+.list-section[data-section='week'] .section-mark {
+  background: var(--dim);
+}
 .section-count {
+  color: var(--dim);
   font-weight: 500;
   letter-spacing: 0;
 }
 .section-span {
   margin-left: auto;
+  color: var(--dim);
   font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
+}
+/* Two bands that meet (Open with no row above the next section) share one line of 1 px: the later
+   band's top line lies on the earlier one's bottom line. */
+.list-section + .list-section {
+  margin-top: -1px;
+}
+/* A section's first row (no card before it), brought into view from below, rests right under its
+   band (the band's 28 px), so that the band sits at the top edge over the one stuck there, with no
+   strip of that one above it; the other rows keep their 2.5em (a first row in a card rests under
+   its caption, its band stuck). */
+.list-section + .list-row {
+  scroll-margin-top: 28px;
 }
 
 /* Rows (S2 12.2): the state icon, then one line — or two for a running or starting session. */
