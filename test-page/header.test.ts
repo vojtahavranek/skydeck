@@ -53,6 +53,8 @@ const NOW_NS = 1794474000000000000n;
 const SEC_NS = 1_000_000_000n;
 const MIN_NS = 60n * SEC_NS;
 const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
+const S5 = '4f9d7a5c-2b6e-4d0f-9a7b-6c5d4e3f2a1b';
+const S6 = '5a0e8b6d-3c7f-4e1a-8b8c-7d6e5f4a3b2c';
 const DONE_WORDS = 'Marked done: hidden from the list. It comes back on new activity.';
 const DONE_RUNNING_WORDS = 'Marked done. Stays under Open while it runs; hidden once it stops.';
 const PR7 = 'https://github.com/acme/web/pull/7';
@@ -1580,7 +1582,18 @@ interface Flags {
   height: number;
   lines: { name: string; overflows: boolean }[];
   places: Record<string, Place | null>;
-  flags: { visible: number; natural: number; text: string; tip: string } | null;
+  flags: {
+    visible: number;
+    natural: number;
+    /** The width of five characters in the item's font. */
+    few: number;
+    boxRight: number;
+    textRight: number;
+    /** The room the line leaves from the item's left edge to the line's end. */
+    room: number;
+    text: string;
+    tip: string;
+  } | null;
 }
 async function flagsLine(page: Page): Promise<Flags> {
   return page.evaluate((todays) => {
@@ -1610,9 +1623,25 @@ async function flagsLine(page: Page): Promise<Flags> {
       const node = document.createTreeWalker(item, NodeFilter.SHOW_TEXT).nextNode();
       range.selectNodeContents(node ?? item);
       const text = range.getBoundingClientRect();
+      // Clipped by the item's box both ways: text pushed below it shows nothing.
+      const across = Math.min(text.right, box.right) - Math.max(text.left, box.left);
+      const down = Math.min(text.bottom, box.bottom) - Math.max(text.top, box.top);
+      // The width of five characters in the item's font, for "a few characters or nothing".
+      const holder = node?.parentElement ?? item;
+      const probe = document.createElement('span');
+      probe.style.cssText = `position: absolute; visibility: hidden; white-space: pre; font: ${getComputedStyle(holder).font}`;
+      probe.textContent = '-----';
+      document.body.append(probe);
+      const few = probe.getBoundingClientRect().width;
+      probe.remove();
+      const line = (head.querySelector('.header-sub') as HTMLElement).getBoundingClientRect();
       flags = {
-        visible: Math.max(0, Math.min(text.right, box.right) - Math.max(text.left, box.left)),
+        visible: down > 0.5 ? Math.max(0, across) : 0,
         natural: text.width,
+        few,
+        boxRight: box.right,
+        textRight: text.right,
+        room: line.right - box.left,
         text: item.textContent ?? '',
         tip: item.title,
       };
@@ -1841,7 +1870,13 @@ test("F16: the flags a session was started with, last on the header's second lin
           const item = withFlags.flags;
           assert.ok(item !== null, `${where}: the item`);
           assert.ok([...item.text].length <= 40, `${where}: at most 40 characters`);
-          const roomless = TODAYS.some((part) => without.places[part]?.cut === true);
+          // A few characters or nothing (C2 of review 2: never a bare `-…`).
+          assert.ok(
+            item.visible < 0.5 || item.visible >= item.few - 0.5,
+            `${where}: ${item.visible} px shown, fewer than five characters (${item.few} px)`,
+          );
+          // Its box ends where its text ends: the tooltip's area is the text's.
+          assert.ok(item.boxRight <= item.textRight + 0.5, `${where}: the box ends at the text`);
           if (item.visible >= item.natural - 0.5) {
             seen.whole++;
           } else if (item.visible > 0.5) {
@@ -1849,11 +1884,8 @@ test("F16: the flags a session was started with, last on the header's second lin
           } else {
             seen.none++;
           }
-          // Something of today's line is cut: the item is gone, it shows nothing.
-          if (
-            roomless &&
-            TODAYS.some((part) => part !== '.header-dir' && without.places[part]?.cut)
-          ) {
+          // Something of today's line other than the folder is cut: the item shows nothing.
+          if (TODAYS.some((part) => part !== '.header-dir' && without.places[part]?.cut)) {
             assert.ok(item.visible < 0.5, `${where}: the item is cut to nothing first`);
           }
         }
@@ -1866,7 +1898,41 @@ test("F16: the flags a session was started with, last on the header's second lin
   );
 
   await t.test(
-    'where it shows: for a session running in another terminal and for an ended terminal of the window; not while the resume card prints "Will run"; back again on a running one',
+    'with little room the item shows a few characters or nothing, never a bare `-…`: the room left to it from 1 to 60 px',
+    async (t) => {
+      const s = await scripted(t, chromium, {
+        sections: { open: [running(S1, TERM_A, 1, { title: 'little room' })] },
+        terminals: [terminal(TERM_A, S1, 1)],
+        selected: { [S1]: { launchFlags: FLAGS } },
+      });
+      const { page } = s;
+      const wide = 1760;
+      await page.setViewportSize({ width: wide, height: 800 });
+      await flagsShow(page, FLAGS_TEXT);
+      await sleep(200);
+      const first = (await flagsLine(page)).flags;
+      assert.ok(first !== null && first.visible >= first.natural - 0.5, 'whole when wide');
+      // The room shrinks with the window, one pixel for one, while the item is the only thing cut.
+      for (const room of [1, 3, 6, 10, 15, 20, 26, 32, 38, 45, 60]) {
+        await page.setViewportSize({ width: Math.round(wide - (first.room - room)), height: 800 });
+        await sleep(150);
+        const item = (await flagsLine(page)).flags;
+        assert.ok(item !== null);
+        const where = `${room} px of room (${item.room.toFixed(1)} measured)`;
+        assert.ok(Math.abs(item.room - room) < 1.5, `${where}: the room as planned`);
+        assert.ok(
+          item.visible < 0.5 || item.visible >= item.few - 0.5,
+          `${where}: ${item.visible} px shown, fewer than five characters (${item.few} px)`,
+        );
+        if (room >= item.few * 1.4 + 2) {
+          assert.ok(item.visible > 0.5, `${where}: room for a few characters shows them`);
+        }
+      }
+    },
+  );
+
+  await t.test(
+    'where it shows: for a session running in another terminal and for an ended terminal of the window; not while the resume card prints the command under "Will run", but on a resume card without one (a word it cannot print, an expired session); back again on a running one',
     async (t) => {
       const s = await scripted(t, chromium, {
         sections: {
@@ -1879,7 +1945,11 @@ test("F16: the flags a session was started with, last on the header's second lin
             }),
             running(S4, TERM_B, 2, { title: 'ended here' }),
           ],
-          week: [row(S3, { title: 'not running' })],
+          week: [
+            row(S3, { title: 'not running' }),
+            row(S5, { title: 'no command' }),
+            row(S6, { title: 'expired', marks: ['expired'] }),
+          ],
         },
         terminals: [terminal(TERM_A, S1, 1), terminal(TERM_B, S4, 2, { state: 'ended' })],
         selected: {
@@ -1891,6 +1961,12 @@ test("F16: the flags a session was started with, last on the header's second lin
             ended: 'exited',
           },
           [S4]: { launchFlags: ['--verbose'] },
+          // A value with a line break: the card cannot print the command (S2 12.6).
+          [S5]: {
+            launchFlags: ['--model', 'opus', '--append-system-prompt', 'a b'],
+            command: null,
+          },
+          [S6]: { launchFlags: ['--model', 'sonnet'], expired: true },
         },
       });
       const { page } = s;
@@ -1915,6 +1991,17 @@ test("F16: the flags a session was started with, last on the header's second lin
       await sleep(300);
       assert.equal((await flagsLine(page)).flags, null, 'not on the resume card');
       assert.deepEqual(await texts(page, '#cards .header-flags'), []);
+
+      // A resume card without the command: the flags are shown in the header (never nothing).
+      await clickRow(page, S5);
+      await showsText(page, '#cards .header-title', /^no command$/);
+      await showsText(page, '#cards .card-command', /^skydeck cannot show the exact command/);
+      await flagsShow(page, '--model opus --append-system-prompt a b');
+      await clickRow(page, S6);
+      await showsText(page, '#cards .header-title', /^expired$/);
+      await showsText(page, '#cards .card-ended', /cannot be resumed/);
+      assert.deepEqual(await texts(page, '#cards .card-command'), [], 'no "Will run"');
+      await flagsShow(page, '--model sonnet');
 
       await clickRow(page, S1);
       await showsText(page, '#cards .header-title', /^running here$/);

@@ -236,8 +236,10 @@ export function titleSourceText(titleSource) {
   return Object.hasOwn(SOURCES, titleSource) ? (SOURCES[titleSource] ?? '') : '';
 }
 
-/** The most characters (code points) of the flags the header's second line shows (F16). */
+/** The most characters of the flags the header's second line shows (F16): characters as they are
+ *  seen (grapheme clusters), so that a joined emoji or a letter with its mark is never split. */
 export const STARTED_WITH_MAX = 40;
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 /**
  * `value` when it is an array of strings, each sanitised again (not trimmed: a value is shown as
@@ -273,7 +275,7 @@ export function startedWithText(selected) {
     return { text: '', tip: '' };
   }
   const whole = flags.join(' ');
-  const characters = [...whole];
+  const characters = [...GRAPHEMES.segment(whole)].map((part) => part.segment);
   const text =
     characters.length <= STARTED_WITH_MAX
       ? whole

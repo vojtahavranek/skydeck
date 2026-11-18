@@ -514,6 +514,21 @@ describe("startedWithText: the flags a session was started with, last on the hea
     assert.equal(startedWithText(flagged(['-d', '🙂'.repeat(37)])).text, `-d ${'🙂'.repeat(37)}`);
   });
 
+  test('a character as it is seen: a joined emoji and a letter with its combining mark count as one each and are never split', () => {
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'; // one family emoji, five code points
+    const shown = startedWithText(flagged(['--append-system-prompt', family.repeat(30)]));
+    assert.equal(shown.text, `--append-system-prompt ${family.repeat(16)}…`);
+    const marked = 'e\u0301'; // é as e and a combining acute accent
+    assert.equal(
+      startedWithText(flagged(['-d', marked.repeat(37)])).text,
+      `-d ${marked.repeat(37)}`,
+    );
+    assert.equal(
+      startedWithText(flagged(['-d', marked.repeat(38)])).text,
+      `-d ${marked.repeat(36)}…`,
+    );
+  });
+
   test('the names not recognised come after the kept flags in the text and on the first line of the tooltip; its second line names them again, not passed on resume', () => {
     assert.deepEqual(startedWithText(flagged(['--model', 'opus'], ['--frob', '-Z'])), {
       text: '--model opus --frob -Z',

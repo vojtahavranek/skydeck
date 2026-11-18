@@ -2508,31 +2508,39 @@ the page, is selected and copied whole, and is its tooltip); the short id is nev
 the plan owner, review of plan task 29).
 
 **The flags it was started with** (asked for by the owner on 2026-11-18, follow-up F16; the details
-ruled by the lead that day). The last item of the second line, after the short id: the flags the
-session was started with as the hook recorded them (design 5.3) — first the ones a resume passes on
-again (design 7.6; `passedOnFlags`) with their values, in the order recorded, then the ones the
-recording knows only by name (in no table: a resume does not pass them on), bare, as recorded
-(ruled by the lead: a session started with a flag never shows nothing) — as one text, `--model
-opus --permission-mode plan`; a value is shown as recorded, one with spaces not quoted. The
-recording keeps neither a prompt nor any flag a resume removes (design 7.6: the ones that pick,
-name, move or place the session, such as `--resume`, `--name`, `--worktree`, `--tmux` and `--bg`),
-so those are never shown, also when they were typed into the New form. In the short id's lighter
-grey (ruled by the lead: a side note, not the folder's grey) and its monospace font, with no label
+ruled by the lead that day and on its reviews). The last item of the second line, after the short
+id: the flags the session was started with as the hook recorded them (design 5.3) — first the ones
+a resume passes on again (design 7.6; `passedOnFlags`) with their values, in the order recorded,
+then the ones the recording knows only by name (in no table: a resume does not pass them on), bare,
+as recorded (ruled: a session started with a flag never shows nothing) — as one text, `--model opus
+--permission-mode plan`; a value is shown as recorded, one with spaces not quoted. They are the
+flags of the latest start that has a recorded command line (a resume in another terminal with other
+flags replaces them); a session whose start was never recorded shows nothing, as one started
+without flags (its resume card says the original flags are unknown). The recording keeps neither a
+prompt nor any flag a resume removes (design 7.6: the ones that pick, name, move or place the
+session, such as `--resume`, `--continue`, `--session-id`, `--name`, `--worktree`, `--tmux` and
+`--bg`), so those are never shown, also when they were typed into the New form. In the short id's
+lighter grey (ruled: a side note, not the folder's grey) and its monospace font, with no label
 before it and no box, the line's own gap before it whether "id copied" shows or not. At most 40
-characters over the whole, the last of them `…` beyond that; its tooltip holds the whole text
-uncut, `Started with: <flags>`, and when there are names it does not know, a second line `Not
-recognised, not passed again on resume: <names>`. "Started with": a model changed inside the
-session later (`/model`) is not seen, and the tooltip claims no more. Not messy (the owner's
-condition): it never adds a line and never moves what the line showed before it — it takes only
-the room the other parts leave (its gap included), so when the line is short of room it is the
-first thing cut, down to nothing before the directory or the short id lose a character. A session
-with no recorded flag shows nothing: no empty item, no separator left behind. It is shown for the
-session the pane shows, whatever its state (running in the window, in another terminal, an ended
-terminal of the window), except while the pane shows the resume card, which prints the flags in
-"Will run" and names the ones it does not pass on (12.6): no flag is printed twice in one view.
-The flags reach the page as `list`'s `selected.launchFlags` and `selected.unknownFlags` (8.2.3),
-sanitised by the server and again by the page, and are shown only as text; nothing new is stored,
-and `skydeck show`, `ls` and the list's rows are unchanged.
+characters over the whole — characters as they are seen, a joined emoji or a letter with its mark
+being one —, the last of them `…` beyond that; its tooltip holds the whole text uncut, `Started
+with: <flags>`, and when there are names it does not know, a second line `Not recognised, not
+passed again on resume: <names>`. "Started with": a model changed inside the session later
+(`/model`) is not seen, and the tooltip claims no more. Not messy (the owner's condition): it never
+adds a line and never moves what the line showed before it — it takes only the room the other parts
+leave (its gap included), so when the line is short of room it is the first thing cut, down to
+nothing before the directory or the short id lose a character; and it shows six characters or more
+(the last of them `…`) or nothing, never a bare `-…`. A session with no recorded flag shows
+nothing: no empty item, no separator left behind. It is shown for the session the pane shows,
+whatever its state (running in the window, in another terminal, an ended terminal of the window, a
+session not running), except while the resume card prints the command under "Will run" (12.6),
+which holds the flags and names the ones it does not pass on: no flag is printed twice in one view.
+A resume card without the command — a word skydeck cannot print or no known directory ("skydeck
+cannot show the exact command"), or an expired session, whose card has no "Will run" — leaves the
+item shown (ruled on review 2), so the flags are never shown nowhere either. The flags reach the
+page as `list`'s `selected.launchFlags` and `selected.unknownFlags` (8.2.3), sanitised by the server
+and again by the page, and are shown only as text; nothing new is stored, and `skydeck show`, `ls`
+and the list's rows are unchanged.
 
 Editing (stage D) uses the step 1 rules and functions: a label or group that design 7.1 refuses is
 refused with the same message; a note is edited in a text box instead of `$VISUAL`, saved as typed

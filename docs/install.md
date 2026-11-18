@@ -801,7 +801,15 @@ is one line, cut with an ellipsis when it is long:
 2. the directory (whole in its tooltip), `opened today at 14:02 · last active 3m` (`opened` while
    the window shows the session's terminal), where the title comes from (`title: your label`,
    `title: Claude Code's name`, `title: Claude Code's summary` or `title: start time and
-   folder`), and the short id, which a click copies whole (`id copied`);
+   folder`), and the short id, which a click copies whole (`id copied`); last, in the short id's
+   grey, the flags the session was started with, such as `--model opus --permission-mode plan`:
+   the ones skydeck recorded at its start, which a resume passes on again, then any it does not
+   know (by their names). A prompt and the flags skydeck drops when it records a start are never
+   shown: the ones that pick or name the session (`--resume`, `--continue`, `--session-id`,
+   `-n`/`--name`) and the ones that move or place it (`--worktree`, `--tmux`, `--bg`, …); nor is
+   a model you change later with `/model`. They are cut at 40 characters, all of them in their
+   tooltip (`Started with: …`), they are the first thing cut when the line is short of room, and
+   while the resume card shows its command ("Will run") they are left out of the header;
 3. the pull requests: the window's chip (below), the open ones side by side as far as they fit
    (`acme/web #7 · failing`; a click opens one in your default browser), and `Pull requests`;
    while none is attached, `no pull request` and `+ PR`;

@@ -2018,17 +2018,22 @@ the throwaway folder there (`mkdir -p ~/skydeck-try`). Write down the time.
    word before it and no box around it, as far from the short id as the short id is from the text
    before it. The header has the same four lines and the same height as before it came: the
    terminal under it did not move down. Hold the mouse still over the flags for a second:
-   the tooltip reads `Started with: --model haiku --permission-mode plan`, on one line.
+   the tooltip reads `Started with: --model haiku --permission-mode plan`, on one line. (The item
+   shows the flags skydeck recorded, the ones a resume passes on again; a prompt and flags such
+   as `-n`, `--worktree` or `--tmux`, which skydeck drops when it records a start, are never
+   shown.)
 3. **Short of room.** Make the window narrower by dragging its right edge, slowly, and watch the
-   second line: first the flags get shorter, ending in `…`, until they are gone; only then do the
-   folder or "where the title comes from" lose characters; the short id is never cut, and the
-   header keeps its height. Drag the window back to its width.
+   second line: first the flags get shorter, ending in `…`, until they are gone (they show six
+   characters or more, or nothing); only then does "where the title comes from" lose characters,
+   and after it the folder and the times together; the short id is never cut, and the header keeps
+   its height. Drag the window back to its width.
 4. **One prompt**, so that the session has a transcript (a session without one is not listed once
-   it has ended). Look at the header's short id: it is the one you wrote down; else type nothing
-   and click the throwaway session's row in the list first. Look that its terminal has the
-   keyboard: the key bar says `Focus: terminal` (else
+   it has ended). Look at the header's short id: it is the one you wrote down; else type nothing,
+   and click rows of the list (one click each, never a double click) until the header shows that
+   short id. Look that its terminal has the keyboard: the key bar says `Focus: terminal` (else
    Ctrl+Shift+L until it does). Type `Reply with the single word ok, in this chat, with no tool and
-   no file.` and Enter. If it asks to run a command or to edit a file, answer No. Wait for its reply.
+   no file.` and Enter. If it asks anything — to run a command, to edit a file, or (the session
+   runs in plan mode) whether to go on with a plan — answer No, or press Esc. Wait for its reply.
 5. **Ended and closed.** Look at the short id: it is the throwaway session's (`/exit` ends the
    session it is typed into). With `Focus: terminal`, type `/exit` and Enter. Expected: the ended
    bar, and the header's second line still ends in the flags. Click `Close` on the bar. Expected:
@@ -2038,8 +2043,9 @@ the throwaway folder there (`mkdir -p ~/skydeck-try`). Write down the time.
 6. **Resumed.** Click "Resume here" on the card (a click, not Enter). Expected: the session runs
    again in a terminal of the window, the same short id; within a few seconds the header's second
    line ends in the same flags again (a resume passes them on again). Then, with `Focus: terminal`
-   and its short id looked at, type `/exit`, and click `Close` on the ended bar. The throwaway
-   session stays in the list, not running, as every throwaway session of these checks does.
+   and its short id looked at, type `/exit` and Enter, and click `Close` on the ended bar. The
+   throwaway session stays in the list, not running, as every throwaway session of these checks
+   does.
 
 Write down: the time of the setup; the second line of step 2 as you saw it (each part, in order),
 the tooltip's text, whether anything of the line or the terminal moved when the flags came; in

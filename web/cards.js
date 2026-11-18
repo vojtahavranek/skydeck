@@ -854,9 +854,14 @@ export function createCards(root, deps) {
      */
     resumeCard(row, selected, resultLines) {
       card.dataset['card'] = 'resume';
-      // F16: the card prints the flags in "Will run": the header's item is not shown beside it
-      // (app.js calls `header` first, then this, on every render of the resume card).
-      setHidden(flags, true);
+      // F16: while the card prints the command under "Will run", the header's item is not shown
+      // beside it (app.js calls `header` first, then this, on every render of the resume card).
+      // A card without one — a word it cannot print, no directory, an expired session — leaves
+      // the item shown (ruled on review 2): the flags are never printed twice, nor nowhere.
+      const expired = selected?.expired === true || row.marks.includes('expired');
+      if (typeof selected?.command === 'string' && !expired) {
+        setHidden(flags, true);
+      }
       showCard(`resume:${row.id}`, () => buildResume(row.id), [row, selected, resultLines]);
     },
     /** @param {RowPayload} row */
