@@ -2645,8 +2645,9 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   off chip adds its text at the end of the field, one space between; on an on chip it takes every
   run of its words out of the field (so that the chip is off after it), the rest as typed. A
   chip's × (title "Remove this favourite"), shown on hover and while the chip has the keyboard,
-  removes the favourite without asking; the form's hint line then reads `Removed <text> · Undo`
-  until the form closes or the favourites change again, and Undo puts it back at its old place.
+  removes the favourite without asking; the form's hint line then reads `Removed <text> · Undo`,
+  the text cut as the chip's, the whole in its hover title (ruled, F15), until the form closes or
+  the favourites change again, and Undo puts it back at its old place.
   Removing a favourite never changes the field. Keys: the ★ and then the chip row come after the
   flags field and before Start; the row is one Tab stop, ← → move between its chips, Space turns
   the one that has the keyboard on or off, Delete or Backspace removes it; Enter is Start on the
