@@ -1032,6 +1032,81 @@ describe('pages: messages', () => {
     );
   });
 
+  test('follow-up F13: a theme message of the page that had focus last goes to the hub at once (also after its blur); one of another page only from its next focus; each a theme of its own', async (t) => {
+    const f = await startPages(t);
+    const a = await openPage(t, f, { focused: true, theme: { fg: '#111111', bg: '#222222' } });
+    const b = await openPage(t, f, { focused: false, theme: { fg: '#333333', bg: '#444444' } });
+    const themes = (): unknown[] =>
+      f.hub.calls.filter((call) => call.kind === 'setTheme').map((call) => call.theme);
+    assert.deepEqual(themes(), [{ fg: '#111111', bg: '#222222' }]);
+
+    // The focused page's switch: the hub answers from the new colours at once.
+    a.client.send({ t: 'theme', theme: { fg: '#d6d9de', bg: '#121417' } });
+    await roundTrip(a.client);
+    assert.deepEqual(themes().at(-1), { fg: '#d6d9de', bg: '#121417' });
+    assert.equal(themes().length, 2);
+
+    // Still the page that had focus last after its blur (the system flipped while the user was in
+    // Windows' settings): the hub follows it.
+    a.client.send({ t: 'focus', focused: false, selected: null, area: { cols: 80, rows: 24 } });
+    a.client.send({ t: 'theme', theme: { fg: '#24292f', bg: '#fbfbf9' } });
+    await roundTrip(a.client);
+    assert.deepEqual(themes().at(-1), { fg: '#24292f', bg: '#fbfbf9' });
+    assert.equal(themes().length, 3);
+
+    // Another page's change (a second window following the storage event) does not take over the
+    // answers; it is kept, and its focus hands it to the hub.
+    b.client.send({ t: 'theme', theme: { fg: '#555555', bg: '#666666' } });
+    await roundTrip(b.client);
+    assert.equal(themes().length, 3, 'b had focus never');
+    b.client.send({ t: 'focus', focused: true, selected: null, area: { cols: 80, rows: 24 } });
+    await roundTrip(b.client);
+    assert.deepEqual(themes().at(-1), { fg: '#555555', bg: '#666666' });
+    a.client.send({ t: 'theme', theme: { fg: '#777777', bg: '#888888' } });
+    await roundTrip(a.client);
+    assert.equal(themes().length, 4, 'a no longer had focus last');
+    a.client.send({ t: 'focus', focused: true, selected: null, area: { cols: 80, rows: 24 } });
+    await roundTrip(a.client);
+    assert.deepEqual(themes(), [
+      { fg: '#111111', bg: '#222222' },
+      { fg: '#d6d9de', bg: '#121417' },
+      { fg: '#24292f', bg: '#fbfbf9' },
+      { fg: '#555555', bg: '#666666' },
+      { fg: '#777777', bg: '#888888' },
+    ]);
+  });
+
+  test('follow-up F13: a page that never had focus changes no answer by its theme message until its focus; a theme of a wrong shape closes the connection (1008)', async (t) => {
+    const f = await startPages(t);
+    const a = await openPage(t, f, { focused: false, theme: { fg: '#111111', bg: '#222222' } });
+    a.client.send({ t: 'theme', theme: { fg: '#333333', bg: '#444444' } });
+    await roundTrip(a.client);
+    assert.deepEqual(
+      f.hub.calls.filter((call) => call.kind === 'setTheme'),
+      [],
+    );
+    a.client.send({ t: 'focus', focused: true, selected: null, area: { cols: 80, rows: 24 } });
+    await roundTrip(a.client);
+    assert.deepEqual(
+      f.hub.calls.filter((call) => call.kind === 'setTheme'),
+      [{ kind: 'setTheme', theme: { fg: '#333333', bg: '#444444' } }],
+    );
+    for (const wrong of [
+      { t: 'theme', theme: { fg: '#ffffff' } },
+      { t: 'theme', theme: { fg: '#ffffff', bg: '#000000' }, focused: true },
+      { t: 'theme', fg: '#ffffff', bg: '#000000' },
+    ]) {
+      const { client } = await openPage(t, f, { focused: true });
+      client.send(wrong);
+      assert.equal((await within('the close', client.closed)).code, 1008);
+    }
+    assert.equal(
+      f.hub.calls.filter((call) => call.kind === 'setTheme').length,
+      4,
+      'three starts with focus, no wrong theme',
+    );
+  });
+
   test('a message that is not valid after start closes with 1008, logged by kind', async (t) => {
     const f = await startPages(t);
     for (const send of [
