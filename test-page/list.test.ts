@@ -1869,7 +1869,7 @@ test('the list', async (t) => {
   );
 
   await t.test(
-    "the section headers are bands (F17), light and dark: the page's --bg as their ground, off the list's; the list column's full width, 28 px, a 1 px --line above and below, square, sticky and opaque; before each title a mark in its section's colour (Open --accent, Recent --dim, Earlier --faint), the titles --text but Earlier's --dim, the count dim, a folded Earlier's span at the right end; Earlier's arrow at least 5 px from its mark (8 px held); the mark is decoration",
+    "the section headers are bands (F17), light and dark: the page's --bg as their ground, off the list's; the list column's full width, 28 px, a 1 px --line above and below, square, sticky and opaque; before each title a mark in its section's colour (Open --accent, Recent --dim, Earlier --faint), the titles --text but Earlier's --dim, the count dim, a folded Earlier's span at the right end; Earlier's arrow at least 5 px from its mark, its box 6 px from the mark's; the mark is decoration",
     async (t) => {
       const unfolded = (view: Record<string, unknown>): boolean =>
         Array.isArray(view['unfolded']) && view['unfolded'].includes('earlier');
@@ -1964,7 +1964,12 @@ test('the list', async (t) => {
               Math.abs(band.mark.top + band.mark.bottom - band.top - band.bottom) <= 1,
               `${what}: the mark is in the band's middle`,
             );
-            assert.ok(band.twist.right <= band.mark.left, `${what}: the arrow's place first`);
+            // The arrow's box, then the gap as built (6 px, read from the layout: whatever font
+            // draws the arrow, a narrower gap fails here), then the mark.
+            assert.ok(
+              Math.abs(band.mark.left - band.twist.right - 6) < 0.01,
+              `${what}: the arrow's box ${band.mark.left - band.twist.right} px before the mark`,
+            );
             assert.equal(band.mark.hidden, 'true', `${what}: the mark is not announced`);
             assert.equal(band.mark.tabIndex, -1, `${what}: no keyboard stop`);
             assert.equal(band.mark.hasTabindex, false, what);
@@ -1984,10 +1989,10 @@ test('the list', async (t) => {
               `${scheme}: the span at the right end (${earlier.span.right} in ${earlier.right})`,
             );
           }
-          // At least 5 px (F17's rule); held at what is built less 1 px (9 px of the arrow's ink
-          // to the bar, ▸ and ▾ alike, in the suite's Chromium), so that a narrower gap fails.
+          // The arrow's ink at least 5 px from the mark (F17's rule; it depends on the font that
+          // draws ▸ and ▾, so the gap as built is held by the boxes above).
           const gap = await arrowGap(earlier);
-          assert.ok(gap >= 8, `${scheme}, folded ${folded}: arrow and mark ${gap} px apart`);
+          assert.ok(gap >= 5, `${scheme}, folded ${folded}: arrow and mark ${gap} px apart`);
 
           // A click on Earlier's mark is a click on its header: it unfolds (then folds) Earlier.
           await s.page.locator('#list .list-section[data-section="earlier"] .section-mark').click();
