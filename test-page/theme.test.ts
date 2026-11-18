@@ -472,7 +472,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
   );
 
   await t.test(
-    'a mouse click on the switch leaves the keyboard where it was: in the terminal (what is typed next goes to its program) and in the list; Enter on the switch, given the keyboard by Tab, goes on by one state, a held Enter or Space by one only, a held Shift+Tab walks on past it',
+    'a mouse click on the switch leaves the keyboard where it was: in the terminal (what is typed next goes to its program) and in the list; Enter on the switch, given the keyboard by Tab, goes on by one state, a held Enter or Space by one only, a held Tab or Shift+Tab walks on past it',
     async (t) => {
       const { page, d, problems } = await opened(t, chromium);
       await clickRow(page, S1);
@@ -523,16 +523,41 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         await shows(page, theme, `a held ${key}`);
         assert.equal(themesSent(d, before).length, 1, `a held ${key}: one theme message`);
       }
-      // A held Shift+Tab from the list walks on past the switch, as everywhere in the page (review
-      // 2, S5): only a held Enter's repeats are cancelled.
-      await page.focus('#list');
-      assert.equal(await active(page), '#list');
-      await page.keyboard.down('Shift');
-      for (let i = 0; i < 6; i++) await page.keyboard.down('Tab');
-      await page.keyboard.up('Tab');
-      await page.keyboard.up('Shift');
-      assert.notEqual(await active(page), '#theme-button', 'a held Shift+Tab does not stop there');
-      await shows(page, 'dark', 'a held Shift+Tab changes no state');
+      // A held Tab or Shift+Tab walks on past the switch, as everywhere in the page (review 2, S5):
+      // only a held Enter's repeats are cancelled. What took the keyboard on the way is recorded:
+      // the walk went through the switch and on.
+      const walk = async (start: () => Promise<void>, shift: boolean): Promise<string[]> => {
+        await start();
+        await page.evaluate(() => {
+          const trail: string[] = [];
+          Reflect.set(globalThis, 'focusTrail', trail);
+          document.addEventListener('focusin', (event) => {
+            const target = event.target;
+            trail.push(
+              target instanceof HTMLElement && target.id !== '' ? `#${target.id}` : 'other',
+            );
+          });
+        });
+        if (shift) await page.keyboard.down('Shift');
+        for (let i = 0; i < 6; i++) await page.keyboard.down('Tab');
+        await page.keyboard.up('Tab');
+        if (shift) await page.keyboard.up('Shift');
+        return page.evaluate(() => [...(Reflect.get(globalThis, 'focusTrail') as string[])]);
+      };
+      for (const [what, start, shift] of [
+        // Backward from the list: the switch comes after `Switch…`.
+        ['Shift+Tab', () => page.focus('#list'), true],
+        // Forward from the page's last control (the key bar's `+ New`): Tab wraps through the
+        // document to the title bar, whose first control is the switch.
+        ['Tab', () => page.focus('#new-button'), false],
+      ] as const) {
+        const trail = await walk(start, shift);
+        const at = trail.indexOf('#theme-button');
+        assert.ok(at !== -1, `a held ${what} reaches the switch: ${trail.join(' ')}`);
+        assert.ok(trail.length > at + 1, `a held ${what} walks on past it: ${trail.join(' ')}`);
+        assert.notEqual(await active(page), '#theme-button', `a held ${what} does not stop there`);
+        await shows(page, 'dark', `a held ${what} changes no state`);
+      }
       assert.deepEqual(problems, []);
     },
   );
