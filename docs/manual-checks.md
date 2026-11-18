@@ -1913,24 +1913,34 @@ Then type `ls -l ~/.claude.json*` and write down what it lists: names, modes and
    Look that it is the new one: the header shows its short id and "opened" a moment ago, and its
    terminal shows Claude Code's empty prompt. Look that its terminal has the keyboard: the key bar
    says `Focus: terminal` (else Ctrl+Shift+L until it does). Do not press ← while the key bar says
-   `Focus: list`: there ← acts on the list (it closes a group). Then press ← once, and once more.
+   `Focus: list`: there ← acts on the list (it closes a group). Then press ← once, and look.
    Expected: the terminal stays as it is, the same empty prompt; no list of sessions (Claude Code's
-   agent view, a table of sessions with an input at the bottom) takes it over, no `Press ← again
-   to open agents` appears, and the list on the left gets no new row "running in another
-   terminal".
+   agent view, a table of sessions with an input at the bottom) takes it over, and the list on the
+   left gets no new row "running in another terminal". Only when the terminal is unchanged, press
+   ← a second time (Claude Code asks for a second press in some cases, `Press ← again to open
+   agents`), and look again: the same is expected.
 
-   When agent view does take the terminal over: press Esc (it goes back to the conversation; type
-   nothing else there), then in W type `skydeck doctor` and write down its line about the
-   shortcut. `is on` means the key is `true` or gone again: a session that was running wrote its
-   older copy of the file back (or the shortcut was turned on in `/config`); write down which
-   sessions were running, and turn it off again once they have ended (`skydeck install` asks
-   again). `is off` means this session did not follow the file: write down the header's "opened"
-   time and the time of step 1. Agent view may have made a background row for the throwaway
-   session; it holds no conversation.
+   When agent view does take the terminal over (this branch is written from Claude Code's
+   documentation, code.claude.com/docs/en/agent-view, and was not tried): press no more ←, type
+   nothing into agent view's input (every prompt entered there starts a new session of its own),
+   and press Esc, which goes back to the conversation. That does not end it: "Detaching never stops
+   a background session", and the row is made "even when the conversation has no messages yet", so
+   until it is ended the window may list a row for `skydeck-try` as running in another terminal.
+   End it now: look that the terminal shows the throwaway session (the header's short id, and
+   `skydeck-try` as its folder) and has the keyboard (`Focus: terminal`), then type `/stop` ("To end
+   a session from inside it, run /stop"). When that is not possible, end it in W with `claude stop
+   <id>`, then `claude rm <id>`, with the id of the row for `skydeck-try`. Then in W type
+   `skydeck doctor` and write down its line about the shortcut. `is on` means the key is `true` or
+   gone again: a session that was running wrote its older copy of the file back (or the shortcut
+   was turned on in `/config`); write down which sessions were running, and turn it off again once
+   they have ended (`skydeck install` asks again). `is off` means this session did not follow the
+   file: write down the header's "opened" time and the time of step 1.
 4. **The end.** End the throwaway session: its terminal has the keyboard (`Focus: terminal`; look
    at the short id, since `/exit` ends the session it is typed into), type `/exit`, then `Close` on
-   its ended bar. The shortcut stays off: that is what you asked for. Sessions you started before
-   step 1 keep it until you start them again (`/exit`, then resume them).
+   its ended bar. When step 3's branch was taken, the session is ended already: only `Close`, if
+   the ended bar shows; and when the list still shows a row for `skydeck-try` as running in another
+   terminal, write that down. The shortcut stays off: that is what you asked for. Sessions you
+   started before step 1 keep it until you start them again (`/exit`, then resume them).
 
 To put the shortcut back on (not part of the check): in Claude Code, `/config`, the option "← opens
 agents"; or set `leftArrowOpensAgents` to `true` in `~/.claude.json` (or remove the key) and start
@@ -1941,7 +1951,8 @@ remove it (`rm ~/.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>`) once you no lo
 
 Write down: the doctor line of the setup; every line step 1 printed about the shortcut; the modes
 and sizes of step 2 and its doctor line; for step 3, whether agent view took the terminal over at
-the first or the second ←, and if it did, doctor's line then and which sessions were running.
+the first or the second ←, and if it did, doctor's line then, which sessions were running and how
+the throwaway session was ended (`/stop`, or `claude stop` and `claude rm`).
 
 Not tried before this check was written: all of it. The tests run install and doctor on made-up
 files in a sandbox and never start `claude`; what Claude Code does with ← once the key is `false`,

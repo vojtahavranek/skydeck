@@ -102,9 +102,16 @@ export function turnLeftArrowOff(
   return { kind: 'kept-changing' };
 }
 
+/**
+ * The file is read as bytes and decoded strictly: a byte sequence that is not UTF-8 would come out
+ * as U+FFFD, and neither the edited file nor its backup would then hold the bytes as they were. The
+ * BOM is kept in the text, so a file that starts with one is not JSON.
+ */
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
 function lookAt(files: Files, uid: number, path: string): Look {
   let info: FileInfo | null;
-  let text: string | null;
+  let bytes: Uint8Array;
   try {
     info = files.lstat(path);
     if (info === null) {
@@ -119,12 +126,20 @@ function lookAt(files: Files, uid: number, path: string): Look {
     if (info.uid !== uid) {
       return unknown('it belongs to another user');
     }
-    text = files.readText(path);
+    // To its end as it is now (readBytes stops there): a file that grew since lstat is read whole,
+    // and the write's check of inode, size and modification time then sees that it changed.
+    bytes = files.readBytes(path, 0, Number.MAX_SAFE_INTEGER);
   } catch (error) {
-    return unknown(`it cannot be read: ${codeOf(error)}`);
+    const code = codeOf(error);
+    return unknown(
+      code === 'ENOENT' || code === 'ENOTDIR' ? 'it does not exist' : `it cannot be read: ${code}`,
+    );
   }
-  if (text === null) {
-    return unknown('it does not exist');
+  let text: string;
+  try {
+    text = STRICT_UTF8.decode(bytes);
+  } catch {
+    return unknown('it is not UTF-8 text');
   }
   const object = parseObject(text);
   if (typeof object === 'string') {

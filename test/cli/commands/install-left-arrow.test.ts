@@ -117,13 +117,14 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
     noCanary(r);
   });
 
-  test('the key true is on as well, and is turned off where it is', async (t) => {
-    const { d, path } = machine(t, `{\n  "${KEY}": true,\n  "z": "${CANARY}"\n}\n`);
+  test('the key true is on as well, and is turned off where it is, not at the first true of the file', async (t) => {
+    const head = `{\n  "hasCompletedOnboarding": true,\n  "projects": {"/p": {"${KEY}": true}},\n`;
+    const { d, path } = machine(t, `${head}  "${KEY}": true,\n  "z": "${CANARY}"\n}\n`);
 
     const r = await run(d.platform, ['install'], { lines: ['y', 'yes'] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(readFileSync(path, 'utf8'), `{\n  "${KEY}": false,\n  "z": "${CANARY}"\n}\n`);
+    assert.equal(readFileSync(path, 'utf8'), `${head}  "${KEY}": false,\n  "z": "${CANARY}"\n}\n`);
     noCanary(r);
   });
 
@@ -370,6 +371,33 @@ describe('install: the ← step never changes what install did (L2)', () => {
     assert.equal(readFileSync(path, 'utf8'), before);
     noCanary(r);
   });
+});
+
+describe("install: the ← step's lines are sanitized (the path comes from CLAUDE_CONFIG_DIR or claudeHome)", () => {
+  const RAW = /[\u001b\u009b]/;
+  for (const [why, text, lines] of [
+    ['on, then n', JSON.stringify(sample()), ['y', 'n']],
+    ['on, then y', JSON.stringify(sample()), ['y', 'y']],
+    ['unknown (no file)', null, ['y']],
+  ] as const) {
+    test(`${why}: no raw ESC or C1 control reaches the terminal`, async (t) => {
+      const d = testPlatform(t, {
+        env: (s) => ({ CLAUDE_CONFIG_DIR: join(s.root, 'cc\u001b[2J\u009bx') }),
+      });
+      mkdirSync(d.places.claudeHome);
+      if (text !== null) {
+        put(d.places.claudeGlobalConfig, text);
+      }
+
+      const r = await run(d.platform, ['install'], { lines });
+
+      assert.equal(r.code, 0, r.stderr);
+      assert.ok((r.stdout + r.stderr).includes('.claude.json'), 'the step named the file');
+      for (const out of [r.stdout, r.stderr]) {
+        assert.ok(!RAW.test(out), JSON.stringify(out));
+      }
+    });
+  }
 });
 
 describe('install: where the global config file is (L1)', () => {

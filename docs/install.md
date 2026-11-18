@@ -274,7 +274,8 @@ Claude Code's ← shortcut: left /home/you/.claude.json alone (it does not exist
 ```
 
 The reason in brackets is one of `it does not exist` (Claude Code has not run yet, or keeps the file
-somewhere else), `it cannot be read: <code>` (such as `EACCES`), `it is not JSON`, `it is not a JSON
+somewhere else), `it cannot be read: <code>` (such as `EACCES`), `it is not UTF-8 text` (a byte
+that is not UTF-8, which skydeck could not keep as it is), `it is not JSON`, `it is not a JSON
 object`, `leftArrowOpensAgents is neither true nor false`, `it is a symbolic link` (skydeck does not
 write through a link, into a dotfiles folder say), `it is not a regular file` and `it belongs to
 another user`; after the `y` also `leftArrowOpensAgents is in it more than once` and `skydeck cannot

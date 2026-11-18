@@ -123,6 +123,41 @@ describe('the global config file: readLeftArrow (L1)', () => {
     }
   });
 
+  test('a key of that name inside another object is not the key: the top level decides', (t) => {
+    const nested = { projects: { '/home/dev/demo': { [LEFT_ARROW_KEY]: false } } };
+    const cases: [Record<string, unknown>, string][] = [
+      [sample(nested), 'on'],
+      [sample({ ...nested, [LEFT_ARROW_KEY]: true }), 'on'],
+      [
+        { [LEFT_ARROW_KEY]: false, ...sample({ projects: { p: { [LEFT_ARROW_KEY]: true } } }) },
+        'off',
+      ],
+    ];
+    for (const [content, state] of cases) {
+      const { d, path } = withFile(t, JSON.stringify(content, null, 2));
+
+      const reading = readLeftArrow(d.platform.files, d.platform.uid, path);
+
+      assert.deepEqual(reading, { state, path, reason: null }, JSON.stringify(content));
+    }
+  });
+
+  test('a file that is not UTF-8 text: unknown (its bytes could not be kept as they are)', (t) => {
+    const d = testPlatform(t);
+    const path = configFile(d);
+    // A Latin-1 byte (0xE9) in a project's path: decoding would replace it.
+    const bytes = Buffer.concat([
+      Buffer.from('{\n  "projects": {"/home/x/caf'),
+      Buffer.from([0xe9]),
+      Buffer.from('": {"ok": true}},\n  "n": 1\n}\n'),
+    ]);
+    writeFileSync(path, bytes, { mode: 0o600 });
+
+    const reading = readLeftArrow(d.platform.files, d.platform.uid, path);
+
+    assert.deepEqual(reading, { state: 'unknown', path, reason: 'it is not UTF-8 text' });
+  });
+
   test('the key holding anything else (a string, 0, null, an object): unknown', (t) => {
     for (const value of ['false', 0, null, {}, []]) {
       const { d, path } = withFile(t, JSON.stringify(sample({ [LEFT_ARROW_KEY]: value })));
@@ -269,15 +304,33 @@ describe('the global config file: turnLeftArrowOff (L3), the text it writes', ()
     );
   });
 
-  test('the key true: replaced where it is; the keys after it stay after it', (t) => {
-    const before = `{\n  "a": 1,\n  "leftArrowOpensAgents": true,\n  "z": "${CANARY}"\n}\n`;
+  test('the key true: replaced where it is, not at the first true of the text; the keys after it stay after it', (t) => {
+    // A real file holds many a `true` before the key, and a project may hold a key of that name.
+    const head =
+      '{\n  "hasTrustDialogAccepted": true,\n' +
+      '  "projects": {"/home/dev/demo": {"leftArrowOpensAgents": true, "allowed": true}},\n';
+    const before = `${head}  "leftArrowOpensAgents": true,\n  "z": "${CANARY}"\n}\n`;
+    const { d, path } = withFile(t, before);
+
+    const result = turnOff(d, path);
+
+    assert.equal(result.kind, 'written');
+    assert.equal(
+      readFileSync(path, 'utf8'),
+      `${head}  "leftArrowOpensAgents": false,\n  "z": "${CANARY}"\n}\n`,
+    );
+  });
+
+  test('a nested key of that name holding false: only the top-level key is written', (t) => {
+    const before =
+      '{\n  "projects": {"p": {"leftArrowOpensAgents": false}},\n  "leftArrowOpensAgents": true\n}\n';
     const { d, path } = withFile(t, before);
 
     turnOff(d, path);
 
     assert.equal(
       readFileSync(path, 'utf8'),
-      `{\n  "a": 1,\n  "leftArrowOpensAgents": false,\n  "z": "${CANARY}"\n}\n`,
+      '{\n  "projects": {"p": {"leftArrowOpensAgents": false}},\n  "leftArrowOpensAgents": false\n}\n',
     );
   });
 
@@ -602,6 +655,23 @@ describe('the global config file: turnLeftArrowOff (L3), what it never writes', 
       assert.deepEqual(leftovers(path), []);
       noCanary(result);
     }
+  });
+
+  test('a file that is not UTF-8 text is never written: its bytes stay, nothing is left beside it', (t) => {
+    const d = testPlatform(t);
+    const path = configFile(d);
+    const bytes = Buffer.concat([
+      Buffer.from('{\n  "projects": {"/home/x/caf'),
+      Buffer.from([0xe9]),
+      Buffer.from('": {"ok": true}},\n  "n": 1\n}\n'),
+    ]);
+    writeFileSync(path, bytes, { mode: 0o600 });
+
+    const result = turnOff(d, path);
+
+    assert.deepEqual(result, { kind: 'unknown', reason: 'it is not UTF-8 text' });
+    assert.deepEqual(readFileSync(path), bytes);
+    assert.deepEqual(leftovers(path), []);
   });
 
   test('the key twice at the top: never written (which one Claude Code reads is not ours to guess)', (t) => {

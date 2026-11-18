@@ -774,8 +774,9 @@ could not be resumed; see above`).
 
   Step (6) reads `leftArrowOpensAgents` from Claude Code's global config file (9.1,
   `claudeGlobalConfig`): `off` when it is exactly `false`; `on` when it is absent or `true`;
-  `unknown` when there is no file, it cannot be read, it is not a JSON object, the key holds
-  anything else, or the path is a symbolic link, not a regular file, or another user's (such a
+  `unknown` when there is no file, it cannot be read, it is not UTF-8 (the file is read as bytes
+  and decoded strictly: a byte that is not UTF-8 would be replaced in both the new file and the
+  backup), it is not a JSON object, the key holds anything else, or the path is a symbolic link, not a regular file, or another user's (such a
   file is never written, so its state is not asked for). The reader never creates the file and
   never follows a link. On `on` install prints three lines (what the shortcut does, that ← also
   closes a group in the window's list, that agent view itself stays) and asks `Turn the shortcut
