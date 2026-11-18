@@ -290,6 +290,48 @@
   white-space: nowrap;
   color: var(--faint);
 }
+/* F16: the flags the session was started with, last on the line, in the short id's lighter grey
+   (ruled: a side note) and monospace, no box. It is the first thing cut: it takes only the room
+   the others leave (a basis of 0, growing up to its text), so it shrinks to nothing before any of
+   them loses a pixel; the line's gap before it lies inside it (its text's padding, its own
+   negative margin), so that the gap goes with it. Its text is at most 40 characters
+   (header-text.js), all of them in its tooltip. */
+.header-flags {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: max-content;
+  margin-left: -12px;
+  overflow: hidden;
+  /* A few characters or nothing (review 2's C2): one row of the line's height is shown; the text
+     needs room for six characters on it, else it wraps onto a second row, below the box, unseen. */
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: center;
+  align-self: stretch;
+}
+.header-flags::before {
+  content: '';
+  height: 100%;
+}
+.header-flags-text {
+  flex: 1 1 0;
+  min-width: calc(12px + 6ch);
+  padding-left: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  font-family: var(--term-font);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+/* While "id copied" is empty, the gap before that empty item already lies between the short id
+   and the flags: the text then needs no padding of its own, so the gap is the line's 12 px either
+   way. A header without the flags is laid out exactly as before them. */
+.header-copied:empty + .header-flags .header-flags-text {
+  min-width: 6ch;
+  padding-left: 0;
+}
 
 .card {
   margin: 24px auto;

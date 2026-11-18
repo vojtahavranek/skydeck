@@ -43,6 +43,7 @@ test('selectedPayload: the command a resume would run, with the recorded flags a
     command: `cd -- ${DIR} && claude --resume ${S1} -n 'fix it' --model opus`,
     flagsKnown: true,
     unknownFlags: [],
+    launchFlags: ['--model', 'opus'],
     ended: null,
     expiring: false,
     expired: false,
@@ -103,6 +104,57 @@ test('selectedPayload lists the flags a resume does not pass on, sanitised', (t)
   );
   assert.deepEqual(payload.unknownFlags, ['--frobnicate', '--ab']);
   assert.equal(payload.command, `cd -- ${DIR} && claude --resume ${S1} --model opus`);
+});
+
+// --- the flags it was started with (follow-up F16) -----------------------------------------------
+
+test('selectedPayload: launchFlags are the recorded flags a resume passes on again, in the order recorded, each token sanitised', (t) => {
+  const d = testDeck(t);
+  const payload = selectedPayload(
+    d.deck,
+    row({
+      launch: [
+        'claude',
+        '--permission-mode',
+        'plan',
+        '--frob',
+        '--append-system-prompt',
+        'be  brief\tnow',
+        '--model',
+        'op\x1b[31mus',
+      ],
+    }),
+  );
+  // A value with spaces is one token, as recorded; a tab and an escape sequence are sanitised.
+  assert.deepEqual(payload.launchFlags, [
+    '--permission-mode',
+    'plan',
+    '--append-system-prompt',
+    'be  brief now',
+    '--model',
+    'opus',
+  ]);
+  assert.deepEqual(payload.unknownFlags, ['--frob']);
+});
+
+test('selectedPayload: no launchFlags without a recorded launch, with only unknown flags, or with none', (t) => {
+  const d = testDeck(t);
+  assert.deepEqual(selectedPayload(d.deck, row({ launch: null })).launchFlags, []);
+  assert.deepEqual(selectedPayload(d.deck, row({ launch: ['claude', '--frob'] })).launchFlags, []);
+  assert.deepEqual(selectedPayload(d.deck, row({ launch: ['claude'] })).launchFlags, []);
+});
+
+test('selectedPayload: launchFlags also for a row whose id is not a session id (no command), and while the directory is not known', (t) => {
+  const d = testDeck(t);
+  const odd = listRow({
+    id: 'not-a-session',
+    session: ds({ id: 'not-a-session', launch: ['claude', '--model', 'opus'] }),
+  });
+  assert.deepEqual(selectedPayload(d.deck, odd).launchFlags, ['--model', 'opus']);
+  assert.deepEqual(
+    selectedPayload(d.deck, row({ dir: null, launch: ['claude', '--verbose'] })).launchFlags,
+    ['--verbose'],
+  );
 });
 
 test('selectedPayload: how the session ended', async (t) => {

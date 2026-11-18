@@ -2,7 +2,8 @@
 // header of stage D (S2 12.5, D11–D15, D17) in four lines of one line each, so that it has one
 // height for every session and window width (D12) — the title, the group chip, its ✎ or `+ group`,
 // the state, Note and Done; the directory, "opened <time> · last active <age>", where the title
-// comes from and the short id; the window's chip (S2 12.3), the open pull requests and the button
+// comes from, the short id and (F16) the flags the session was started with; the window's chip
+// (S2 12.3), the open pull requests and the button
 // of the pull-request dialog; the note's first line —, the resume card, the card of a session
 // running in another terminal, the ended bar, the new form and (F9) the small card of a group whose
 // closed caption is selected in the list. Its interface is contract 2.9's with plan D 2.4's
@@ -34,6 +35,7 @@ import {
   prItemParts,
   prItemTip,
   splitPrs,
+  startedWithText,
   timesText,
   titleSourceText,
 } from './header-text.js';
@@ -384,14 +386,20 @@ export function createCards(root, deps) {
   });
 
   // Line 2: the directory (one line, cut with an ellipsis, whole in its tooltip), "opened <time> ·
-  // last active <age>", where the title comes from, the short id (never cut; a click copies).
+  // last active <age>", where the title comes from, the short id (never cut; a click copies), and
+  // last (F16) the flags the session was started with — the first thing cut (cards.css), all of
+  // them in its tooltip; not there without one, nor while the resume card shows ("Will run").
   const dir = element('span', 'header-dir');
   const times = element('span', 'header-times');
   const source = element('span', 'header-source');
   const shortId = element('span', 'header-id');
   const copied = element('span', 'header-copied');
+  const flags = element('span', 'header-flags');
+  const flagsText = element('span', 'header-flags-text');
+  flags.append(flagsText);
+  flags.hidden = true;
   const sub = element('div', 'header-sub');
-  sub.append(dir, times, source, shortId, copied);
+  sub.append(dir, times, source, shortId, copied, flags);
 
   // Line 3: the window's chip (S2 12.3), the open pull requests side by side as far as they fit
   // (a click opens one), and the button of the pull-request dialog, never cut; while none is
@@ -796,6 +804,11 @@ export function createCards(root, deps) {
       setText(source, titleSourceText(row.titleSource));
       setText(shortId, row.shortId);
       setTip(shortId, `session ${row.id}; a click copies it`);
+      // F16: shown whatever the session's state; `resumeCard` hides it again.
+      const started = startedWithText(selected);
+      setText(flagsText, started.text);
+      setTip(flags, started.tip);
+      setHidden(flags, started.text === '');
       // Line 3: none attached exactly when there is no chip (S2 12.3).
       const none = row.chip === null;
       setHidden(prsNone, !none);
@@ -841,6 +854,14 @@ export function createCards(root, deps) {
      */
     resumeCard(row, selected, resultLines) {
       card.dataset['card'] = 'resume';
+      // F16: while the card prints the command under "Will run", the header's item is not shown
+      // beside it (app.js calls `header` first, then this, on every render of the resume card).
+      // A card without one — a word it cannot print, no directory, an expired session — leaves
+      // the item shown (ruled on review 2): the flags are never printed twice, nor nowhere.
+      const expired = selected?.expired === true || row.marks.includes('expired');
+      if (typeof selected?.command === 'string' && !expired) {
+        setHidden(flags, true);
+      }
       showCard(`resume:${row.id}`, () => buildResume(row.id), [row, selected, resultLines]);
     },
     /** @param {RowPayload} row */

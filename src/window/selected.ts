@@ -2,10 +2,11 @@
  * The resume card's facts for the selected session (S2 12.6, plan A27): the exact command a resume
  * would run (design 7.6's, built by the same function the resume uses), the flags it would not
  * pass on, how the session ended, and whether its transcript is expiring or gone; and what the
- * header and the dialogs of stage D need (plan D5, D6): the note as stored and the ticket address.
+ * header and the dialogs of stage D need (plan D5, D6): the note as stored and the ticket address;
+ * and the flags the session was started with, for the header (follow-up F16).
  * It only reads: no lock, no refresh, nothing stored — the page asks for it on every `list`.
  */
-import { buildResumeCommand, unknownFlags } from '../claude/launch.ts';
+import { buildResumeCommand, passedOnFlags, unknownFlags } from '../claude/launch.ts';
 import { isSessionId } from '../claude/session-id.ts';
 import type { Deck } from '../sessions/deck.ts';
 import type { ListRow } from '../sessions/list.ts';
@@ -46,7 +47,9 @@ function noteOf(note: string | null): Pick<SelectedPayload, 'note' | 'noteTooLon
  * argument list buildResumeCommand gives for the session (claudeCommand, its recorded launch, its
  * label), as `prepareResume` builds them; null when the directory is not known or a word holds
  * anything the sanitiser would change. `unknownFlags` are sanitised: they come from a recorded
- * command line. `note` and `noteTooLong` as `noteOf` says (plan D5); `ticketUrl` is S2 12.5's
+ * command line; so is each token of `launchFlags` (follow-up F16), the recorded flags a resume
+ * passes on again (`passedOnFlags`), also when no command can be printed. `note` and
+ * `noteTooLong` as `noteOf` says (plan D5); `ticketUrl` is S2 12.5's
  * ticket address of the row's group (`ticketAddress` with the configuration's `groupPattern` and
  * `ticketUrl`), null without one. Takes no lock and reads nothing but `deck.config`.
  */
@@ -68,6 +71,7 @@ export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload {
     command: dir === null || argv === null ? null : printableCommand(dir, argv),
     flagsKnown: launch !== null,
     unknownFlags: launch === null ? [] : unknownFlags(launch).map(sanitize),
+    launchFlags: launch === null ? [] : passedOnFlags(launch).map(sanitize),
     ended: endedOf(row),
     expiring: row.marks.includes('expiring'),
     expired: row.marks.includes('expired'),

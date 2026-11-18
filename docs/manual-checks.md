@@ -12,7 +12,8 @@ and W21 check which sessions need you and the desktop notifications (stage B), a
 page's icon (stage E), at "The window (step 2, stage E)"; W32 checks `skydeck update` (follow-up
 F8), at "Updating skydeck"; W33 checks install's offer to turn off Claude Code's ← shortcut
 (follow-up F11), at "Claude Code's ← shortcut"; W34 checks the title bar's theme switch (follow-up
-F13), at "The window's theme".
+F13), at "The window's theme"; W35 checks the flags a session was started with in the header
+(follow-up F16), at "The flags a session was started with".
 
 Setup:
 
@@ -2112,3 +2113,71 @@ the profile), and the answers to OSC 10 and 11 with the stand-in program's quest
 draws its window before the page's first frame, how Windows' mode reaches Edge, and what Claude
 Code's "Auto (match terminal)" does with the answers (when it asks, and whether again during a
 session) are known from nothing but this check.
+
+## The flags a session was started with
+
+The check of the flags in the header (follow-up F16; design-step-2.md 12.5): W35, in your window,
+on one new throwaway session in `~/skydeck-try` and nothing else. It changes no file and no setting
+of yours, and types and presses keys only in that session's terminal and in the New form. From
+step 2 on, before every key and every click, look at the header's short id: it must be the
+throwaway session's (step 2 writes it down).
+
+## W35. The flags in the header (real claude)
+
+Setup: skydeck updated to a commit that has follow-up F16 (`skydeck update`, W32); the window open;
+the throwaway folder there (`mkdir -p ~/skydeck-try`). Write down the time.
+
+1. **Start it with flags.** In the window press Ctrl+Shift+N. The right side shows the form for a
+   new session, its first field the directory, with the cursor in it; when the form does not
+   show, or the cursor is not in that field, type nothing: press Ctrl+Shift+N again, or click into
+   the field. Press Ctrl+A in the field and type the throwaway folder's full path over its text
+   (`/home/<you>/skydeck-try`). Click into the field "Flags for claude" and type
+   `--model haiku --permission-mode plan`. Leave the label and the group empty. Press Enter only
+   when the directory field holds exactly that path and the flags field exactly those words.
+2. **The header.** Look that it is the new one: the header shows a short id you have not seen, its
+   folder ends in `skydeck-try`, "opened" a moment ago, and its terminal Claude Code's prompt.
+   Write the short id down. Expected within a few seconds (once Claude Code's start was recorded):
+   the header's second line ends, after the short id, in `--model haiku --permission-mode plan` —
+   in the lighter grey of the short id, in the narrow font of the folder and the short id, with no
+   word before it and no box around it, as far from the short id as the short id is from the text
+   before it. The header has the same four lines and the same height as before it came: the
+   terminal under it did not move down. Hold the mouse still over the flags for a second:
+   the tooltip reads `Started with: --model haiku --permission-mode plan`, on one line. (The item
+   shows the flags skydeck recorded, the ones a resume passes on again; a prompt and flags such
+   as `-n`, `--worktree` or `--tmux`, which skydeck drops when it records a start, are never
+   shown.)
+3. **Short of room.** Make the window narrower by dragging its right edge, slowly, and watch the
+   second line: first the flags get shorter, ending in `…`, until they are gone (they show six
+   characters or more, or nothing); only then does "where the title comes from" lose characters,
+   and after it the folder and the times together; the short id is never cut, and the header keeps
+   its height. Drag the window back to its width.
+4. **One prompt**, so that the session has a transcript (a session without one is not listed once
+   it has ended). Look at the header's short id: it is the one you wrote down; else type nothing,
+   and click the throwaway session's row once: it is under Open and its title ends in
+   `skydeck-try` (never a row with a coloured bar at its left: a click on one would clear a real
+   session's mark); then look at the short id again. Look that its terminal has the keyboard: the key bar says `Focus: terminal` (else
+   Ctrl+Shift+L until it does). Type `Reply with the single word ok, in this chat, with no tool and
+   no file.` and Enter. If it asks anything — to run a command, to edit a file, or (the session
+   runs in plan mode) whether to go on with a plan — answer No, or press Esc. Wait for its reply.
+5. **Ended and closed.** Look at the short id: it is the throwaway session's (`/exit` ends the
+   session it is typed into). With `Focus: terminal`, type `/exit` and Enter. Expected: the ended
+   bar, and the header's second line still ends in the flags. Click `Close` on the bar. Expected:
+   the right side shows the throwaway session's resume card (its title and folder in the header):
+   its line "Will run" ends in `--model haiku --permission-mode plan`, and the header's second line
+   ends at the short id: the flags are not printed twice.
+6. **Resumed.** Click "Resume here" on the card (a click, not Enter). Expected: the session runs
+   again in a terminal of the window, the same short id; within a few seconds the header's second
+   line ends in the same flags again (a resume passes them on again). Then, with `Focus: terminal`
+   and its short id looked at, type `/exit` and Enter, and click `Close` on the ended bar. The
+   throwaway session stays in the list, not running, as every throwaway session of these checks
+   does.
+
+Write down: the time of the setup; the second line of step 2 as you saw it (each part, in order),
+the tooltip's text, whether anything of the line or the terminal moved when the flags came; in
+step 3, which part lost characters first; the "Will run" line of step 5 and whether the header
+showed the flags beside the card; whether step 6 showed them again. A model changed with `/model`
+inside the session is not shown: the header says what the session was started with (12.5).
+
+Not tried before this check was written: all of it with the real Claude Code. The tests start the
+stand-in program from the form with the same kind of flags and see them in the header, on the
+ended bar and in "Will run", and measure that nothing else of the line moves at any width.

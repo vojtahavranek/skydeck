@@ -8,6 +8,7 @@
 // saved with `savePrResult`, `gh` answered by test/helpers/gh.ts, and links seen by the Edge stub.
 // The page has web/'s real modules in every case.
 import assert from 'node:assert/strict';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -22,6 +23,7 @@ import { ghRunner } from '../test/helpers/gh.ts';
 import type { GhOptions, GhRunner } from '../test/helpers/gh.ts';
 import { sleep } from '../test/helpers/keeper.ts';
 import { S1, S2, S3 } from '../test/helpers/platform.ts';
+import { connectTestPage } from '../test/helpers/window.ts';
 import { browser, newPage } from './helpers/browser.ts';
 import {
   active,
@@ -40,6 +42,7 @@ import {
   shownText,
   showsText,
   TERM_A,
+  TERM_B,
 } from './helpers/shell.ts';
 import type { EditWorld, Launched } from './helpers/shell.ts';
 
@@ -50,6 +53,8 @@ const NOW_NS = 1794474000000000000n;
 const SEC_NS = 1_000_000_000n;
 const MIN_NS = 60n * SEC_NS;
 const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
+const S5 = '4f9d7a5c-2b6e-4d0f-9a7b-6c5d4e3f2a1b';
+const S6 = '5a0e8b6d-3c7f-4e1a-8b8c-7d6e5f4a3b2c';
 const DONE_WORDS = 'Marked done: hidden from the list. It comes back on new activity.';
 const DONE_RUNNING_WORDS = 'Marked done. Stays under Open while it runs; hidden once it stops.';
 const PR7 = 'https://github.com/acme/web/pull/7';
@@ -1549,6 +1554,494 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
       await l.page.keyboard.press('Escape');
       await dialogShown(l.page, false);
       assert.equal(await shownText(l.page, '#key-message'), '');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+});
+
+// --- follow-up F16: the flags a session was started with ------------------------------------------
+
+const FLAGS = ['--model', 'opus', '--permission-mode', 'plan'];
+const FLAGS_TEXT = '--model opus --permission-mode plan';
+/** The four parts the second line held before F16, in order. */
+const TODAYS = ['.header-dir', '.header-times', '.header-source', '.header-id'] as const;
+
+/** Where a part of the header's second line is: its box, and whether its own text is cut. */
+interface Place {
+  left: number;
+  width: number;
+  cut: boolean;
+}
+
+/**
+ * The header's height, its lines, the places of the second line's parts of before F16, and the
+ * flags' item: how much of its text shows (the text's box clipped by the item's), how wide that
+ * text is whole, and the item's text and tooltip; null while it is not shown.
+ */
+interface Flags {
+  height: number;
+  lines: { name: string; overflows: boolean }[];
+  places: Record<string, Place | null>;
+  flags: {
+    visible: number;
+    natural: number;
+    /** The width of five characters in the item's font. */
+    few: number;
+    boxRight: number;
+    textRight: number;
+    /** The room the line leaves from the item's left edge to the line's end. */
+    room: number;
+    text: string;
+    tip: string;
+  } | null;
+}
+async function flagsLine(page: Page): Promise<Flags> {
+  return page.evaluate((todays) => {
+    const head = document.querySelector('#cards .card-header') as HTMLElement;
+    const shown = (element: Element | null): element is HTMLElement =>
+      element instanceof HTMLElement && element.closest('[hidden]') === null;
+    const places: Record<string, { left: number; width: number; cut: boolean } | null> = {};
+    for (const selector of todays) {
+      const element = head.querySelector(selector);
+      if (!shown(element)) {
+        places[selector] = null;
+        continue;
+      }
+      const r = element.getBoundingClientRect();
+      places[selector] = {
+        left: r.left,
+        width: r.width,
+        cut: element.scrollWidth > element.clientWidth,
+      };
+    }
+    const item = head.querySelector('.header-flags');
+    let flags = null;
+    if (shown(item) && getComputedStyle(item).display !== 'none') {
+      const box = item.getBoundingClientRect();
+      // The text itself (its node, not the boxes around it, whose padding holds no text).
+      const range = document.createRange();
+      const node = document.createTreeWalker(item, NodeFilter.SHOW_TEXT).nextNode();
+      range.selectNodeContents(node ?? item);
+      const text = range.getBoundingClientRect();
+      // Clipped by the item's box both ways: text pushed below it shows nothing.
+      const across = Math.min(text.right, box.right) - Math.max(text.left, box.left);
+      const down = Math.min(text.bottom, box.bottom) - Math.max(text.top, box.top);
+      // The width of five characters in the item's font, for "a few characters or nothing".
+      const holder = node?.parentElement ?? item;
+      const probe = document.createElement('span');
+      probe.style.cssText = `position: absolute; visibility: hidden; white-space: pre; font: ${getComputedStyle(holder).font}`;
+      probe.textContent = '-----';
+      document.body.append(probe);
+      const few = probe.getBoundingClientRect().width;
+      probe.remove();
+      const line = (head.querySelector('.header-sub') as HTMLElement).getBoundingClientRect();
+      flags = {
+        visible: down > 0.5 ? Math.max(0, across) : 0,
+        natural: text.width,
+        few,
+        boxRight: box.right,
+        textRight: text.right,
+        room: line.right - box.left,
+        text: item.textContent ?? '',
+        tip: item.title,
+      };
+    }
+    return {
+      height: head.getBoundingClientRect().height,
+      lines: [...head.children].map((line) => ({
+        name: line.className,
+        overflows: line.scrollHeight > line.clientHeight + 1,
+      })),
+      places,
+      flags,
+    };
+  }, TODAYS);
+}
+
+/** Waits until the flags' item shows `text`, or is not shown when `text` is null. */
+async function flagsShow(page: Page, text: string | null): Promise<void> {
+  await eventually(
+    async () => (await flagsLine(page)).flags?.text === (text ?? undefined),
+    `the flags' item: ${JSON.stringify(text)}`,
+  );
+}
+
+test("F16: the flags a session was started with, last on the header's second line", async (t) => {
+  const chromium = await browser(t);
+
+  await t.test(
+    'a running session with flags: one monospace item after the short id, in its lighter grey in both schemes, the line\'s gap before it with and without "id copied", the flags as recorded, its tooltip "Started with:" and the names not recognised; none without flags, nothing left behind; markup stays text',
+    async (t) => {
+      const s = await scripted(t, chromium, {
+        sections: { open: [running(S1, TERM_A, 1, { title: 'with flags' })] },
+        terminals: [terminal(TERM_A, S1, 1)],
+        selected: { [S1]: { launchFlags: FLAGS } },
+      });
+      const { page } = s;
+      await showsText(page, '#cards .header-title', /^with flags$/);
+      await flagsShow(page, FLAGS_TEXT);
+      const order = await page.evaluate(() =>
+        [...(document.querySelector('#cards .header-sub') as HTMLElement).children]
+          .filter((part) => part instanceof HTMLElement && !part.hidden)
+          .map((part) => part.className),
+      );
+      assert.deepEqual(order, [
+        'header-dir',
+        'header-times',
+        'header-source',
+        'header-id',
+        'header-copied',
+        'header-flags',
+      ]);
+      assert.equal((await flagsLine(page)).flags?.tip, `Started with: ${FLAGS_TEXT}`);
+      // The short id's lighter grey (ruled: a side note) in both schemes, and its monospace font;
+      // no box. The mouse is kept off the short id: hovered, it takes the text's colour.
+      await page.mouse.move(2, 2);
+      for (const scheme of ['light', 'dark'] as const) {
+        await page.emulateMedia({ colorScheme: scheme });
+        await sleep(100);
+        const look = await page.evaluate(() => {
+          const item = document.querySelector('#cards .header-flags') as HTMLElement;
+          const holder = [...item.querySelectorAll('*')].at(-1) ?? item;
+          const id = document.querySelector('#cards .header-id') as Element;
+          const dir = document.querySelector('#cards .header-dir') as Element;
+          const style = getComputedStyle(holder);
+          const outer = getComputedStyle(item);
+          return {
+            color: style.color,
+            idColor: getComputedStyle(id).color,
+            dirColor: getComputedStyle(dir).color,
+            font: style.fontFamily,
+            idFont: getComputedStyle(id).fontFamily,
+            boxes: [style, outer].map(
+              (one) => `${one.borderStyle}|${one.backgroundColor}|${one.borderRadius}`,
+            ),
+          };
+        });
+        assert.equal(look.color, look.idColor, `${scheme}: the short id's colour`);
+        assert.notEqual(look.color, look.dirColor, `${scheme}: not the folder's`);
+        assert.equal(look.font, look.idFont, `${scheme}: the monospace font`);
+        assert.match(look.font, /Cascadia Mono/);
+        for (const box of look.boxes) assert.equal(box, 'none|rgba(0, 0, 0, 0)|0px', 'no box');
+      }
+      await page.emulateMedia({ colorScheme: 'light' });
+
+      // The gap before the flags' text is the line's own (between the source and the short id),
+      // with the "copied" text empty and while it shows (a click on the short id).
+      const gaps = (): Promise<{ line: number; before: number; copied: string }> =>
+        page.evaluate(() => {
+          const head = document.querySelector('#cards .card-header') as HTMLElement;
+          const box = (selector: string): DOMRect =>
+            (head.querySelector(selector) as HTMLElement).getBoundingClientRect();
+          const copied = head.querySelector('.header-copied') as HTMLElement;
+          const range = document.createRange();
+          const item = head.querySelector('.header-flags') as HTMLElement;
+          // The text itself (its node, not the boxes around it, whose padding holds no text).
+          range.selectNodeContents(
+            document.createTreeWalker(item, NodeFilter.SHOW_TEXT).nextNode() ?? item,
+          );
+          const before = copied.textContent === '' ? box('.header-id') : box('.header-copied');
+          return {
+            line: box('.header-id').left - box('.header-source').right,
+            before: range.getBoundingClientRect().left - before.right,
+            copied: copied.textContent ?? '',
+          };
+        });
+      const quiet = await gaps();
+      assert.equal(quiet.copied, '');
+      assert.ok(quiet.line > 1, JSON.stringify(quiet));
+      assert.ok(
+        Math.abs(quiet.before - quiet.line) < 0.5,
+        `without "copied": ${JSON.stringify(quiet)}`,
+      );
+      await page.locator('#cards .header-id').click();
+      const shown = await eventually(async () => {
+        const now = await gaps();
+        return now.copied === '' ? null : now;
+      }, 'the "copied" text');
+      assert.ok(
+        Math.abs(shown.before - shown.line) < 0.5,
+        `with "copied": ${JSON.stringify(shown)}`,
+      );
+      await page.mouse.move(2, 2);
+
+      // The names the recording knows only by name (ruled): after the kept flags, in the text
+      // (cut at 40 over the whole) and on the tooltip's first line; its second line names them.
+      s.set({ selected: { [S1]: { launchFlags: FLAGS, unknownFlags: ['--frob', '-Z'] } } });
+      await flagsShow(page, `${FLAGS_TEXT} --f…`);
+      assert.equal(
+        (await flagsLine(page)).flags?.tip,
+        `Started with: ${FLAGS_TEXT} --frob -Z\nNot recognised, not passed again on resume: --frob -Z`,
+      );
+      // Only names it does not know: an item with those names, never nothing.
+      s.set({ selected: { [S1]: { launchFlags: [], unknownFlags: ['--frob'] } } });
+      await flagsShow(page, '--frob');
+      assert.equal(
+        (await flagsLine(page)).flags?.tip,
+        'Started with: --frob\nNot recognised, not passed again on resume: --frob',
+      );
+
+      // A flag's value is text: markup in it is shown, never made.
+      const markup = '<img src=x onerror="window.flagged=1"><b>bold</b>';
+      s.set({ selected: { [S1]: { launchFlags: ['--append-system-prompt', markup] } } });
+      await flagsShow(page, `--append-system-prompt ${markup}`.slice(0, 39) + '…');
+      assert.equal(
+        (await flagsLine(page)).flags?.tip,
+        `Started with: --append-system-prompt ${markup}`,
+      );
+      assert.equal(
+        await page.evaluate(
+          () => document.querySelectorAll('#cards .card-header img, #cards .card-header b').length,
+        ),
+        0,
+      );
+      assert.equal(await page.evaluate(() => 'flagged' in window), false);
+
+      // No flag recorded (none known, none by name): no item, and the line holds exactly what it
+      // held before F16.
+      for (const selected of [{ launchFlags: [] }, { launchFlags: [], unknownFlags: [] }]) {
+        s.set({ selected: { [S1]: selected } });
+        await flagsShow(page, null);
+        const parts = await page.evaluate(() =>
+          [...(document.querySelector('#cards .header-sub') as HTMLElement).children]
+            .filter(
+              (part) => part instanceof HTMLElement && getComputedStyle(part).display !== 'none',
+            )
+            .map((part) => part.className),
+        );
+        assert.deepEqual(parts, [
+          'header-dir',
+          'header-times',
+          'header-source',
+          'header-id',
+          'header-copied',
+        ]);
+      }
+    },
+  );
+
+  await t.test(
+    'not messy: the header keeps its height and its lines, and the folder, the times, the source and the short id keep their places with and without the item, at every width; short of room the item is cut first, to nothing',
+    async (t) => {
+      const dir = `/home/u/projects/${'a-longer-folder/'.repeat(3)}end`;
+      const longFlags = ['--model', 'opus', '--settings', `/home/u/${'s'.repeat(80)}.json`];
+      const s = await scripted(t, chromium, {
+        sections: {
+          open: [running(S1, TERM_A, 1, { title: 'the places', titleSource: 'label', dir })],
+        },
+        terminals: [terminal(TERM_A, S1, 1)],
+        selected: { [S1]: { launchFlags: [] } },
+      });
+      const { page } = s;
+      await showsText(page, '#cards .header-title', /^the places$/);
+      let height: number | null = null;
+      const seen = { whole: 0, partly: 0, none: 0 };
+      for (let width = 1760; width >= 640; width -= 56) {
+        await page.setViewportSize({ width, height: 800 });
+        s.set({ selected: { [S1]: { launchFlags: [] } } });
+        await flagsShow(page, null);
+        await sleep(100);
+        const without = await flagsLine(page);
+        for (const [flags, text] of [
+          [FLAGS, FLAGS_TEXT],
+          [longFlags, `${longFlags.join(' ').slice(0, 39)}…`],
+        ] as const) {
+          s.set({ selected: { [S1]: { launchFlags: flags } } });
+          await flagsShow(page, text);
+          await sleep(100);
+          const withFlags = await flagsLine(page);
+          const where = `${width} px, ${text}`;
+          height ??= without.height;
+          assert.equal(without.height, height, `${where}: the height without`);
+          assert.equal(withFlags.height, height, `${where}: the height with`);
+          assert.deepEqual(withFlags.lines, without.lines, `${where}: the same lines`);
+          for (const line of withFlags.lines) assert.ok(!line.overflows, `${where}: ${line.name}`);
+          for (const part of TODAYS) {
+            const a = without.places[part];
+            const b = withFlags.places[part];
+            assert.ok(a !== null && a !== undefined && b !== null && b !== undefined, part);
+            assert.ok(
+              Math.abs(a.left - b.left) < 0.5 && Math.abs(a.width - b.width) < 0.5,
+              `${where}: ${part} keeps its place (${JSON.stringify(a)} / ${JSON.stringify(b)})`,
+            );
+            assert.equal(a.cut, b.cut, `${where}: ${part} is cut alike`);
+          }
+          assert.equal(withFlags.places['.header-id']?.cut, false, `${where}: the short id whole`);
+          const item = withFlags.flags;
+          assert.ok(item !== null, `${where}: the item`);
+          assert.ok([...item.text].length <= 40, `${where}: at most 40 characters`);
+          // A few characters or nothing (C2 of review 2: never a bare `-…`).
+          assert.ok(
+            item.visible < 0.5 || item.visible >= item.few - 0.5,
+            `${where}: ${item.visible} px shown, fewer than five characters (${item.few} px)`,
+          );
+          // Its box ends where its text ends: the tooltip's area is the text's.
+          assert.ok(item.boxRight <= item.textRight + 0.5, `${where}: the box ends at the text`);
+          if (item.visible >= item.natural - 0.5) {
+            seen.whole++;
+          } else if (item.visible > 0.5) {
+            seen.partly++;
+          } else {
+            seen.none++;
+          }
+          // Something of today's line other than the folder is cut: the item shows nothing.
+          if (TODAYS.some((part) => part !== '.header-dir' && without.places[part]?.cut)) {
+            assert.ok(item.visible < 0.5, `${where}: the item is cut to nothing first`);
+          }
+        }
+      }
+      // The sweep saw every case: whole, cut in part, and cut to nothing.
+      assert.ok(seen.whole > 0, JSON.stringify(seen));
+      assert.ok(seen.partly > 0, JSON.stringify(seen));
+      assert.ok(seen.none > 0, JSON.stringify(seen));
+    },
+  );
+
+  await t.test(
+    'with little room the item shows a few characters or nothing, never a bare `-…`: the room left to it from 1 to 60 px',
+    async (t) => {
+      const s = await scripted(t, chromium, {
+        sections: { open: [running(S1, TERM_A, 1, { title: 'little room' })] },
+        terminals: [terminal(TERM_A, S1, 1)],
+        selected: { [S1]: { launchFlags: FLAGS } },
+      });
+      const { page } = s;
+      const wide = 1760;
+      await page.setViewportSize({ width: wide, height: 800 });
+      await flagsShow(page, FLAGS_TEXT);
+      await sleep(200);
+      const first = (await flagsLine(page)).flags;
+      assert.ok(first !== null && first.visible >= first.natural - 0.5, 'whole when wide');
+      // The room shrinks with the window, one pixel for one, while the item is the only thing cut.
+      for (const room of [1, 3, 6, 10, 15, 20, 26, 32, 38, 45, 60]) {
+        await page.setViewportSize({ width: Math.round(wide - (first.room - room)), height: 800 });
+        await sleep(150);
+        const item = (await flagsLine(page)).flags;
+        assert.ok(item !== null);
+        const where = `${room} px of room (${item.room.toFixed(1)} measured)`;
+        assert.ok(Math.abs(item.room - room) < 1.5, `${where}: the room as planned`);
+        assert.ok(
+          item.visible < 0.5 || item.visible >= item.few - 0.5,
+          `${where}: ${item.visible} px shown, fewer than five characters (${item.few} px)`,
+        );
+        if (room >= item.few * 1.4 + 2) {
+          assert.ok(item.visible > 0.5, `${where}: room for a few characters shows them`);
+        }
+      }
+    },
+  );
+
+  await t.test(
+    'where it shows: for a session running in another terminal and for an ended terminal of the window; not while the resume card prints the command under "Will run", but on a resume card without one (a word it cannot print, an expired session); back again on a running one',
+    async (t) => {
+      const s = await scripted(t, chromium, {
+        sections: {
+          open: [
+            running(S1, TERM_A, 1, { title: 'running here' }),
+            row(S2, {
+              title: 'running elsewhere',
+              state: 'running',
+              elsewhere: { pid: 4242, tty: '/dev/pts/3', dir: '/home/u/project' },
+            }),
+            running(S4, TERM_B, 2, { title: 'ended here' }),
+          ],
+          week: [
+            row(S3, { title: 'not running' }),
+            row(S5, { title: 'no command' }),
+            row(S6, { title: 'expired', marks: ['expired'] }),
+          ],
+        },
+        terminals: [terminal(TERM_A, S1, 1), terminal(TERM_B, S4, 2, { state: 'ended' })],
+        selected: {
+          [S1]: { launchFlags: ['--model', 'opus'] },
+          [S2]: { launchFlags: ['--model', 'sonnet'] },
+          [S3]: {
+            launchFlags: ['--model', 'haiku'],
+            command: `cd /home/u/project && claude --resume ${S3} --model haiku`,
+            ended: 'exited',
+          },
+          [S4]: { launchFlags: ['--verbose'] },
+          // A value with a line break: the card cannot print the command (S2 12.6).
+          [S5]: {
+            launchFlags: ['--model', 'opus', '--append-system-prompt', 'a b'],
+            command: null,
+          },
+          [S6]: { launchFlags: ['--model', 'sonnet'], expired: true },
+        },
+      });
+      const { page } = s;
+      await showsText(page, '#cards .header-title', /^running here$/);
+      await flagsShow(page, '--model opus');
+
+      await clickRow(page, S2);
+      await page.waitForSelector('#right-zone[data-pane="elsewhere"]', { state: 'attached' });
+      await showsText(page, '#cards .header-title', /^running elsewhere$/);
+      await flagsShow(page, '--model sonnet');
+
+      await clickRow(page, S4);
+      await page.waitForSelector('#right-zone[data-pane="terminal"]', { state: 'attached' });
+      await showsText(page, '#cards .header-title', /^ended here$/);
+      await showsText(page, '#cards .card-ended', /not running in this terminal/);
+      await flagsShow(page, '--verbose');
+
+      await clickRow(page, S3);
+      await page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await showsText(page, '#cards .header-title', /^not running$/);
+      await showsText(page, '#cards .card-command', /--model haiku$/);
+      await sleep(300);
+      assert.equal((await flagsLine(page)).flags, null, 'not on the resume card');
+      assert.deepEqual(await texts(page, '#cards .header-flags'), []);
+
+      // A resume card without the command: the flags are shown in the header (never nothing).
+      await clickRow(page, S5);
+      await showsText(page, '#cards .header-title', /^no command$/);
+      await showsText(page, '#cards .card-command', /^skydeck cannot show the exact command/);
+      await flagsShow(page, '--model opus --append-system-prompt a b');
+      await clickRow(page, S6);
+      await showsText(page, '#cards .header-title', /^expired$/);
+      await showsText(page, '#cards .card-ended', /cannot be resumed/);
+      assert.deepEqual(await texts(page, '#cards .card-command'), [], 'no "Will run"');
+      await flagsShow(page, '--model sonnet');
+
+      await clickRow(page, S1);
+      await showsText(page, '#cards .header-title', /^running here$/);
+      await flagsShow(page, '--model opus');
+    },
+  );
+
+  await t.test(
+    'the real server: a session started from the New form with --model opus --permission-mode plan shows them; once it ended, the ended bar too; after Close the resume card says them in "Will run" and the header does not',
+    async (t) => {
+      const l = await launched(t, chromium);
+      const dir = join(l.d.s.home, 'fresh');
+      mkdirSync(dir);
+      await l.page.keyboard.press('Control+Shift+N');
+      await l.page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      await l.page.fill('#cards input[name="directory"]', dir);
+      await l.page.fill('#cards input[name="label"]', 'flagged');
+      await l.page.fill('#cards input[name="flags"]', FLAGS.join(' '));
+      await l.page.keyboard.press('Enter');
+      await showsText(l.page, '#cards .header-title', /^flagged$/);
+      await flagsShow(l.page, FLAGS_TEXT);
+      assert.equal((await flagsLine(l.page)).flags?.tip, `Started with: ${FLAGS_TEXT}`);
+
+      const [started] = l.server.hub.list();
+      assert.ok(started !== undefined);
+      // A transcript, as a prompt would leave: a session without one is not listed once it ended.
+      l.d.resumable(started.expectedSessionId, dir);
+      const p = await connectTestPage(t, l.d, l.server, { focused: false, view: null });
+      p.send({ t: 'input', term: started.id, data: '/exit\r' });
+      await showsText(l.page, '#cards .card-ended', /^claude exited \(status 0\)/);
+      await flagsShow(l.page, FLAGS_TEXT);
+
+      await l.page.locator('#cards .card-bar button', { hasText: 'Close' }).click();
+      await l.page.waitForSelector('#right-zone[data-pane="resume"]', {
+        state: 'attached',
+        timeout: PAGE_WAIT_MS,
+      });
+      await showsText(l.page, '#cards .card-command', new RegExp(`${FLAGS_TEXT}$`));
+      await sleep(300);
+      assert.equal((await flagsLine(l.page)).flags, null, 'not on the resume card');
       assert.deepEqual(l.problems, []);
     },
   );
