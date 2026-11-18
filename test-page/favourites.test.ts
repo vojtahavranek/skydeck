@@ -587,7 +587,7 @@ test('the favourite flags of the new form', async (t) => {
   });
 
   await t.test(
-    'the last chip removed from the keyboard: the field gets the keyboard back',
+    'the last chip removed from the keyboard: the field gets the keyboard back; Enter on Undo is Undo, not Start (ruled)',
     async (t) => {
       const w = await world(t, chromium, ['--only']);
       await openForm(w.page);
@@ -601,9 +601,19 @@ test('the favourite flags of the new form', async (t) => {
       assert.equal(await activeIs(w.page), 'card-button primary', 'no ★ for an empty field');
       await w.page.keyboard.press('Tab');
       assert.equal(await activeIs(w.page), 'card-undo', 'after Start: the hint’s Undo');
-      await w.page.keyboard.press('Space');
+      await w.page.keyboard.press('Enter');
       await chipsAre(w.page, ['--only']);
       assert.equal(await activeIs(w.page), 'input:flags', 'the Undo gone: the field has it');
+      assert.deepEqual(
+        w.acts().map((act) => [act['kind'], act['text'], act['at']]),
+        [
+          ['favourite-remove', '--only', undefined],
+          ['favourite-add', '--only', 0],
+        ],
+        'no new session',
+      );
+      assert.equal(await hint(w.page), HINT);
+      assert.equal(await w.page.getAttribute('#right-zone', 'data-pane'), 'new');
     },
   );
 
