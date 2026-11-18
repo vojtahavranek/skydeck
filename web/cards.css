@@ -457,7 +457,13 @@
   line-height: 1.2;
   color: var(--dim);
 }
-.card-star:not([disabled]):hover {
+/* A disabled ★ is aria-disabled (it keeps the keyboard and its place of Tab), drawn as a disabled
+   button is. */
+.card-star[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: default;
+}
+.card-star:not([aria-disabled='true']):hover {
   color: var(--accent);
 }
 .card-favourites-line {

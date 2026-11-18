@@ -2637,7 +2637,11 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   Start would refuse). The ★ (title "Save these flags as a favourite") is enabled only when the
   page sees none of those reasons but the last, which the server alone judges (ruled by the plan
   owner, F15: the page holds no copy of the flag table): its refusal is the form's result line,
-  nothing is saved and the field keeps its text; a disabled ★'s title names its reason. A chip
+  nothing is saved and the field keeps its text; a disabled ★'s title names its reason. A disabled
+  ★ keeps the keyboard and its place in the order of Tab (it is `aria-disabled`), so that pressing
+  it never moves the keyboard (review 2 of F15). A save's chip comes with the server's list, which
+  can follow the answer by up to a second (8.2.3: at most a list a second): the page asks for it
+  with a `view` after the answer, and the ★ stays disabled until it comes. A chip
   shows its favourite in monospace, cut at 28 characters with `…`, the whole text in its title. It
   is on while the field's words hold the favourite's words as one run, both split by the rule
   above — the page's copy of the rule, held to the server's by a test —, and off otherwise, every
@@ -2647,14 +2651,19 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   chip's × (title "Remove this favourite"), shown on hover and while the chip has the keyboard,
   removes the favourite without asking; the form's hint line then reads `Removed <text> · Undo`,
   the text cut as the chip's, the whole in its hover title (ruled, F15), until the form closes or
-  the favourites change again, and Undo puts it back at its old place.
-  Removing a favourite never changes the field. Keys: the ★ and then the chip row come after the
+  the favourites change again, and Undo puts it back at its old place. A removal and an Undo show
+  in the chips at once, before the server's list: the page keeps the lists its own changes lead
+  to until the server's lists have caught up, and a list that is none of them — another window's
+  change — takes the Undo away. Removing a favourite never changes the field, also when the
+  Delete or Backspace that removed the last chip is held: the field then takes the keyboard, and
+  the key's repeats do nothing there (a key pressed elsewhere acts only when pressed again, 12.9).
+  Keys: the ★ and then the chip row come after the
   flags field and before Start; the row is one Tab stop, ← → move between its chips, Space turns
   the one that has the keyboard on or off, Delete or Backspace removes it; Enter is Start on the
   fields, the ★ and the row alike (Undo, a button after Start, takes Enter as a button does);
   Esc closes the form. None of the row's keys is a list key or a window chord, and the window
-  chords act from the row as from the form's fields (ruled, F15). A click on a chip, its × or Undo
-  takes no keyboard. The form opens with the flags field empty and every chip off, whatever was
+  chords act from the row as from the form's fields (ruled, F15). A click on a chip, its ×, the ★
+  or Undo takes no keyboard. The form opens with the flags field empty and every chip off, whatever was
   used before: no favourite is ever on without a click, and Start sends the field's text, as
   before.
 

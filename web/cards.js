@@ -936,6 +936,12 @@ function newFormOf(defaults, deps) {
   const group = field('group', 'Group', '', 'optional');
   const flags = field('flags', 'Flags for claude', '', 'optional, e.g. --model opus');
   flags.classList.add('mono');
+  // The field's name is its label's words alone, not the ★'s too, which the label also holds.
+  const flagsLabel = flags.closest('label')?.querySelector('.card-label');
+  if (flagsLabel instanceof HTMLElement) {
+    flagsLabel.id = 'card-new-flags-label';
+    flags.setAttribute('aria-labelledby', flagsLabel.id);
+  }
   const start = /** @type {HTMLButtonElement} */ (
     element('button', 'card-button primary', 'Start')
   );

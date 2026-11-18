@@ -1,7 +1,7 @@
 // The favourite flags of the new form end to end on the server (S2 12.6, 10.2; follow-up F15): two
 // pages of one server, a favourite added and removed from one, what the other's `list` shows
-// (`favourites`) within a second and a half, the kv entry the store holds, and the list a server
-// started again reads. In the test process (A19) on realTestPlatform.
+// (`favourites`) within the list's second and some room, the kv entry the store holds, and the
+// list a server started again reads. In the test process (A19) on realTestPlatform.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
@@ -12,7 +12,7 @@ const same = (list: ListMessage, favourites: string[]): boolean =>
   JSON.stringify(list.favourites) === JSON.stringify(favourites);
 
 describe('favourites in the window (S2 12.6; F15)', () => {
-  test("added from page A: in A's and B's lists within 1.5 s, removed the same way; the store holds them", async (t) => {
+  test("added from page A: in A's and B's lists within 2.5 s, removed the same way; the store holds them", async (t) => {
     const d = serverSandbox(t);
     const running = await d.start();
     const a = await connectTestPage(t, d, running.server);
@@ -22,9 +22,10 @@ describe('favourites in the window (S2 12.6; F15)', () => {
     const sent = performance.now();
     const added = await a.act({ kind: 'favourite-add', text: ' --model opus ' });
     assert.equal(added.ok, true, JSON.stringify(added));
-    await b.list((list) => same(list, ['--model opus']), 'the favourite in B', 1500);
-    assert.ok(performance.now() - sent < 1500, `${Math.round(performance.now() - sent)} ms`);
-    await a.list((list) => same(list, ['--model opus']), 'the favourite in A', 1500);
+    // Within the list's second (pages.ts, LIST_MS) and some room for a loaded machine.
+    await b.list((list) => same(list, ['--model opus']), 'the favourite in B', 2500);
+    assert.ok(performance.now() - sent < 2500, `${Math.round(performance.now() - sent)} ms`);
+    await a.list((list) => same(list, ['--model opus']), 'the favourite in A', 2500);
     assert.equal(d.deck.store.getKv('window_favourites'), '["--model opus"]');
 
     const second = await b.act({ kind: 'favourite-add', text: "--append-system-prompt '<b>'" });
@@ -32,7 +33,7 @@ describe('favourites in the window (S2 12.6; F15)', () => {
     await a.list(
       (list) => same(list, ['--model opus', "--append-system-prompt '<b>'"]),
       "B's favourite in A",
-      1500,
+      2500,
     );
 
     const refused = await b.act({ kind: 'favourite-add', text: '--model  "opus"' });
@@ -44,13 +45,13 @@ describe('favourites in the window (S2 12.6; F15)', () => {
 
     const removed = await b.act({ kind: 'favourite-remove', text: '--model opus' });
     assert.equal(removed.ok, true, JSON.stringify(removed));
-    await a.list((list) => same(list, ["--append-system-prompt '<b>'"]), 'the removal in A', 1500);
+    await a.list((list) => same(list, ["--append-system-prompt '<b>'"]), 'the removal in A', 2500);
     const undone = await a.act({ kind: 'favourite-add', text: '--model opus', at: 0 });
     assert.equal(undone.ok, true, JSON.stringify(undone));
     await b.list(
       (list) => same(list, ['--model opus', "--append-system-prompt '<b>'"]),
       'Undo: back at its old place, in B',
-      1500,
+      2500,
     );
   });
 

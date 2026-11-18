@@ -142,6 +142,21 @@ describe('the list in kv window_favourites', () => {
     assert.deepEqual(readFavourites(d.deck.store), ['--y', '--a', '--x', '--b', '--c', '--z']);
   });
 
+  test('an add with `at` (Undo) passes the same rule: each refusal at a place is refused', (t) => {
+    const d = testDeck(t);
+    for (const one of ['--a', '--b']) addFavourite(d.deck.store, one);
+    const before = d.deck.store.getKv('window_favourites');
+    assert.match(addFavourite(d.deck.store, '-c', 0) ?? '', /^cannot pass -c to claude: /);
+    assert.equal(addFavourite(d.deck.store, ' "--a" ', 0), FAVOURITE_REFUSALS.known);
+    assert.equal(addFavourite(d.deck.store, '', 1), FAVOURITE_REFUSALS.empty);
+    assert.equal(addFavourite(d.deck.store, "--x 'y", 1), "the flags have an unclosed '");
+    assert.equal(addFavourite(d.deck.store, 'a'.repeat(201), 0), FAVOURITE_REFUSALS.tooLong);
+    assert.equal(d.deck.store.getKv('window_favourites'), before);
+    for (const one of twelve().slice(2)) addFavourite(d.deck.store, one);
+    assert.equal(readFavourites(d.deck.store).length, 12);
+    assert.equal(addFavourite(d.deck.store, '--more', 3), FAVOURITE_REFUSALS.full);
+  });
+
   test('removed by its text: true; a text that is no favourite: false, nothing written', (t) => {
     const d = testDeck(t);
     for (const one of ['--a', '--b', '--c']) addFavourite(d.deck.store, one);

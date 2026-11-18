@@ -7,12 +7,24 @@
 // refusal is the form's result line. The × of a chip removes the favourite, and the form's hint
 // line offers `Undo` until the form closes or the favourites change again.
 //
+// The server answers an action before or after the list that holds it (it sends a page at most a
+// list a second; app.js asks for one after each of these answers). So the chips show the list the
+// page's own removals and Undos give at once — `ahead`, the lists they lead to, in order, until
+// the server's lists have caught up; a list that is none of them is a change of another window,
+// which takes the Undo away and drops `ahead` (a refused action drops it too) — and a save keeps
+// the ★ disabled until a list after its answer: the chip comes with the server's list, never
+// before (a refused save shows nothing).
+//
 // Keyboard (S2 12.9): the ★ and then the row come after the field and before Start; the row is
 // one Tab stop (aria-activedescendant names its current chip), ← → move, Space turns the chip on
-// or off, Delete and Backspace remove it, Enter starts as everywhere in the form. A click on a
-// chip, its × or Undo takes no keyboard (their mousedown is cancelled), so that a click leaves the
-// keyboard in the field. When the row, or Undo, that had the keyboard goes away, the field takes
-// it. Every favourite reaches the DOM as text (sanitised for show, as typed in the field).
+// or off, Delete and Backspace remove it, Enter starts as everywhere in the form. A disabled ★ is
+// aria-disabled, not disabled: it keeps the keyboard and its place of Tab, so that pressing it
+// never moves the keyboard. A click on a chip, its ×, the ★ or Undo takes no keyboard (their
+// mousedown is cancelled), so that a click leaves the keyboard in the field. When the row, or
+// Undo, that had the keyboard goes away, the field takes it, and the repeats of a key held down
+// since (the Delete or Backspace that removed the last chip) do nothing there: a key pressed
+// elsewhere acts in the field only when it is pressed again (12.9). Every favourite reaches the
+// DOM as text, sanitised for show and as stored in the field.
 
 /** @import { ResultMessage } from '../src/window/protocol.ts' */
 import {
@@ -66,6 +78,18 @@ const sameList = (one, other) =>
   one.length === other.length && one.every((text, i) => text === other[i]);
 
 /**
+ * @param {readonly string[]} list
+ * @param {string} text
+ * @param {number} at
+ * @returns {string[]} the list with `text` put at place `at` (past the end: last), as the server does
+ */
+function withAt(list, text, at) {
+  const made = [...list];
+  made.splice(Math.min(at, made.length), 0, text);
+  return made;
+}
+
+/**
  * The ★ and the chip row of a new form.
  * @param {object} parts
  * @param {HTMLFormElement} parts.form the new form (Enter on the row or the ★ submits it)
@@ -90,18 +114,30 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
   line.append(element('span', 'card-label'), row);
   line.hidden = true;
 
-  /** The favourites the chips show, in their order. @type {string[]} */
+  /** The favourites of the server's last list. @type {string[]} */
   let favourites = [];
+  /** The lists this page's own removals and Undos lead to, in order, not yet listed. */
+  /** @type {string[][]} */
+  let ahead = [];
+  /** The favourites the chips show: the last of `ahead`, else the server's. */
+  const shown = () => ahead.at(-1) ?? favourites;
+  /** What the chips show now. @type {string[]} */
+  let drawn = [];
   /** The chip that has the row's keyboard. */
   let current = 0;
-  /** A save is waiting for its answer. */
+  /** A save waits for its answer, then (`listAfter`) for a list. */
   let saving = false;
-  /** The removal the hint offers to undo: the list before it and the list it gives. */
-  /** @type {{ text: string, at: number, before: string[], after: string[] } | null} */
+  let listAfter = false;
+  /** The list a save that works leads to: this page's own change too, though not drawn ahead. */
+  /** @type {string[] | null} */
+  let saved = null;
+  /** The removal the hint offers to undo. @type {{ text: string, at: number } | null} */
   let undo = null;
   /** The result line a favourite's refusal wrote, so that only it is cleared. */
   /** @type {string | null} */
   let refused = null;
+  /** The code of the key that removed the last chip, while it is held (its repeats go nowhere). */
+  let held = '';
 
   /** @param {ResultMessage} result */
   const answered = (result) => {
@@ -131,20 +167,34 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
     }
   };
 
-  /** S2 12.6's `Removed <text> · Undo`. */
+  /** S2 12.6's `Removed <text> · Undo`, the text cut as the chip's, the whole in its title. */
   const offerUndo = () => {
     if (undo === null) {
       return;
     }
     const { text, at } = undo;
-    const shown = element('span', 'card-hint-favourite mono', chipWords(sanitize(text)));
-    shown.title = sanitize(text);
+    const removed = element('span', 'card-hint-favourite mono', chipWords(sanitize(text)));
+    removed.title = sanitize(text);
     const button = quietButton('card-undo', 'Undo');
     button.addEventListener('click', () => {
       plainHint();
-      void act({ kind: 'favourite-add', text, at }).then(answered);
+      if (shown().includes(text)) {
+        return; // it is back already
+      }
+      ahead.push(withAt(shown(), text, at));
+      draw();
+      void act({ kind: 'favourite-add', text, at }).then(refusedDrops);
     });
-    hint.replaceChildren('Removed ', shown, ' · ', button);
+    hint.replaceChildren('Removed ', removed, ' · ', button);
+  };
+
+  /** The answer to a removal or an Undo: a refusal drops what the page expected. */
+  const refusedDrops = (/** @type {ResultMessage} */ result) => {
+    if (!result.ok) {
+      ahead = [];
+      draw();
+    }
+    answered(result);
   };
 
   /** The states of the chips and the ★ for the field's text now. */
@@ -154,7 +204,7 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
       if (!(chip instanceof HTMLElement)) {
         return;
       }
-      const on = holdsFavourite(text, favourites[at] ?? '');
+      const on = holdsFavourite(text, drawn[at] ?? '');
       chip.dataset['on'] = String(on);
       chip.setAttribute('aria-selected', String(on));
       chip.dataset['current'] = String(at === current);
@@ -162,58 +212,9 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
         row.setAttribute('aria-activedescendant', chip.id);
       }
     });
-    const reason = saving ? null : favouriteRefusal(text, favourites);
-    star.disabled = saving || reason !== null;
+    const reason = saving ? null : favouriteRefusal(text, shown());
+    star.setAttribute('aria-disabled', String(saving || reason !== null));
     star.title = reason === null ? STAR_TIP : `${STAR_TIP}\n${reason}`;
-  };
-
-  /** @param {number} at */
-  const toggle = (at) => {
-    const favourite = favourites[at];
-    if (favourite === undefined) {
-      return;
-    }
-    current = at;
-    flags.value = holdsFavourite(flags.value, favourite)
-      ? withoutFavourite(flags.value, favourite)
-      : withFavourite(flags.value, favourite);
-    paint();
-  };
-
-  /** @param {number} at */
-  const remove = (at) => {
-    const favourite = favourites[at];
-    if (favourite === undefined) {
-      return;
-    }
-    current = at;
-    undo = {
-      text: favourite,
-      at,
-      before: favourites,
-      after: favourites.filter((one) => one !== favourite),
-    };
-    offerUndo();
-    void act({ kind: 'favourite-remove', text: favourite }).then((result) => {
-      if (!result.ok && undo?.text === favourite) {
-        plainHint();
-      }
-      answered(result);
-    });
-  };
-
-  const save = () => {
-    if (star.disabled) {
-      return;
-    }
-    saving = true;
-    paint();
-    void act({ kind: 'favourite-add', text: flags.value })
-      .then(answered)
-      .finally(() => {
-        saving = false;
-        paint();
-      });
   };
 
   /** @param {string} favourite */
@@ -227,6 +228,76 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
     x.setAttribute('aria-hidden', 'true');
     chip.append(element('span', 'card-favourite-text mono', chipWords(sanitize(favourite))), x);
     return chip;
+  };
+
+  /** The chips of `shown()`; the current one stays on its favourite, else at its place. */
+  const draw = () => {
+    const list = shown();
+    if (!sameList(list, drawn)) {
+      const was = drawn[current];
+      const kept = was === undefined ? -1 : list.indexOf(was);
+      current = kept >= 0 ? kept : Math.max(0, Math.min(current, list.length - 1));
+      drawn = [...list];
+      row.replaceChildren(...drawn.map(chipOf));
+      if (drawn.length === 0) {
+        keepKeyboard(line);
+      }
+      line.hidden = drawn.length === 0;
+    }
+    paint();
+  };
+
+  /** @param {number} at */
+  const toggle = (at) => {
+    const favourite = drawn[at];
+    if (favourite === undefined) {
+      return;
+    }
+    current = at;
+    flags.value = holdsFavourite(flags.value, favourite)
+      ? withoutFavourite(flags.value, favourite)
+      : withFavourite(flags.value, favourite);
+    paint();
+  };
+
+  /** @param {number} at */
+  const remove = (at) => {
+    const favourite = drawn[at];
+    if (favourite === undefined) {
+      return;
+    }
+    current = at;
+    undo = { text: favourite, at };
+    ahead.push(drawn.filter((one) => one !== favourite));
+    offerUndo();
+    draw();
+    void act({ kind: 'favourite-remove', text: favourite }).then((result) => {
+      if (!result.ok && undo?.text === favourite) {
+        plainHint();
+      }
+      refusedDrops(result);
+    });
+  };
+
+  const save = () => {
+    if (star.getAttribute('aria-disabled') === 'true') {
+      return;
+    }
+    const text = flags.value;
+    plainHint(); // the favourites change again
+    saving = true;
+    saved = [...shown(), text.trim()];
+    paint();
+    void act({ kind: 'favourite-add', text }).then((result) => {
+      if (!result.ok) {
+        saved = null;
+      }
+      answered(result);
+      // The list that holds a save that worked can come after the answer: until then the ★ waits.
+      listAfter = result.ok && !shown().includes(text.trim());
+      saving = listAfter;
+      paint();
+    });
   };
 
   /** The chip under `target`, and whether it is its ×. */
@@ -252,7 +323,7 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
     if (event.ctrlKey || event.altKey || event.metaKey) {
       return;
     }
-    const last = favourites.length - 1;
+    const last = drawn.length - 1;
     switch (event.key) {
       case 'ArrowLeft':
       case 'ArrowRight':
@@ -270,6 +341,7 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
       case 'Delete':
       case 'Backspace':
         if (!event.repeat) {
+          held = event.code;
           remove(current);
         }
         break;
@@ -283,6 +355,21 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
     }
     event.preventDefault();
   });
+  flags.addEventListener('keydown', (event) => {
+    if (event.code !== held) {
+      return;
+    }
+    if (event.repeat) {
+      event.preventDefault(); // held since it removed the last chip (12.9)
+    } else {
+      held = '';
+    }
+  });
+  form.addEventListener('keyup', (event) => {
+    if (event.code === held) {
+      held = '';
+    }
+  });
   star.addEventListener('click', save);
   star.addEventListener('keydown', (event) => {
     // V6: Enter is Start everywhere in the form; Space (or a click) presses the ★.
@@ -294,28 +381,29 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
     }
   });
   flags.addEventListener('input', paint);
-  paint();
+  draw();
 
   return {
     star,
     line,
     update(list) {
-      if (sameList(list, favourites)) {
-        return;
+      if (listAfter) {
+        listAfter = false; // a list after the save's answer holds it
+        saving = false;
       }
-      if (undo !== null && !sameList(list, undo.before) && !sameList(list, undo.after)) {
-        plainHint(); // the favourites changed again
+      const own = ahead.findIndex((one) => sameList(one, list));
+      if (own >= 0) {
+        ahead = ahead.slice(own + 1); // the server has caught up with this page's own change
+      } else if (saved !== null && sameList(list, saved)) {
+        ahead = []; // and with the save, which came after every change ahead
+        saved = null;
+      } else if (!sameList(list, favourites)) {
+        ahead = [];
+        saved = null;
+        plainHint(); // another window changed the favourites
       }
-      const was = favourites[current];
       favourites = [...list];
-      const kept = was === undefined ? -1 : favourites.indexOf(was);
-      current = kept >= 0 ? kept : Math.max(0, Math.min(current, favourites.length - 1));
-      row.replaceChildren(...favourites.map(chipOf));
-      if (favourites.length === 0) {
-        keepKeyboard(line);
-      }
-      line.hidden = favourites.length === 0;
-      paint();
+      draw();
     },
   };
 }

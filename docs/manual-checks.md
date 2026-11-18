@@ -2002,8 +2002,8 @@ Code).
 
 ## W36. Favourite flags in the new form (real claude)
 
-Setup: the window is open, and `mkdir -p ~/skydeck-try` in W. In the window press Ctrl+Shift+N.
-The right side shows `New session`, the caret in its first field, Directory; when the form does
+Setup: the window is open, and `mkdir -p ~/skydeck-try` in W. In the window press Ctrl+Shift+N
+(here and below; in a browser tab, the `+ New` button instead). The right side shows `New session`, the caret in its first field, Directory; when the form does
 not show, press Ctrl+Shift+N again. Under the field "Flags for claude" a row of chips shows the
 favourites you have (no row when there is none); write down how many, and their texts. With 12
 already the form takes no more: write that down and stop (press Esc while the form shows). When
