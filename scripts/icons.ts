@@ -1,9 +1,10 @@
-// `node scripts/icons.ts` (S2 12.12; plan E14, task 94; follow-ups F10, F12, F14): draws the owner's
-// two pictures, scripts/icons/skydeck-source.png and scripts/icons/skydeck-source-small.png, into
-// the PNG files of web/icons/ and web/icons/favicon.ico with the pinned Playwright's Chromium. Run
-// it by hand after changing a picture or the numbers below, and commit what it wrote: there is no
-// build step, and no test and no CI step runs it (test/window/icons.test.ts holds its output, and
-// reduces the pictures again in Node to see that the files are the pictures').
+// `node scripts/icons.ts` (S2 12.12; plan E14, task 94; follow-ups F10, F12, F14): draws the
+// owner's two pictures, scripts/icons/skydeck-source.png and
+// scripts/icons/skydeck-source-small.png, into the PNG files of web/icons/ and
+// web/icons/favicon.ico with the pinned Playwright's Chromium. Run it by hand after changing a
+// picture or the numbers below, and commit what it wrote: there is no build step, and no test and
+// no CI step runs it (test/window/icons.test.ts holds its output, and reduces the pictures again in
+// Node to see that the files are the pictures').
 //
 // Which picture. The large one (a cloud and three stacked terminal windows) is drawn into the 192
 // and 512 pixel files and the two maskable ones. At 48 pixels and below it blurs (at 16 into a
