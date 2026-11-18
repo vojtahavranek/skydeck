@@ -17,8 +17,10 @@ import {
 import { basename, dirname, join } from 'node:path';
 import { describe, test } from 'node:test';
 
+import { main } from '../../../src/cli/main.ts';
 import { NS_PER_DAY } from '../../../src/platform/time.ts';
 import type { Files, Platform } from '../../../src/platform/types.ts';
+import { capture } from '../../helpers/capture.ts';
 import { run, settingsFile, transcript } from '../../helpers/install.ts';
 import type { Run } from '../../helpers/install.ts';
 import { S1, T0, testPlatform } from '../../helpers/platform.ts';
@@ -398,6 +400,37 @@ describe("install: the ← step's lines are sanitized (the path comes from CLAUD
       }
     });
   }
+});
+
+describe('install: an error of the ← step that is no write (review 2, C6)', () => {
+  test('the question cannot be read: one line that claims no write, install still succeeds, the file as it was', async (t) => {
+    const before = JSON.stringify(sample(), null, 2);
+    const { d, path } = machine(t, before);
+    const captured = capture({ lines: ['y'] });
+    const io = {
+      ...captured.io,
+      readLine: (prompt: string) =>
+        prompt === QUESTION
+          ? Promise.reject(new TypeError(`stdin went away near ${CANARY}`))
+          : captured.io.readLine(prompt),
+    };
+
+    const code = await main(['install'], { io, platform: d.platform });
+
+    assert.equal(code, 0, captured.stderr());
+    assert.ok(
+      captured
+        .stderr()
+        .endsWith(
+          "could not turn Claude Code's ← shortcut off: an unexpected error (TypeError); " +
+            `skydeck doctor says whether it is off; to turn it off: ${HOW}\n`,
+        ),
+      captured.stderr(),
+    );
+    assert.ok(captured.stdout().endsWith('skydeck is installed\n'), captured.stdout());
+    assert.equal(readFileSync(path, 'utf8'), before);
+    assert.ok(!(captured.stdout() + captured.stderr()).includes(CANARY));
+  });
 });
 
 describe('install: where the global config file is (L1)', () => {

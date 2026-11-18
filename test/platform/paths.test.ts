@@ -121,6 +121,27 @@ describe('resolvePlaces (home /h)', () => {
     );
   });
 
+  test('a configured claudeHome that is the default ~/.claude written out: ~/.claude.json, whatever CLAUDE_CONFIG_DIR says (F11)', () => {
+    // Its sessions run as Claude Code's default home has them, so without CLAUDE_CONFIG_DIR.
+    for (const configured of ['/h/.claude', '/h/.claude/', '/h//.claude']) {
+      assert.equal(
+        resolvePlaces({}, '/h', configured).claudeGlobalConfig,
+        '/h/.claude.json',
+        configured,
+      );
+      assert.equal(
+        resolvePlaces({ CLAUDE_CONFIG_DIR: '/c' }, '/h', configured).claudeGlobalConfig,
+        '/h/.claude.json',
+        configured,
+      );
+    }
+    // CLAUDE_CONFIG_DIR itself is Claude Code's own rule: the file is inside it, even for ~/.claude.
+    assert.equal(
+      resolvePlaces({ CLAUDE_CONFIG_DIR: '/h/.claude' }, '/h', null).claudeGlobalConfig,
+      '/h/.claude/.claude.json',
+    );
+  });
+
   test('a configured claudeHome is used as it is given: validating it is the job of parseConfig', () => {
     assert.equal(resolvePlaces({ CLAUDE_CONFIG_DIR: '/c' }, '/h', 'rel/k').claudeHome, 'rel/k');
   });

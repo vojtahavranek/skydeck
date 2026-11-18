@@ -11,7 +11,7 @@ export interface Places {
   /**
    * Claude Code's global config file (follow-up F11): `<homeDir>/.claude.json`, beside the default
    * claudeHome; `<claudeHome>/.claude.json` when claudeHome is named (config.json or
-   * CLAUDE_CONFIG_DIR).
+   * CLAUDE_CONFIG_DIR), unless config.json names the default `<homeDir>/.claude`.
    */
   claudeGlobalConfig: string;
   dbPath: string; // <dataDir>/skydeck.db
@@ -56,7 +56,8 @@ export function resolveConfigDir(env: Env, homeDir: string): string {
  * parseConfig, so used as given), else CLAUDE_CONFIG_DIR, else <homeDir>/.claude.
  * claudeGlobalConfig by the same rule: Claude Code keeps `.claude.json` in the home directory, and
  * inside CLAUDE_CONFIG_DIR when that is set; a claudeHome in config.json stands for the
- * CLAUDE_CONFIG_DIR that Claude Code runs with (only that variable moves Claude Code's home).
+ * CLAUDE_CONFIG_DIR that Claude Code runs with (only that variable moves Claude Code's home),
+ * except when it is the default <homeDir>/.claude written out: those sessions run without it.
  */
 export function resolvePlaces(
   env: Env,
@@ -67,13 +68,20 @@ export function resolvePlaces(
   const stateDir = skydeckDir(env, homeDir, 'state', 'XDG_STATE_HOME', join('.local', 'state'));
   const configDir = resolveConfigDir(env, homeDir);
   const spoolDir = join(stateDir, 'spool');
-  const namedClaudeHome = configuredClaudeHome ?? absoluteEnv(env, 'CLAUDE_CONFIG_DIR');
+  const defaultClaudeHome = join(homeDir, '.claude');
+  const envClaudeHome = absoluteEnv(env, 'CLAUDE_CONFIG_DIR');
+  let globalConfigDir = envClaudeHome ?? homeDir;
+  if (configuredClaudeHome !== null) {
+    // Compared as paths: `/h/.claude/` and `/h//.claude` are the default too.
+    const same = join(configuredClaudeHome).replace(/(?<=.)\/+$/, '') === defaultClaudeHome;
+    globalConfigDir = same ? homeDir : configuredClaudeHome;
+  }
   return {
     dataDir,
     stateDir,
     configDir,
-    claudeHome: namedClaudeHome ?? join(homeDir, '.claude'),
-    claudeGlobalConfig: join(namedClaudeHome ?? homeDir, '.claude.json'),
+    claudeHome: configuredClaudeHome ?? envClaudeHome ?? defaultClaudeHome,
+    claudeGlobalConfig: join(globalConfigDir, '.claude.json'),
     dbPath: join(dataDir, 'skydeck.db'),
     hookPath: join(dataDir, 'skydeck-hook'),
     nodeLink: join(dataDir, 'node'),

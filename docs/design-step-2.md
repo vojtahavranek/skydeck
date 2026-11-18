@@ -1166,7 +1166,7 @@ messages yet, `/bg` asks you to send a message first, while `←` works right aw
 (code.claude.com/docs/en/agent-view, read 2026-11-17). The conversation then goes on in a
 background session with a new id, whose program runs under a `claude bg-pty-host` process
 re-parented to init, outside the terminal's process tree; the terminal's program shows agent view,
-and what the user types there goes to the background session (observed on Claude Code 2.1.311,
+and what the user types there then goes to a background session (observed on Claude Code 2.1.311,
 design.md 14). By the rule above the window lists the background session as running in another
 terminal, with its turns "finished · not seen" (seen is kept for the session the terminal shows,
 12.4), while the terminal's row keeps its own session, which never took that prompt. skydeck does

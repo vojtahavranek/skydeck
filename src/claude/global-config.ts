@@ -56,8 +56,8 @@ type Look =
 /**
  * The state of the ← shortcut in the global config file at `path` (Places.claudeGlobalConfig).
  * Never creates the file, never follows a symbolic link, never throws: a file that cannot be
- * looked at or read is `unknown`. A file of another user than `uid` is `unknown` too: skydeck
- * would never write it.
+ * looked at or read is `unknown`. A file of another user than `uid`, or one without its owner's
+ * write bit, is `unknown` too: skydeck would never write it.
  */
 export function readLeftArrow(files: Files, uid: number, path: string): LeftArrowReading {
   const look = lookAt(files, uid, path);
@@ -134,6 +134,11 @@ function lookAt(files: Files, uid: number, path: string): Look {
     return unknown(
       code === 'ENOENT' || code === 'ENOTDIR' ? 'it does not exist' : `it cannot be read: ${code}`,
     );
+  }
+  // Its owner made it read-only: a statement skydeck does not overrule by renaming over it. (After
+  // the read: a file that cannot be read at all says so first.)
+  if ((info.mode & 0o200) === 0) {
+    return unknown('it is read-only');
   }
   let text: string;
   try {

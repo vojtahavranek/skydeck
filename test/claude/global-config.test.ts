@@ -217,6 +217,22 @@ describe('the global config file: readLeftArrow (L1)', () => {
     assert.deepEqual(reading, { state: 'unknown', path, reason: 'it is a symbolic link' });
   });
 
+  test("a file without the owner's write bit: unknown (it is read-only for you)", (t) => {
+    for (const mode of [0o400, 0o444, 0o500]) {
+      const d = testPlatform(t);
+      const path = configFile(d);
+      put(path, JSON.stringify(sample()), mode);
+
+      const reading = readLeftArrow(d.platform.files, d.platform.uid, path);
+
+      assert.deepEqual(
+        reading,
+        { state: 'unknown', path, reason: 'it is read-only' },
+        mode.toString(8),
+      );
+    }
+  });
+
   test('a directory at the path: unknown', (t) => {
     const d = testPlatform(t);
     const path = configFile(d);
@@ -622,6 +638,20 @@ describe('the global config file: turnLeftArrowOff (L3), what it never writes', 
     assert.deepEqual(result, { kind: 'unknown', reason: 'it is a symbolic link' });
     assert.equal(lstatSync(path).isSymbolicLink(), true);
     assert.equal(readFileSync(target, 'utf8'), text);
+    assert.deepEqual(leftovers(path), []);
+  });
+
+  test('a read-only file (mode 400) is never written and keeps its mode', (t) => {
+    const d = testPlatform(t);
+    const path = configFile(d);
+    const text = JSON.stringify(sample());
+    put(path, text, 0o400);
+
+    const result = turnOff(d, path);
+
+    assert.deepEqual(result, { kind: 'unknown', reason: 'it is read-only' });
+    assert.equal(readFileSync(path, 'utf8'), text);
+    assert.equal(statSync(path).mode & 0o777, 0o400);
     assert.deepEqual(leftovers(path), []);
   });
 

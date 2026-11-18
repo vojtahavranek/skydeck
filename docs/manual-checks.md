@@ -1871,7 +1871,9 @@ Setup: skydeck updated to a commit that has follow-up F11 (`skydeck update`, W32
   reason means), and `/config` in Claude Code, the option "← opens agents", turns the shortcut off
   instead.
 
-Then type `ls -l ~/.claude.json*` and write down what it lists: names, modes and sizes only.
+Then type `ls -la ~ | grep -F claude.json` and write down what it lists: names, modes and sizes
+only (it also lists a `..claude.json.<12 hex digits>.tmp`, with two dots, that an interrupted
+install would leave).
 
 1. **The question.** In W, type `skydeck install`. Expected, among its usual lines (`hook entries
    already present`, perhaps the python3 line): the three lines and the question
@@ -1896,10 +1898,11 @@ Then type `ls -l ~/.claude.json*` and write down what it lists: names, modes and
    wrote it …`, `could not turn Claude Code's ← shortcut off: …`, `… left … alone (…)`): write it
    down. The file is then as it was; leave out the rest of the check, and turn the shortcut off
    with `/config` in Claude Code ("← opens agents") if you want it off.
-2. **What changed.** In W, `ls -l ~/.claude.json*`. Expected: `~/.claude.json` with mode
+2. **What changed.** In W, `ls -la ~ | grep -F claude.json`. Expected: no
+   `..claude.json.<12 hex digits>.tmp` that was not there in the setup; `.claude.json` with mode
    `-rw-------`, about 30 bytes larger than in the setup (1 byte when the key was there as `true`;
    a session of yours may also have saved the file in between, so a size that differs more is not
-   a failure on its own), and a new `~/.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>`, mode
+   a failure on its own); and a new `.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>`, mode
    `-rw-------`, with the size the file had in the setup. Then `skydeck doctor`: its line is now
    `ok       Claude Code's ← shortcut is off (/home/<you>/.claude.json)`.
 3. **A new session in the window.** A session that already runs keeps the shortcut (Claude Code

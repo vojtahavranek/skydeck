@@ -224,11 +224,11 @@ Last, install looks at **Claude Code's ← shortcut**. In a Claude Code session,
 sends the session to the background and opens Claude Code's agent view. In skydeck's window ← also
 closes a group in the list, so a ← meant for the list but typed into a terminal sends that
 terminal's session away: the conversation goes on in a background session that the window lists
-as "running in another terminal", and what you type in the terminal goes there. Claude Code keeps
-the switch, `leftArrowOpensAgents`, in its global config file (not in `settings.json`):
-`~/.claude.json`, or the `.claude.json` inside `CLAUDE_CONFIG_DIR` when that is set (inside
-`claudeHome` when `config.json` sets it). When the shortcut is on, install says so and asks (on
-stderr):
+as "running in another terminal", and what you type in the terminal then goes to a background
+session. Claude Code keeps the switch, `leftArrowOpensAgents`, in its global config file (not in
+`settings.json`): `~/.claude.json`, or the `.claude.json` inside `CLAUDE_CONFIG_DIR` when that is
+set (inside `claudeHome` when `config.json` sets it to anything but the default `~/.claude`). When
+the shortcut is on, install says so and asks (on stderr):
 
 ```
 Claude Code's ← shortcut is on: ← on an empty prompt sends the session to the background and opens agent view.
@@ -254,7 +254,8 @@ your account details and the MCP servers' settings, so install never prints anyt
 new file and the backup are readable by you only (mode 600). Only that one key changes: every other
 key keeps its place and its value, the indentation and the final newline stay. install writes the
 new file beside the old one, reads it back, and renames it over the old one; when another session
-saved the file in the meantime, install reads it again, and after the third time it gives up:
+saved the file in the meantime, install reads it again, and after the third time it gives up (the
+file then stays as the other session left it):
 
 ```
 /home/you/.claude.json kept changing while skydeck wrote it, so skydeck left it as it is; to turn the ← shortcut off: /config in Claude Code ("← opens agents")
@@ -277,8 +278,9 @@ The reason in brackets is one of `it does not exist` (Claude Code has not run ye
 somewhere else), `it cannot be read: <code>` (such as `EACCES`), `it is not UTF-8 text` (a byte
 that is not UTF-8, which skydeck could not keep as it is), `it is not JSON`, `it is not a JSON
 object`, `leftArrowOpensAgents is neither true nor false`, `it is a symbolic link` (skydeck does not
-write through a link, into a dotfiles folder say), `it is not a regular file` and `it belongs to
-another user`; after the `y` also `leftArrowOpensAgents is in it more than once` and `skydeck cannot
+write through a link, into a dotfiles folder say), `it is not a regular file`, `it belongs to
+another user` and `it is read-only` (its owner write bit is off, mode 400 say: skydeck does not
+overrule that); after the `y` also `leftArrowOpensAgents is in it more than once` and `skydeck cannot
 edit its text safely`. When the write fails, install says so on stderr, still ends with `skydeck is
 installed` and exits 0:
 
@@ -287,9 +289,17 @@ could not turn Claude Code's ← shortcut off: cannot write /home/you/.claude.js
 ```
 
 (After `off:` there can also be `cannot write a backup of … (<code>); it was not changed`, `cannot
-find a free name for a backup of …; it was not changed`, or `what skydeck wrote for … did not read
-back as written; it was not changed`.) This step runs only after everything else install does has
-succeeded, and its outcome never changes install's exit code.
+find a free name for a backup of …; it was not changed`, `what skydeck wrote for … did not read
+back as written; it was not changed`, or, for a failure that did not come from the write itself,
+`an unexpected error (<name>); skydeck doctor says whether it is off`.) This step runs only after
+everything else install does has succeeded, and its outcome never changes install's exit code.
+
+The file is whole at every moment, the old text before the rename and the new one after it. An
+install that is killed in between (Ctrl+C at that moment, a crash) can leave
+`..claude.json.<12 hex digits>.tmp` beside it (two dots: the temporary file of the new text, mode
+600, a whole copy with your account details) and the backup; remove that temporary file when no
+install runs. A file with a second name (a hard link) loses it: the renamed file is a new one, and
+the other name keeps the old text.
 
 To turn the shortcut back on: in Claude Code, `/config`, the option "← opens agents"; or set
 `leftArrowOpensAgents` to `true` in the file (or remove the key) and start your sessions again. Do
@@ -372,7 +382,7 @@ npm run check
 |---|---|
 | `<claudeHome>/settings.json` (default `~/.claude/settings.json`) | Two hook entries are added: `SessionStart` and `SessionEnd`, each running `'<dataDir>/skydeck-hook' <event> >/dev/null 2>&1 \|\| true` with a timeout of 5 seconds. Everything else in the file keeps its key order, and its content except a number that cannot be written back exactly (the question names it; the backup has it). The file is parsed and written back in skydeck's formatting (two-space indentation, a newline at the end); when that changes more than the entries, the question has one more line (below). If the file does not exist but the folder does, install creates it. Hook entries that belong to something else are never touched. |
 | `<claudeHome>/settings.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>` | The file as it was before, readable by you only. The time is UTC; a second backup in the same second gets `-2`, and so on. Every install that changes the settings makes a new one. skydeck never removes one, not even with `uninstall --purge`. |
-| Claude Code's global config file, `~/.claude.json` (or `.claude.json` in a named `claudeHome`, see "Places") | Only after your `y` to the ← question: `leftArrowOpensAgents` is set to `false` (added after the last key, or its `true` replaced where it is). Nothing else in the file changes; it is mode 600 afterwards. `uninstall` leaves it. |
+| Claude Code's global config file, `~/.claude.json` (or `.claude.json` in a named `claudeHome`, see "Places") | Only after your `y` to the ← question: `leftArrowOpensAgents` is set to `false` (added after the last key, or its `true` replaced where it is). Nothing else in the file changes; it is mode 600 afterwards (a file you made read-only is never written). `uninstall` leaves it. |
 | `~/.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>` | That file as it was before the change, readable by you only, named as the settings backups are. skydeck never removes it, and `uninstall` does not name it: it holds your account details, so remove it yourself once you no longer need it. |
 | `<dataDir>/skydeck-hook` | Symbolic link to `<checkout>/bin/skydeck-hook`. |
 | `~/.local/bin/skydeck` | Symbolic link to `<checkout>/bin/skydeck`. The folder is created when missing. |
@@ -423,7 +433,7 @@ global config file that is a symbolic link is never written.
 | `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`, `locks/` (unused), a note while it is being edited, and `note-<session id>.md` after an editor that failed having changed it (`editor exited <n>; your text is in <path>`). |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
 | `claudeHome` | the key `claudeHome` of `config.json`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files, including the settings file and the backups. |
-| Claude Code's global config file | `~/.claude.json`, beside the default `claudeHome`; `<claudeHome>/.claude.json` when `config.json` or `CLAUDE_CONFIG_DIR` names `claudeHome` | Claude Code's global settings, among them `leftArrowOpensAgents` (the ← shortcut), which install offers to turn off and doctor reports. Claude Code keeps the file in the home directory, and inside `CLAUDE_CONFIG_DIR` when that is set; a `claudeHome` in `config.json` stands for the `CLAUDE_CONFIG_DIR` your sessions run with. |
+| Claude Code's global config file | `~/.claude.json`, beside the default `claudeHome`; `<claudeHome>/.claude.json` when `config.json` or `CLAUDE_CONFIG_DIR` names `claudeHome` (a `claudeHome` in `config.json` that is the default `~/.claude` written out still means `~/.claude.json`) | Claude Code's global settings, among them `leftArrowOpensAgents` (the ← shortcut), which install offers to turn off and doctor reports. Claude Code keeps the file in the home directory, and inside `CLAUDE_CONFIG_DIR` when that is set; a `claudeHome` in `config.json` stands for the `CLAUDE_CONFIG_DIR` your sessions run with. |
 
 ### `config.json`
 

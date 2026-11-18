@@ -377,7 +377,7 @@ async function offerLeftArrowOff(ctx: Context, deck: Deck): Promise<void> {
       say(line);
     }
   } catch (error) {
-    const line = `could not turn Claude Code's ← shortcut off: ${stepFailure(path, error)}; to turn it off: ${IN_CLAUDE_CODE}`;
+    const line = `could not turn Claude Code's ← shortcut off: ${stepFailure(error)}; to turn it off: ${IN_CLAUDE_CODE}`;
     ctx.io.stderr(`${sanitize(line)}\n`);
   }
 }
@@ -408,9 +408,11 @@ function turnedOffLines(path: string, result: TurnOffResult): string[] {
 
 /**
  * What went wrong, without a value of the file: a SkydeckError's own message (the writer's and the
- * backup's name the path and an error code only); for anything else, its code or its name.
+ * backup's name the path and an error code only). Anything else did not come from the write (which
+ * turns every failure of its own into a SkydeckError) but from the question, the clock or the
+ * output, perhaps after the write: its code or its name, and no claim about the file.
  */
-function stepFailure(path: string, error: unknown): string {
+function stepFailure(error: unknown): string {
   if (error instanceof SkydeckError) {
     return error.message;
   }
@@ -419,7 +421,7 @@ function stepFailure(path: string, error: unknown): string {
   if (typeof code === 'string' && /^E[A-Z0-9]+$/.test(code)) {
     what = code;
   }
-  return `cannot write ${path} (${what}); it was not changed`;
+  return `an unexpected error (${what}); skydeck doctor says whether it is off`;
 }
 
 function isYes(answer: string | null): boolean {
