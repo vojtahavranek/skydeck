@@ -500,7 +500,16 @@ test('the favourite flags of the new form', async (t) => {
       await openForm(w.page);
       await chipsAre(w.page, ['--a', '--b', '--c']);
       await w.page.fill('#cards input[name="flags"]', '--d');
-      await w.page.click('#cards .card-star');
+      assert.equal(
+        await w.page.evaluate(() => {
+          const button = document.querySelector('#cards .card-star');
+          if (!(button instanceof HTMLButtonElement)) return 'no star';
+          button.click();
+          return button.getAttribute('aria-disabled');
+        }),
+        'true',
+        'disabled from the click on, before the answer',
+      );
       await until(async () => w.acts().length, 1, 'the save sent');
       await sleep(150);
       assert.equal((await star(w.page)).disabled, true, 'waiting for its list');
@@ -809,8 +818,7 @@ test('the favourite flags of the new form', async (t) => {
       await w.page.keyboard.press('Space');
       assert.equal(await flagsValue(w.page), '-x');
       await w.page.keyboard.down(' ');
-      await w.page.keyboard.down(' '); // a held Space turns it on once
-      await w.page.keyboard.down(' ');
+      await w.page.keyboard.down(' '); // a held Space (one repeat: an even count) turns it on once
       await w.page.keyboard.up(' ');
       assert.equal(await flagsValue(w.page), '-x --a');
       await w.page.keyboard.press('Space');
