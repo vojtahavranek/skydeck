@@ -16,8 +16,8 @@
 // the icon looked small and blurred beside the others. Each small file is a square crop of the
 // picture, on the tile's navy, its corners rounded with the tile's own relative radius
 // (CORNER_RADIUS): the corners are transparent, and along the straight sides alpha is 252 to 255,
-// not 255, because a picture pixel on the crop's edge counts in the mask and again in the area
-// average. The crops:
+// not always 255, because a picture pixel on the crop's edge counts in the mask and again in the
+// area average. The crops:
 //   - 32 and 48 pixels: the drawing, the box DRAWING_BOX (the cloud with the window in front)
 //     and DRAWING_MARGIN of its width on each side, so that the drawing fills the square;
 //   - 16 pixels (WINDOW_ONLY): the terminal window alone, WINDOW_BOX and WINDOW_MARGIN on each

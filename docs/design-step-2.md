@@ -3095,7 +3095,7 @@ small sizes; the small files redrawn by follow-up F12, 2026-11-18):
   small file is a square crop of the picture on the tile's navy (`#01062b`), its corners rounded
   by a mask of the tile's own relative radius, 273 / 1200 = 0.2275 of the crop's side (a circle
   fitted to the tile's corner): the corners transparent, and along the straight sides alpha 252 to
-  255 (not 255: a picture pixel on the crop's edge counts in the mask and again in the area
+  255 (not always 255: a picture pixel on the crop's edge counts in the mask and again in the area
   average). The mask is laid on the picture's pixels before the reduction, so its edge is
   anti-aliased like the rest, and no pixel of the picture under a crop is less than opaque, so the
   picture's own soft edge and transparent corners are never in a small file.
@@ -3123,14 +3123,14 @@ small sizes; the small files redrawn by follow-up F12, 2026-11-18):
     terminal window with a light `>_` and a frame in the cloud's blue and violet. **Which file the
     taskbar button takes is not verified. Most likely it is the 16 pixel one**, stretched to about
     24 pixels: the button shows the terminal window alone, soft (a stretched bitmap is never
-    crisp), the window and the `>_` still reading. The evidence is review 2's reading of the
-    owner's screenshot of 2026-11-17, in which the button's 24 pixel icon matches the earlier 16
-    pixel file stretched to 24 far better than the earlier 32 or 48 pixel one reduced; not tried in
-    Edge. If Windows takes the 32 pixel file instead, the button shows the cloud with the window
-    filling the tile. The title bar shows the 16 pixel file at a display scale of 100 %; at 125 or
-    150 % Edge may draw it from the 32 pixel one. **The taskbar's look was not tried in Edge or on
-    Windows**: it is judged from sheets drawn with the same Chromium (a file resized as a browser
-    does), and W3 asks the owner to write down which one they see.
+    crisp), the window and the `>_` still reading. The evidence is review 2's reading of a
+    screenshot of the taskbar taken before F12 (2026-11-17), in which the button's 24 pixel icon
+    matches the earlier 16 pixel file stretched to 24 far better than the earlier 32 or 48 pixel
+    one reduced; not tried in Edge. If Windows takes the 32 pixel file instead, the button shows
+    the cloud with the window filling the tile. The title bar shows the 16 pixel file at a display
+    scale of 100 %; at 125 or 150 % Edge may draw it from the 32 pixel one. **The taskbar's look
+    was not tried in Edge or on Windows**: it is judged from sheets drawn with the same Chromium
+    (a file resized as a browser does), and W3 asks the owner to write down which one they see.
 - **The maskable icons** have a full background of the large picture's tile colour, `#040925` (the
   average of its opaque pixels between 555 and 585 pixels from its middle), with the picture in the
   middle at 0.927 of the icon's width: drawn in full within 555 of its 1254 pixels from its middle,
