@@ -1730,12 +1730,13 @@ chip on. Write down how many sessions the title bar counts.
 7. **The section headers.** Press no key and click nothing in this step. Expected: each section,
    Open, Recent and Earlier, starts with a band across the whole width of the list, a step darker
    than the list, a thin line above and below it; in it a short bar before the section's name
-   (blue for Open, grey for Recent, paler for Earlier, whose `▸` or `▾` stands before the bar with
-   room between them), the name in capitals, the number of its sessions after it, dim, and while
-   Earlier is folded its span of days at the right end. Scroll the list with the mouse wheel over
-   it (scrolling selects nothing): the band of the section you scroll through stays at the top of
-   the list, and no row or card shows through it. Write down whether the three sections are easy
-   to find and to tell apart.
+   (blue for Open, grey for Recent, fainter for Earlier, whose `▸` or `▾` stands before the bar
+   with room between them), the name in capitals, the number of its sessions after it, dim, and
+   while Earlier is folded its span of days at the right end. Scroll the list with the mouse wheel
+   over it (scrolling selects nothing): the band of the section you scroll through stays at the
+   top of the list, and no row or card shows through it; when the whole list fits and nothing
+   scrolls, write that down. Write down whether the three sections are easy to find and to tell
+   apart.
 
 Write down: whether any answer of the list came late enough to notice (the filter as you typed,
 the chips, the card, the switcher); whether the switcher's order — those that need you, then

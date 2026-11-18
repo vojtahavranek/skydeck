@@ -9,6 +9,9 @@ import { describe, test } from 'node:test';
 /** WCAG 2's least contrast for text of this size (12 px), and for a mark that must be seen. */
 const TEXT_MIN = 4.5;
 const MARK_MIN = 3;
+/** The least contrast of the band's ground against the list's, so that the band is seen at all
+ *  (as built: 1.10 : 1 light, 1.09 : 1 dark). */
+const GROUND_MIN = 1.05;
 
 /** The custom properties of a block of CSS declarations. */
 function properties(block: string): Map<string, string> {
@@ -96,7 +99,7 @@ describe("the section headers' bands (F17)", () => {
   });
 
   for (const [name, scheme] of Object.entries(schemes())) {
-    test(`${name}: every word of a band at least ${TEXT_MIN} : 1 against it, Open's mark at least ${MARK_MIN} : 1; the band is off the list`, () => {
+    test(`${name}: every word of a band at least ${TEXT_MIN} : 1 against it, Open's mark at least ${MARK_MIN} : 1; the band at least ${GROUND_MIN} : 1 against the list`, () => {
       const colour = (property: string): string => {
         const value = scheme.get(property);
         assert.ok(value, `${name} sets ${property}`);
@@ -117,7 +120,8 @@ describe("the section headers' bands (F17)", () => {
       }
       const open = contrast(colour(variable(rule(mark('open')), 'background')), ground);
       assert.ok(open >= MARK_MIN, `${name}: Open's mark ${open.toFixed(2)} : 1`);
-      assert.notEqual(ground.toLowerCase(), colour('--panel').toLowerCase(), 'off the list');
+      const off = contrast(ground, colour('--panel'));
+      assert.ok(off >= GROUND_MIN, `${name}: the band against the list ${off.toFixed(2)} : 1`);
     });
   }
 });

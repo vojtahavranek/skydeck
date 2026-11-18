@@ -580,40 +580,75 @@ function inside(box: Box): { x: number; y: number; width: number; height: number
 }
 
 /**
- * Which pixel columns of `clip` the page draws something in other than `ground` (any pixel of
- * another colour), as the screenshot has them; the browser decodes the picture, in a blank page
- * of the same context (as test-page/terminal-frame.test.ts does).
+ * The colours of the pixels of `clip`, row by row, each `r,g,b`, as the screenshot has them; the
+ * browser decodes the picture, in a blank page of the same context (as
+ * test-page/terminal-frame.test.ts does).
  */
+async function pixels(
+  page: Page,
+  clip: { x: number; y: number; width: number; height: number },
+): Promise<string[][]> {
+  const png = await page.screenshot({ clip, animations: 'disabled' });
+  const blank = await page.context().newPage();
+  try {
+    return await blank.evaluate(async (base64) => {
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const context = canvas.getContext('2d');
+      if (context === null) throw new Error('no canvas');
+      context.drawImage(bitmap, 0, 0);
+      const data = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
+      return Array.from({ length: bitmap.height }, (_, y) =>
+        Array.from({ length: bitmap.width }, (_, x) => {
+          const i = (y * bitmap.width + x) * 4;
+          return `${data[i]},${data[i + 1]},${data[i + 2]}`;
+        }),
+      );
+    }, png.toString('base64'));
+  } finally {
+    await blank.close();
+  }
+}
+
+/** Which pixel columns of `clip` the page draws something in other than `ground` (`rgb(…)`). */
 async function inkColumns(
   page: Page,
   clip: { x: number; y: number; width: number; height: number },
   ground: string,
 ): Promise<boolean[]> {
-  const png = await page.screenshot({ clip, animations: 'disabled' });
-  const blank = await page.context().newPage();
-  try {
-    return await blank.evaluate(
-      async ({ base64, ground }) => {
-        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-        const bitmap = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
-        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-        const context = canvas.getContext('2d');
-        if (context === null) throw new Error('no canvas');
-        context.drawImage(bitmap, 0, 0);
-        const data = context.getImageData(0, 0, bitmap.width, bitmap.height).data;
-        const columns = Array.from({ length: bitmap.width }, () => false);
-        for (let i = 0; i < data.length; i += 4) {
-          if (data[i] !== ground[0] || data[i + 1] !== ground[1] || data[i + 2] !== ground[2]) {
-            columns[(i / 4) % bitmap.width] = true;
+  const plain = rgb(ground).join(',');
+  const rows = await pixels(page, clip);
+  return Array.from({ length: clip.width }, (_, x) => rows.some((row) => row[x] !== plain));
+}
+
+/**
+ * Bands that overlap only in part (`''` when none do): a band stuck at the top showing as a strip
+ * above the band of the next section, which rests below it. Bands that meet share their one line
+ * (1 px), and a band stuck over another covers it whole.
+ */
+async function bandStrips(page: Page): Promise<string> {
+  return readPage(
+    page,
+    () => {
+      const boxes = [...document.querySelectorAll('#list .list-section')]
+        .filter((band) => band instanceof HTMLElement && band.checkVisibility())
+        .map((band) => ({
+          section: (band as HTMLElement).dataset['section'] ?? '',
+          box: band.getBoundingClientRect(),
+        }));
+      for (const [i, a] of boxes.entries()) {
+        for (const b of boxes.slice(i + 1)) {
+          const overlap = Math.min(a.box.bottom, b.box.bottom) - Math.max(a.box.top, b.box.top);
+          if (overlap > 1.5 && overlap < Math.min(a.box.height, b.box.height) - 0.5) {
+            return `${a.section} ${a.box.top}–${a.box.bottom} shows above ${b.section} ${b.box.top}–${b.box.bottom}`;
           }
         }
-        return columns;
-      },
-      { base64: png.toString('base64'), ground: rgb(ground) },
-    );
-  } finally {
-    await blank.close();
-  }
+      }
+      return '';
+    },
+    null,
+  );
 }
 
 /**
@@ -2009,6 +2044,46 @@ test('the list', async (t) => {
   );
 
   await t.test(
+    'two bands that meet share one line of 1 px (F17), light and dark: Open with no row, right above Recent',
+    async (t) => {
+      const s = await scripted(t, chromium, () => bandList(0, 3, 'folded'), 48);
+      await untilDrawn(s.page, (rows) => rows.length === 3, "Recent's rows");
+      await s.page.mouse.move(1200, 600);
+      for (const scheme of ['light', 'dark'] as const) {
+        await s.page.emulateMedia({ colorScheme: scheme });
+        const want = await colours(s.page, { line: 'var(--line)' });
+        const [open, week] = (await bands(s.page)).bands;
+        assert.ok(open?.section === 'open' && week?.section === 'week', 'Open, then Recent');
+        assert.ok(
+          Math.abs(week.top - (open.bottom - 1)) < 0.01,
+          `${scheme}: Recent's band starts on Open's bottom line (${open.bottom}, ${week.top})`,
+        );
+        // One column of pixels down both bands and a little beyond, in their left padding.
+        const top = Math.floor(open.top) - 2;
+        const column = await pixels(s.page, {
+          x: Math.round(open.left + 4),
+          y: top,
+          width: 1,
+          height: Math.ceil(week.bottom) + 2 - top,
+        });
+        const line = rgb(want.line).join(',');
+        const runs: number[] = [];
+        let run = 0;
+        for (const [colour] of column) {
+          if (colour === line) {
+            run++;
+          } else if (run > 0) {
+            runs.push(run);
+            run = 0;
+          }
+        }
+        if (run > 0) runs.push(run);
+        assert.deepEqual(runs, [1, 1, 1], `${scheme}: three lines of 1 px, the middle one shared`);
+      }
+    },
+  );
+
+  await t.test(
     'a stuck band is opaque (F17), light and dark: its pixels do not change while the rows and a card scroll under it, which they do with the bands hidden',
     async (t) => {
       const s = await scripted(t, chromium, () => bandList(4, 40, 'folded'), 46);
@@ -2071,7 +2146,7 @@ test('the list', async (t) => {
   );
 
   await t.test(
-    'the keyboard never leaves the selected line under a stuck band (F17), light and dark: ↓ from the first line through every row and caption of the three sections, and ↑ back',
+    "the keyboard never leaves the selected line under a stuck band (F17), light and dark: ↓ from the first line through every row and caption of the three sections, and ↑ back; ↑ onto a section's first row brings its band to the top edge, no band showing as a strip above it",
     async (t) => {
       const s = await scripted(
         t,
@@ -2106,6 +2181,15 @@ test('the list', async (t) => {
           await sleep(20);
         }
       };
+      /** The rows right after a band (no card before them), by their section. */
+      const firstRows = new Map([
+        [week[0] ?? '', 'week'],
+        [bandIds(3, 16)[0] ?? '', 'earlier'],
+      ]);
+      /** The first rows found with their band at the top, `<scheme> <section>`. */
+      const flush = new Set<string>();
+      const scrollTop = async (): Promise<number> =>
+        readPage(s.page, () => document.querySelector('#list .list-body')?.scrollTop ?? -1, null);
       await toZone(s.page, 'list');
       await s.page.keyboard.press('Home');
       await movedFrom('');
@@ -2118,17 +2202,36 @@ test('the list', async (t) => {
         ] as const) {
           for (let i = 1; i < lines.length; i++) {
             const from = walked.at(-1) ?? '';
+            const before = await scrollTop();
             await s.page.keyboard.press(key);
-            walked.push(await movedFrom(from));
-            assert.equal(
-              await selectedClear(s.page),
-              'clear',
-              `${scheme}: after ${i} × ${arrow}, on ${walked.at(-1)}`,
-            );
+            const now = await movedFrom(from);
+            walked.push(now);
+            const what = `${scheme}: after ${i} × ${arrow}, on ${now}`;
+            assert.equal(await selectedClear(s.page), 'clear', what);
+            // ↑ that scrolled the list: no band shows as a strip above another; onto a section's
+            // first row (no card before it), that section's band sits at the list's top edge.
+            if (key === 'ArrowUp' && (await scrollTop()) !== before) {
+              assert.equal(await bandStrips(s.page), '', what);
+              const section = firstRows.get(now);
+              if (section !== undefined) {
+                const { column, bands: drawnBands } = await bands(s.page);
+                const band = drawnBands.find((candidate) => candidate.section === section);
+                assert.ok(
+                  band !== undefined && Math.abs(band.top - column.top) < 0.5,
+                  `${what}: its band at the top (${band?.top} against ${column.top})`,
+                );
+                flush.add(`${scheme} ${section}`);
+              }
+            }
           }
         }
         assert.deepEqual(walked, [...lines, ...lines.toReversed().slice(1)], scheme);
       }
+      assert.deepEqual(
+        [...flush].sort(),
+        ['dark earlier', 'dark week', 'light earlier', 'light week'],
+        'each first row reached by ↑ with a scroll',
+      );
       assert.equal(await zone(s.page), 'Focus: list');
       assert.deepEqual(await s.page.evaluate(() => Reflect.get(globalThis, 'pageErrors')), []);
     },

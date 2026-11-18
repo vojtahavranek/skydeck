@@ -114,6 +114,17 @@
   letter-spacing: 0;
   text-transform: none;
 }
+/* Two bands that meet (Open with no row above the next section) share one line of 1 px: the later
+   band's top line lies on the earlier one's bottom line. */
+.list-section + .list-section {
+  margin-top: -1px;
+}
+/* A section's first row, brought into view from below, rests right under its band (the band's
+   28 px), so that the band sits at the top edge over the one stuck there, with no strip of that
+   one above it; the other rows keep their 2.5em. */
+.list-section + .list-row {
+  scroll-margin-top: 28px;
+}
 
 /* Rows (S2 12.2): the state icon, then one line — or two for a running or starting session. */
 .list-row {
