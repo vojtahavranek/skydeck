@@ -90,6 +90,7 @@ describe("favouriteRefusal: the server's rule (S2 12.6, F15)", () => {
     assert.equal(favouriteRefusal(`--resume\n${'a'.repeat(200)}`, []), FAVOURITE_REFUSALS.control);
     assert.equal(favouriteRefusal('--model\topus', []), FAVOURITE_REFUSALS.control);
     assert.equal(favouriteRefusal('--x\u202e', []), FAVOURITE_REFUSALS.control);
+    assert.equal(favouriteRefusal('--x\u2028y', []), FAVOURITE_REFUSALS.control);
     assert.equal(favouriteRefusal(`--resume ${'a'.repeat(200)}`, []), FAVOURITE_REFUSALS.tooLong);
     assert.equal(favouriteRefusal('--model   opus', ['--model opus']), FAVOURITE_REFUSALS.known);
     assert.equal(favouriteRefusal('--resume', twelve()), FAVOURITE_REFUSALS.full);

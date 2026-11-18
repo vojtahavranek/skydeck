@@ -21,11 +21,10 @@
 // aria-disabled, not disabled: it keeps the keyboard and its place of Tab, so that pressing it
 // never moves the keyboard. A click on a chip, its ×, the ★ or Undo takes no keyboard (their
 // mousedown is cancelled), so that a click leaves the keyboard in the field. The keyboard never
-// lands in a text field because of these controls (a key held down would type there, 12.9): when
-// the row that had it goes away (its last chip removed) the ★ takes it; a save pressed from the
-// keyboard gives it to the new chip once the list brings it; Undo pressed from the keyboard gives
-// it to the chip it puts back, and an Undo that goes away for another reason to the row (or the ★
-// when there is no chip). Every favourite reaches the DOM as text, sanitised for show and as
+// lands in a text field because of these controls (a key held down would type there, 12.9): the ★
+// keeps it while it saves and once it is disabled; when the row that had it goes away (its last
+// chip removed) the ★ takes it; Undo pressed from the keyboard gives it to the chip it puts back,
+// and an Undo that goes away for another reason to the row (or the ★ when there is no chip). Every favourite reaches the DOM as text, sanitised for show and as
 // stored in the field.
 
 /** @import { ResultMessage } from '../src/window/protocol.ts' */
@@ -138,9 +137,6 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
   /** The result line a favourite's refusal wrote, so that only it is cleared. */
   /** @type {string | null} */
   let refused = null;
-  /** A save pressed from the keyboard: the text whose chip takes the keyboard when it comes. */
-  /** @type {string | null} */
-  let toNewChip = null;
 
   /** @param {ResultMessage} result */
   const answered = (result) => {
@@ -262,13 +258,6 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
       if (had && drawn.length === 0) {
         star.focus(); // the row went away: the keyboard goes to the ★ before it, never into the field
       }
-      const chip = toNewChip === null ? -1 : drawn.indexOf(toNewChip);
-      if (chip >= 0) {
-        toNewChip = null;
-        if (document.activeElement === star) {
-          rowTakes(chip);
-        }
-      }
     }
     paint();
   };
@@ -313,12 +302,10 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
     plainHint(); // the favourites change again
     saving = true;
     saved = [...shown(), text.trim()];
-    toNewChip = document.activeElement === star ? text.trim() : null;
     paint();
     void act({ kind: 'favourite-add', text }).then((result) => {
       if (!result.ok) {
         saved = null;
-        toNewChip = null;
       }
       answered(result);
       // The list that holds a save that worked can come after the answer: until then the ★ waits.

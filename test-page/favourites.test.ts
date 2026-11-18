@@ -47,6 +47,8 @@ interface World {
   setFavourites(list: string[]): void;
   /** How the stand-in answers `act new` (default: ok, S3 started in TERM_C). */
   answerNew: { refuse: string | null };
+  /** When set, `favourite-remove` is refused with these words and nothing changes. */
+  refuseRemove: { words: string | null };
 }
 
 let seed = 90;
@@ -75,6 +77,7 @@ async function world(
   let selected: string | null = null;
   let current: StandinConnection | null = null;
   const answerNew: World['answerNew'] = { refuse: null };
+  const refuseRemove: World['refuseRemove'] = { words: null };
   const listNow = (): Row => {
     const rows: { id: string; terminal: string | null; slot: number | null }[] = [
       { id: S1, terminal: null, slot: null },
@@ -134,6 +137,10 @@ async function world(
             }
             conn.send(result(message, refusal));
           } else if (message['kind'] === 'favourite-remove') {
+            if (refuseRemove.words !== null) {
+              conn.send(result(message, refuseRemove.words));
+              return;
+            }
             kept.favourites = kept.favourites.filter((one) => one !== text);
             sendList(conn);
             conn.send(result(message, null));
@@ -166,6 +173,7 @@ async function world(
       current?.send(listNow());
     },
     answerNew,
+    refuseRemove,
   };
 }
 
@@ -665,32 +673,30 @@ test('the favourite flags of the new form', async (t) => {
   );
 
   await t.test(
-    'the ★ from the keyboard: Space saves, the new chip takes the keyboard (letters do nothing there); refused, the ★ keeps it; a click on a disabled ★ leaves the keyboard where it was',
+    'the ★ from the keyboard keeps it (ruled): Space saves, refused or not, Enter starts; Directory never gets the keyboard or a letter; a click on a disabled ★ leaves the keyboard where it was',
     async (t) => {
       const w = await world(t, chromium, ['--a']);
+      w.answerNew.refuse = 'refused';
       await openForm(w.page);
       await chipsAre(w.page, ['--a']);
+      const untouched = async (what: string): Promise<void> => {
+        assert.equal(await activeIs(w.page), 'card-button card-star', what);
+        await w.page.keyboard.type('zz');
+        assert.equal(await activeIs(w.page), 'card-button card-star', `${what}: still`);
+        assert.equal(
+          await w.page.inputValue('#cards input[name="directory"]'),
+          '/home/u/project',
+          `${what}: Directory untouched`,
+        );
+        assert.equal(await w.page.inputValue('#cards input[name="label"]'), '', what);
+      };
       await w.page.fill('#cards input[name="flags"]', '--x');
       await w.page.focus('#cards .card-star');
       await w.page.keyboard.press('Space');
       await chipsAre(w.page, ['--a', '--x']);
-      await until(() => activeIs(w.page), 'card-favourites', 'the row has the keyboard');
-      assert.equal(
-        await w.page.evaluate(
-          () =>
-            document.querySelector(
-              '#cards .card-favourite[data-current="true"] .card-favourite-text',
-            )?.textContent,
-        ),
-        '--x',
-        'on the new chip',
-      );
       assert.equal((await star(w.page)).disabled, true, 'a favourite already');
-      await w.page.keyboard.type('zz');
-      assert.equal(await activeIs(w.page), 'card-favourites');
-      assert.equal(await w.page.inputValue('#cards input[name="directory"]'), '/home/u/project');
+      await untouched('after Space saved');
       assert.equal(await flagsValue(w.page), '--x');
-      assert.equal(await w.page.inputValue('#cards input[name="label"]'), '');
 
       await w.page.fill('#cards input[name="flags"]', '--resume x');
       await w.page.focus('#cards .card-star');
@@ -700,14 +706,81 @@ test('the favourite flags of the new form', async (t) => {
         favouriteRefusal('--resume x', []),
         'the refusal',
       );
-      assert.equal(await activeIs(w.page), 'card-button card-star', 'after a refusal');
+      await untouched('after a refusal');
+
+      await w.page.focus('#cards .card-star');
+      await w.page.keyboard.press('Enter');
+      await showsText(w.page, '#cards .card-new .card-lines', /^refused$/);
+      await untouched('after Enter, which starts');
+      assert.equal(w.acts().filter((act) => act['kind'] === 'new').length, 1);
 
       await w.page.fill('#cards input[name="flags"]', '');
       await w.page.focus('#cards input[name="directory"]');
       assert.equal((await star(w.page)).disabled, true);
       await w.page.click('#cards .card-star', { force: true }); // aria-disabled: Playwright would wait
       assert.equal(await activeIs(w.page), 'input:directory', 'a click takes no keyboard');
-      assert.equal(w.acts().length, 2, 'a disabled ★ sends nothing');
+      assert.equal(
+        w.acts().filter((act) => act['kind'] === 'favourite-add').length,
+        2,
+        'a disabled ★ sends nothing',
+      );
+    },
+  );
+
+  await t.test(
+    "a removal the server refuses shows the server's words and changes nothing; Ctrl, Alt or Meta with a row key is not that key",
+    async (t) => {
+      const w = await world(t, chromium, ['--a', '--b']);
+      w.refuseRemove.words = "skydeck's database is busy; try again";
+      await openForm(w.page);
+      await chipsAre(w.page, ['--a', '--b']);
+      await w.page.fill('#cards input[name="flags"]', '--a');
+      await w.page.hover('#cards .card-favourite >> nth=0');
+      await w.page.click('#cards .card-favourite >> nth=0 >> .card-favourite-x');
+      await until(
+        () => w.page.evaluate(() => document.querySelector('#cards .card-lines')?.textContent),
+        "skydeck's database is busy; try again",
+        'the refusal',
+      );
+      await chipsAre(w.page, ['--a', '--b']);
+      assert.equal(await hint(w.page), HINT, 'no Undo for what was not removed');
+      assert.equal(await flagsValue(w.page), '--a');
+      assert.deepEqual(w.favourites, ['--a', '--b']);
+
+      w.refuseRemove.words = null;
+      await w.page.focus('#cards .card-favourites');
+      const current = (): Promise<string> =>
+        w.page.evaluate(
+          () =>
+            document.querySelector(
+              '#cards .card-favourite[data-current="true"] .card-favourite-text',
+            )?.textContent ?? '',
+        );
+      assert.equal(await current(), '--a');
+      for (const key of [
+        'Control+ArrowRight',
+        'Shift+ArrowRight',
+        'Control+Delete',
+        'Alt+Delete',
+        'Meta+Delete',
+        'Control+Backspace',
+        'Alt+Backspace',
+        'Control+Space',
+        'Alt+Space',
+        'Meta+Space',
+      ]) {
+        await w.page.keyboard.press(key);
+        assert.equal(await current(), '--a', key);
+      }
+      await chipsAre(w.page, ['--a', '--b']);
+      assert.equal(await flagsValue(w.page), '--a', 'no chip turned on or off');
+      assert.equal(
+        w.acts().filter((act) => act['kind'] === 'favourite-remove').length,
+        1,
+        'only the refused one',
+      );
+      await w.page.keyboard.press('ArrowRight');
+      assert.equal(await current(), '--b', 'the key alone acts');
     },
   );
 

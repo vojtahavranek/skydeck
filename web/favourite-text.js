@@ -27,10 +27,11 @@ export const FAVOURITE_REFUSALS = {
   full: `there are ${MAX_FAVOURITES} favourites already; remove one first`,
 };
 
-/** What a favourite never holds (ruled on review 2 of F15): a line break or another control
- *  character (C0, DEL, C1) and the bidirectional controls — what design 7.4's sanitiser takes
- *  away or changes, so that a chip shows the favourite as it is. The server's CONTROL. */
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
+/** What a favourite never holds (ruled on review 2 of F15): a line break (U+2028 and U+2029
+ *  too) or another control character (C0, DEL, C1) and the bidirectional controls — what design
+ *  7.4's sanitiser takes away or changes —, so that a chip shows the favourite as it is. The
+ *  server's CONTROL. */
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
 
 /** Separates words outside quotes, as in splitFlags: any whitespace. */
 const SEPARATOR = /^\s$/;

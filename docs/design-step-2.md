@@ -2631,8 +2631,8 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   store (10.2): every window and every server after a restart see the same list; not in
   `config.json`, not in the browser, and no command manages them. A favourite is one text of one
   or more flags as typed, trimmed. It is refused, with words the form shows, when it is empty,
-  when the rule above cannot split it, when it holds a line break or another control character or
-  a bidirectional control (what design 7.4's sanitiser takes away or changes, so that a chip shows
+  when the rule above cannot split it, when it holds a line break (U+2028 and U+2029 too) or
+  another control character or a bidirectional control (what design 7.4's sanitiser takes away or changes, so that a chip shows
   the favourite as it is; ruled on review 2 of F15), when it is longer than 200 characters, when
   it has the same words as a favourite already (however spaced or quoted), as a thirteenth (at
   most 12), and when
@@ -2662,9 +2662,9 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   change — takes the Undo away. Removing a favourite never changes the field, also when the
   Delete or Backspace that removed it is held: the key's repeats remove no second favourite, and
   the keyboard never lands in a text field because of these controls (a key pressed elsewhere acts
-  only when pressed again, 12.9): when the row that had it goes away (its last chip removed) the
-  ★ takes it; a save pressed from the keyboard gives it to the new chip once the list brings it;
-  Undo pressed from the keyboard gives it to the chip it puts back (ruled on review 2 of F15).
+  only when pressed again, 12.9): the ★ keeps it while it saves and once it is disabled (ruled
+  on review 2 of F15); when the row that had it goes away (its last chip removed) the ★ takes it;
+  Undo pressed from the keyboard gives it to the chip it puts back.
   Keys: the ★ and then the chip row come after the
   flags field and before Start; the row is one Tab stop, ← → move between its chips, Space turns
   the one that has the keyboard on or off, Delete or Backspace removes it; Enter is Start on the

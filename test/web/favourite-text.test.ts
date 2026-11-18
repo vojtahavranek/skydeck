@@ -270,6 +270,8 @@ describe('favouriteRefusal: which texts may be saved', () => {
       '--x\u009b',
       '--x\u202ey',
       '--x\u2066y',
+      '--x\u2028y',
+      '--x\u2029y',
     ]) {
       assert.equal(favouriteRefusal(text, []), FAVOURITE_REFUSALS.control, JSON.stringify(text));
     }
