@@ -2176,6 +2176,29 @@ bar at the bottom. The list has three sections:
   A click on its header folds and unfolds it, as ← and → do, and leaves the keyboard on the list
   (ruled by the plan owner, plan task 27).
 
+Each section's header is a band (follow-up F17, 2026-11-18; the owner, shown six pictures: "Lets go
+for X"): across the whole width of the list column, edge to edge and square, on the page's own
+background (`--bg`: a step darker than the list's `--panel`, so the band looks sunk into the list),
+with a 1 px line above and below it in the line colour, 28 px high with them — within 1 px of the
+header it replaced (27.85 px), and below the rows' scroll margin, so that a row or a caption the
+keyboard scrolls into view is never left under it. Before the title a small bar (3 × 12 px, rounded)
+marks the section: Open's in the accent colour, Recent's in `--dim`, Earlier's in `--faint`. The
+title is 12 px, bold, in capitals: Open's and Recent's in the text colour, Earlier's in `--dim`
+(`--faint` reads too weakly on the darker ground); the count follows it, dim; a folded Earlier's
+span sits at the right end. Earlier's fold arrow keeps its place before the bar, at least 5 px apart
+from it, so that the two never read as one sign. While its section scrolls, the band stays at the
+top of the list and nothing of a row or a card shows through it. Two bands that meet (Open with no
+row, right above the next section) share one line. A section's first row (no card before it) that
+the keyboard brings into view from below rests right under its band, so that the band sits at the
+list's top edge over the one stuck there, with no strip of that one above it (the other rows keep
+their scroll margin). The bar is decoration: it is not announced, and it is no control of its own (a
+click on it is a click on its header). Why a band: since F9 the cards of the blocks have a stronger
+edge than a faint rule, and the old header — a small faint title with no line — was lost among them
+(the owner: "the resent open and eatlier are not much visible now"); the band is the one thing
+stronger than the cards, in the dark scheme too, and adds next to no height (half a pixel for the
+three). Its words stay at least 4.5 : 1 against the band and Open's bar at least 3 : 1, in both
+schemes (`test/web/section-band.test.ts`).
+
 Done sessions are hidden (design 7.1), with a footer "17 done hidden · show". Filtering and the
 switcher search done ones too (12.8).
 

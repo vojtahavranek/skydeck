@@ -285,16 +285,23 @@ function paintStack(row, stack) {
   }
 }
 
-/** A section header's elements, made once (S2 12.1). @param {SectionPayload['name']} name */
+/**
+ * A section header's elements, made once (S2 12.1): Earlier's fold arrow (drawn by list.css), the
+ * section's mark (follow-up F17: a small bar in its colour, decoration only, so neither announced
+ * nor a control of its own), the title, the count and a folded Earlier's span.
+ * @param {SectionPayload['name']} name
+ */
 function makeHeader(name) {
   const root = element('list-section', 'div');
   root.dataset.section = name;
   const twist = element('section-twist');
   twist.setAttribute('aria-hidden', 'true');
+  const mark = element('section-mark');
+  mark.setAttribute('aria-hidden', 'true');
   const title = element('section-title');
   const count = element('section-count');
   const span = element('section-span');
-  root.append(twist, title, count, span);
+  root.append(twist, mark, title, count, span);
   return { root, title, count, span };
 }
 
