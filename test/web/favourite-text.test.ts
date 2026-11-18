@@ -258,6 +258,40 @@ describe('favouriteRefusal: which texts may be saved', () => {
     assert.equal(favouriteRefusal('--x\0', []), 'the flags contain a NUL character');
   });
 
+  test('a line break, another control character or a bidirectional control: refused with its words', () => {
+    for (const text of [
+      '--model\nopus',
+      '--x\ry',
+      '--model\topus',
+      '--x \x1b[31mred',
+      '--x\u0007',
+      '--x\u007f',
+      '--x\u0085y',
+      '--x\u009b',
+      '--x\u202ey',
+      '--x\u2066y',
+    ]) {
+      assert.equal(favouriteRefusal(text, []), FAVOURITE_REFUSALS.control, JSON.stringify(text));
+    }
+    assert.equal(
+      FAVOURITE_REFUSALS.control,
+      'the flags contain a line break or another control character',
+    );
+    assert.equal(
+      favouriteRefusal('--x\0', []),
+      'the flags contain a NUL character',
+      "splitFlags's",
+    );
+    assert.equal(favouriteRefusal("'\u0001", []), "the flags have an unclosed '", 'split first');
+    assert.equal(favouriteRefusal(`\u0001${'a'.repeat(300)}`, []), FAVOURITE_REFUSALS.control);
+    assert.equal(favouriteRefusal(' --x\t', []), null, 'white space at the ends is trimmed');
+    assert.equal(
+      favouriteRefusal('--x \u00a0 \u2003 y', []),
+      null,
+      'other white space is no control',
+    );
+  });
+
   test('at most 200 characters, counted as characters (an emoji is one), after the trim', () => {
     assert.equal(favouriteRefusal(`--x ${'a'.repeat(196)}`, []), null);
     assert.equal(favouriteRefusal(`--x ${'a'.repeat(197)}`, []), FAVOURITE_REFUSALS.tooLong);

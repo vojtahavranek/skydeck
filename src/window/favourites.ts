@@ -7,9 +7,11 @@
  * actions `favourite-add` and `favourite-remove` change it (actions.ts).
  *
  * A favourite is one text of flags as typed, trimmed. `favouriteRefusal` says why a text cannot be
- * one: empty; splitFlags refuses it; longer than FAVOURITE_LENGTH characters; the same words as a
- * favourite; MAX_FAVOURITES already; then a flag that `skydeck new` refuses — prepareNew's own
- * rule and words (refuseSessionFlags), so that a favourite never holds what Start would refuse.
+ * one: empty; splitFlags refuses it; it holds a line break or another control character, or a
+ * bidirectional control (ruled on review 2); longer than FAVOURITE_LENGTH characters; the same
+ * words as a favourite; MAX_FAVOURITES already; then a flag that `skydeck new` refuses —
+ * prepareNew's own rule and words (refuseSessionFlags), so that a favourite never holds what Start
+ * would refuse.
  * web/favourite-text.js is the page's copy of every step but the last, held equal by
  * test/web/favourite-text.test.ts.
  */
@@ -27,10 +29,16 @@ export const FAVOURITE_LENGTH = 200;
 /** The refusals' words; the page shows them (web/favourite-text.js has the same). */
 export const FAVOURITE_REFUSALS = {
   empty: 'there are no flags to save',
+  control: 'the flags contain a line break or another control character',
   tooLong: `a favourite is at most ${FAVOURITE_LENGTH} characters`,
   known: 'these flags are a favourite already',
   full: `there are ${MAX_FAVOURITES} favourites already; remove one first`,
 } as const;
+
+/** What a favourite never holds (ruled on review 2 of F15): a line break or another control
+ *  character (C0, DEL, C1) and the bidirectional controls — what design 7.4's sanitiser takes
+ *  away or changes, so that a chip shows the favourite as it is (the page's CONTROL is the same). */
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
 
 /** The words of a text, or null when splitFlags refuses it. */
 function wordsOf(text: string): string[] | null {
@@ -44,7 +52,8 @@ function sameWords(one: readonly string[], other: readonly string[] | null): boo
 
 /**
  * Why `text` cannot be saved as one more favourite beside `favourites`, in this order and these
- * words: trimmed it is empty; splitFlags refuses it (its words); it holds more than
+ * words: trimmed it is empty; splitFlags refuses it (its words); it holds a line break or another
+ * control character, or a bidirectional control (CONTROL); it holds more than
  * FAVOURITE_LENGTH characters; it has the same words as one of `favourites`, however spaced or
  * quoted; `favourites` holds MAX_FAVOURITES; refuseSessionFlags refuses its words (prepareNew's
  * words). null when it can be one.
@@ -54,6 +63,7 @@ export function favouriteRefusal(text: string, favourites: readonly string[]): s
   if (favourite === '') return FAVOURITE_REFUSALS.empty;
   const split = splitFlags(favourite);
   if (!split.ok) return split.error;
+  if (CONTROL.test(favourite)) return FAVOURITE_REFUSALS.control;
   if ([...favourite].length > FAVOURITE_LENGTH) return FAVOURITE_REFUSALS.tooLong;
   if (favourites.some((one) => sameWords(split.flags, wordsOf(one)))) {
     return FAVOURITE_REFUSALS.known;

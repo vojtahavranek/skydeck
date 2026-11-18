@@ -2631,8 +2631,11 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   store (10.2): every window and every server after a restart see the same list; not in
   `config.json`, not in the browser, and no command manages them. A favourite is one text of one
   or more flags as typed, trimmed. It is refused, with words the form shows, when it is empty,
-  when the rule above cannot split it, when it is longer than 200 characters, when it has the same
-  words as a favourite already (however spaced or quoted), as a thirteenth (at most 12), and when
+  when the rule above cannot split it, when it holds a line break or another control character or
+  a bidirectional control (what design 7.4's sanitiser takes away or changes, so that a chip shows
+  the favourite as it is; ruled on review 2 of F15), when it is longer than 200 characters, when
+  it has the same words as a favourite already (however spaced or quoted), as a thirteenth (at
+  most 12), and when
   it holds a flag design 7.7 refuses (`prepareNew`'s rule and words: a favourite never holds what
   Start would refuse). The ★ (title "Save these flags as a favourite") is enabled only when the
   page sees none of those reasons but the last, which the server alone judges (ruled by the plan
@@ -2647,7 +2650,9 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   above — the page's copy of the rule, held to the server's by a test —, and off otherwise, every
   chip while the field cannot be split; its state follows the field as one types. A click on an
   off chip adds its text at the end of the field, one space between; on an on chip it takes every
-  run of its words out of the field (so that the chip is off after it), the rest as typed. A
+  run of its words out of the field (so that the chip is off after it), the rest as typed; the
+  page sets the field's text, which the browser's own undo (Ctrl+Z) then does not take back (a
+  named limit, ruled on review 2 of F15). A
   chip's × (title "Remove this favourite"), shown on hover and while the chip has the keyboard,
   removes the favourite without asking; the form's hint line then reads `Removed <text> · Undo`,
   the text cut as the chip's, the whole in its hover title (ruled, F15), until the form closes or
@@ -2655,8 +2660,11 @@ from the ticket system: no API, no login. `skydeck show` prints the address as `
   in the chips at once, before the server's list: the page keeps the lists its own changes lead
   to until the server's lists have caught up, and a list that is none of them — another window's
   change — takes the Undo away. Removing a favourite never changes the field, also when the
-  Delete or Backspace that removed the last chip is held: the field then takes the keyboard, and
-  the key's repeats do nothing there (a key pressed elsewhere acts only when pressed again, 12.9).
+  Delete or Backspace that removed it is held: the key's repeats remove no second favourite, and
+  the keyboard never lands in a text field because of these controls (a key pressed elsewhere acts
+  only when pressed again, 12.9): when the row that had it goes away (its last chip removed) the
+  ★ takes it; a save pressed from the keyboard gives it to the new chip once the list brings it;
+  Undo pressed from the keyboard gives it to the chip it puts back (ruled on review 2 of F15).
   Keys: the ★ and then the chip row come after the
   flags field and before Start; the row is one Tab stop, ← → move between its chips, Space turns
   the one that has the keyboard on or off, Delete or Backspace removes it; Enter is Start on the

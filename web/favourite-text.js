@@ -21,10 +21,16 @@ export const CHIP_LENGTH = 28;
 /** The refusals' words (the server's FAVOURITE_REFUSALS, held equal by the test). */
 export const FAVOURITE_REFUSALS = {
   empty: 'there are no flags to save',
+  control: 'the flags contain a line break or another control character',
   tooLong: `a favourite is at most ${FAVOURITE_LENGTH} characters`,
   known: 'these flags are a favourite already',
   full: `there are ${MAX_FAVOURITES} favourites already; remove one first`,
 };
+
+/** What a favourite never holds (ruled on review 2 of F15): a line break or another control
+ *  character (C0, DEL, C1) and the bidirectional controls — what design 7.4's sanitiser takes
+ *  away or changes, so that a chip shows the favourite as it is. The server's CONTROL. */
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
 
 /** Separates words outside quotes, as in splitFlags: any whitespace. */
 const SEPARATOR = /^\s$/;
@@ -195,8 +201,9 @@ function sameFlags(one, other) {
 /**
  * Why `text` cannot be saved as one more favourite beside `favourites`, in the server's words and
  * order; null when the page knows of no reason (the server refuses the flags `skydeck new` refuses
- * too). Judged on the text trimmed: empty; splitFlags refuses it; longer than FAVOURITE_LENGTH
- * characters; the same words as a favourite; MAX_FAVOURITES favourites already.
+ * too). Judged on the text trimmed: empty; splitFlags refuses it; it holds a line break or another
+ * control character (CONTROL); longer than FAVOURITE_LENGTH characters; the same words as a
+ * favourite; MAX_FAVOURITES favourites already.
  * @param {string} text
  * @param {readonly string[]} favourites
  * @returns {string | null}
@@ -209,6 +216,9 @@ export function favouriteRefusal(text, favourites) {
   const split = flagWords(favourite);
   if (!split.ok) {
     return split.error;
+  }
+  if (CONTROL.test(favourite)) {
+    return FAVOURITE_REFUSALS.control;
   }
   if ([...favourite].length > FAVOURITE_LENGTH) {
     return FAVOURITE_REFUSALS.tooLong;

@@ -20,11 +20,13 @@
 // or off, Delete and Backspace remove it, Enter starts as everywhere in the form. A disabled ★ is
 // aria-disabled, not disabled: it keeps the keyboard and its place of Tab, so that pressing it
 // never moves the keyboard. A click on a chip, its ×, the ★ or Undo takes no keyboard (their
-// mousedown is cancelled), so that a click leaves the keyboard in the field. When the row, or
-// Undo, that had the keyboard goes away, the field takes it, and the repeats of a key held down
-// since (the Delete or Backspace that removed the last chip) do nothing there: a key pressed
-// elsewhere acts in the field only when it is pressed again (12.9). Every favourite reaches the
-// DOM as text, sanitised for show and as stored in the field.
+// mousedown is cancelled), so that a click leaves the keyboard in the field. The keyboard never
+// lands in a text field because of these controls (a key held down would type there, 12.9): when
+// the row that had it goes away (its last chip removed) the ★ takes it; a save pressed from the
+// keyboard gives it to the new chip once the list brings it; Undo pressed from the keyboard gives
+// it to the chip it puts back, and an Undo that goes away for another reason to the row (or the ★
+// when there is no chip). Every favourite reaches the DOM as text, sanitised for show and as
+// stored in the field.
 
 /** @import { ResultMessage } from '../src/window/protocol.ts' */
 import {
@@ -136,8 +138,9 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
   /** The result line a favourite's refusal wrote, so that only it is cleared. */
   /** @type {string | null} */
   let refused = null;
-  /** The code of the key that removed the last chip, while it is held (its repeats go nowhere). */
-  let held = '';
+  /** A save pressed from the keyboard: the text whose chip takes the keyboard when it comes. */
+  /** @type {string | null} */
+  let toNewChip = null;
 
   /** @param {ResultMessage} result */
   const answered = (result) => {
@@ -152,10 +155,21 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
     lines.textContent = refused;
   };
 
-  /** The keyboard stays in the form when what had it goes away. */
+  /** The row takes the keyboard, on the chip at `at`; while there is no chip, the ★. */
+  const rowTakes = (/** @type {number} */ at) => {
+    if (drawn.length === 0) {
+      star.focus();
+      return;
+    }
+    current = Math.max(0, Math.min(at, drawn.length - 1));
+    paint();
+    row.focus();
+  };
+
+  /** What had the keyboard goes away: it stays in the form, never in a text field. */
   const keepKeyboard = (/** @type {Element} */ going) => {
     if (going.contains(document.activeElement)) {
-      flags.focus();
+      rowTakes(current);
     }
   };
 
@@ -177,13 +191,17 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
     removed.title = sanitize(text);
     const button = quietButton('card-undo', 'Undo');
     button.addEventListener('click', () => {
-      plainHint();
-      if (shown().includes(text)) {
-        return; // it is back already
+      const keyboard = document.activeElement === button;
+      undo = null;
+      hint.textContent = hintText;
+      if (!shown().includes(text)) {
+        ahead.push(withAt(shown(), text, at));
+        draw();
+        void act({ kind: 'favourite-add', text, at }).then(refusedDrops);
       }
-      ahead.push(withAt(shown(), text, at));
-      draw();
-      void act({ kind: 'favourite-add', text, at }).then(refusedDrops);
+      if (keyboard) {
+        rowTakes(drawn.indexOf(text)); // the chip it put back
+      }
     });
     hint.replaceChildren('Removed ', removed, ' · ', button);
   };
@@ -238,11 +256,19 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
       const kept = was === undefined ? -1 : list.indexOf(was);
       current = kept >= 0 ? kept : Math.max(0, Math.min(current, list.length - 1));
       drawn = [...list];
+      const had = row.contains(document.activeElement);
       row.replaceChildren(...drawn.map(chipOf));
-      if (drawn.length === 0) {
-        keepKeyboard(line);
-      }
       line.hidden = drawn.length === 0;
+      if (had && drawn.length === 0) {
+        star.focus(); // the row went away: the keyboard goes to the ★ before it, never into the field
+      }
+      const chip = toNewChip === null ? -1 : drawn.indexOf(toNewChip);
+      if (chip >= 0) {
+        toNewChip = null;
+        if (document.activeElement === star) {
+          rowTakes(chip);
+        }
+      }
     }
     paint();
   };
@@ -287,10 +313,12 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
     plainHint(); // the favourites change again
     saving = true;
     saved = [...shown(), text.trim()];
+    toNewChip = document.activeElement === star ? text.trim() : null;
     paint();
     void act({ kind: 'favourite-add', text }).then((result) => {
       if (!result.ok) {
         saved = null;
+        toNewChip = null;
       }
       answered(result);
       // The list that holds a save that worked can come after the answer: until then the ★ waits.
@@ -341,7 +369,6 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
       case 'Delete':
       case 'Backspace':
         if (!event.repeat) {
-          held = event.code;
           remove(current);
         }
         break;
@@ -354,21 +381,6 @@ export function favouriteControls({ form, flags, hint, lines, act }) {
         return;
     }
     event.preventDefault();
-  });
-  flags.addEventListener('keydown', (event) => {
-    if (event.code !== held) {
-      return;
-    }
-    if (event.repeat) {
-      event.preventDefault(); // held since it removed the last chip (12.9)
-    } else {
-      held = '';
-    }
-  });
-  form.addEventListener('keyup', (event) => {
-    if (event.code === held) {
-      held = '';
-    }
   });
   star.addEventListener('click', save);
   star.addEventListener('keydown', (event) => {

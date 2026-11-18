@@ -83,10 +83,13 @@ describe("favouriteRefusal: the server's rule (S2 12.6, F15)", () => {
     }
   });
 
-  test('each other refusal with its words, in the order empty, split, too long, known, full, flags', () => {
+  test('each other refusal with its words, in the order empty, split, control, too long, known, full, flags', () => {
     assert.equal(favouriteRefusal(' ', []), FAVOURITE_REFUSALS.empty);
     assert.equal(favouriteRefusal("--resume 'x", []), "the flags have an unclosed '");
     assert.equal(favouriteRefusal('--x\0', []), 'the flags contain a NUL character');
+    assert.equal(favouriteRefusal(`--resume\n${'a'.repeat(200)}`, []), FAVOURITE_REFUSALS.control);
+    assert.equal(favouriteRefusal('--model\topus', []), FAVOURITE_REFUSALS.control);
+    assert.equal(favouriteRefusal('--x\u202e', []), FAVOURITE_REFUSALS.control);
     assert.equal(favouriteRefusal(`--resume ${'a'.repeat(200)}`, []), FAVOURITE_REFUSALS.tooLong);
     assert.equal(favouriteRefusal('--model   opus', ['--model opus']), FAVOURITE_REFUSALS.known);
     assert.equal(favouriteRefusal('--resume', twelve()), FAVOURITE_REFUSALS.full);
@@ -189,6 +192,8 @@ describe('the list in kv window_favourites', () => {
     const d = testDeck(t);
     const stored = [
       '--a',
+      '--x\ny',
+      '--x\u001b[31m',
       ' --b',
       '',
       7,
@@ -343,14 +348,15 @@ describe('act favourite-add and favourite-remove', () => {
     assert.deepEqual(h.told, []);
   });
 
-  test('a refusal holding what was typed reaches the page sanitised', async (t) => {
+  test('what was typed reaches no refusal with a control character: it is refused before prepareNew quotes it', async (t) => {
     const d = testDeck(t);
     const h = harness(d);
-    // prepareNew's words quote a cluster as typed: `-c<ESC>[31m (--continue)`.
+    // prepareNew's words would quote the cluster as typed: `-c<ESC>[31m (--continue)`.
     const result = await h.act(add('-c\x1b[31m'));
-    assert.equal(result.ok, false);
-    assert.match(result.error ?? '', /^cannot pass -c.*\(--continue\) to claude/);
-    for (const line of [...result.lines, result.error ?? '']) {
+    assert.deepEqual(result, refused(5, FAVOURITE_REFUSALS.control));
+    const quoted = await h.act(add('-c<b>x</b>'));
+    assert.equal(quoted.error, prepareNewRefusal(d, '-c<b>x</b>'), 'quoted as typed, as Start');
+    for (const line of [...result.lines, result.error ?? '', ...quoted.lines]) {
       assert.ok(!/[\u0000-\u001f]/.test(line), JSON.stringify(line));
     }
   });
