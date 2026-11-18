@@ -1,7 +1,8 @@
 // The header's text and the pull-request dialog's (S2 12.3, 12.5; plan D task 38, D11–D13): a
 // pull request's words in the header's line and on its line of the dialog, their tooltips, the
 // fold of the merged and closed ones, "opened <time> · last active <age>", where the title comes
-// from, and the note's line. web/cards.js and web/edit.js draw them. Pure: no DOM and no clock,
+// from, the note's line, and the flags the session was started with (follow-up F16). web/cards.js
+// and web/edit.js draw them. Pure: no DOM and no clock,
 // so that node:test and the root type check load it (test/web/header-text.test.ts); the caller
 // passes the server's time now (`serverNow`, A18) and the moment a terminal opened in words.
 //
@@ -233,6 +234,54 @@ const SOURCES = /** @type {Record<string, string>} */ ({
  */
 export function titleSourceText(titleSource) {
   return Object.hasOwn(SOURCES, titleSource) ? (SOURCES[titleSource] ?? '') : '';
+}
+
+/** The most characters (code points) of the flags the header's second line shows (F16). */
+export const STARTED_WITH_MAX = 40;
+
+/**
+ * `value` when it is an array of strings, each sanitised again (not trimmed: a value is shown as
+ * recorded); else null — a list of another server, or one of the wrong shape, holds none.
+ * @param {unknown} value
+ * @returns {string[] | null}
+ */
+function strings(value) {
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
+    return null;
+  }
+  return value.map((item) => sanitize(/** @type {string} */ (item)));
+}
+
+/**
+ * Follow-up F16: the flags the session was started with, the last item of the header's second
+ * line — `selected.launchFlags` (the recorded ones a resume passes on again) in the order recorded,
+ * joined by one space, a value with spaces as it was recorded (not quoted) — cut to
+ * STARTED_WITH_MAX characters, the last of them `…`, when longer. Its tooltip holds them uncut,
+ * `Started with: <flags>`, and when there are flags the recording knows only by name, a second
+ * line `Not recognised, not passed again on resume: <names>`. "Started with": a model changed
+ * inside the session later is not seen. `text` and `tip` are '' when no flag is passed again.
+ * @param {SelectedPayload | null} selected `list.selected` when it is the row's session
+ * @returns {{ text: string, tip: string }}
+ */
+export function startedWithText(selected) {
+  const flags = strings(selected?.launchFlags) ?? [];
+  if (flags.length === 0) {
+    return { text: '', tip: '' };
+  }
+  const whole = flags.join(' ');
+  const characters = [...whole];
+  const text =
+    characters.length <= STARTED_WITH_MAX
+      ? whole
+      : `${characters.slice(0, STARTED_WITH_MAX - 1).join('')}…`;
+  const unknown = strings(selected?.unknownFlags) ?? [];
+  const tip = [
+    `Started with: ${whole}`,
+    unknown.length === 0 ? '' : `Not recognised, not passed again on resume: ${unknown.join(' ')}`,
+  ]
+    .filter((line) => line !== '')
+    .join('\n');
+  return { text, tip };
 }
 
 /** A line break of a note, as the server splits one (a lone carriage return too). */

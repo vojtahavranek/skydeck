@@ -32,6 +32,7 @@ import type {
   RestoreStreamLine,
   ResultMessage,
   RowPayload,
+  SelectedPayload,
   ServerMessage,
   SizeMessage,
   SnapMessage,
@@ -620,6 +621,7 @@ describe('types (checked by npm run typecheck)', () => {
       command: 'cd /home/u/project && claude --resume 11111111-1111-4111-8111-111111111111',
       flagsKnown: true,
       unknownFlags: [],
+      launchFlags: ['--model', 'opus'],
       ended: 'exited',
       expiring: false,
       expired: false,
@@ -743,8 +745,22 @@ describe('types (checked by npm run typecheck)', () => {
         // @ts-expect-error a note act's base is `base`
         baseText: '',
       } satisfies ActMessage,
+      {
+        sessionId: S1,
+        command: null,
+        flagsKnown: true,
+        unknownFlags: [],
+        // @ts-expect-error the flags a session was started with are `launchFlags` (follow-up F16)
+        startFlags: ['--model', 'opus'],
+        ended: null,
+        expiring: false,
+        expired: false,
+        note: null,
+        noteTooLong: false,
+        ticketUrl: null,
+      } satisfies SelectedPayload,
     ];
-    assert.equal(misspelt.length, 5);
+    assert.equal(misspelt.length, 6);
   });
 
   test("stage D's act kinds compile with exactly plan D 2.2's fields", () => {

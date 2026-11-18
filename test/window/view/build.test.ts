@@ -1098,6 +1098,7 @@ const CARD: SelectedPayload = {
   command: "cd /home/dev/projects/demo && claude --resume '0b5f3c1e'",
   flagsKnown: true,
   unknownFlags: [],
+  launchFlags: [],
   ended: 'exited',
   expiring: false,
   expired: false,

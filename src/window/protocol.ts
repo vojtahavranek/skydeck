@@ -279,6 +279,10 @@ export interface SelectedPayload {
   command: string | null; // printableCommand of the command a resume would run, null when it cannot be printed
   flagsKnown: boolean;
   unknownFlags: string[];
+  /** Follow-up F16: the flags of the session's recorded launch that a resume passes on again, with
+   *  their values, in the order recorded, each token sanitised (`passedOnFlags`); [] without a
+   *  recorded launch. The header shows them as the flags it was started with (S2 12.5). */
+  launchFlags: string[];
   ended: 'exited' | 'unexpectedly' | 'mid-turn' | null;
   expiring: boolean;
   expired: boolean;

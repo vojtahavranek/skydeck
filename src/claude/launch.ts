@@ -572,6 +572,17 @@ function passedOnTokens(args: readonly string[]): string[] {
 }
 
 /**
+ * The flags of a recorded or a stored command (program first) that a resume passes on again, with
+ * their values, in order — what `buildResumeCommand` puts after the session id and the label: no
+ * program, no removed flag, no flag that is in no table (`unknownFlags` names those), nothing after
+ * `--`. The same for a command and for `storableArgv` of it. Follow-up F16: the window's header
+ * shows them as the flags the session was started with.
+ */
+export function passedOnFlags(launch: readonly string[]): string[] {
+  return passedOnTokens(launch.slice(1));
+}
+
+/**
  * What skydeck stores of a recorded launch command (design 5.3, principle 4): the program (first
  * element) and the flags, with their values, that a resume keeps — in order. Positional arguments
  * (an initial prompt), `--` and everything after it, and every flag with `remove: true` (with its
@@ -695,7 +706,7 @@ export function buildResumeCommand(input: {
   label: string | null;
 }): ResumeCommand {
   assertSessionId(input.sessionId);
-  const kept = input.launch === null ? [] : passedOnTokens(input.launch.slice(1));
+  const kept = input.launch === null ? [] : passedOnFlags(input.launch);
   return {
     argv: [input.claudeCommand, '--resume', input.sessionId, ...labelArgs(input.label), ...kept],
     flagsKnown: input.launch !== null,

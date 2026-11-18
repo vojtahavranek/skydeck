@@ -10,6 +10,7 @@ import {
   isPrintRun,
   nameFlags,
   parseLaunchArgs,
+  passedOnFlags,
   sessionPickingFlags,
   storableArgv,
   unknownFlags,
@@ -1379,6 +1380,40 @@ test('what is stored is the program, the tokens a resume keeps and the names of 
     assert.deepEqual(passedOn(stored), resume(launch).argv.slice(3), launch.join(' '));
     assert.deepEqual(unknownFlags(stored), unknownFlags(launch), launch.join(' '));
   }
+});
+
+// --- passedOnFlags (follow-up F16) ---------------------------------------------------------------
+
+test("passedOnFlags is what a resume passes on after the session id: buildResumeCommand's tail, from the recorded and the stored command", () => {
+  for (const launch of LAUNCHES) {
+    assert.deepEqual(passedOnFlags(launch), resume(launch).argv.slice(3), launch.join(' '));
+    assert.deepEqual(passedOnFlags(storableArgv(launch)), passedOnFlags(launch), launch.join(' '));
+  }
+});
+
+test('passedOnFlags keeps the known flags with their values, in order, a value with spaces as one token', () => {
+  assert.deepEqual(
+    passedOnFlags([
+      'claude',
+      '--model',
+      'opus',
+      '--frob',
+      '--append-system-prompt',
+      'be brief',
+      '--permission-mode',
+      'plan',
+      'a prompt',
+    ]),
+    ['--model', 'opus', '--append-system-prompt', 'be brief', '--permission-mode', 'plan'],
+  );
+});
+
+test('passedOnFlags leaves out the program, the flags a resume removes, unknown ones and what follows --', () => {
+  assert.deepEqual(passedOnFlags(['claude', '--session-id', 'x', '-n', 'label', '-c']), []);
+  assert.deepEqual(passedOnFlags(['claude', '--frob', '--other=1', '-Z']), []);
+  assert.deepEqual(passedOnFlags(['claude', '--verbose', '--', '--model', 'opus']), ['--verbose']);
+  assert.deepEqual(passedOnFlags(['claude']), []);
+  assert.deepEqual(passedOnFlags([]), []);
 });
 
 // --- unknownFlags --------------------------------------------------------------------------------
