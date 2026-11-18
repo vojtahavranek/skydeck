@@ -1869,7 +1869,7 @@ test('the list', async (t) => {
   );
 
   await t.test(
-    "the section headers are bands (F17), light and dark: the page's --bg as their ground, off the list's; the list column's full width, 28 px, a 1 px --line above and below, square, sticky and opaque; before each title a mark in its section's colour (Open --accent, Recent --dim, Earlier --faint), the titles --text but Earlier's --dim, the count dim, a folded Earlier's span at the right end; Earlier's arrow at least 5 px from its mark; the mark is decoration",
+    "the section headers are bands (F17), light and dark: the page's --bg as their ground, off the list's; the list column's full width, 28 px, a 1 px --line above and below, square, sticky and opaque; before each title a mark in its section's colour (Open --accent, Recent --dim, Earlier --faint), the titles --text but Earlier's --dim, the count dim, a folded Earlier's span at the right end; Earlier's arrow at least 5 px from its mark (8 px held); the mark is decoration",
     async (t) => {
       const unfolded = (view: Record<string, unknown>): boolean =>
         Array.isArray(view['unfolded']) && view['unfolded'].includes('earlier');
@@ -1984,8 +1984,10 @@ test('the list', async (t) => {
               `${scheme}: the span at the right end (${earlier.span.right} in ${earlier.right})`,
             );
           }
+          // At least 5 px (F17's rule); held at what is built less 1 px (9 px of the arrow's ink
+          // to the bar, ▸ and ▾ alike, in the suite's Chromium), so that a narrower gap fails.
           const gap = await arrowGap(earlier);
-          assert.ok(gap >= 5, `${scheme}, folded ${folded}: arrow and mark ${gap} px apart`);
+          assert.ok(gap >= 8, `${scheme}, folded ${folded}: arrow and mark ${gap} px apart`);
 
           // A click on Earlier's mark is a click on its header: it unfolds (then folds) Earlier.
           await s.page.locator('#list .list-section[data-section="earlier"] .section-mark').click();
