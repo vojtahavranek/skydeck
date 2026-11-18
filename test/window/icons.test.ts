@@ -1,8 +1,9 @@
-// The page's own icon (S2 12.12; plan E14, task 94; follow-ups F10 and F12): the owner's two pictures
-// scripts/icons/skydeck-source.png and scripts/icons/skydeck-source-small.png, the committed files of
-// web/icons/ and web/manifest.webmanifest, read from the checkout. scripts/icons.ts drew the PNG and
-// ICO files from the pictures once; no test runs it, so these cases hold what it wrote, and (by
-// reducing the pictures again in plain Node) that the files are the pictures'.
+// The page's own icon (S2 12.12; plan E14, task 94; follow-ups F10 and F12): the owner's two
+// pictures scripts/icons/skydeck-source.png and scripts/icons/skydeck-source-small.png, the
+// committed files of web/icons/ and web/manifest.webmanifest, read from the checkout.
+// scripts/icons.ts drew the PNG and ICO files from the pictures once; no test runs it, so these
+// cases hold what it wrote, and (by reducing the pictures again in plain Node) that the files are
+// the pictures'.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
@@ -123,6 +124,10 @@ const WINDOW_RADIUS = 107;
 /** In the 16 pixel file the cloud is painted out beyond this many source pixels from the window's
  *  outline (so that the window's soft edge is whole). */
 const CLEARANCE = 3;
+/** The lowest alpha on the middle half of each side of a small file: a picture pixel on the crop's
+ *  straight edge counts in the mask's coverage and again in the area average, so the outer rows and
+ *  columns are 252 to 255 (the corners are transparent). */
+const SIDE_OPAQUE = 252;
 /** A pixel counts as the picture's drawing when it differs from the tile's navy by more than
  *  this (of 255) in some channel. */
 const DRAWN_ON_NAVY = 40;
@@ -699,11 +704,12 @@ const MIN_WHITE_16 = 22;
 
 /**
  * How many pixels of a 16 pixel file (straight RGBA, `size` pixels square) are a stroke of the
- * cloud outside the terminal window's outline. A pixel is a stroke when it is at least half
- * opaque, its blue is its strongest channel, 128 or more, and at least 60 above the weaker of its
- * red and green: the cloud's cyan to violet, not the navy, the white of the `>_` or a grey. It is
- * outside when its middle is more than half a pixel beyond the outline (the window's frame has
- * the same colours, and its soft edge is a pixel wide).
+ * cloud outside the terminal window's outline. A pixel is a stroke when it is at least a quarter
+ * opaque (the pixels at the crop's rounded corners are partly transparent), its blue is its
+ * strongest channel, 128 or more, and at least 60 above the weaker of its red and green: the
+ * cloud's cyan to violet, not the navy, the white of the `>_` or a grey. It is outside when its
+ * middle is more than half a pixel beyond the outline (the window's frame has the same colours,
+ * and its soft edge is a pixel wide).
  */
 function strokesOutsideWindow(rgba: ArrayLike<number>, size: number): number {
   const crop = cropOf('window');
@@ -718,7 +724,7 @@ function strokesOutsideWindow(rgba: ArrayLike<number>, size: number): number {
         { length: 4 },
         (_, c) => rgba[(y * size + x) * 4 + c],
       );
-      const stroke = a >= 128 && b >= 128 && b >= Math.max(r, g) && b - Math.min(r, g) >= 60;
+      const stroke = a >= 64 && b >= 128 && b >= Math.max(r, g) && b - Math.min(r, g) >= 60;
       const outside =
         outsideRounded(
           x + 0.5 - cx,
@@ -847,6 +853,30 @@ describe('the small picture, as the three small files use it', () => {
     for (const crop of [drawing, win]) {
       assert.ok(crop.x >= tile.minX && crop.y >= tile.minY);
       assert.ok(crop.x + crop.side <= tile.maxX + 1 && crop.y + crop.side <= tile.maxY + 1);
+    }
+  });
+
+  test("no pixel of the picture that a crop covers at all is less than opaque: the tile's soft edge and its transparent corners are in no small file", () => {
+    // The crops lie inside the tile's box, but the tile is rounded: a square crop's corner can lie
+    // outside the tile's corner arc, and it holds only because the crop's own rounding cuts it off.
+    const png = picture('small');
+    for (const view of ['drawing', 'window'] as const) {
+      const source = smallSource(view, false);
+      const { side } = cropOf(view);
+      let covered = 0;
+      for (let i = 0; i < png.width * png.height; i++) {
+        if ((source[i * 4 + 3] ?? 0) > 0) {
+          covered++;
+          assert.ok(
+            (png.pixels[i * 4 + 3] ?? 0) >= OPAQUE,
+            `${view}: pixel ${i % png.width},${Math.floor(i / png.width)} is at alpha ${png.pixels[i * 4 + 3]}`,
+          );
+        }
+      }
+      assert.ok(
+        covered > 0.8 * side * side,
+        `${view}: ${covered} pixels covered of ${side * side}`,
+      );
     }
   });
 
@@ -1002,7 +1032,7 @@ describe('the PNG files', () => {
     }
   });
 
-  test('the three small files fill their square: the middle half of each side is opaque, the corners are not', () => {
+  test('the three small files fill their square: the middle half of each side is at alpha 252 or more, the corners are transparent', () => {
     // Each is a rounded square cropped from the picture, so that the outer rows and columns are
     // covered whole: one pixel of a 16 pixel file is 78 of the picture's, and a soft grey rim on a
     // light taskbar is what a partly covered edge gives.
@@ -1015,17 +1045,21 @@ describe('the PNG files', () => {
           [0, t],
           [size - 1, t],
         ] as const) {
-          assert.ok(alpha(png, x, y) >= OPAQUE, `icon-${size}.png: pixel ${x},${y} is not opaque`);
+          assert.ok(
+            alpha(png, x, y) >= SIDE_OPAQUE,
+            `icon-${size}.png: pixel ${x},${y} is at alpha ${alpha(png, x, y)}`,
+          );
         }
       }
       assert.deepEqual(corners(png), [0, 0, 0, 0], `icon-${size}.png`);
     }
   });
 
-  test('32 and 48 pixels: the drawing reaches within 2 pixels of the left and the right edge', () => {
+  test('32 and 48 pixels: the drawing reaches within 1 pixel of the left and the right edge', () => {
     // The crop is the drawing's width plus 2 % each side: 0.6 of a pixel at 32 and 0.9 at 48 are
-    // navy before the cloud's outline starts. A pixel is the drawing's when it is opaque and more
-    // than DRAWN_ON_NAVY from the navy in some channel.
+    // navy before the cloud's outline starts, so the drawing starts and ends at the edge at 32 (0
+    // pixels away) and one pixel from it at 48. A pixel is the drawing's when it is opaque and
+    // more than DRAWN_ON_NAVY from the navy in some channel.
     for (const size of [32, 48]) {
       const png = decodePng(read(`${ICONS}/icon-${size}.png`));
       let left = size;
@@ -1039,11 +1073,11 @@ describe('the PNG files', () => {
         }
       }
       assert.ok(
-        left <= 2,
+        left <= 1,
         `icon-${size}.png: the drawing starts ${left} pixels from the left edge`,
       );
       assert.ok(
-        size - 1 - right <= 2,
+        size - 1 - right <= 1,
         `icon-${size}.png: the drawing ends ${size - 1 - right} pixels from the right edge`,
       );
     }
@@ -1101,9 +1135,9 @@ describe('the PNG files', () => {
 
   test("16 pixels: no stroke of the cloud is left outside the window's outline, and the check sees the cloud where it was not painted out", () => {
     assert.equal(strokesOutsideWindow(decodePng(read(`${ICONS}/icon-16.png`)).pixels, 16), 0);
-    // The same crop without the painting out (the pixels at the top right corner): the check is
-    // not one that nothing could fail.
-    assert.ok(strokesOutsideWindow(reduced(16, 1, 'small', false, false), 16) >= 1);
+    // The same crop without the painting out (two pixels at the top right corner, where the cloud
+    // crosses it): the check is not one that nothing could fail.
+    assert.ok(strokesOutsideWindow(reduced(16, 1, 'small', false, false), 16) >= 2);
   });
 
   test("the four large files are main's, byte for byte (follow-up F12 changes the three small ones and favicon.ico only)", () => {

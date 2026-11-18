@@ -1278,9 +1278,10 @@ holds it. When the list shows the session again (the filter cleared), it is sele
 
 #### The icon (stage E)
 
-The page has an icon of its own, a dark navy rounded square with a blue-to-violet cloud outline
-and one terminal window with a white prompt (`>_`) in it, for the window's taskbar button and its
-title bar; manual check W3 says whether Edge shows it there.
+The page has an icon of its own: on a dark navy rounded square, a terminal window with a white
+prompt (`>_`) and, at the larger sizes, a blue-to-violet cloud outline behind it, for the window's
+taskbar button and its title bar (the smallest size, 16 pixels, is the terminal window alone);
+manual check W3 says whether Edge shows it there.
 The page also has a manifest, for the icon: Edge's menu may offer to install the page as an app.
 Do not: the window is opened by `skydeck window`, and the page is built not to be installable (its
 manifest names no start address).

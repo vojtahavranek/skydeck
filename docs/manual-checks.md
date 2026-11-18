@@ -1762,19 +1762,21 @@ the short id).
 
 1. Look at the window's taskbar button and at the left end of the window's own title bar (Edge's,
    above the page): skydeck's icon, not Edge's. Expected, by place:
-   - the **title bar** (16 pixels): a small dark navy rounded square filled by one terminal window
-     with a frame that runs blue to violet and a white `>_` in it; the cloud is left out at that
-     size, and it is not crisp;
+   - the **title bar** (the 16 pixel file at a display scale of 100 %; at 125 or 150 % Edge may
+     draw it from the 32 pixel file, which shows the cloud with the window: the same icon, not an
+     earlier one): a small dark navy rounded square filled by one terminal window with a frame
+     that runs blue to violet and a white `>_` in it; no cloud, and not crisp;
    - the **taskbar button**: which of the page's small icons Windows takes for it is not known
      (Edge may hand it the 16 or the 32 pixel one, and Windows stretches it to 24 to 36 pixels).
-     From the 32 pixel file: a dark navy rounded square with a blue-to-violet cloud outline and
-     the terminal window with its white `>_` in front of it, the drawing filling the square
-     nearly to its edges, so that it is as large as the other buttons' icons. Since follow-up F12
-     it fills the tile; before it the same drawing sat inside a margin of the same navy, which
-     on a dark taskbar is nearly invisible, so the icon looked small. From the 16 pixel file: the
-     terminal window with its `>_` alone, no cloud, soft (a stretched bitmap is never crisp).
-     Write down which it is, whether the picture is sharp or soft, and whether it is as large as
-     the buttons beside it.
+     Most likely the 16 pixel file stretched to about 24 pixels (review 2's reading of the owner's
+     screenshot of 2026-11-17; not tried in Edge): the terminal window alone with its white `>_`,
+     no cloud, soft (a stretched bitmap is never crisp). If Windows takes the 32 pixel file: a
+     dark navy rounded square with a blue-to-violet cloud outline and the terminal window with
+     its white `>_` in front of it, the drawing filling the square nearly to its edges, so that
+     it is as large as the other buttons' icons. Since follow-up F12 the drawing fills the tile;
+     before it the same drawing sat inside a margin of the same navy, which on a dark taskbar is
+     nearly invisible, so the icon looked small. Write down which of the two you see, whether the
+     picture is sharp or soft, and whether it is as large as the buttons beside it.
 
    The taskbar's look was NOT tried in Edge when F12 was made: the files were judged from sheets
    drawn with the same browser engine (Chromium), and this check is the first time they are seen
