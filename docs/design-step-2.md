@@ -2513,10 +2513,12 @@ session was started with as the hook recorded them (design 5.3) — first the on
 again (design 7.6; `passedOnFlags`) with their values, in the order recorded, then the ones the
 recording knows only by name (in no table: a resume does not pass them on), bare, as recorded
 (ruled by the lead: a session started with a flag never shows nothing) — as one text, `--model
-opus --permission-mode plan`; a value is shown as recorded, one with spaces not quoted. In the
-short id's lighter grey (ruled by the lead: a side note, not the folder's grey) and its monospace
-font, with no label before it and no box, the line's own gap before it whether "id copied" shows
-or not. At most 40
+opus --permission-mode plan`; a value is shown as recorded, one with spaces not quoted. The
+recording keeps neither a prompt nor any flag a resume removes (design 7.6: the ones that pick,
+name, move or place the session, such as `--resume`, `--name`, `--worktree`, `--tmux` and `--bg`),
+so those are never shown, also when they were typed into the New form. In the short id's lighter
+grey (ruled by the lead: a side note, not the folder's grey) and its monospace font, with no label
+before it and no box, the line's own gap before it whether "id copied" shows or not. At most 40
 characters over the whole, the last of them `…` beyond that; its tooltip holds the whole text
 uncut, `Started with: <flags>`, and when there are names it does not know, a second line `Not
 recognised, not passed again on resume: <names>`. "Started with": a model changed inside the

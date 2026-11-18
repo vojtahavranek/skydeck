@@ -1994,8 +1994,9 @@ documentation only (design.md 14), or not at all.
 
 The check of the flags in the header (follow-up F16; design-step-2.md 12.5): W35, in your window,
 on one new throwaway session in `~/skydeck-try` and nothing else. It changes no file and no setting
-of yours, and types and presses keys only in that session's terminal and in the New form; a row of
-your own is only looked at (one click, never a double click: that would resume it).
+of yours, and types and presses keys only in that session's terminal and in the New form. Before
+every key and every click, look at the header's short id: it must be the throwaway session's (step
+2 writes it down).
 
 ## W35. The flags in the header (real claude)
 
@@ -2010,19 +2011,22 @@ the throwaway folder there (`mkdir -p ~/skydeck-try`). Write down the time.
    `--model haiku --permission-mode plan`. Leave the label and the group empty. Press Enter only
    when the directory field holds exactly that path and the flags field exactly those words.
 2. **The header.** Look that it is the new one: the header shows a short id you have not seen, its
-   folder ends in `skydeck-try`, "opened" a moment ago, and its terminal Claude Code's
-   prompt. Expected within a few seconds (once Claude Code's start was recorded): the header's
-   second line ends, after the short id, in `--model haiku --permission-mode plan` — in the lighter
-   grey of the short id, in the narrow font of the folder and the short id, with no word before it
-   and no box around it, as far from the short id as the short id is from the text before it. The header has the same four lines and the same height as before it came:
-   the terminal under it did not move down. Hold the mouse still over the flags for a second:
+   folder ends in `skydeck-try`, "opened" a moment ago, and its terminal Claude Code's prompt.
+   Write the short id down. Expected within a few seconds (once Claude Code's start was recorded):
+   the header's second line ends, after the short id, in `--model haiku --permission-mode plan` —
+   in the lighter grey of the short id, in the narrow font of the folder and the short id, with no
+   word before it and no box around it, as far from the short id as the short id is from the text
+   before it. The header has the same four lines and the same height as before it came: the
+   terminal under it did not move down. Hold the mouse still over the flags for a second:
    the tooltip reads `Started with: --model haiku --permission-mode plan`, on one line.
 3. **Short of room.** Make the window narrower by dragging its right edge, slowly, and watch the
    second line: first the flags get shorter, ending in `…`, until they are gone; only then do the
    folder or "where the title comes from" lose characters; the short id is never cut, and the
    header keeps its height. Drag the window back to its width.
 4. **One prompt**, so that the session has a transcript (a session without one is not listed once
-   it has ended). Look that its terminal has the keyboard: the key bar says `Focus: terminal` (else
+   it has ended). Look at the header's short id: it is the one you wrote down; else type nothing
+   and click the throwaway session's row in the list first. Look that its terminal has the
+   keyboard: the key bar says `Focus: terminal` (else
    Ctrl+Shift+L until it does). Type `Reply with the single word ok, in this chat, with no tool and
    no file.` and Enter. If it asks to run a command or to edit a file, answer No. Wait for its reply.
 5. **Ended and closed.** Look at the short id: it is the throwaway session's (`/exit` ends the
