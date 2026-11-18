@@ -17,13 +17,17 @@ function properties(block: string): Map<string, string> {
   return found;
 }
 
-/** The light (`:root`) and dark (`prefers-color-scheme: dark`) variables of web/style.css. */
+/** The light (`:root`) and dark (`prefers-color-scheme: dark`, unless forced light; forced dark is
+ *  the same declarations, test/web/theme.test.ts) variables of web/style.css. */
 function schemes(): { light: Map<string, string>; dark: Map<string, string> } {
   const css = readFileSync(new URL('../../web/style.css', import.meta.url), 'utf8').replaceAll(
     /\/\*[^]*?\*\//g,
     '',
   );
-  const dark = /@media \(prefers-color-scheme: dark\)\s*\{\s*:root\s*\{([^}]*)\}/.exec(css);
+  const dark =
+    /@media \(prefers-color-scheme: dark\)\s*\{\s*:root:not\(\[data-theme='light'\]\)\s*\{([^}]*)\}/.exec(
+      css,
+    );
   const light = /:root\s*\{([^}]*)\}/.exec(css);
   assert.ok(light !== null && dark !== null, 'style.css has a light and a dark :root');
   return { light: properties(light[1] ?? ''), dark: properties(dark[1] ?? '') };

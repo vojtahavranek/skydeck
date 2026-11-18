@@ -54,8 +54,9 @@
   inherits: true;
   initial-value: 0px;
 }
+/* Dark: the system's, or forced (style.css says how; the two rules are the same). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --tv-black: #2e3436;
     --tv-red: #e5534b;
     --tv-green: #6bc46d;
@@ -75,6 +76,26 @@
     --tv-selection: #2f4a73;
     --tv-overlay: rgba(29, 32, 37, 0.94);
   }
+}
+:root[data-theme='dark'] {
+  --tv-black: #2e3436;
+  --tv-red: #e5534b;
+  --tv-green: #6bc46d;
+  --tv-yellow: #d9b44a;
+  --tv-blue: #539bf5;
+  --tv-magenta: #b083f0;
+  --tv-cyan: #39c5cf;
+  --tv-white: #d3d7cf;
+  --tv-bright-black: #6e7681;
+  --tv-bright-red: #ff7b72;
+  --tv-bright-green: #8ae234;
+  --tv-bright-yellow: #fce94f;
+  --tv-bright-blue: #79c0ff;
+  --tv-bright-magenta: #d2a8ff;
+  --tv-bright-cyan: #56d4dd;
+  --tv-bright-white: #f0f3f6;
+  --tv-selection: #2f4a73;
+  --tv-overlay: rgba(29, 32, 37, 0.94);
 }
 
 .terminal {
