@@ -3031,7 +3031,7 @@ check W3. Low priority: stage E (19).
 
 As built (stage E, plan E14; the picture changed by follow-up F10, 2026-11-17, on the owner's words
 "change the icon, use this [a picture], but use appropriate sizes", and a second picture for the
-small sizes):
+small sizes; the small files redrawn by follow-up F12, 2026-11-18):
 
 - **The pictures** are the owner's, two of them, 1254 × 1254 pixels, RGBA, transparent outside
   their dark navy rounded tile, kept exactly as they were received (their own `caBX` chunks, the
@@ -3050,8 +3050,8 @@ small sizes):
   own, and committed; no test and no CI step runs the script. Nothing is fetched from outside, at
   build time or at run time. **The 16, 32 and 48 pixel files, and so the ICO, are drawn from the
   small picture; the 192 and 512 pixel files and both maskable files from the first one**: the
-  detailed picture blurs at 48 pixels and below (at 16 it is a ring with a light spot), and the window's
-  taskbar button and title bar show the small sizes.
+  detailed picture blurs at 48 pixels and below (at 16 it is a ring with a light spot), and the
+  window's taskbar button and title bar show the small sizes.
 - **How a size is reduced.** Chromium decodes the picture; for each pixel of an icon the script
   averages the picture's pixels under it, weighted by the area they cover, premultiplied and in
   linear light: a box filter at exactly the icon's pixel pitch, so that no pixel of the picture is
@@ -3059,19 +3059,42 @@ small sizes):
   canvas with Chromium's high-quality smoothing was tried first and rejected: it left a grey halo
   around the tile on a light background and a duller 16 pixel icon. The large files are the whole
   picture in their box, transparent where the picture is (its rounded corners; the tile itself is
-  at alpha 251 to 254 of 255, the pictures' own). **The small files are not the whole small
-  picture**: it has a transparent margin of 18 to 29 pixels (of 1254) around its tile, one pixel
-  of a 16 pixel file is 78 of them, and drawn whole the outer rows and columns were only partly
-  covered (alpha 162 to 199 at 16, an empty top row at 48), a soft grey rim on a light title bar.
-  The tile's box (its pixels of alpha 250 or more) is x 18 to 1232 and y 29 to 1228, 1215 × 1200
-  pixels; the files take its shorter side, 1200 pixels, scaled to the icon (1254 / 1200 = 1.045
-  of the whole picture) and centred on the tile. The tile fills the box, the rounded corners stay
-  transparent, and the middle of each side is opaque. The test re-derives every file from its
-  picture in plain Node and compares, and tells the two pictures apart by the white of the `>_`
-  (the small picture's is bold: 2.7 to 3.1 % of a 16, 32 or 48 pixel icon is white; the large
-  one's is thin: about 0.5 % of a 192 or 512 pixel one). At 16 pixels the small picture is the
-  cloud's ring, the window's frame and a light chevron and bar of about seven pixels; it reads as
-  a terminal in a cloud, not crisply. At 32 and 48 the cloud, the window and the `>_` read.
+  at alpha 251 to 254 of 255, the pictures' own).
+- **The small files are not the whole small picture, and not its tile** (follow-up F12, on the
+  owner's report that the icon on the taskbar looked small and blurred and, a day later, still
+  smaller than the others). The taskbar is dark there, where the navy tile is nearly invisible, and
+  the drawing is only 83 % of the tile's width and 70 % of its height (1001 × 844 of the tile's
+  1200 pixels): drawn by its tile, as F10 first did, the icon looked small beside the others. Each
+  small file is a square crop of the picture on the tile's navy (`#01062b`), its corners rounded
+  by a mask of the tile's own relative radius, 273 / 1200 = 0.2275 of the crop's side (a circle
+  fitted to the tile's corner): the corners transparent, everything else opaque. The mask is laid
+  on the picture's pixels before the reduction, so its edge is anti-aliased like the rest, and
+  every crop lies inside the tile, so the picture's own soft edge is never in a small file.
+  - **32 and 48 pixels: the drawing.** Its box (what is more than 40 of 255 from the navy, at least
+    60 pixels inside the tile) is x 115 to 1115 and y 202 to 1045, 1001 × 844 pixels. The crop is
+    centred on it and its side is the width plus 2 % each side, 1041.04 pixels, so the drawing
+    fills the square: at 32 pixels it covers 96 % of the icon's width and 81 % of its height and
+    starts at the left edge and ends at the right one.
+  - **16 pixels: the terminal window alone.** Its box is x 306 to 941 and y 546 to 1045, 636 × 500
+    pixels, its outer corner radius 107 pixels (a fitted circle). The crop is centred on it and its
+    side is the window's width plus 4 % each side, 686.88 pixels. What of the cloud's strokes
+    falls in the crop outside the window (beyond 3 pixels of its outline, so that the window's
+    soft edge is whole) is painted the tile's navy: at 16 pixels a cloud stroke is a smear that
+    takes the `>_` its room, and with the window alone the chevron and the bar are 22 white
+    pixels, where the picture's whole tile gave 7.
+  - **The numbers are measured from the picture**, and `test/window/icons.test.ts` measures them
+    again from it (the tile's navy, both boxes, both radii) and holds the script's constants to
+    what it finds. The test re-derives every file from its picture in plain Node and compares
+    (within one step of 255 on this build); tells the two pictures apart by the white of the `>_`
+    (the small picture's is bold: 3.8 to 8.6 % of a 16, 32 or 48 pixel icon is white; the large
+    one's is thin: about 0.5 % of a 192 or 512 pixel one); and pins the four large files (192
+    and 512 pixels, and the two maskable ones) byte for byte as they were before F12.
+  - **What it looks like.** At 32 and 48 pixels the cloud, the window and the `>_` read. At 16 a
+    terminal window with a light `>_` and a frame in the cloud's blue and violet; stretched by
+    Windows to a taskbar button of 24 to 36 pixels it is soft (a bitmap stretched is never
+    crisp), the window and the `>_` still read. **The taskbar's look was not tried in Edge or on
+    Windows**: it is judged from sheets drawn with the same Chromium (a file resized as a browser
+    does), and W3 is the check that confirms it.
 - **The maskable icons** have a full background of the large picture's tile colour, `#040925` (the
   average of its opaque pixels between 555 and 585 pixels from its middle), with the picture in the
   middle at 0.927 of the icon's width: drawn in full within 555 of its 1254 pixels from its middle,

@@ -1761,14 +1761,28 @@ Setup: the window open after the update to stage E (`git pull` and `skydeck wind
 the short id).
 
 1. Look at the window's taskbar button and at the left end of the window's own title bar (Edge's,
-   above the page). Expected: skydeck's icon, a dark navy rounded square with a blue-to-violet
-   cloud outline and one terminal window with a white `>_` in it (the button and the title bar show
-   the small sizes of the icon; at the title bar's 16 pixels it is the cloud's ring, the window's
-   frame and a light `>_` of a few pixels, not crisp); not Edge's. Since follow-up F10 the icon is
-   this picture; the one before it was three cards, the front one white with a prompt, on a blue
-   rounded square. When the button or the title bar still shows that earlier icon after the page
-   reloaded itself, write it down and treat it as step 3 treats Edge's own icon: look again the
-   next time the window is opened anew (do not close it for this check).
+   above the page): skydeck's icon, not Edge's. Expected, by place:
+   - the **title bar** (16 pixels): a small dark navy rounded square filled by one terminal window
+     with a frame that runs blue to violet and a white `>_` in it; the cloud is left out at that
+     size, and it is not crisp;
+   - the **taskbar button**: which of the page's small icons Windows takes for it is not known
+     (Edge may hand it the 16 or the 32 pixel one, and Windows stretches it to 24 to 36 pixels).
+     From the 32 pixel file: a dark navy rounded square with a blue-to-violet cloud outline and
+     the terminal window with its white `>_` in front of it, the drawing filling the square
+     nearly to its edges, so that it is as large as the other buttons' icons. Since follow-up F12
+     it fills the tile; before it the same drawing sat inside a margin of the same navy, which
+     on a dark taskbar is nearly invisible, so the icon looked small. From the 16 pixel file: the
+     terminal window with its `>_` alone, no cloud, soft (a stretched bitmap is never crisp).
+     Write down which it is, whether the picture is sharp or soft, and whether it is as large as
+     the buttons beside it.
+
+   The taskbar's look was NOT tried in Edge when F12 was made: the files were judged from sheets
+   drawn with the same browser engine (Chromium), and this check is the first time they are seen
+   on the taskbar. The icon before F10 was three cards, the front one white with a prompt, on a
+   blue rounded square; between F10 and F12 it was the picture inside its tile. When the button
+   or the title bar still shows an earlier icon after the page reloaded itself, write it down and
+   treat it as step 3 treats Edge's own icon: look again the next time the window is opened anew
+   (do not close it for this check).
 2. In W: `skydeck window --restart`. Expected: the same window stays and says `skydeck's server
    restarted; your sessions kept running`. Look at the button again.
 3. When the button showed Edge's icon in step 1 or 2, write that down, and look at it again the
@@ -1784,8 +1798,10 @@ the short id).
    down.
 
 Write down: the icon the button and the title bar showed, after the update, after the restart (and
-when the window was opened anew, after a WSL restart, or "left out"); whether Edge's menu offered
-to install the page as an app, in its own words.
+when the window was opened anew, after a WSL restart, or "left out"); whether the button showed
+the cloud with the window or the window alone, and whether the picture was sharp or soft, and
+whether it was as large as the buttons beside it; whether Edge's menu offered to install the page
+as an app, in its own words.
 
 ## Updating skydeck
 
