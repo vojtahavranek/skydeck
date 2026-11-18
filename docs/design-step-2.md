@@ -2552,8 +2552,9 @@ passed again on resume: <names>`. "Started with": a model changed inside the ses
 (`/model`) is not seen, and the tooltip claims no more. Not messy (the owner's condition): it never
 adds a line and never moves what the line showed before it — it takes only the room the other parts
 leave (its gap included), so when the line is short of room it is the first thing cut, down to
-nothing before the directory or the short id lose a character; and it shows six characters or more
-(the last of them `…`) or nothing, never a bare `-…`. A session with no recorded flag shows
+nothing before the directory or the short id lose a character; and it shows only once it has the
+room of six characters (then six or more, the last of them `…` when cut, or all of a shorter text),
+and nothing before, never a bare `-…`. A session with no recorded flag shows
 nothing: no empty item, no separator left behind. It is shown for the session the pane shows,
 whatever its state (running in the window, in another terminal, an ended terminal of the window, a
 session not running), except while the resume card prints the command under "Will run" (12.6),

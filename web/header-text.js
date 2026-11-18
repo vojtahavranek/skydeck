@@ -275,7 +275,15 @@ export function startedWithText(selected) {
     return { text: '', tip: '' };
   }
   const whole = flags.join(' ');
-  const characters = [...GRAPHEMES.segment(whole)].map((part) => part.segment);
+  // Read up to the first character past the limit only: a value can be long (128 KiB).
+  /** @type {string[]} */
+  const characters = [];
+  for (const part of GRAPHEMES.segment(whole)) {
+    characters.push(part.segment);
+    if (characters.length > STARTED_WITH_MAX) {
+      break;
+    }
+  }
   const text =
     characters.length <= STARTED_WITH_MAX
       ? whole

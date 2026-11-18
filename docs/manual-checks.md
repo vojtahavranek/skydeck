@@ -2004,9 +2004,9 @@ documentation only (design.md 14), or not at all.
 
 The check of the flags in the header (follow-up F16; design-step-2.md 12.5): W35, in your window,
 on one new throwaway session in `~/skydeck-try` and nothing else. It changes no file and no setting
-of yours, and types and presses keys only in that session's terminal and in the New form. Before
-every key and every click, look at the header's short id: it must be the throwaway session's (step
-2 writes it down).
+of yours, and types and presses keys only in that session's terminal and in the New form. From
+step 2 on, before every key and every click, look at the header's short id: it must be the
+throwaway session's (step 2 writes it down).
 
 ## W35. The flags in the header (real claude)
 
@@ -2039,8 +2039,9 @@ the throwaway folder there (`mkdir -p ~/skydeck-try`). Write down the time.
    its height. Drag the window back to its width.
 4. **One prompt**, so that the session has a transcript (a session without one is not listed once
    it has ended). Look at the header's short id: it is the one you wrote down; else type nothing,
-   and click rows of the list (one click each, never a double click) until the header shows that
-   short id. Look that its terminal has the keyboard: the key bar says `Focus: terminal` (else
+   and click the throwaway session's row once: it is under Open and its title ends in
+   `skydeck-try` (never a row with a coloured bar at its left: a click on one would clear a real
+   session's mark); then look at the short id again. Look that its terminal has the keyboard: the key bar says `Focus: terminal` (else
    Ctrl+Shift+L until it does). Type `Reply with the single word ok, in this chat, with no tool and
    no file.` and Enter. If it asks anything — to run a command, to edit a file, or (the session
    runs in plan mode) whether to go on with a plan — answer No, or press Esc. Wait for its reply.

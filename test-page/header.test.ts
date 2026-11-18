@@ -1728,7 +1728,13 @@ test("F16: the flags a session was started with, last on the header's second lin
 
       // The gap before the flags' text is the line's own (between the source and the short id),
       // with the "copied" text empty and while it shows (a click on the short id).
-      const gaps = (): Promise<{ line: number; before: number; copied: string }> =>
+      const gaps = (): Promise<{
+        line: number;
+        before: number;
+        copied: string;
+        top: number;
+        bottom: number;
+      }> =>
         page.evaluate(() => {
           const head = document.querySelector('#cards .card-header') as HTMLElement;
           const box = (selector: string): DOMRect =>
@@ -1741,14 +1747,24 @@ test("F16: the flags a session was started with, last on the header's second lin
             document.createTreeWalker(item, NodeFilter.SHOW_TEXT).nextNode() ?? item,
           );
           const before = copied.textContent === '' ? box('.header-id') : box('.header-copied');
+          // The short id's text, in the same font and size: the flags' text sits level with it.
+          const id = document.createRange();
+          id.selectNodeContents(head.querySelector('.header-id') as HTMLElement);
+          const text = range.getBoundingClientRect();
           return {
             line: box('.header-id').left - box('.header-source').right,
-            before: range.getBoundingClientRect().left - before.right,
+            before: text.left - before.right,
             copied: copied.textContent ?? '',
+            top: text.top - id.getBoundingClientRect().top,
+            bottom: text.bottom - id.getBoundingClientRect().bottom,
           };
         });
       const quiet = await gaps();
       assert.equal(quiet.copied, '');
+      assert.ok(
+        Math.abs(quiet.top) < 0.5 && Math.abs(quiet.bottom) < 0.5,
+        `level with the short id: ${JSON.stringify(quiet)}`,
+      );
       assert.ok(quiet.line > 1, JSON.stringify(quiet));
       assert.ok(
         Math.abs(quiet.before - quiet.line) < 0.5,
