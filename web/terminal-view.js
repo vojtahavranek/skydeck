@@ -830,11 +830,18 @@ export function createTerminalView(root, deps) {
     return { width: width * ratio, height: Math.ceil(height * ratio), ratio };
   };
 
-  // The colours follow the page's light or dark scheme (style.css, terminal-view.css).
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  // The colours follow the page's light or dark scheme (style.css, terminal-view.css): the
+  // system's, and the title bar's switch, which sets <html data-theme> (web/theme.js; follow-up
+  // F13). Every terminal is repainted, a hidden one too.
+  const retheme = () => {
     for (const t of terms.values()) {
       t.xterm.options.theme = theme();
     }
+  };
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', retheme);
+  new MutationObserver(retheme).observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['data-theme'],
   });
 
   /** @type {ReturnType<typeof setTimeout> | null} */

@@ -632,7 +632,8 @@ test('attention in the page', async (t) => {
           scripts: document.querySelectorAll('script').length,
           owned: document.documentElement.dataset['owned'] ?? null,
         })),
-        { images: 0, scripts: 1, owned: null },
+        // The page's own two: web/theme-early.js and app.js (follow-up F13).
+        { images: 0, scripts: 2, owned: null },
       );
 
       // A click: the window to the front, the session selected, the notification closed.

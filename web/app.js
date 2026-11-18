@@ -51,6 +51,7 @@ import { blockInfo, paneFor, sessionRow } from './pane.js';
 import { cutWords } from './search-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
+import { createThemeSwitch } from './theme.js';
 import { createToast } from './toast.js';
 
 // S2 8.2.2: before anything else.
@@ -102,6 +103,7 @@ const dom = {
   notifyOn: /** @type {HTMLButtonElement} */ (byId('notify-on')),
   switcher: byId('switcher'),
   switchButton: byId('switch-button'),
+  themeButton: /** @type {HTMLButtonElement} */ (byId('theme-button')),
   measure: byId('cell-measure'),
 };
 /** The page under a dialog: inert while one is shown (D2), so that nothing in it takes the keyboard. */
@@ -341,6 +343,17 @@ dom.switchButton.addEventListener('click', () => {
     openSwitcher();
   }
 });
+// Follow-up F13: the title bar's theme switch (web/theme.js). Whenever the page's colours may have
+// changed — a click, another window's change, the system's scheme while the page follows it — the
+// server is told them again (`theme`), so that it answers OSC 10 / 11 with the colours the
+// terminals have (S2 7.2); while the connection is down, the next `start` carries them. The
+// terminal view repaints its terminals by itself (it watches <html data-theme>). A click passes
+// no gate: it moves no keyboard and changes no selection.
+createThemeSwitch(dom.themeButton, {
+  changed: () => {
+    send({ t: 'theme', theme: theme() });
+  },
+});
 
 /** Whether a dialog or the switcher is shown (D2, E11: then the page is modal). */
 function modal() {
@@ -506,7 +519,9 @@ function area(forAct = false) {
 }
 
 /**
- * The terminal's colours as `#rrggbb` (S2 8.2.2 `start.theme`), from style.css's variables.
+ * The terminal's colours as `#rrggbb` (S2 8.2.2 `start.theme`, and follow-up F13's `theme`), from
+ * style.css's variables as the page's scheme has them now (the system's, or the title bar's
+ * switch).
  * @returns {{ fg: string, bg: string }}
  */
 function theme() {
