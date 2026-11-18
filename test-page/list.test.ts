@@ -2064,7 +2064,7 @@ test('the list', async (t) => {
   );
 
   await t.test(
-    'the keyboard never leaves the selected line under a stuck band (F17): ↓ from the first line through every row and caption of the three sections, and ↑ back',
+    'the keyboard never leaves the selected line under a stuck band (F17), light and dark: ↓ from the first line through every row and caption of the three sections, and ↑ back',
     async (t) => {
       const s = await scripted(
         t,
@@ -2101,23 +2101,27 @@ test('the list', async (t) => {
       };
       await toZone(s.page, 'list');
       await s.page.keyboard.press('Home');
-      const walked = [await movedFrom('')];
-      for (const [key, arrow] of [
-        ['ArrowDown', '↓'],
-        ['ArrowUp', '↑'],
-      ] as const) {
-        for (let i = 1; i < lines.length; i++) {
-          const from = walked.at(-1) ?? '';
-          await s.page.keyboard.press(key);
-          walked.push(await movedFrom(from));
-          assert.equal(
-            await selectedClear(s.page),
-            'clear',
-            `after ${i} × ${arrow}, on ${walked.at(-1)}`,
-          );
+      await movedFrom('');
+      for (const scheme of ['light', 'dark'] as const) {
+        await s.page.emulateMedia({ colorScheme: scheme });
+        const walked = [await selectedLine(s.page)];
+        for (const [key, arrow] of [
+          ['ArrowDown', '↓'],
+          ['ArrowUp', '↑'],
+        ] as const) {
+          for (let i = 1; i < lines.length; i++) {
+            const from = walked.at(-1) ?? '';
+            await s.page.keyboard.press(key);
+            walked.push(await movedFrom(from));
+            assert.equal(
+              await selectedClear(s.page),
+              'clear',
+              `${scheme}: after ${i} × ${arrow}, on ${walked.at(-1)}`,
+            );
+          }
         }
+        assert.deepEqual(walked, [...lines, ...lines.toReversed().slice(1)], scheme);
       }
-      assert.deepEqual(walked, [...lines, ...lines.toReversed().slice(1)]);
       assert.equal(await zone(s.page), 'Focus: list');
       assert.deepEqual(await s.page.evaluate(() => Reflect.get(globalThis, 'pageErrors')), []);
     },

@@ -1606,15 +1606,7 @@ Setup:
 ## W30. Search on your own sessions (real claude)
 
 Setup: the throwaway session selected (look at the short id in its header), the filter empty, no
-chip on. Write down how many sessions the title bar counts. Then look at the list's section
-headers, pressing no key and clicking nothing: each section, Open, Recent and Earlier, starts
-with a band across the whole width of the list, a step darker than the list, with a thin line
-above and below it; in the band a short bar before the section's name (blue for Open, grey for
-Recent, paler for Earlier, whose `▸` or `▾` stands before the bar with room between the two),
-the name in capitals, the number of its sessions after it, dim, and while Earlier is folded its
-span of days at the right end. Scroll the list with the mouse wheel, over the list (scrolling
-selects nothing): the band of the section you scroll through stays at the top of the list, and
-no row or card shows through it.
+chip on. Write down how many sessions the title bar counts.
 
 1. **Two words.** Take one of your ticket keys and a word of that session's title (`ORB-2107` and
    `login` below). Click into the filter's field: its caret blinks. Type `orb-2107 login`, in lower
@@ -1735,10 +1727,18 @@ no row or card shows through it.
    it is, for the other checks. When step 4 left Earlier unfolded: with the throwaway session's row
    now under Open, fold Earlier with a click on its header; with its row still in Earlier, leave
    Earlier unfolded and write that down.
+7. **The section headers.** Press no key and click nothing in this step. Expected: each section,
+   Open, Recent and Earlier, starts with a band across the whole width of the list, a step darker
+   than the list, a thin line above and below it; in it a short bar before the section's name
+   (blue for Open, grey for Recent, paler for Earlier, whose `▸` or `▾` stands before the bar with
+   room between them), the name in capitals, the number of its sessions after it, dim, and while
+   Earlier is folded its span of days at the right end. Scroll the list with the mouse wheel over
+   it (scrolling selects nothing): the band of the section you scroll through stays at the top of
+   the list, and no row or card shows through it. Write down whether the three sections are easy
+   to find and to tell apart.
 
-Write down: whether the three sections are easy to find and to tell apart by their bands, and
-anything of a row or a card you saw through a band; whether any answer of the list came late
-enough to notice (the filter as you typed, the chips, the card, the switcher); whether the switcher's order — those that need you, then
+Write down: whether any answer of the list came late enough to notice (the filter as you typed,
+the chips, the card, the switcher); whether the switcher's order — those that need you, then
 Open, then the ones not running, then the done ones — is the one you want; what Enter did in
 step 6; what the right side showed while the caption was selected; every step that showed
 something else than described.

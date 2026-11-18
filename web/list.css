@@ -46,8 +46,9 @@
 /* Section headers: Open, Recent (key `week`), Earlier (folded by default: its count and span).
    Each is a band (S2 12.1, follow-up F17): across the whole list column, edge to edge and square,
    on the page's --bg (sunken against the list's --panel, and stronger than the cards' edges), a
-   line above and below, 28 px high with them — no taller than the header it replaced, and under
-   the rows' scroll-margin-top, so that a row the keyboard brings into view is never under it.
+   line above and below, 28 px high with them — within 1 px of the header it replaced (27.85 px),
+   and under the rows' scroll-margin-top, so that a row the keyboard brings into view is never
+   under it.
    Sticky and opaque: nothing of a row or a card shows through a stuck band. Before the title the
    section's mark, then the title in capitals (Open and Recent --text, Earlier --dim), its count
    dim, and a folded Earlier's span at the right end. */
