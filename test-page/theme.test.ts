@@ -472,7 +472,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
   );
 
   await t.test(
-    'a mouse click on the switch leaves the keyboard where it was: in the terminal (what is typed next goes to its program) and in the list; Enter on the switch, given the keyboard by Tab, goes on by one state, a held Enter or Space by one only',
+    'a mouse click on the switch leaves the keyboard where it was: in the terminal (what is typed next goes to its program) and in the list; Enter on the switch, given the keyboard by Tab, goes on by one state, a held Enter or Space by one only, a held Shift+Tab walks on past it',
     async (t) => {
       const { page, d, problems } = await opened(t, chromium);
       await clickRow(page, S1);
@@ -523,6 +523,16 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         await shows(page, theme, `a held ${key}`);
         assert.equal(themesSent(d, before).length, 1, `a held ${key}: one theme message`);
       }
+      // A held Shift+Tab from the list walks on past the switch, as everywhere in the page (review
+      // 2, S5): only a held Enter's repeats are cancelled.
+      await page.focus('#list');
+      assert.equal(await active(page), '#list');
+      await page.keyboard.down('Shift');
+      for (let i = 0; i < 6; i++) await page.keyboard.down('Tab');
+      await page.keyboard.up('Tab');
+      await page.keyboard.up('Shift');
+      assert.notEqual(await active(page), '#theme-button', 'a held Shift+Tab does not stop there');
+      await shows(page, 'dark', 'a held Shift+Tab changes no state');
       assert.deepEqual(problems, []);
     },
   );

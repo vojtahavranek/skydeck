@@ -73,9 +73,10 @@ export function createThemeSwitch(button, deps) {
   apply(readStored());
 
   // A held key acts once, as everywhere in the page (S2 12.9): the repeats of a held Enter, which
-  // would each press the button, do nothing (a held Space presses it once, at its release).
+  // would each press the button, do nothing (a held Space presses it once, at its release); a held
+  // Tab walks on, as it does over the banner's controls.
   button.addEventListener('keydown', (event) => {
-    if (event.repeat) {
+    if (event.repeat && event.key === 'Enter') {
       event.preventDefault();
     }
   });
