@@ -2010,16 +2010,18 @@ the favourites you have (no row when there is none); write down how many, and th
 `--verbose --model sonnet` already, use `--verbose --model haiku` everywhere below instead.
 
 1. **Save.** Click into the field "Flags for claude". Expected: it is empty, and every chip is off
-   (none is coloured). Type `--verbose --model sonnet`. Expected: the ★ at the end of the field can
+   (none is coloured). Type only when the right side shows "New session" and the cursor blinks in
+   that field (else type nothing, and click into it again): `--verbose --model sonnet`. Expected: the ★ at the end of the field can
    be clicked, and its title (point at it) is `Save these flags as a favourite`. Click it.
    Expected: a chip `--verbose --model sonnet` comes at the end of the row, on (coloured), and the
    field still holds the text. The ★ is now greyed out; its title's second line says `these flags
    are a favourite already`.
 2. **A second look.** Press Esc: the form closes. Press Ctrl+Shift+N. Expected: the form again,
    its flags field empty and every chip off, the chip `--verbose --model sonnet` in the same place.
-3. **Start a session with it.** The cursor is in the directory field: press Ctrl+A and type the
-   throwaway folder's full path over its text (`/home/<you>/skydeck-try`). Leave the label and the
-   group empty. Click the chip `--verbose --model sonnet`. Expected: the flags field holds exactly
+3. **Start a session with it.** Look that the right side shows "New session" and that the cursor
+   blinks in its first field, the directory; when it does not, type nothing: press Ctrl+Shift+N
+   again, or click into that field. Then press Ctrl+A and type the throwaway folder's full path
+   over its text (`/home/<you>/skydeck-try`). Leave the label and the group empty. Click the chip `--verbose --model sonnet`. Expected: the flags field holds exactly
    `--verbose --model sonnet`, and the chip is on; the cursor is still in the directory field (a
    click on a chip leaves it where it was). Press Enter only when the directory field holds
    exactly that path and the flags field exactly that text. **Type no prompt
