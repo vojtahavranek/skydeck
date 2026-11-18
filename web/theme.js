@@ -42,7 +42,6 @@ function store(theme) {
  * @param {{ changed(): void }} deps  `changed` once the page's colours may have changed: after a
  *   click, after another window's change, and after a change of the system's scheme while the page
  *   follows it
- * @returns {{ theme(): Theme }}
  */
 export function createThemeSwitch(button, deps) {
   const root = document.documentElement;
@@ -94,5 +93,4 @@ export function createThemeSwitch(button, deps) {
       deps.changed();
     }
   });
-  return { theme: () => current };
 }
