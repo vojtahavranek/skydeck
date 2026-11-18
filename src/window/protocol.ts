@@ -86,6 +86,8 @@ export interface ClosedBlock {
 }
 /** E6: the most entries view.closed holds. */
 export const MAX_CLOSED = 64;
+/** F15: the most favourite flags skydeck keeps (S2 12.6); `favourite-add`'s `at` is below it. */
+export const MAX_FAVOURITES = 12;
 /** Window focus, selection and the terminal area at the page's font (S2 8.2.3, 8.2.6). */
 export interface FocusMessage {
   t: 'focus';
@@ -131,7 +133,12 @@ export interface ResizeMessage {
  *
  *  Stage C (plan C 2.2): `restore` restores the sessions `sessionIds` names (1–1,000 distinct
  *  session ids) of the banner's offer (S2 12.7); `dismiss-restore` is "Not now" for the earlier
- *  boot `bootId` (a lower-case UUID, the form of /proc/sys/kernel/random/boot_id). */
+ *  boot `bootId` (a lower-case UUID, the form of /proc/sys/kernel/random/boot_id).
+ *
+ *  F15 (S2 12.6): `favourite-add` saves `text` (a text field: at most 1,024 bytes) as one more
+ *  favourite of the new form, last, or at place `at` (0 to MAX_FAVOURITES − 1; Undo's put-back of
+ *  a removed one) when given; `favourite-remove` removes the favourite whose text is exactly
+ *  `text`. What a favourite may be is the server's rule (src/window/favourites.ts). */
 export type ActMessage =
   | { t: 'act'; id: number; kind: 'resume'; sessionId: string; cols: number; rows: number }
   | {
@@ -152,7 +159,9 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'done' | 'undone' | 'pr-refresh'; sessionId: string }
   | { t: 'act'; id: number; kind: 'pr-add' | 'pr-rm'; sessionId: string; url: string }
   | { t: 'act'; id: number; kind: 'restore'; sessionIds: string[] }
-  | { t: 'act'; id: number; kind: 'dismiss-restore'; bootId: string };
+  | { t: 'act'; id: number; kind: 'dismiss-restore'; bootId: string }
+  | { t: 'act'; id: number; kind: 'favourite-add'; text: string; at?: number }
+  | { t: 'act'; id: number; kind: 'favourite-remove'; text: string };
 export type PageMessage =
   | HelloMessage
   | StartMessage
@@ -316,6 +325,10 @@ export interface ListMessage {
   selected: SelectedPayload | null;
   /** Known project directories, most recent first (S2 12.6, the new form). */
   dirs: string[];
+  /** F15: the new form's favourite flags (S2 12.6), each as typed, trimmed, in the order they were
+   *  added; at most MAX_FAVOURITES. Optional for the reader: absent (a scripted list of the test
+   *  helpers, a server before F15) is none. */
+  favourites?: string[];
   // Stage E (plan E 2.3): optional for the reader — a list without them (a scripted list of the
   // test helpers, a server before stage E) counts as false and null.
   /** E5: the view's words or chips are set (the page draws its empty line and folds nothing). */
@@ -757,6 +770,12 @@ const ACTS: Readonly<Record<string, Check>> = {
   // Stage C (plan C 2.2).
   restore: object({ t: ANY, id: COUNT, kind: ANY, sessionIds: SESSION_IDS }),
   'dismiss-restore': object({ t: ANY, id: COUNT, kind: ANY, bootId: BOOT }),
+  // F15 (S2 12.6): the new form's favourites.
+  'favourite-add': object(
+    { t: ANY, id: COUNT, kind: ANY, text: TEXT, at: wholeNumber(0, MAX_FAVOURITES - 1) },
+    ['at'],
+  ),
+  'favourite-remove': object({ t: ANY, id: COUNT, kind: ANY, text: TEXT }),
 };
 
 const INPUT_SHAPE = object({ t: ANY, term: TERM, data: STRING, binary: TRUE }, ['binary']);

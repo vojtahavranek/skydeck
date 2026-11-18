@@ -2,8 +2,9 @@
  * What a page can ask the server to do (S2 8.2.3 `act`): in stage A resume a session, start a new
  * one, close an ended terminal, open a link; from stage D edit a session (S2 12.5): its label,
  * group and note, done and undone, its pull requests; from stage C restore the banner's sessions
- * and dismiss its offer (S2 12.7). Every field of an action is the page's — any page that passed
- * the handshake — so each one is checked here again and goes through step 1's own rules: a resume
+ * and dismiss its offer (S2 12.7); since F15 add and remove the new form's favourite flags (S2
+ * 12.6). Every field of an action is the page's — any page that passed the handshake — so each
+ * one is checked here again and goes through step 1's own rules: a resume
  * names a session and nothing more (the guard, the lock and the command builder decide the rest,
  * S2 11.1), a new session's directory, label, group and flags are checked as `skydeck new` checks
  * them (design 7.7) — both through `launches.ts`, the one way the window starts a session (plan
@@ -30,6 +31,7 @@ import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
 import { isBusy } from './busy.ts';
 import { splitFlags } from './flags.ts';
+import { addFavourite, removeFavourite } from './favourites.ts';
 import type { ActionHandler, TerminalHub } from './hub.ts';
 import { createLaunches } from './launches.ts';
 import type { Launched } from './launches.ts';
@@ -175,7 +177,9 @@ function orNone(text: string): string | null {
  * its session runs again (ruled, review of task 13). Stage C's kinds: `restore` →
  * `deps.restore(sessionIds)`, `dismiss-restore` → `deps.dismissRestore(bootId)`, each answering
  * `ok` with no lines or its error; without the dep the kind answers `skydeck cannot do that
- * action`, nothing done.
+ * action`, nothing done. F15's kinds (S2 12.6): `favourite-add` → addFavourite (the refusal's words,
+ * or `ok` once the lists were told), `favourite-remove` → removeFavourite (`ok`; the lists told
+ * only when it removed one).
  *
  * Never rejects (2.5): an action that is not well formed is refused with one log line (the
  * parser's kind), and an unexpected error is answered `ok: false` and logged by kind (failureKind)
@@ -214,7 +218,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
    * is committed, so a `changed()` that throws is logged by kind and the answer stays `ok` (ruled
    * on #90, review 2).
    */
-  function tell(kind: EditAction['kind']): void {
+  function tell(kind: ActMessage['kind']): void {
     try {
       deps.changed();
     } catch (error) {
@@ -223,7 +227,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
   }
 
   /** The answer to an edit that wrote: `ok` once the lists were told (`tell`). */
-  function wrote(kind: EditAction['kind']): Answer {
+  function wrote(kind: ActMessage['kind']): Answer {
     tell(kind);
     return DONE;
   }
@@ -346,6 +350,12 @@ export function createActions(deps: ActionDeps): ActionHandler {
         return deps.dismissRestore === undefined
           ? refusal(NOT_AN_ACTION)
           : answered(deps.dismissRestore(action.bootId));
+      case 'favourite-add': {
+        const refused = addFavourite(deck.store, action.text, action.at);
+        return refused === null ? wrote(action.kind) : refusal(refused);
+      }
+      case 'favourite-remove':
+        return removeFavourite(deck.store, action.text) ? wrote(action.kind) : DONE;
     }
   }
 

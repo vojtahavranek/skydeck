@@ -521,8 +521,9 @@ export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch {
  * the label is given with `--label`, and skydeck passes it as the name itself. A cluster of short
  * flags is refused when any flag in it is (`-cp`). The flags that only say where or how a new
  * session starts (`--worktree`, `--tmux`, …) and arguments that are no flag, such as a prompt, pass.
+ * The window's favourite flags (S2 12.6, F15) are refused by the same rule, in the same words.
  */
-function refuseSessionFlags(extra: readonly string[]): void {
+export function refuseSessionFlags(extra: readonly string[]): void {
   const shown = ({ written, spec }: FoundFlag): string =>
     spec.names.includes(written) ? written : `${written} (${spec.names.at(-1)})`;
   const [picking] = sessionPickingFlags(extra);

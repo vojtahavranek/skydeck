@@ -34,6 +34,7 @@ import { isBusy } from './busy.ts';
 import { controlHandler } from './control.ts';
 import { openLink } from './edge.ts';
 import { serverEnvironment } from './env.ts';
+import { readFavourites } from './favourites.ts';
 import type { KeeperHello } from './frames.ts';
 import type { ActionHandler, TerminalHub } from './hub.ts';
 import { createInteropFrom, probeSocket } from './interop.ts';
@@ -651,6 +652,8 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         ...message,
         // Plan C9: the view model's banner for the tick's rows — the array itself (its cache).
         banner: restorer.banner(rows),
+        // F15: the new form's favourites, as the store holds them now (one kv read).
+        favourites: readFavourites(deck.store),
         terminals: message.terminals.map((term) => ({ ...term, ownsSize: false })),
       };
       // Plan E12 (task 98): stage C's offer in the switcher, from the banner just put on the list.
