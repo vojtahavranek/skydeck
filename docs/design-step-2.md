@@ -863,15 +863,11 @@ open: a click on the title bar's theme switch (12.1), the same choice made in an
 the profile, or the system's scheme while the page follows it. The server keeps each page's latest
 for that page's next `focus`, and answers from it at once while that page is the one that had
 focus last, also when its window has lost the focus since (the system's scheme is changed in
-Windows' settings, outside the window). Any other page hands its colours over only at its next
-focus, as its `start`'s are — also when it is the only page open: after a reconnect while its
-window was in the background (its `start` said it was not focused), or after the page that had
-focus later has closed (a named limit: a program that asks meanwhile is told the colours the server
-had). So a program that asks after a change is told the colours its terminal has then; before F13
-the answer stayed the `start`'s until the page was loaded again, also after a change of the
-system's scheme. It does not answer XTVERSION in the first version (9.3). It never answers while
-it replays (7.3). The answers to a record's queries go to the keeper once that record has been
-applied.
+Windows' settings, outside the window). So a program that asks after a change is told the colours
+its terminal has then; before F13 the answer stayed the `start`'s until the page was loaded again,
+also after a change of the system's scheme. It does not answer XTVERSION
+in the first version (9.3). It never answers while it replays (7.3). The answers to a record's
+queries go to the keeper once that record has been applied.
 
 The serialise addon does not restore everything (section 21). The server adds what it misses at
 the end of every snapshot, from state it tracks with parser hooks that follow xterm.js 6.0.0's own
@@ -1736,9 +1732,12 @@ W5; the answer is a one-line change in the screen side.
 The colours OSC 10 and 11 are answered with are the page's (7.2). From follow-up F13 a program that
 asks after a click on the title bar's theme switch (12.1), or after a change of the system's scheme,
 is told the colours its terminal has then. A program that asked before keeps what it was told until
-it asks again (Claude Code, whose `/theme` can match the terminal's light or dark background, asks
-at least when a session starts): nothing tells a running program that the colours changed — no
-notification of a theme change is sent to programs, which is not part of F13. Check W34.
+it asks again: nothing tells a running program that the colours changed — no notification of a
+theme change is sent to programs, which is not part of F13. Claude Code's `/theme` has an "Auto
+(match terminal)" theme; its documentation (read 2026-11-18) says only "Selecting the auto option
+detects your terminal's light or dark background, so the theme follows OS appearance changes
+whenever your terminal does". How and when it detects — whether through OSC 11, at a session's
+start or again while it runs — is not documented; W5 and W34 write down what is seen.
 
 ### 9.4 Widths
 
@@ -4034,7 +4033,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W30 | On the user's own sessions (about 105), without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a block's card closed with ← and opened again with → (blocks are open by default from follow-up F3, drawn as cards with a selectable caption from follow-up F9), a click on a caption, the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |
 | W31 | Czech and US layouts in the filter's and the switcher's fields: AltGr characters and dead keys type; Ctrl+Shift+P opens and closes the switcher on both. | E | 12.8, 12.9 |
 | W32 | `skydeck update` on the user's own installation, typed in a WSL terminal of the user's own with the window open: `--check` first (the list of new commits, or "up to date"; the window and the sessions stay as they are); then, only when it listed commits, the update itself: the window says for a few seconds that the server is not answering, then reloads itself; every session is there; no second window; `skydeck doctor` has no `problem` line that was not there before. It types into no session and presses no key in the window. | F8 | 16.5, 5.1 |
-| W34 | **Real claude**: the title bar's theme switch in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme set to match the terminal (`/theme`), a new throwaway session started in each forced state picks the matching one, and one already running keeps its own. At the end the switch, Windows' mode and Claude Code's theme are as they were. | F13 | 12.1, 7.2, 9.3 |
+| W34 | **Real claude**: the title bar's theme switch in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme "Auto (match terminal)" (looked at in `/theme`, never in its files), a new throwaway session started in each forced state picks the matching one, and whether one already running changes its theme at a switch is written down (not documented). At the end the switch, Windows' mode and Claude Code's theme are as they were. | F13 | 12.1, 7.2, 9.3 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
