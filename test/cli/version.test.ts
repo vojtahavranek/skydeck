@@ -24,7 +24,11 @@ import type { Sandbox } from '../helpers/sandbox.ts';
 const UNKNOWN = `${pkg.version} (commit unknown)\n`;
 
 /** A real machine whose git sees no configuration of this one, and a throwaway checkout in it. */
-function machine(t: TestContext): { tp: RealTestPlatform; checkout: GitCheckout; platform: Platform } {
+function machine(t: TestContext): {
+  tp: RealTestPlatform;
+  checkout: GitCheckout;
+  platform: Platform;
+} {
   const tp = realTestPlatform(t, { env: (s) => gitTestEnv(s) });
   const checkout = gitCheckout(tp.sandbox);
   return { tp, checkout, platform: { ...tp.platform, appRoot: checkout.root } };

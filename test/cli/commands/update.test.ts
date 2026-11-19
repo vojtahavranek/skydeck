@@ -978,9 +978,14 @@ describe('skydeck update: the database at step 1 (ruled by the plan owner)', () 
     const doctor = await run(tp.platform, ['doctor']);
     assert.equal(doctor.code, 1);
     assert.ok(
-      doctor.stdout.startsWith(
-        `problem  database ${tp.places.dbPath} cannot be opened (${line}); the checks that need it are skipped\n`,
-      ),
+      // After the three version lines of follow-up F20.
+      doctor.stdout
+        .split('\n')
+        .slice(3)
+        .join('\n')
+        .startsWith(
+          `problem  database ${tp.places.dbPath} cannot be opened (${line}); the checks that need it are skipped\n`,
+        ),
       doctor.stdout,
     );
     // The type that tells it apart for skydeck update keeps the name a reader prints.

@@ -1,8 +1,9 @@
 // `skydeck doctor`'s lines for the window (S2 16.3; A30): one case per line, in its ok, info and
 // problem forms. The machine is real (A36) but its Windows side is a folder of the sandbox
 // (SKYDECK_TEST_MNT_C); the server is the fake serve of task 22, started by the test; keepers are
-// `.pid` lines naming processes the test started. doctor starts nothing but gh and
-// `python3 --version`, nothing on Windows, signals nothing and never connects to a keeper.
+// `.pid` lines naming processes the test started. doctor starts nothing but gh,
+// `python3 --version` and, for its first lines (follow-up F20), git and `<claudeCommand>
+// --version`; nothing on Windows; it signals nothing and never connects to a keeper.
 import assert from 'node:assert/strict';
 import {
   chmodSync,
@@ -851,7 +852,7 @@ describe('doctor: keepers', () => {
 // What doctor starts
 
 describe('doctor: what it starts', () => {
-  test('nothing on Windows: only gh and python3 --version run, nothing is started detached', async (t) => {
+  test("nothing on Windows: only gh, python3 --version and the version lines' git and claude --version run, nothing is started detached", async (t) => {
     const m = machine(t, { window: { keepAlive: 'wsl' } });
     writeKeeperLine(m.makeRuntime(), ID_A, (await liveProcess(t, m)).line);
     const commands: string[] = [];
@@ -869,7 +870,12 @@ describe('doctor: what it starts', () => {
 
     await doctor(m, { runner });
 
-    assert.deepEqual(commands, ['gh --version', 'python3 --version']);
+    // The machine's PATH has no git and no claude: both are asked, neither starts (F20).
+    assert.deepEqual(
+      commands.filter((command) => !command.startsWith('git ')),
+      ['claude --version', 'gh --version', 'python3 --version'],
+    );
+    assert.equal(commands.filter((command) => command.startsWith('git ')).length, 2);
   });
 });
 
