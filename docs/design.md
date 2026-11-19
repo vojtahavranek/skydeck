@@ -805,7 +805,11 @@ could not be resumed; see above`).
   backup. Every check that can stop install runs before it creates anything, and the question is
   asked before anything is created too, so a refusal or a no leaves no directory, database or link
   behind (apart from the compile cache under `~/.cache/skydeck` that every run of the launcher
-  creates, 10): a link is created or re-pointed only where there is nothing or a symbolic link;
+  creates, 10). First of all, before config.json is read, a system without a boot id (5.5; macOS,
+  for now) stops it with one line, exit 1: skydeck works on Linux and on Windows with WSL2 only,
+  and nothing was changed; a boot id that cannot be read for another reason stops it naming the
+  cause (follow-up F23; decided by the boot id, not by the system's name). Then: a link is created
+  or re-pointed only where there is nothing or a symbolic link;
   a settings file that cannot be read or is not JSON stops it; so does a settings path that is a symbolic link
   to nothing (install names the link and its target and never replaces it with a file), and a
   missing Claude Code directory (never created for it). After the yes, install reads the settings
@@ -1114,7 +1118,7 @@ Specified in [design-step-2.md](design-step-2.md), which also says how step 2 am
   terminal owns the pty, and one Node.js server keeps each terminal's screen state, so that
   restarting or updating the server never ends a session and a reconnect shows the exact screen.
 - **WSL lifetime.** While the window has terminals, skydeck tries to keep WSL from stopping by
-  itself by holding a `wsl.exe` (that this works is not verified yet), or the user's `.wslconfig`
+  itself by holding a `wsl.exe`, or the user's `.wslconfig`
   keeps it; `doctor` says which protection is in effect, and the page notices when WSL has stopped
   anyway and offers restore.
 - **Keys follow the developer's terminal:** Ctrl+V pastes text, Ctrl+Shift+V sends the raw key

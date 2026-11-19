@@ -460,7 +460,7 @@ describe('doctor: the keep-alive', () => {
     lineOf(await doctor(m), 'ok', /\.wslconfig has instanceIdleTimeout=-1/);
   });
 
-  test('a keep-alive running: the unverified wording, with its pid and since when', async (t) => {
+  test('a keep-alive running: its pid and since when, and nothing that calls it unverified', async (t) => {
     const m = machine(t);
     const files = m.makeRuntime();
     const script = await liveProcess(t, m);
@@ -472,9 +472,12 @@ describe('doctor: the keep-alive', () => {
       r,
       'info',
       new RegExp(
-        `^info {5}keep-alive wsl\\.exe running \\(pid ${script.pid}, since \\d{4}-\\d\\d-\\d\\dT[^)]*\\); that it keeps WSL running is unverified \\(manual check W14\\)$`,
+        `^info {5}keep-alive wsl\\.exe running \\(pid ${script.pid}, since \\d{4}-\\d\\d-\\d\\dT[^)]*\\)$`,
       ),
     );
+    assert.doesNotMatch(r.stdout, /unverified|not verified|manual check/i);
+    const keepAliveLines = r.lines.filter((line) => line.includes('keep-alive'));
+    assert.ok(!keepAliveLines.some((line) => /\bW\d+\b/.test(line)), r.stdout);
   });
 
   test('neither protection while a keeper lives: a problem', async (t) => {
