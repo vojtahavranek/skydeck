@@ -3066,18 +3066,20 @@ nothing; `ls` is unchanged.
   name stands right after the Group field, on its line: in the look of a favourite's chip, cut at
   28 characters with `…` and, short of room, at half the line, its hover title and its name for
   assistive technology `Use the group <name>` with the whole name. It costs the form no height
-  (the line keeps the field's), and a form without it is the form as before. A click on it, or
-  Enter or Space on it (a button, the stop of Tab right after the field), puts the name into the
-  Group field in place of what is there (the page sets the field's text, which the browser's own
-  undo, Ctrl+Z, then does not take back: the favourites' named limit); it starts nothing, takes
-  no keyboard on a click and stays. Nothing is filled in by itself (the owner's choice of a one-click suggestion over a
-  filled-in field: a wrong group would misfile the session, and a related session is the rarer
-  case), so without the click the
-  field is empty as before; Start sends the field's text, so a group the session has only through
-  its title's key becomes the new session's own stored group. The Group field offers as
-  completions the groups of the list's sessions (a closed block's too), each once, as the list
-  shows them, the selected session's first, then in the list's order — as the Directory field
-  offers the known directories. The form takes both when it opens, as it takes its directory.
+  (the line keeps the field's), and a form without it is the form as before, but that once the
+  list has a group the Group field shows the browser's own arrow at its right end while it has the
+  keyboard or the mouse, as Directory does (what a list of completions brings). A click on the
+  chip, or Enter or Space on it (a button, the stop of Tab right after the field), puts the name
+  into the Group field in place of what is there (the page sets the field's text, which the
+  browser's own undo, Ctrl+Z, then does not take back: the favourites' named limit); it starts
+  nothing, takes no keyboard on a click and stays. Nothing is filled in by itself (the owner's
+  choice of a one-click suggestion over a filled-in field: a wrong group would misfile the
+  session, and a related session is the rarer case), so without the click the field is empty as
+  before; Start sends the field's text, so a group the session has only through its title's key
+  becomes the new session's own stored group. The Group field offers as completions the groups of
+  the list's sessions (a closed block's too), each once, as the list shows them, the selected
+  session's first, then in the list's order — as the Directory field offers the known
+  directories. The form takes both when it opens, as it takes its directory.
 
 ### 12.7 The restore banner
 
