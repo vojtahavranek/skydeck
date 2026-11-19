@@ -2255,8 +2255,8 @@ Chromium against a stand-in server, and the server on test databases; they never
 ## A session's ticket
 
 The check of a session's ticket (follow-up F18; design-step-2.md 12.5; [install.md](install.md),
-"The ticket of a session"): W37, in your window, on the throwaway session of "The window (step 2,
-stage A)" and nothing else. It opens only `https://example.com/browse/TRY-1`, a page of
+"The ticket link", its paragraph "The ticket of a session"): W37, in your window, on the throwaway
+session of "The window (step 2, stage A)" and nothing else. It opens only `https://example.com/browse/TRY-1`, a page of
 `example.com` (a domain kept for examples: nothing of yours is on it), sets a ticket only on the
 throwaway session and removes it at its end. It changes no file and no setting of yours. Commands
 are typed in W, a WSL terminal of your own (never a `!` command inside Claude Code).

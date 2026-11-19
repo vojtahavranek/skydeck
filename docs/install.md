@@ -454,7 +454,7 @@ ignored.
 | `restoreStartTimeoutSeconds` | `120` | How long `restore` waits for the sessions of a batch to report their start. |
 | `claudeHome` | `null` | Claude Code's folder. `null` means `$CLAUDE_CONFIG_DIR`, else `~/.claude`. Must be an absolute path (no `~`). |
 | `claudeCommand` | `"claude"` | The program `resume`, `new` and `restore` (and `R` in the list) run. One word: a name on `PATH` or an absolute path. It is not split into arguments. The window runs it too. |
-| `ticketUrl` | `null` | A ticket's address with `{key}` where the ticket key goes, for Jira `"https://example.atlassian.net/browse/{key}"`. The group chip of the window's header then opens the session's ticket, and `skydeck show` prints its address as a `ticket:` line (while the session has no ticket of its own); a bare key then also sets a session's ticket ("The ticket of a session"). `null`: no link. What it accepts, and its line when it is refused: "The ticket link", in "The window (step 2)". |
+| `ticketUrl` | `null` | A ticket's address with `{key}` where the ticket key goes, for Jira `"https://example.atlassian.net/browse/{key}"`. The group chip of the window's header then opens the session's ticket, and `skydeck show` prints its address as a `ticket:` line (while the session has no ticket of its own); a bare key then also sets a session's ticket ("The ticket link", "The ticket of a session"). `null`: no link. What it accepts, and its line when it is refused: "The ticket link", in "The window (step 2)". |
 | `window` | see the window's section | The window's keys `window.port`, `window.edge`, `window.profileDir` and `window.keepAlive`: "The window (step 2)", "The `window` keys". |
 
 The numbers must be positive integers. An example that uses WezTerm tabs and a lower-case ticket key:
@@ -816,7 +816,7 @@ is one line, cut with an ellipsis when it is long:
    a model you change later with `/model`. They are cut at 40 characters, all of them in their
    tooltip (`Started with: …`), they are the first thing cut when the line is short of room, and
    while the resume card shows its command ("Will run") they are left out of the header;
-3. the session's ticket, when you set one ("The ticket of a session" below): its name with ` ↗`,
+3. the session's ticket, when you set one ("The ticket link" below): its name with ` ↗`,
    such as `ABC-123 ↗` or `repo #5 ↗`, its address as its tooltip, a click opens it; then the pull
    requests: the window's chip (below), the open ones side by side as far as they fit
    (`acme/web #7 · failing`; a click opens one in your default browser), and at the right end
@@ -847,7 +847,7 @@ requests — …`): look at it before you save.
   `skydeck label` refuses, the same line; for a note that another window or `skydeck note`
   changed since the dialog opened, `the note was changed elsewhere while you edited it; your text
   is still in the box`; for a ticket that is no link and no key, or a key without `ticketUrl`,
-  the words `skydeck ticket set` prints ("The ticket of a session" below); for a session started
+  the words `skydeck ticket set` prints ("The ticket link" below); for a session started
   in the window that has not started yet, `this session has not started yet; edit it once it
   runs`.
 - **Esc** or `Cancel` closes without saving. A note whose text you changed takes Esc twice: the
@@ -954,20 +954,19 @@ group:     ABC-123
 ticket:    https://example.atlassian.net/browse/ABC-123
 ```
 
-#### The ticket of a session
-
-Beside the group chip's link, a session can have **one ticket of its own**, which you set: a Jira
-issue, a GitHub issue, any tracker's ticket with an `http` or `https` address. It stands beside the
-group chip's link and changes nothing of it: the group chip still opens the ticket of its group's
-key, and the ticket's chip, first on the header's third line, opens the one you set. Set it with
-`t` in the list or `+ ticket` in the header (`Ticket` once one is set), with `skydeck ticket set
-<ref> <link-or-key>`, or with `t` in the interactive list; one text, either
+**The ticket of a session.** Beside the group chip's link, a session can have **one ticket of its
+own**, which you set: a Jira issue, a GitHub issue, any tracker's ticket with an `http` or `https`
+address. It stands beside the group chip's link and changes nothing of it: the group chip still
+opens the ticket of its group's key, and the ticket's chip, first on the header's third line, opens
+the one you set. Set it with `t` in the list or `+ ticket` in the header (`Ticket` once one is
+set), with `skydeck ticket set <ref> <link-or-key>`, or with `t` in the interactive list; one
+text, either
 
 - a whole link, such as `https://github.com/owner/repo/issues/5`: it is taken as it is (as the
   window would open it: the host lower-cased, a default port dropped), when the window may open
   it — `http` or `https`, at most 2,048 characters, no control character, no user name or
   password —; or
-- a key, such as `ABC-123`: it needs `ticketUrl` ("The ticket link" above), which turns it into
+- a key, such as `ABC-123`: it needs `ticketUrl` (above), which turns it into
   its link. **The address is what is stored**: a later change of `ticketUrl` does not move it.
   Without `ticketUrl` a key is refused with `a ticket key needs ticketUrl in config.json: set
   ticketUrl, or give the whole link`.

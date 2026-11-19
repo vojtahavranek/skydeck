@@ -302,6 +302,14 @@ async function shownRows(page: Page): Promise<string[]> {
   );
 }
 
+/**
+ * Waits until the list that carries `id`'s `selected` has come: the resume card shows the command
+ * it holds (`t` acts only then; before, it says to press it again).
+ */
+async function selectedHasCome(page: Page, id: string): Promise<void> {
+  await showsText(page, '#cards', new RegExp(`--resume ${id}`));
+}
+
 /** Waits until the Edge stub was run with `url` (S2 9.6). */
 async function opened(l: Launched, url: string): Promise<void> {
   await eventually(
@@ -474,6 +482,7 @@ test("F18: a session's ticket in the header, its dialog and the filter", async (
       const { page, w } = s;
       await clickRow(page, S1);
       await showsText(page, '#cards .header-title', /^first$/);
+      await selectedHasCome(page, S1);
       await page.keyboard.press('t');
       await dialogShown(page, true);
       let shown = await dialog(page);
@@ -526,6 +535,7 @@ test("F18: a session's ticket in the header, its dialog and the filter", async (
       // With ticketUrl configured the placeholder names a key; empty text removes the ticket.
       await clickRow(page, S2);
       await showsText(page, '#cards .header-title', /^second$/);
+      await chipShows(page, ISSUE.text); // its `selected` has come
       await page.keyboard.press('t');
       await dialogShown(page, true);
       shown = await dialog(page);
@@ -572,6 +582,7 @@ test("F18: a session's ticket in the header, its dialog and the filter", async (
         async () => (await texts(l.page, '#cards .header-ticket-button'))[0] === '+ ticket',
         '+ ticket',
       );
+      await selectedHasCome(l.page, S1);
 
       await l.page.keyboard.press('t');
       await dialogShown(l.page, true);

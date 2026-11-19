@@ -110,6 +110,15 @@ describe('readTicket (K1): a bare key', () => {
     );
   });
 
+  test('a key never gives an address with a user name or a password: a ticketUrl holding one (the configuration refuses it) makes no link', () => {
+    for (const ticketUrl of [
+      'https://someone@example.com/browse/{key}',
+      'https://someone:secret@example.com/browse/{key}',
+    ]) {
+      assert.equal(refusal('ABC-123', ticketUrl), TICKET_REFUSALS.keyMakesNoLink, ticketUrl);
+    }
+  });
+
   test('without ticketUrl: refused with words that say what to do', () => {
     assert.equal(refusal('ABC-123', null), TICKET_REFUSALS.keyWithoutTicketUrl);
     assert.equal(

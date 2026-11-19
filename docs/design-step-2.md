@@ -2678,7 +2678,8 @@ host, a path or a query: the key holds no `/`, `?`, `#`, `@`, `:`, `%` or white 
 parser, not the text, decides that `{key}` stands after the host (16.4). The address reaches the
 page as a string of `list` and is shown only as text; it never becomes markup. skydeck reads nothing
 from the ticket system: no API, no login. `skydeck show` prints the address as `ticket:` after
-`group:` while the session has no ticket of its own (below; its `--json` holds neither).
+`group:` while the session has no ticket of its own (below; its `--json` does not hold the group's
+link).
 
 **The ticket of a session** (asked for by the owner on 2026-11-18 and 19, follow-up F18, step 1;
 the details ruled by the lead). A session has at most one ticket, which the user sets: a JIRA
