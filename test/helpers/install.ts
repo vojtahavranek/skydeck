@@ -95,3 +95,22 @@ export function transcript(
   utimesSync(path, seconds, seconds);
   return path;
 }
+
+/**
+ * The lines install prints after `skydeck is installed` (follow-up F22), for the checkout of
+ * `platform`: what a new user does next. Words as the plan has them.
+ */
+export function nextSteps(platform: Platform): string[] {
+  return [
+    'Open a new terminal: skydeck is found there (if not, add ~/.local/bin to your PATH).',
+    'skydeck doctor checks the installation.',
+    'skydeck ls lists the sessions: those Claude Code already has, and new ones as they start.',
+    'skydeck window opens the window, from a terminal of your own, not from inside Claude Code.',
+    `The guide: ${join(platform.appRoot, 'README.md')}`,
+  ];
+}
+
+/** The end of the stdout of an install that succeeded: `skydeck is installed`, then the next steps. */
+export function installedTail(platform: Platform): string {
+  return `skydeck is installed\n${nextSteps(platform).join('\n')}\n`;
+}

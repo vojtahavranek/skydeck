@@ -3,7 +3,8 @@
 // one-time offer to mark old sessions as done (7.1, D20). Running it again changes nothing. It
 // writes nothing for the window (S2 16.1): it only says so when python3 3.9 or newer, which the
 // window's keepers need, is not found. Last, it offers to turn off Claude Code's ← shortcut
-// (follow-up F11, S2 7.9).
+// (follow-up F11, S2 7.9). On a system without a boot id (macOS, for now) it does none of this: it
+// says that skydeck cannot work there and stops (follow-up F23).
 //
 // The settings file is the one place where skydeck changes Claude Code's configuration on its own
 // account (principle 2), so that step adds nothing but the two entries, never touches other hooks,
@@ -93,6 +94,10 @@ export const command: Command = {
       ctx.io.stdout(SPEC.usage);
       return EXIT.ok;
     }
+    if (!hasBootId(ctx.platform)) {
+      ctx.io.stderr(`${NO_BOOT_ID}\n`);
+      return EXIT.failure;
+    }
     const { places } = resolveDeckPlaces(ctx.platform);
     const prepared = prepare(ctx.platform, places);
     if (prepared.edit.changed) {
@@ -118,10 +123,28 @@ export const command: Command = {
       }
       await offerLeftArrowOff(ctx, deck);
       ctx.io.stdout('skydeck is installed\n');
+      for (const line of nextSteps(deck.platform)) {
+        ctx.io.stdout(`${sanitize(line)}\n`);
+      }
       return EXIT.ok;
     });
   },
 };
+
+/**
+ * Follow-up F22: what a new user does next, after `skydeck is installed` — on every install that
+ * succeeds, also one that found everything in place. Each line is shorter than 100 characters but
+ * the guide's, which names the README of this checkout.
+ */
+function nextSteps(platform: Platform): string[] {
+  return [
+    'Open a new terminal: skydeck is found there (if not, add ~/.local/bin to your PATH).',
+    'skydeck doctor checks the installation.',
+    'skydeck ls lists the sessions: those Claude Code already has, and new ones as they start.',
+    'skydeck window opens the window, from a terminal of your own, not from inside Claude Code.',
+    `The guide: ${join(platform.appRoot, 'README.md')}`,
+  ];
+}
 
 /** Each link and where install points it (uninstall.ts removes exactly these). */
 function linksFor(platform: Platform, places: Places): Link[] {
@@ -132,12 +155,39 @@ function linksFor(platform: Platform, places: Places): Link[] {
   ];
 }
 
+/** Where the boot id is read (src/platform/real.ts). */
+const BOOT_ID_FILE = '/proc/sys/kernel/random/boot_id';
+
+const NO_BOOT_ID =
+  'skydeck works on Linux and on Windows with WSL2 (run inside WSL) only: this system has no ' +
+  `${BOOT_ID_FILE} (macOS is not supported yet); nothing was changed`;
+
 /**
- * Every check that can stop install, before anything is created (ruled by the plan owner): a link
- * path that holds something that is not a symbolic link (never replaced: it is not skydeck's); a
- * settings file that cannot be read or is not JSON; a settings path that is a symbolic link to
- * nothing (never replaced by a file); no settings file and no Claude Code directory (never made
- * up: most likely claudeHome or CLAUDE_CONFIG_DIR names the wrong place).
+ * Follow-up F23: whether this system has a boot id. skydeck judges every process by it (design
+ * 5.5) and ingest drops a hook event without one, so on a system that has none (macOS, for now)
+ * skydeck would record nothing and never show a session as running. Install asks this first of
+ * all: before any question, before config.json is read, before anything is created. It is decided
+ * by the boot id, not by the system's name. A boot id that cannot be read for another reason
+ * (EACCES …) stops install too, naming the cause.
+ */
+function hasBootId(platform: Platform): boolean {
+  try {
+    return platform.proc.bootId() !== null;
+  } catch (error) {
+    throw new SkydeckError(
+      `cannot read ${BOOT_ID_FILE} (${describeError(error)}), which skydeck needs to tell which ` +
+        'sessions are running; nothing was changed',
+    );
+  }
+}
+
+/**
+ * Every check that can stop install, after the boot id's (hasBootId) and before anything is
+ * created (ruled by the plan owner): a link path that holds something that is not a symbolic link
+ * (never replaced: it is not skydeck's); a settings file that cannot be read or is not JSON; a
+ * settings path that is a symbolic link to nothing (never replaced by a file); no settings file
+ * and no Claude Code directory (never made up: most likely claudeHome or CLAUDE_CONFIG_DIR names
+ * the wrong place).
  */
 function prepare(platform: Platform, places: Places): Prepared {
   const { files } = platform;
@@ -295,6 +345,11 @@ function writeSettings(ctx: Context, deck: Deck, prepared: Prepared): void {
   );
 }
 
+/** Follow-up F22: what the first-run question's "done" means, for someone new to skydeck. */
+const DONE_ONLY_HIDES =
+  '"Done" only hides a session from skydeck\'s list: nothing is deleted, it can still be ' +
+  'resumed, and skydeck ls --all shows it.';
+
 /**
  * Design 7.1 "First run", once (D20): the listed sessions that are not running and whose last
  * activity is older than firstRunDoneAfterDays may be marked as done. Nothing changes without a yes.
@@ -310,13 +365,15 @@ async function offerFirstRun(ctx: Context, deck: Deck): Promise<void> {
   const old = loadRows(deck).filter(
     (row) => isListed(row, false) && row.state === 'not-running' && row.lastActivityNs < before,
   );
-  const mark =
-    old.length > 0 &&
-    isYes(
+  let mark = false;
+  if (old.length > 0) {
+    ctx.io.stderr(`${DONE_ONLY_HIDES}\n`);
+    mark = isYes(
       await ctx.io.readLine(
         `Mark ${count(old.length, 'session')} older than ${count(days, 'day')} as done? [y/N] `,
       ),
     );
+  }
   store.transaction(() => {
     if (mark) {
       for (const row of old) {
