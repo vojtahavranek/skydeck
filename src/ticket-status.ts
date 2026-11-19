@@ -19,7 +19,7 @@ import type { Clock, Env, Ns, RunOptions, RunResult, Runner } from './platform/t
 import { ticketText } from './sessions/ticket.ts';
 import type { Store } from './store/store.ts';
 import { TICKET_CATEGORIES } from './store/types.ts';
-import type { TicketCategory, TicketStatusResult, TicketStatusRow } from './store/types.ts';
+import type { TicketStatusResult, TicketStatusRow } from './store/types.ts';
 import { sanitize } from './text/sanitize.ts';
 
 /** T2 b: a status command's time limit, and how much of each of its outputs is read. */
@@ -274,9 +274,4 @@ export async function fetchTicketStatuses(
     options.saved?.();
   }
   return { fetched, failed };
-}
-
-/** The category words of a status, for the callers that print or check one (T3). */
-export function isCategory(word: unknown): word is TicketCategory {
-  return TICKET_CATEGORIES.some((category) => category === word);
 }
