@@ -2846,8 +2846,9 @@ s`; for a program that is not found, `the status command <its last path part> is
 for an exit other than 0, the first line of standard error that has anything on it once sanitised
 (at most 200 characters, a cut one ending in `…`), else `the status command exited <n>` (`the
 status command was killed by a signal` when a signal ended it); for an exit 0 with an empty first
-line, `the status command printed no status`; for a program that cannot be started (not
-executable), `the status command could not be run: <the first line of the reason>`.
+line, `the status command printed no status`; for a program that cannot be started, `the status
+command could not be run: <the first line of the reason>` (not executable: `… could not be run:
+spawn <the program> EACCES`, the runner's words; test/ticket-status-programs.test.ts).
 
 *GitHub issues.* `gh api graphql --hostname github.com`, in a batch of its own — the pull
 requests' query is not changed —, one alias for each issue, `i<n>: repository(owner: …, name: …) {
@@ -2885,8 +2886,13 @@ checked <age> ago`, the age of the last read that succeeded). While no status is
 F18's (accent colour, underlined name, ` ↗`), its tooltip the address and, after a failed first
 attempt, `status not read: <words>` under it. A ticket that comes from the group (not stored) has
 the chip only once a status is known or an attempt was made, so that a session whose ticket no
-provider reads looks as F18 left it; a click on it opens its address, the button stays `+ ticket`
-(it names the ticket the user set), and the group chip and its link do not change. The header
+provider reads looks as F18 left it; and that chip shows the STATUS ALONE (ruled by the lead on
+2026-11-19, amending T6: the group chip of line 1 already names that ticket in most sessions, so a
+second `ABC-123` would name the key twice) — in the category's tint, with no name and no ` ↗` —,
+or `status not read` in grey while every read failed; its tooltip holds the ticket's name first,
+then the address and the status' age or the failure's words as above. A click on it opens its
+address, the button stays `+ ticket` (it names the ticket the user set), and the group chip and
+its link do not change. The header
 keeps its four lines and their heights: when the line is short of room the open pull requests give
 way first, then the status part is cut, with an ellipsis, before the name (it shrinks a thousand
 times as fast), and only then the name; the chip may be up to 36em wide with a status (24em
@@ -2895,8 +2901,9 @@ without, as in F18).
 **The ticket dialog's status line.** While a provider reads the session's ticket, the dialog (`t`,
 the header's button) has, above its field, a line `In Progress · checked 3m ago` — after a
 failure `status not read: <words> · last <status>, checked <age> ago`, or `status not read:
-<words>` while no status is known, and `status not read yet` before any attempt — and a ↻ at its
-right end (its title is `read its status now`); without a provider the line and the ↻ are not
+<words>` while no status is known, and `status not read yet` before any attempt —, in the
+dialog's own grey (it takes no tint: the header's chip and the row's carry the colour), and a ↻ at
+its right end (its title is `read its status now`); without a provider the line and the ↻ are not
 there. ↻ sends `act ticket-refresh`, is disabled while the answer is awaited, leaves the keyboard
 in the field, and a refusal shows under the field as the dialog's other refusals do. The line is
 drawn again by each `list`, so that a saved result shows in it.

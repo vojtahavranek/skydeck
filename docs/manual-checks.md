@@ -2454,18 +2454,21 @@ skydeck window --restart
    stand-in's setup).
 4. **A failure keeps the status.** In W: `chmod -x ~/skydeck-try/status/status`. In the window
    (short id, `Focus: list`, `t`, heading) click `↻`. Expected: the dialog's line reads `status
-   not read: the status command could not be run: …` (Node's own words follow) then ` · last In
-   Progress, checked <age> ago`; after Esc the chip still reads `TRY-1 · In Progress ↗`, in blue,
-   and its tooltip has three lines: the address, `status not read: the status command could not be
-   run: …`, and `In Progress, checked <age> ago` (the age of the last success, which grows). Then
+   not read: the status command could not be run: spawn /home/you/skydeck-try/status/status
+   EACCES · last In Progress, checked <age> ago` (with your home folder in place of `/home/you`);
+   after Esc the chip still reads `TRY-1 · In Progress ↗`, in blue, and its tooltip has three
+   lines: the address, `status not read: the status command could not be run: spawn
+   /home/you/skydeck-try/status/status EACCES`, and `In Progress, checked <age> ago` (the age of
+   the last success, which grows). Then
    `chmod +x ~/skydeck-try/status/status`, click `↻` again (dialog first, as above): the line is
    `In Progress · checked <age> ago` again, and the tooltip has two lines.
 5. **`skydeck show`.** In W: `skydeck show <short id>`. Expected: right after the `group:` line, a
    line that starts with `ticket:` and ends with `https://example.com/try/TRY-1 · In Progress`.
    Then `skydeck ticket refresh <short id>`: it prints `<short id> ticket:
    https://example.com/try/TRY-1 · In Progress`. With `chmod -x` as in step 4, the same command
-   prints that line with ` (status not read: the status command could not be run: …)` after it,
-   and `skydeck show <short id>` adds a line `status not read: …` under `ticket:`; put `chmod +x`
+   prints that line with ` (status not read: the status command could not be run: spawn
+   /home/you/skydeck-try/status/status EACCES)` after it, and `skydeck show <short id>` adds that
+   `status not read: …` line under `ticket:`; put `chmod +x`
    back, and look that the next `skydeck ticket refresh <short id>` has no failure.
 6. **Put everything back.**
    - **The ticket.** Look at the header's short id, click `Ticket` and look that the dialog shows.

@@ -405,16 +405,24 @@ function checked(status, nowNs, atNs) {
   return age === '' ? status : `${status}, checked ${age} ago`;
 }
 
+/** What the chip of a group's ticket says while its reads all failed (no status known yet). */
+export const GROUP_NOT_READ = 'status not read';
+
 /**
- * Follow-up F19 (T6): the header's ticket chip with its status. The ticket the user set
- * (`ticketChip`) always has its chip; a ticket from the group only once its status is known or
- * was tried (so that a session without a provider looks as F18 left it). `status` is the last
- * status read ('' for none), `category` its tint's word ('' for grey); the tooltip holds the
- * address, then `<status>, checked <age> ago` — after a failure `status not read: <words>` and,
- * under it, the last known status and its age. Null without a chip.
+ * Follow-up F19 (T6, as amended by the lead on 2026-11-19): the header's ticket chip with its
+ * status. The ticket the user set (`ticketChip`) always has its chip, `<name> · <status> ↗` once a
+ * status is known. A ticket from the group has one only once its status is known or was tried (so
+ * that a session without a provider looks as F18 left it), and it shows the STATUS ALONE — no
+ * name, no arrow: the group chip beside the title names that ticket and stays its link —, or
+ * `status not read` while every read failed (`group` true). `status` is the last status read (''
+ * for none), `category` its tint's word ('' for grey); the tooltip holds, for a group's ticket,
+ * its name first, then the address, then `<status>, checked <age> ago` — after a failure `status
+ * not read: <words>` and, under it, the last known status and its age. A click opens `url` either
+ * way. Null without a chip.
  * @param {SelectedPayload | null} selected `list.selected` when it is the row's session
  * @param {string} nowNs the server's time now (serverNow)
- * @returns {{ name: string, status: string, category: string, tip: string, url: string } | null}
+ * @returns {{ name: string, status: string, category: string, tip: string, url: string,
+ *   group: boolean } | null}
  */
 export function ticketHeader(selected, nowNs) {
   const own = ticketChip(selected);
@@ -427,11 +435,18 @@ export function ticketHeader(selected, nowNs) {
     if (status === null || (status.status === '' && status.triedAtNs === null)) {
       return null;
     }
-    return withStatus(status.name === '' ? status.url : status.name, status.url, status, nowNs);
+    const name = status.name === '' ? status.url : status.name;
+    const shown = withStatus(name, status.url, status, nowNs);
+    return {
+      ...shown,
+      status: shown.status === '' ? GROUP_NOT_READ : shown.status,
+      tip: `${name}\n${shown.tip}`,
+      group: true,
+    };
   }
   return status === null
-    ? { name: own.text, status: '', category: '', tip: own.url, url: own.url }
-    : withStatus(own.text, own.url, status, nowNs);
+    ? { name: own.text, status: '', category: '', tip: own.url, url: own.url, group: false }
+    : { ...withStatus(own.text, own.url, status, nowNs), group: false };
 }
 
 /**

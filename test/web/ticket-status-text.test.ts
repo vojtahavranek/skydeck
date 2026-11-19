@@ -147,6 +147,7 @@ describe("the header's ticket chip (T6)", () => {
       category: 'doing',
       tip: `${URL}\nIn Progress, checked 3m ago`,
       url: URL,
+      group: false,
     });
   });
 
@@ -164,6 +165,7 @@ describe("the header's ticket chip (T6)", () => {
       category: 'doing',
       tip: `${URL}\nstatus not read: the status command timed out after 10 s\nIn Progress, checked 2h ago`,
       url: URL,
+      group: false,
     });
     const never = selected({
       ticketStatus: status({
@@ -179,11 +181,12 @@ describe("the header's ticket chip (T6)", () => {
       category: '',
       tip: `${URL}\nstatus not read: gh is not installed`,
       url: URL,
+      group: false,
     });
   });
 
   test('the stored ticket without a status, or without a provider, is F18’s chip', () => {
-    const plain = { name: 'ABC-123', status: '', category: '', tip: URL, url: URL };
+    const plain = { name: 'ABC-123', status: '', category: '', tip: URL, url: URL, group: false };
     assert.deepEqual(ticketHeader(selected({ ticketStatus: null }), NOW_NS), plain);
     assert.deepEqual(
       ticketHeader(
@@ -198,7 +201,7 @@ describe("the header's ticket chip (T6)", () => {
     assert.deepEqual(ticketHeader(before as SelectedPayload, NOW_NS), plain, 'a server before F19');
   });
 
-  test('a ticket from the group: shown only once a status is known or was tried', () => {
+  test('a ticket from the group: shown only once a status is known or was tried, and then its status alone (the group chip names it); its name first in the tooltip', () => {
     const group = (over: Partial<TicketStatusPayload>) =>
       ticketHeader(
         selected({ ticket: null, ticketStatus: status({ stored: false, ...over }) }),
@@ -208,13 +211,24 @@ describe("the header's ticket chip (T6)", () => {
       name: 'ABC-123',
       status: 'In Progress',
       category: 'doing',
-      tip: `${URL}\nIn Progress, checked 3m ago`,
+      tip: `ABC-123\n${URL}\nIn Progress, checked 3m ago`,
       url: URL,
+      group: true,
     });
     assert.equal(group({ status: null, category: null, okAtNs: null, triedAtNs: null }), null);
+    // Tried, never read: the chip says so, grey, its tooltip the failure's words.
+    assert.deepEqual(group({ status: null, category: null, okAtNs: null, error: 'x' }), {
+      name: 'ABC-123',
+      status: 'status not read',
+      category: '',
+      tip: `ABC-123\n${URL}\nstatus not read: x`,
+      url: URL,
+      group: true,
+    });
+    // After a failure the last status stays, with its words and its age.
     assert.deepEqual(
-      group({ status: null, category: null, okAtNs: null, error: 'x' })?.tip,
-      `${URL}\nstatus not read: x`,
+      group({ okAtNs: ago(7200n), error: 'down' })?.tip,
+      `ABC-123\n${URL}\nstatus not read: down\nIn Progress, checked 2h ago`,
     );
     assert.equal(ticketHeader(selected({ ticket: null, ticketStatus: null }), NOW_NS), null);
   });

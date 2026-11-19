@@ -1094,8 +1094,9 @@ not lose the status you had: it stays, with its age, and the failure's words are
   200 characters, a cut one ending in `…`), else `the status command exited <n>`, or `the status
   command was killed by a signal`;
 - `the status command printed no status`, for an exit 0 with an empty first line;
-- `the status command could not be run: <why>`, for a program that cannot be started (it is not
-  executable, say).
+- `the status command could not be run: <why>`, for a program that cannot be started: for one
+  that is not executable, `the status command could not be run: spawn /home/you/bin/tickets-status
+  EACCES`.
 
 For a GitHub issue the failures have the pull requests' words: `gh timed out after 10 s`, `gh is
 not installed`, the first line of `gh`'s own message (not logged in: `To get started with GitHub
@@ -1147,8 +1148,11 @@ starts: after you change either, run `skydeck window --restart`.
 **Where it shows.** The ticket's chip becomes `<name> · <status> ↗`, in the category's colour (the
 name still underlined); its tooltip holds the address, then `In Progress, checked 3m ago`, or, after
 a failure, `status not read: <why>` and under it the last status and its age. A ticket that is only
-the group's link has the chip once a status is known or was tried; the button stays `+ ticket`,
-since it names the ticket you set. The row of the list gets a second small chip after the
+the group's link has the chip once a status is known or was tried, and that chip is the status
+alone — `In Progress`, in its colour, with no name and no ` ↗`, since the group chip beside the
+title names the ticket and stays its link; `status not read` in grey while its reads all failed —,
+its tooltip the ticket's name, the address and the age; a click on it opens the ticket. The button
+stays `+ ticket`, since it names the ticket you set. The row of the list gets a second small chip after the
 pull-request chip: the status cut at 14 characters (`…` when cut), in the same colour, `<name> ·
 <status>` in its tooltip, and nothing at all while no status is known. The ticket's dialog has a
 line above its field, `In Progress · checked 3m ago` (`status not read: <why> · last In Progress,

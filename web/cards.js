@@ -847,16 +847,24 @@ export function createCards(root, deps) {
       setTip(flags, started.tip);
       setHidden(flags, started.text === '');
       // Line 3: F18's ticket, from `selected` (the server's address and name), first; F19: with
-      // its status. The button names the ticket the user set (F18), not the group's.
+      // its status — a group's ticket its status alone, no name and no arrow (the group chip
+      // names it). The button names the ticket the user set (F18), not the group's.
       const ticketShown = ticketHeader(selected, now());
       const ticketSet = ticketChip(selected) !== null;
+      const alone = ticketShown?.group === true;
       ticketLink = ticketShown?.url ?? null;
-      setText(ticketText, ticketShown?.name ?? '');
+      setText(ticketText, ticketShown === null || alone ? '' : ticketShown.name);
+      setHidden(ticketText, alone);
       setText(
         ticketStatus,
-        ticketShown === null || ticketShown.status === '' ? '' : ` · ${ticketShown.status}`,
+        ticketShown === null || ticketShown.status === ''
+          ? ''
+          : alone
+            ? ticketShown.status
+            : ` · ${ticketShown.status}`,
       );
       setHidden(ticketStatus, ticketShown === null || ticketShown.status === '');
+      setHidden(ticketArrow, alone);
       setTip(ticketItem, ticketShown?.tip ?? '');
       setHidden(ticketItem, ticketShown === null);
       if (ticketShown === null || ticketShown.status === '') {
@@ -866,6 +874,7 @@ export function createCards(root, deps) {
         setData(ticketItem, 'status', 'true');
         setData(ticketItem, 'category', ticketShown.category);
       }
+      setData(ticketItem, 'group', String(alone));
       setText(ticketButton, ticketSet ? 'Ticket' : '+ ticket');
       setTip(ticketButton, ticketSet ? 'the ticket (t)' : 'set a ticket (t)');
       // None attached exactly when there is no chip (S2 12.3).

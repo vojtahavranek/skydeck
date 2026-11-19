@@ -2,7 +2,7 @@
 // ticket chip shows `<name> · <status> ↗` in the category's tint — the pull requests' own tint of
 // that colour, light and dark and under each forced theme — with the address and the status' age
 // (or a failure's words) as its tooltip; a ticket from the group has the chip only once a status
-// is known or was tried; the list's row has a second small chip after the pull requests' chip, cut
+// is known or was tried, and shows its status alone (the group chip names it); the list's row has a second small chip after the pull requests' chip, cut
 // at 14 characters, that takes no room without a status. Scripted cases run on an `editWorld`
 // (helpers/shell.ts); the filter and ↻ run against a real test server whose status program is a
 // stand-in script in the sandbox's home (no network, no real gh). web/'s real modules throughout.
@@ -154,7 +154,11 @@ async function headerChip(page: Page) {
     if (chip === null || chip.closest('[hidden]') !== null) return null;
     const style = getComputedStyle(chip);
     return {
-      text: chip.textContent ?? '',
+      // The shown parts only (a group's ticket hides its name and its arrow).
+      text: [...chip.children]
+        .filter((part) => part instanceof HTMLElement && !part.hidden)
+        .map((part) => part.textContent ?? '')
+        .join(''),
       tip: chip.title,
       color: style.color,
       background: style.backgroundColor,
@@ -332,7 +336,7 @@ test("F19: a ticket's status in the header, in the list's rows, the filter and �
   );
 
   await t.test(
-    'a ticket from the group: no chip while no status is known or tried (as F18), the chip once one is; the button stays `+ ticket`',
+    'a ticket from the group: no chip while no status is known or tried (as F18); once one is, the chip shows the status alone (no name, no arrow) in its tint, its tooltip the name, the address and the age; a click opens it; `status not read` after failed reads; the button stays `+ ticket`',
     async (t) => {
       const group = { stored: false };
       const s = await scripted(t, chromium, {
@@ -374,10 +378,12 @@ test("F19: a ticket's status in the header, in the list's rows, the filter and �
           },
         },
       });
-      await eventually(
-        async () => (await headerChip(s.page))?.text === 'ABC-123 · Done ↗',
-        'the chip',
-      );
+      // The status alone, in its tint: the group chip on line 1 names the ticket (amended T6).
+      await eventually(async () => (await headerChip(s.page))?.text === 'Done', 'the chip');
+      const green = await resolve(s.page, 'var(--pr-green)', 'var(--pr-green-bg)');
+      const chip = await headerChip(s.page);
+      assert.deepEqual([chip?.color, chip?.background], [green.color, green.background]);
+      assert.equal(chip?.tip, `ABC-123\n${URL}\nDone, checked 3m ago`);
       assert.equal((await rowChip(s.page, S1))?.text, 'Done');
       assert.equal(await showsText(s.page, '#cards .header-ticket-button', /ticket/), '+ ticket');
       // The group chip and its link are F18's: unchanged.
@@ -386,6 +392,34 @@ test("F19: a ticket's status in the header, in the list's rows, the filter and �
       await s.page.locator('#cards .header-ticket').click();
       const act = await s.w.act(1);
       assert.deepEqual([act['kind'], act['url']], ['open-link', URL]);
+
+      // Tried, never read: `status not read`, grey, the failure's words in its tooltip.
+      s.set({
+        rows: [
+          resting(S1, { title: 'ABC-123 from the title', group: 'ABC-123', groupSource: 'title' }),
+        ],
+        selected: {
+          [S1]: {
+            ticketUrl: URL,
+            ticketStatus: status({
+              ...group,
+              status: null,
+              category: null,
+              okAtNs: null,
+              error: 'gh is not installed',
+            }),
+          },
+        },
+      });
+      await eventually(
+        async () => (await headerChip(s.page))?.text === 'status not read',
+        'the chip of a failed first read',
+      );
+      const grey = await resolve(s.page, 'var(--dim)', 'transparent');
+      const failed = await headerChip(s.page);
+      assert.deepEqual([failed?.color, failed?.background], [grey.color, grey.background]);
+      assert.equal(failed?.tip, `ABC-123\n${URL}\nstatus not read: gh is not installed`);
+      assert.equal(await rowChip(s.page, S1), null, 'no status: no chip in the row');
     },
   );
 
