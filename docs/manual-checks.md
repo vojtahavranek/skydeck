@@ -1,5 +1,9 @@
 # Manual checks
 
+> **This is the maintainer's checklist, run by hand after changes. It is not a guide.** Some of
+> its items uninstall skydeck or stop WSL, so nobody, and no AI agent, should follow it to install
+> skydeck or to learn it: [quick-start.md](quick-start.md) and [install.md](install.md) are for that.
+
 The short checklist to run by hand after installing skydeck on a machine, and before trusting a new
 Claude Code version. It covers what the tests cannot: they never start `claude`, never open a
 terminal tab, never restart WSL and never start a Windows program. Each item gives the command and

@@ -1,9 +1,10 @@
-# Installing skydeck on another machine
+# Installing and using skydeck
 
-This guide is enough on its own. It covers the prerequisites, the install, what the install changes,
-the configuration, the window of step 2, updating and uninstalling. The design is in
-[design.md](design.md) (step 2: [design-step-2.md](design-step-2.md)); the checks to run by hand
-after an install are in [manual-checks.md](manual-checks.md).
+New to skydeck? Start with [quick-start.md](quick-start.md): from nothing to using it in about ten
+minutes. This guide is the complete reference: the prerequisites, the install, what the install
+changes, the configuration, the window, updating and uninstalling. The design is in
+[design.md](design.md) (the window: [design-step-2.md](design-step-2.md)).
+[manual-checks.md](manual-checks.md) is the maintainer's checklist, not a guide.
 
 Commands are shown as typed. Paths such as `/home/you/...` are examples: skydeck prints yours.
 
@@ -361,7 +362,9 @@ and exits 1. That happens, for example, after a clone with an SSH key and no `gh
 skydeck ls
 ```
 
-The steps to try by hand are in [manual-checks.md](manual-checks.md).
+What to do next, the window included, is in [quick-start.md](quick-start.md).
+[manual-checks.md](manual-checks.md) is the maintainer's checklist, not a guide: do not follow it to
+learn skydeck (some of its items uninstall skydeck or stop WSL).
 
 **7. Optional: check that this machine can run the tests.** `npm ci` is needed for development only:
 it installs TypeScript, Prettier, `@types/node`, `ws`, Playwright and the `@xterm/*` packages,
