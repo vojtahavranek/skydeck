@@ -4,12 +4,12 @@
 
 skydeck is a window and a command line for Claude Code, for people who run many sessions at once. It
 shows which session is about what, what each one is doing and which one needs its user. Installing
-it adds (docs/install.md, the guide, "What install changes"): two hook entries, `SessionStart` and
-`SessionEnd`, to Claude Code's settings file `~/.claude/settings.json` (backing up a file that was
-there); a link `~/.local/bin/skydeck` to this checkout; skydeck's folders `~/.local/share/skydeck`
-(its database, two links), `~/.local/state/skydeck`, `~/.config/skydeck`; and, only after a yes to
-`Turn the shortcut off?`, one key in `~/.claude.json` (after a backup). If `CLAUDE_CONFIG_DIR` is
-set, it stands for `~/.claude`, its `.claude.json` for `~/.claude.json`.
+it adds (the guide, docs/install.md, "What install changes"): two hook entries, `SessionStart` and
+`SessionEnd`, to Claude Code's settings file `~/.claude/settings.json`; a link
+`~/.local/bin/skydeck` to this checkout; its folders `~/.local/share/skydeck` (database, links),
+`~/.local/state/skydeck`, `~/.config/skydeck`; and, only after a yes to the ← question, one key in
+`~/.claude.json`; each file of Claude Code's is backed up first. A set `CLAUDE_CONFIG_DIR` stands
+for `~/.claude`, its `.claude.json` for `~/.claude.json`.
 
 The work is split. YOU check, clone, preview and explain. THE HUMAN answers install's questions (one
 of them agrees to hooks in Claude Code's own settings) and opens the window, in a terminal of their
@@ -29,7 +29,8 @@ also needs Microsoft Edge on the Windows side. Run `uname -sr`:
 ```sh
 for p in node git python3 claude gh skydeck; do printf '%s: ' "$p"; command -v "$p" || echo missing; done
 node --version; ls ~/.nvm/versions/node; python3 --version; claude --version; gh auth status
-ls -ld "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ~/.local/bin/skydeck ~/.local/share/skydeck ~/skydeck
+ls -ld "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" ~/.local/bin/skydeck ~/.config/skydeck/config.json
+ls -ld ~/.local/share/skydeck ~/skydeck
 grep -c skydeck-hook "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 ```
 
@@ -37,18 +38,19 @@ grep -c skydeck-hook "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 - If `node` is older than 24.12 or missing, put `SKYDECK_NODE=<node binary>` (24.12 or newer) before
   every `bin/skydeck` below. nvm keeps them in `~/.nvm/versions/node/` (your shell may not load
   nvm): take the highest version (`ls` puts v24.9 after v24.19). None: the human installs one.
-- `git` missing: the human installs it. `claude` missing: STOP; it must be installed on this side
-  and started once (no folder in the `ls`: the human starts `claude` once). No version stops the
-  install; the guide names 2.1.3xx, the version skydeck was written for: report theirs.
+- `claude` missing: STOP; it must be installed and run once on this side (no folder in the `ls`:
+  they run it once); any version goes on (the guide names 2.1.3xx). No `git`: theirs to install.
 - `python3` 3.9 or newer (only for the window's terminals) and `gh` (only for the status of pull
   requests and GitHub issues) are optional: tell the human what is missing, and go on.
-- A machine without skydeck shows `skydeck: missing`, `No such file or directory` for the three
-  skydeck paths (and nvm's, without nvm) and a count of 0 or no settings file. Only `~/skydeck` or
-  `~/.local/share/skydeck` (a checkout; data an uninstall left): ask the human whether to go on.
-  `skydeck` found, the link `~/.local/bin/skydeck` or a count above 0: installed. STOP and tell the
-  human; the rest is theirs (install would act without asking).
-- Anything that needs `sudo`, a script from the internet or a login (`gh auth login`): PRINT it for
-  the human (the guide's "On a fresh WSL" has them all); never run it yourself.
+- Without skydeck: `skydeck: missing`, `No such file or directory` for the skydeck paths (nvm's
+  folder too, without nvm), a count of 0 or no settings file. Installed (the link
+  `~/.local/bin/skydeck`, whose `->` names its checkout, or a count above 0): STOP and run nothing
+  more, not even the clone; tell the human what you found, and that an install from another folder
+  re-points the links unasked: theirs, in their own terminal.
+- `config.json` found: skydeck was set up here before, maybe for another Claude Code folder: STOP,
+  ask the human. Only `~/skydeck` or `~/.local/share/skydeck` (a checkout; data an uninstall left,
+  which install uses again): ask whether to go on. A `skydeck` on `PATH` not in `~/.local/bin` is
+  another program: tell the human the first on `PATH` answers to `skydeck`; go on at their word.
 
 **3. Clone, and preview the change.** Ask where the checkout should live (`~/skydeck`, or their
 choice: change it below); it stays there (install links to it). Reading this in a checkout they want
@@ -59,7 +61,7 @@ git clone https://github.com/vojtahavranek/skydeck.git ~/skydeck
 cd ~/skydeck && bin/skydeck install </dev/null
 ```
 
-Only where step 2 found no skydeck (none on `PATH`, no link, a count of 0): with no input every
+Only where step 2 stopped nothing (no link, a count of 0, no `config.json`): with no input every
 question gets a no, so the second line shows the exact entries install would add, changes nothing
 (but skydeck's compile cache in `~/.cache/skydeck`) and exits 1, as expected. It prints:
 
@@ -85,20 +87,18 @@ or feed them from a pipe (`printf 'y\n' |`, `yes |`). Tell them first what a yes
 - `Turn the shortcut off? [y/N]` (while it is on): turns off Claude Code's ← shortcut in
   `~/.claude.json` (after a backup), so a ← meant for skydeck's list cannot send a session away.
 
-**5. Check it.** When they say it is done, ask them to open a new terminal, where `skydeck` is found
-(if not, give them `export PATH="$HOME/.local/bin:$PATH"` for their shell's startup file,
-`~/.bashrc` or `~/.zshrc`; never edit it yourself). You may run `~/.local/bin/skydeck doctor` and
-`~/.local/bin/skydeck ls` here and read them out. `doctor` prints a line per check (`ok`, `info` or
-`problem`; exit 1 on any problem); the first three, `info`, give the versions and the system. Normal
-on a new install: `info     no events yet`; a `problem` for a missing or logged-out `gh`; `info` for
-the window's lines, Edge's too, until it is used. Other problems: the human's to fix.
+**5. Check it.** Once done, have them run `command -v skydeck` in a new terminal and tell you: it
+must print their `~/.local/bin/skydeck` (nothing: give them `export PATH="$HOME/.local/bin:$PATH"`
+for `~/.bashrc` or `~/.zshrc`, which you never edit; another path: tell them that program answers).
+Then run `~/.local/bin/skydeck doctor` and `~/.local/bin/skydeck ls` and read them out. doctor's
+lines start `ok`, `info` or `problem`, versions first; normal when new: `info     no events yet`, a
+`problem` (exit 1) for a missing or logged-out `gh`, `info` for the window's until it is used. Other
+problems are theirs.
 
-**6. Tell the human, at the end:** what changed (above), and that `skydeck uninstall` undoes it (it
-takes the hook entries out, removes the links and stops the window's server; the database, the
-backups and the ← setting stay); that the window is theirs: `skydeck window` in a terminal of their
-own, first with a new session in a scratch folder, one they can lose (without Edge:
-`skydeck window --print-url`, for any browser); and that [docs/quick-start.md](docs/quick-start.md)
-takes them through their first ten minutes.
+**6. Tell the human, at the end:** what changed (above), and that `skydeck uninstall` undoes it
+(keeping the database, the backups and the ← setting); that `skydeck window` is theirs, in a
+terminal of their own, first with a new session in a scratch folder they can lose (without Edge:
+`skydeck window --print-url`); and that `docs/quick-start.md` is their first ten minutes.
 
 **Never:**
 
@@ -110,7 +110,8 @@ takes them through their first ten minutes.
 - Run `skydeck uninstall` or `skydeck uninstall --purge` unasked: they undo the install, and
   `--purge` deletes the human's labels and notes for good.
 - Edit Claude Code's settings files by hand: uninstall undoes exactly the change install made.
-- Use `sudo`, or pipe a script from the internet into a shell: print it for the human.
+- Use `sudo`, pipe a script from the internet into a shell, or log in (`gh auth login`): PRINT such
+  commands for the human (the guide's "On a fresh WSL" has them all).
 - Run `npm ci` or the tests as part of an install: they are for changing the code (part 2).
 - Paste what `doctor` or `ls` print outside this conversation unasked: paths, user names, titles.
 
@@ -120,11 +121,10 @@ takes them through their first ten minutes.
   JavaScript); `bin/`: launcher, hook, keeper; `test/`, `test-page/`: tests and page tests; `docs/`.
 - Node.js 24.12 or newer runs the TypeScript as it is. `npm ci`, `npm run format`, `npm run check`
   (format, types, tests, page tests; these need `npx playwright install chromium`, no `sudo`).
-- Rules that must not break: no runtime dependency (Node.js's own modules only), and
-  - nothing outside `src/platform/` reads the clock, the environment or `/proc`, or starts a
-    program: every module gets them as parameters, so that tests pass fakes;
-  - nothing outside `src/claude/` reads a Claude Code file; no conversation text is stored;
-  - tests run only in the suite's sandbox (`test/helpers/`): never against a real home or
-    `~/.claude`, never the real `claude`, never the window's real port, never the network.
+- Rules that must not break: no runtime dependency (Node.js's own modules only); nothing outside
+  `src/platform/` reads the clock, the environment or `/proc` or starts a program (modules get them
+  passed in, so tests pass fakes); nothing outside `src/claude/` reads a Claude Code file; no
+  conversation text is stored; tests run only in the suite's sandbox (`test/helpers/`), never
+  against a real home or `~/.claude`, the real `claude`, the window's real port or the network.
 - The design is `docs/design.md` (section 2, the principles, changes first if one must break) and
   `docs/design-step-2.md` (the window); a change in behaviour updates it in the same pull request.
