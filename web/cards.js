@@ -38,6 +38,7 @@ import {
   splitPrs,
   startedWithText,
   ticketChip,
+  ticketHeader,
   timesText,
   titleSourceText,
 } from './header-text.js';
@@ -320,8 +321,10 @@ export function createCards(root, deps) {
   // --- the header (S2 12.5, plan D task 38): four lines, one height (D12) ---------------------
   const head = element('div', 'card-header');
   /**
-   * The session the header shows, its terminal and `now`, for the age tick.
-   * @type {{ row: RowPayload, term: TerminalPayload | null, now: () => string } | null}
+   * The session the header shows, its terminal and `now`, for the age tick; F19: and the list's
+   * `selected` of it (the ticket chip's tooltip counts its status' age).
+   * @type {{ row: RowPayload, term: TerminalPayload | null, now: () => string,
+   *          selected: SelectedPayload | null } | null}
    */
   let shownHead = null;
   /** The whole id the short id copies. */
@@ -411,11 +414,16 @@ export function createCards(root, deps) {
   // pull requests side by side as far as they fit (a click opens one; they give way before the
   // ticket's chip does), and the buttons of the ticket's and the pull-request dialogs, whole while
   // the window has room for them (cards.css); while none is attached, the hint `no pull request`
-  // and `+ PR`. Without a ticket its chip is not there and the rest keeps its place.
+  // and `+ PR`. Without a ticket its chip is not there and the rest keeps its place. F19: with a
+  // status known, ` · <status>` after the name (`.header-ticket-status`, cut before the name when
+  // room is short) and the chip in its category's tint (`data-category`, style.css); a ticket from
+  // the group has the chip only once a status is known or was tried, and then its status alone
+  // (the group chip names it): no name, no arrow (ticketHeader).
   const ticketItem = element('span', 'header-ticket');
   const ticketText = element('span', 'header-ticket-text');
+  const ticketStatus = element('span', 'header-ticket-status');
   const ticketArrow = element('span', 'header-ticket-arrow', ' ↗');
-  ticketItem.append(ticketText, ticketArrow);
+  ticketItem.append(ticketText, ticketStatus, ticketArrow);
   ticketItem.hidden = true;
   /**
    * The address the ticket's chip opens, null while it is not shown.
@@ -500,8 +508,11 @@ export function createCards(root, deps) {
     if (shownHead === null) {
       return;
     }
-    const { row, term, now } = shownHead;
+    const { row, term, now, selected } = shownHead;
     const nowNs = now();
+    // F19: the ticket chip's tooltip counts its status' age.
+    const ticketShown = ticketHeader(selected, nowNs);
+    setTip(ticketItem, ticketShown?.tip ?? '');
     setText(
       times,
       timesText(term === null ? '' : momentOf(term.openedNs), row.lastActivityNs, nowNs),
@@ -806,7 +817,7 @@ export function createCards(root, deps) {
         setText(copied, '');
       }
       headId = row.id;
-      shownHead = { row, term, now };
+      shownHead = { row, term, now, selected };
       setText(title, row.title);
       // D14: with a group, the chip and ✎; with a ticket address (the server's, S2 12.5) the chip is
       // a link — the key, `↗`, the address as its tooltip —, else plain text.
@@ -835,14 +846,28 @@ export function createCards(root, deps) {
       setText(flagsText, started.text);
       setTip(flags, started.tip);
       setHidden(flags, started.text === '');
-      // Line 3: F18's ticket, from `selected` (the server's address and name), first.
-      const ticketShown = ticketChip(selected);
+      // Line 3: F18's ticket, from `selected` (the server's address and name), first; F19: with
+      // its status. The button names the ticket the user set (F18), not the group's.
+      const ticketShown = ticketHeader(selected, now());
+      const ticketSet = ticketChip(selected) !== null;
       ticketLink = ticketShown?.url ?? null;
-      setText(ticketText, ticketShown?.text ?? '');
+      setText(ticketText, ticketShown?.name ?? '');
+      setText(
+        ticketStatus,
+        ticketShown === null || ticketShown.status === '' ? '' : ` · ${ticketShown.status}`,
+      );
+      setHidden(ticketStatus, ticketShown === null || ticketShown.status === '');
       setTip(ticketItem, ticketShown?.tip ?? '');
       setHidden(ticketItem, ticketShown === null);
-      setText(ticketButton, ticketShown === null ? '+ ticket' : 'Ticket');
-      setTip(ticketButton, ticketShown === null ? 'set a ticket (t)' : 'the ticket (t)');
+      if (ticketShown === null || ticketShown.status === '') {
+        delete ticketItem.dataset['status'];
+        delete ticketItem.dataset['category'];
+      } else {
+        setData(ticketItem, 'status', 'true');
+        setData(ticketItem, 'category', ticketShown.category);
+      }
+      setText(ticketButton, ticketSet ? 'Ticket' : '+ ticket');
+      setTip(ticketButton, ticketSet ? 'the ticket (t)' : 'set a ticket (t)');
       // None attached exactly when there is no chip (S2 12.3).
       const none = row.chip === null;
       setHidden(prsNone, !none);

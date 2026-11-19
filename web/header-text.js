@@ -9,9 +9,9 @@
 // Every string from the server is sanitised again (list-text.js's `sanitize`, design 7.4) and is
 // handed on for `textContent` or a `title` only, never as markup.
 
-/** @import { PrPayload, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
+/** @import { PrPayload, RowPayload, SelectedPayload, TicketStatusPayload } from '../src/window/protocol.ts' */
 import { ageBetween } from './format.js';
-import { chipText, knownLevel, sanitize } from './list-text.js';
+import { chipText, cutText, knownCategory, knownLevel, sanitize } from './list-text.js';
 
 /** An error is cut to this many UTF-16 units on its line of the dialog (its tooltip has it whole). */
 export const ERROR_MAX = 120;
@@ -361,5 +361,133 @@ export function ticketField(selected) {
     help: keys
       ? "A link is stored as the window opens it; a key becomes ticketUrl's link. Empty removes it."
       : 'An http or https link, stored as the window opens it (a key needs ticketUrl in config.json). Empty removes it.',
+  };
+}
+
+// --- follow-up F19: a ticket's status in the header and its dialog (S2 12.5) ---------------------
+
+/** The status' longest text, in characters (the server keeps no more). */
+const STATUS_MAX = 40;
+
+/**
+ * `selected.ticketStatus` when it has the shape of one, its strings sanitised again; else null.
+ * @param {SelectedPayload | null} selected
+ * @returns {{ url: string, name: string, stored: boolean, status: string, category: string,
+ *   okAtNs: string | null, triedAtNs: string | null, error: string } | null}
+ */
+function statusOf(selected) {
+  const given = /** @type {TicketStatusPayload | null | undefined} */ (selected?.ticketStatus);
+  if (typeof given !== 'object' || given === null || typeof given.url !== 'string') {
+    return null;
+  }
+  const time = (/** @type {unknown} */ value) => (typeof value === 'string' ? value : null);
+  return {
+    url: given.url,
+    name: clean(given.name),
+    stored: given.stored === true,
+    status: cutText(clean(given.status), STATUS_MAX),
+    category: knownCategory(given.category),
+    okAtNs: time(given.okAtNs),
+    triedAtNs: time(given.triedAtNs),
+    error: clean(given.error),
+  };
+}
+
+/**
+ * `<status>, checked <age> ago` (the age from `atNs`), or the status alone when the age cannot be
+ * told.
+ * @param {string} status
+ * @param {string} nowNs
+ * @param {string | null} atNs
+ */
+function checked(status, nowNs, atNs) {
+  const age = ageBetween(nowNs, atNs);
+  return age === '' ? status : `${status}, checked ${age} ago`;
+}
+
+/**
+ * Follow-up F19 (T6): the header's ticket chip with its status. The ticket the user set
+ * (`ticketChip`) always has its chip; a ticket from the group only once its status is known or
+ * was tried (so that a session without a provider looks as F18 left it). `status` is the last
+ * status read ('' for none), `category` its tint's word ('' for grey); the tooltip holds the
+ * address, then `<status>, checked <age> ago` — after a failure `status not read: <words>` and,
+ * under it, the last known status and its age. Null without a chip.
+ * @param {SelectedPayload | null} selected `list.selected` when it is the row's session
+ * @param {string} nowNs the server's time now (serverNow)
+ * @returns {{ name: string, status: string, category: string, tip: string, url: string } | null}
+ */
+export function ticketHeader(selected, nowNs) {
+  const own = ticketChip(selected);
+  const found = statusOf(selected);
+  // The status is the chip's when it is of the stored ticket's address, or, without a stored
+  // ticket, of the group's link.
+  const status =
+    found !== null && (own === null ? !found.stored : found.url === own.url) ? found : null;
+  if (own === null) {
+    if (status === null || (status.status === '' && status.triedAtNs === null)) {
+      return null;
+    }
+    return withStatus(status.name === '' ? status.url : status.name, status.url, status, nowNs);
+  }
+  return status === null
+    ? { name: own.text, status: '', category: '', tip: own.url, url: own.url }
+    : withStatus(own.text, own.url, status, nowNs);
+}
+
+/**
+ * The chip of `name` and `url` with `status`: its words, its tint, its tooltip (ticketHeader's).
+ * @param {string} name
+ * @param {string} url
+ * @param {NonNullable<ReturnType<typeof statusOf>>} status
+ * @param {string} nowNs
+ */
+function withStatus(name, url, status, nowNs) {
+  const lines = [url];
+  if (status.error !== '') {
+    lines.push(`status not read: ${status.error}`);
+    if (status.status !== '') lines.push(checked(status.status, nowNs, status.okAtNs));
+  } else if (status.status !== '') {
+    lines.push(checked(status.status, nowNs, status.triedAtNs));
+  }
+  return {
+    name,
+    status: status.status,
+    category: status.status === '' ? '' : status.category,
+    tip: lines.join('\n'),
+    url,
+  };
+}
+
+/**
+ * Follow-up F19 (T4): the ticket dialog's line about the status, beside its ↻: `In Progress ·
+ * checked 3m ago`; after a failure `status not read: <words>`, then ` · last <status>, checked
+ * <age> ago` when one is known; `status not read yet` before any attempt. Null when no provider
+ * reads the session's ticket (the line and its ↻ are not shown).
+ * @param {SelectedPayload | null} selected `list.selected` of the dialog's session
+ * @param {string} nowNs
+ * @returns {{ text: string, category: string } | null}
+ */
+export function ticketStatusLine(selected, nowNs) {
+  const status = statusOf(selected);
+  if (status === null) {
+    return null;
+  }
+  const known = status.status === '' ? '' : checked(status.status, nowNs, status.okAtNs);
+  if (status.error !== '') {
+    return {
+      text:
+        known === ''
+          ? `status not read: ${status.error}`
+          : `status not read: ${status.error} · last ${known}`,
+      category: '',
+    };
+  }
+  if (status.status === '') {
+    return { text: 'status not read yet', category: '' };
+  }
+  const age = ageBetween(nowNs, status.triedAtNs);
+  return {
+    text: age === '' ? status.status : `${status.status} · checked ${age} ago`,
+    category: status.category,
   };
 }

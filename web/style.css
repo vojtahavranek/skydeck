@@ -194,6 +194,32 @@ kbd {
     color: var(--tint);
   }
 }
+/* Follow-up F19: a ticket's status takes a pull request's tint by its category — blocked red,
+   review amber, doing blue, done green; todo, closed and none keep the chip's own grey — on the
+   list's chip and on the header's ticket chip, which carry it in `data-category` (list-text.js's
+   knownCategory: the page's own word, never a text of the server's). No new colour. */
+:where(.row-ticket, .header-ticket) {
+  &[data-category='blocked'] {
+    --tint: var(--pr-red);
+    --tint-bg: var(--pr-red-bg);
+    color: var(--tint);
+  }
+  &[data-category='review'] {
+    --tint: var(--pr-amber);
+    --tint-bg: var(--pr-amber-bg);
+    color: var(--tint);
+  }
+  &[data-category='doing'] {
+    --tint: var(--pr-blue);
+    --tint-bg: var(--pr-blue-bg);
+    color: var(--tint);
+  }
+  &[data-category='done'] {
+    --tint: var(--pr-green);
+    --tint-bg: var(--pr-green-bg);
+    color: var(--tint);
+  }
+}
 
 .app {
   display: flex;

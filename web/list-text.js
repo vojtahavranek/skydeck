@@ -9,6 +9,7 @@
 // the test holds to the server's): a page that shows foreign text decides that for itself.
 
 /** @import { ChipPayload, ListMessage, RowPayload, SectionPayload, TerminalPayload } from '../src/window/protocol.ts' */
+/** @import { RowTicketPayload } from '../src/window/protocol.ts' */
 import { attentionLine } from './attention-text.js';
 import { ageBetween } from './format.js';
 
@@ -60,6 +61,10 @@ function clean(text) {
  *   (dim)
  * @property {string} level the state the chip names, one of design 7.3's levels, for its tint
  *   (follow-up F4); '' for a level the page does not know, which keeps the chip grey
+ * @typedef {object} TicketText F19's small chip of a row: its ticket's status
+ * @property {string} text the status, cut at 14 characters with `…`
+ * @property {string} tip `<name> · <status>`, the status whole
+ * @property {string} category the status' category for its tint (`knownCategory`), '' for none
  * @typedef {object} RowText
  * @property {RowIcon} icon the state icon
  * @property {string} slot the slot number, '' when the row's terminal has none
@@ -68,6 +73,7 @@ function clean(text) {
  * @property {string} title the title, after its key when it has one
  * @property {MarkText[]} marks design 6.3's marks in words, then `done`
  * @property {ChipText | null} chip S2 12.3's chip, null when no pull request is attached
+ * @property {TicketText | null} ticket F19: the ticket's status chip, null while none is known
  * @property {string | null} note null without a note; else the note's first line, the ✎'s tooltip
  * @property {string} age a one-line row's age (its last activity); '' on a row of two lines
  * @property {string | null} stateLine the second line of a running or starting row, and of a row
@@ -246,6 +252,57 @@ function chipOf(row, nowNs) {
   };
 }
 
+// --- follow-up F19: a ticket's status (S2 12.2, 12.3) --------------------------------------------
+
+/** The six categories of a ticket's status (T3); each names a pull request's tint (style.css). */
+const TICKET_CATEGORIES = ['todo', 'doing', 'review', 'blocked', 'done', 'closed'];
+/** The longest status the row's chip shows, in characters, the `…` included. */
+export const ROW_STATUS_LENGTH = 14;
+
+/**
+ * The category a status names, for its tint: one of the six words, else '' (no category: grey).
+ * Only the page's own words reach the markup.
+ * @param {unknown} category
+ * @returns {string}
+ */
+export function knownCategory(category) {
+  return typeof category === 'string' && TICKET_CATEGORIES.includes(category) ? category : '';
+}
+
+/**
+ * `text` cut to `length` characters (code points), the cut one ending in `…`.
+ * @param {string} text
+ * @param {number} length
+ * @returns {string}
+ */
+export function cutText(text, length) {
+  const characters = [...text];
+  return characters.length <= length ? text : `${characters.slice(0, length - 1).join('')}…`;
+}
+
+/**
+ * F19 (T7): a row's ticket chip — its status cut at 14 characters, `<name> · <status>` as its
+ * tooltip, its category for the tint —; null while the row has no status (or one of a wrong shape).
+ * @param {RowPayload} row
+ * @returns {TicketText | null}
+ */
+function ticketOf(row) {
+  const ticket = /** @type {RowTicketPayload | null | undefined} */ (row.ticketStatus);
+  if (typeof ticket !== 'object' || ticket === null) {
+    return null;
+  }
+  const status = clean(ticket.status);
+  if (status === '') {
+    return null;
+  }
+  const name = clean(ticket.name);
+  return {
+    text: cutText(status, ROW_STATUS_LENGTH),
+    tip: name === '' ? status : `${name} · ${status}`,
+    category: knownCategory(ticket.category),
+  };
+}
+
 /** What may stand between a title's ticket key and the rest of it. */
 const AFTER_KEY = /^[\s:–—-]+/u;
 /** A character that continues a word: a key ends before none of these. */
@@ -338,6 +395,7 @@ export function rowText(row, nowNs, terminal) {
     ...titleOf(row),
     marks,
     chip: chipOf(row, nowNs),
+    ticket: ticketOf(row),
     note: row.hasNote ? clean(noteHead[0] ?? '') : null,
     age: twoLines ? '' : ageBetween(nowNs, row.lastActivityNs),
     stateLine: needs ?? (twoLines ? stateLineOf(row, nowNs, terminal) : null),

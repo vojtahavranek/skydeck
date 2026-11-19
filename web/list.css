@@ -242,6 +242,18 @@
 .row-chip[data-dim='true'] {
   border-color: var(--line);
 }
+/* F19: the ticket's status, right after the pull requests' chip, in that chip's box: its
+   category's tint (style.css), else grey. Hidden (no room) without a status. */
+.row-ticket {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid var(--line2);
+  border-radius: 9px;
+  background-color: var(--tint-bg, transparent);
+  color: var(--tint, var(--dim));
+  font-size: 11px;
+  line-height: 16px;
+}
 .row-note,
 .row-age {
   flex: none;

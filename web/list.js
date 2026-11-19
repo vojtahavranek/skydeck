@@ -149,7 +149,7 @@ function setTip(target, tip) {
 /**
  * One row's elements, made once (S2 12.2): the state icon, then the first line — the slot, the
  * ticket key or the group, the title, the marks, the chip (S2 12.3: its open part, then its merged
- * part apart), ✎, the age — and the state line.
+ * part apart), the ticket's status (follow-up F19), ✎, the age — and the state line.
  *
  * A double click activates only when both its clicks were on this row: Chromium counts a double
  * click by time and distance, not by element, so a list that moved the rows between the two
@@ -189,10 +189,13 @@ function makeRow(id, hooks, clicks) {
   const chipText = element('row-chip-text');
   const chipMerged = element('row-chip-merged');
   chip.append(chipText, chipMerged);
+  // F19: the ticket's status, right after the pull requests' chip.
+  const ticket = element('row-ticket');
+  ticket.hidden = true;
   const note = element('row-note');
   const age = element('row-age');
   const state = element('row-state', 'div');
-  first.append(slot, key, group, title, ...marks.values(), chip, note, age);
+  first.append(slot, key, group, title, ...marks.values(), chip, ticket, note, age);
   main.append(first, state);
   root.append(icon, main);
   return {
@@ -206,6 +209,7 @@ function makeRow(id, hooks, clicks) {
     chip,
     chipText,
     chipMerged,
+    ticket,
     note,
     age,
     state,
@@ -260,6 +264,10 @@ function paintRow(row, text, done) {
   setData(row.chip, 'dim', String(chip?.dim ?? false));
   // F4: the state it names, for its tint (style.css); '' for one the page does not know.
   setData(row.chip, 'level', chip?.level ?? '');
+  // F19: the ticket's status (14 characters at most), in its category's tint; no room without.
+  setText(row.ticket, text.ticket?.text ?? '');
+  setTip(row.ticket, text.ticket?.tip ?? '');
+  setData(row.ticket, 'category', text.ticket?.category ?? '');
   setText(row.note, text.note === null ? '' : '✎');
   setTip(row.note, text.note === null ? '' : text.note === '' ? 'has a note' : text.note);
   setText(row.age, text.age);

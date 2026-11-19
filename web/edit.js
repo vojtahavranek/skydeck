@@ -26,7 +26,15 @@
 
 /** @import { ListMessage, PrPayload, ResultMessage, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
 /** @import { EditWhat } from './keys.js' */
-import { foldText, prLineParts, prLineTip, prName, splitPrs, ticketField } from './header-text.js';
+import {
+  foldText,
+  prLineParts,
+  prLineTip,
+  prName,
+  splitPrs,
+  ticketField,
+  ticketStatusLine,
+} from './header-text.js';
 import { sessionRow } from './pane.js';
 
 /**
@@ -143,7 +151,15 @@ export function createEditor(root, deps) {
   foot.append(fold, refresh);
   const finishedLines = element('div', 'edit-prs-finished');
   prList.append(prNone, openLines, foot, finishedLines);
-  box.append(heading, prList, place, help, message, actions);
+  // F19: the ticket dialog's line about the ticket's status, and its ↻ (`ticket-refresh`); shown
+  // only while a provider reads the session's ticket.
+  const ticketLine = element('div', 'edit-ticket-status');
+  const ticketWords = element('span', 'edit-ticket-words');
+  const ticketRefresh = button('edit-ticket-refresh', '↻');
+  ticketRefresh.title = 'read its status now';
+  ticketLine.append(ticketWords, ticketRefresh);
+  ticketLine.hidden = true;
+  box.append(heading, prList, ticketLine, place, help, message, actions);
   root.replaceChildren(scrim, box);
   root.hidden = true;
 
@@ -151,9 +167,11 @@ export function createEditor(root, deps) {
    * The dialog shown: what it edits, for which session (its row as the last list had it, for
    * task 38's list), its field (null for a note too long to edit, D5), the note's `base` (the
    * listed string exactly, D3), the field's value when it opened (to tell a change), whether the
-   * act waits, and whether a first Esc warned about a changed note.
+   * act waits, and whether a first Esc warned about a changed note; F19: the list's `selected`
+   * of the session (the ticket dialog's status line follows it).
    * @type {{ what: EditWhat, row: RowPayload, field: HTMLInputElement | HTMLTextAreaElement | null,
-   *          base: string, start: string, waiting: boolean, warned: boolean } | null}
+   *          base: string, start: string, waiting: boolean, warned: boolean,
+   *          selected: SelectedPayload | null } | null}
    */
   let current = null;
   /** The merged and closed pull requests are shown (the fold is open); folded at every open. */
@@ -180,6 +198,44 @@ export function createEditor(root, deps) {
   const say = (text) => {
     message.textContent = text;
   };
+
+  /** F19: the sessions whose ticket ↻ waits for its answer. @type {Set<string>} */
+  const refreshingTicket = new Set();
+
+  /** F19: the ticket dialog's status line for its session as the last list had it. */
+  const drawTicket = () => {
+    const line =
+      current !== null && current.what === 'ticket'
+        ? ticketStatusLine(current.selected, deps.now())
+        : null;
+    ticketLine.hidden = line === null;
+    setText(ticketWords, line?.text ?? '');
+    ticketRefresh.disabled = current !== null && refreshingTicket.has(current.row.id);
+  };
+
+  /** F19's ↻: `ticket-refresh`, the server's read in the background; the lists follow. */
+  const refreshTicket = async () => {
+    const sessionId = current?.row.id;
+    if (sessionId === undefined || refreshingTicket.has(sessionId)) {
+      return;
+    }
+    if (document.activeElement === ticketRefresh) {
+      current?.field?.focus(); // a disabled button would drop the keyboard
+    }
+    refreshingTicket.add(sessionId);
+    drawTicket();
+    const result = await deps.act({ kind: 'ticket-refresh', sessionId });
+    refreshingTicket.delete(sessionId);
+    drawTicket();
+    if (!result.ok) {
+      if (current !== null && current.what === 'ticket' && current.row.id === sessionId) {
+        say(errorOf(result));
+      } else {
+        deps.toast(`not read: ${errorOf(result)}`, null);
+      }
+    }
+  };
+  ticketRefresh.addEventListener('click', () => void refreshTicket());
 
   /** Whether the field holds text the user typed and did not save. */
   const changed = () =>
@@ -450,6 +506,9 @@ export function createEditor(root, deps) {
     if (current !== null && current.what === 'pr') {
       drawPrs();
     }
+    if (current !== null && current.what === 'ticket') {
+      drawTicket();
+    }
   }, AGE_TICK_MS);
 
   /** The act of the dialog shown, from its field. */
@@ -660,10 +719,12 @@ export function createEditor(root, deps) {
         start: field?.value ?? '',
         waiting: false,
         warned: false,
+        selected,
       };
       box.dataset['what'] = what;
       unfolded = false;
       drawPrs();
+      drawTicket();
       heading.textContent = `${HEADINGS[what]} — ${row.title}`;
       place.replaceChildren(...(field === null ? [] : [field]));
       help.textContent = helpText;
@@ -699,7 +760,13 @@ export function createEditor(root, deps) {
       if (row !== null) {
         shown.row = row;
       }
+      // F19: the status line follows the session's `selected` (a list of another selection keeps
+      // the last one).
+      if (list.selected?.sessionId === shown.row.id) {
+        shown.selected = list.selected;
+      }
       drawPrs();
+      drawTicket();
     },
     escape() {
       if (current === null) {
