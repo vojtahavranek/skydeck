@@ -3,7 +3,8 @@
 // one-time offer to mark old sessions as done (7.1, D20). Running it again changes nothing. It
 // writes nothing for the window (S2 16.1): it only says so when python3 3.9 or newer, which the
 // window's keepers need, is not found. Last, it offers to turn off Claude Code's ← shortcut
-// (follow-up F11, S2 7.9).
+// (follow-up F11, S2 7.9). On a system without a boot id (macOS, for now) it does none of this: it
+// says that skydeck cannot work there and stops (follow-up F23).
 //
 // The settings file is the one place where skydeck changes Claude Code's configuration on its own
 // account (principle 2), so that step adds nothing but the two entries, never touches other hooks,
@@ -93,6 +94,10 @@ export const command: Command = {
       ctx.io.stdout(SPEC.usage);
       return EXIT.ok;
     }
+    if (!hasBootId(ctx.platform)) {
+      ctx.io.stderr(`${NO_BOOT_ID}\n`);
+      return EXIT.failure;
+    }
     const { places } = resolveDeckPlaces(ctx.platform);
     const prepared = prepare(ctx.platform, places);
     if (prepared.edit.changed) {
@@ -132,12 +137,39 @@ function linksFor(platform: Platform, places: Places): Link[] {
   ];
 }
 
+/** Where the boot id is read (src/platform/real.ts). */
+const BOOT_ID_FILE = '/proc/sys/kernel/random/boot_id';
+
+const NO_BOOT_ID =
+  'skydeck works on Linux and on Windows with WSL2 (run inside WSL) only: this system has no ' +
+  `${BOOT_ID_FILE} (macOS is not supported yet); nothing was changed`;
+
 /**
- * Every check that can stop install, before anything is created (ruled by the plan owner): a link
- * path that holds something that is not a symbolic link (never replaced: it is not skydeck's); a
- * settings file that cannot be read or is not JSON; a settings path that is a symbolic link to
- * nothing (never replaced by a file); no settings file and no Claude Code directory (never made
- * up: most likely claudeHome or CLAUDE_CONFIG_DIR names the wrong place).
+ * Follow-up F23: whether this system has a boot id. skydeck judges every process by it (design
+ * 5.5) and ingest drops a hook event without one, so on a system that has none (macOS, for now)
+ * skydeck would record nothing and never show a session as running. Install asks this first of
+ * all: before any question, before config.json is read, before anything is created. It is decided
+ * by the boot id, not by the system's name. A boot id that cannot be read for another reason
+ * (EACCES …) stops install too, naming the cause.
+ */
+function hasBootId(platform: Platform): boolean {
+  try {
+    return platform.proc.bootId() !== null;
+  } catch (error) {
+    throw new SkydeckError(
+      `cannot read ${BOOT_ID_FILE} (${describeError(error)}), which skydeck needs to tell which ` +
+        'sessions are running; nothing was changed',
+    );
+  }
+}
+
+/**
+ * Every check that can stop install, after the boot id's (hasBootId) and before anything is
+ * created (ruled by the plan owner): a link path that holds something that is not a symbolic link
+ * (never replaced: it is not skydeck's); a settings file that cannot be read or is not JSON; a
+ * settings path that is a symbolic link to nothing (never replaced by a file); no settings file
+ * and no Claude Code directory (never made up: most likely claudeHome or CLAUDE_CONFIG_DIR names
+ * the wrong place).
  */
 function prepare(platform: Platform, places: Places): Prepared {
   const { files } = platform;
