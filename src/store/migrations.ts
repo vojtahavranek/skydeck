@@ -96,6 +96,17 @@ CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
   // adds a nullable column, so a reader of schema 2 (an old server until its next write, an old
   // interactive list) still reads correctly; an older skydeck refuses the database at its open.
   'ALTER TABLE session_meta ADD COLUMN ticket_url TEXT;  -- F18: the ticket the user set, its address; NULL for none',
+  // Migration 4 (follow-up F19): the SQL of design-step-2.md 10.2, character for character. It only
+  // adds a table, so a reader of schema 3 still reads correctly; an older skydeck refuses the
+  // database at its open.
+  `CREATE TABLE ticket_status (
+  url          TEXT PRIMARY KEY,  -- a ticket's address (F19), as a session's ticket gives it
+  status       TEXT,              -- its status' text; NULL until a read succeeded
+  category     TEXT,              -- todo | doing | review | blocked | done | closed; NULL for none
+  ok_at_ns     INTEGER,           -- the last read that succeeded
+  tried_at_ns  INTEGER NOT NULL,  -- the last attempt
+  error        TEXT               -- the last attempt's failure; NULL after a success
+);`,
 ];
 
 export const SCHEMA_VERSION: number = MIGRATIONS.length;

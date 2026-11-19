@@ -214,6 +214,34 @@ export function schema1Database(path: string): void {
   }
 }
 
+/**
+ * What migration 4 (follow-up F19) adds to sqlite_master: the table ticket_status and the index of
+ * its primary key. SQLite keeps the statement's text without its closing semicolon.
+ */
+export const TICKET_STATUS_ENTRIES = [
+  { type: 'index', name: 'sqlite_autoindex_ticket_status_1', sql: null },
+  { type: 'table', name: 'ticket_status', sql: MIGRATIONS[3]?.replace(/;$/, '') ?? null },
+];
+
+/** Whether an entry of sqlite_master is one of migration 4's. */
+export function isTicketStatusEntry(entry: { name: string }): boolean {
+  return TICKET_STATUS_ENTRIES.some((added) => added.name === entry.name);
+}
+
+/**
+ * `after` without what migration 4 added (TICKET_STATUS_ENTRIES and the empty table), for the
+ * tests of an older migration, after which an open goes on to the newest schema. Throws when the
+ * table holds a row: a migration makes it empty.
+ */
+export function withoutTicketStatus(after: DatabaseDump): DatabaseDump {
+  const rows = after.tables['ticket_status'];
+  if (rows !== undefined && rows.length > 0) {
+    throw new Error('ticket_status is not empty');
+  }
+  const { ticket_status: _left, ...tables } = after.tables;
+  return { schema: after.schema.filter((entry) => !isTicketStatusEntry(entry)), tables };
+}
+
 export interface DatabaseDump {
   schema: { type: string; name: string; sql: string | null }[];
   tables: Record<string, Record<string, unknown>[]>;

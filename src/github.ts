@@ -7,7 +7,15 @@
 import { nsFromMs } from './platform/time.ts';
 import type { Clock, Env, Ns, RunOptions, RunResult, Runner } from './platform/types.ts';
 import type { Store } from './store/store.ts';
-import type { PrChecks, PrFetchResult, PrReview, PrRow, PrState } from './store/types.ts';
+import type {
+  PrChecks,
+  PrFetchResult,
+  PrReview,
+  PrRow,
+  PrState,
+  TicketCategory,
+  TicketStatusResult,
+} from './store/types.ts';
 
 export interface PrKey {
   url: string;
@@ -46,6 +54,34 @@ export function prKey(text: string): PrKey | null {
   const lowerRepo = repo.toLowerCase();
   return {
     url: `https://github.com/${lowerOwner}/${lowerRepo}/pull/${number}`,
+    owner: lowerOwner,
+    repo: lowerRepo,
+    number,
+  };
+}
+
+// Follow-up F19: <owner>/<repo>/issues/<number>, then the end or a '/', '?' or '#'.
+const ISSUE_REST = /^([^/]+)\/([^/]+)\/issues\/([1-9][0-9]*)(?:[/?#]|$)/;
+
+/**
+ * Follow-up F19 (T2 a): the key of a GitHub issue's address, by prKey's rules with `issues` where
+ * prKey has `pull`: `https://github.com/<owner>/<repo>/issues/<number>`, lower-cased; null for
+ * anything else (a pull request's address included: it gets no status as a ticket).
+ */
+export function issueKey(text: string): PrKey | null {
+  const prefix = PREFIX.exec(text);
+  if (prefix === null) return null;
+  const match = ISSUE_REST.exec(text.slice(prefix[0].length));
+  if (match === null) return null;
+  const [, owner, repo, digits] = match;
+  if (owner === undefined || repo === undefined || digits === undefined) return null;
+  if (!OWNER.test(owner) || !REPO.test(repo) || repo === '.' || repo === '..') return null;
+  const number = Number(digits);
+  if (number > MAX_PR_NUMBER) return null;
+  const lowerOwner = owner.toLowerCase();
+  const lowerRepo = repo.toLowerCase();
+  return {
+    url: `https://github.com/${lowerOwner}/${lowerRepo}/issues/${number}`,
     owner: lowerOwner,
     repo: lowerRepo,
     number,
@@ -450,6 +486,175 @@ export function refreshPrs(
     due.map((pr) => pr.url),
     options.signal === undefined ? {} : { signal: options.signal },
   );
+}
+
+// --- follow-up F19: the status of a GitHub issue that is a session's ticket (T2 a, T3) ----------
+
+/** F19: the longest status text kept (the configured command's limit, T2 b). */
+const ISSUE_STATUS_LENGTH = 40;
+
+/**
+ * The `gh` arguments for one batch of issues (1 to BATCH_SIZE keys): as batchArgs, each key under
+ * the alias `i<n>` and asked for `issue(number: …) { state stateReason }`. A batch of its own, so
+ * that the pull requests' query stays as it is. Throws RangeError for an empty or oversized batch.
+ */
+export function issueBatchArgs(keys: readonly PrKey[]): string[] {
+  if (keys.length < 1 || keys.length > BATCH_SIZE) {
+    throw new RangeError(`a batch holds 1 to ${BATCH_SIZE} issues, not ${keys.length}`);
+  }
+  const declarations = keys
+    .map((_, i) => `$o${i}: String!, $r${i}: String!, $n${i}: Int!`)
+    .join(', ');
+  const selections = keys
+    .map(
+      (_, i) =>
+        `i${i}: repository(owner: $o${i}, name: $r${i}) { issue(number: $n${i}) { state stateReason } }`,
+    )
+    .join(' ');
+  const args = [
+    'api',
+    'graphql',
+    '--hostname',
+    'github.com',
+    '-f',
+    `query=query(${declarations}) { ${selections} }`,
+  ];
+  keys.forEach((key, i) => {
+    args.push('-f', `o${i}=${key.owner}`, '-f', `r${i}=${key.repo}`, '-F', `n${i}=${key.number}`);
+  });
+  return args;
+}
+
+/** A word of GitHub's (`NOT_PLANNED`) as the status' text: lower case, spaces, at most 40. */
+function issueWords(word: string): string {
+  return [...word.toLowerCase().replaceAll('_', ' ')].slice(0, ISSUE_STATUS_LENGTH).join('');
+}
+
+/**
+ * T3: an `issue` object of the answer. OPEN → `open` (doing); CLOSED as COMPLETED → `closed` (done),
+ * as NOT_PLANNED → `not planned` (closed), as DUPLICATE → `duplicate` (closed), without a reason →
+ * `closed` and no category (done or not is not known), with a reason not known here → its words,
+ * no category; a state not known here → its words, no category; no state → a failure.
+ */
+function readIssue(issue: Record<string, unknown>, atNs: Ns): TicketStatusResult {
+  const state = issue['state'];
+  const reason = issue['stateReason'];
+  if (typeof state !== 'string') {
+    return { ok: false, atNs, error: 'GitHub answered without a state' };
+  }
+  const known = (status: string, category: TicketCategory | null): TicketStatusResult => ({
+    ok: true,
+    atNs,
+    status,
+    category,
+  });
+  if (state === 'OPEN') return known('open', 'doing');
+  if (state !== 'CLOSED') return known(issueWords(state), null);
+  switch (reason) {
+    case 'COMPLETED':
+      return known('closed', 'done');
+    case 'NOT_PLANNED':
+      return known('not planned', 'closed');
+    case 'DUPLICATE':
+      return known('duplicate', 'closed');
+    default:
+      return known(typeof reason === 'string' ? issueWords(reason) : 'closed', null);
+  }
+}
+
+function failIssues(
+  keys: readonly PrKey[],
+  atNs: Ns,
+  error: string,
+): Map<string, TicketStatusResult> {
+  return new Map(keys.map((key) => [key.url, { ok: false, atNs, error }]));
+}
+
+/**
+ * One `gh` result of an issue batch as a status per key url, in parseBatch's manner and words:
+ * timedOut → every key "gh timed out after 10 s"; notFound → "gh is not installed"; no answer →
+ * "gh returned output skydeck could not read" after exit 0, else the first line of stderr, else
+ * "gh exited <code>" ("gh was killed by a signal"); otherwise per alias i<n>: an `issue` object →
+ * readIssue; null or missing → the message of the alias's error, else of the first error with no
+ * path, else "not found".
+ */
+export function parseIssueBatch(
+  keys: readonly PrKey[],
+  result: RunResult,
+  atNs: Ns,
+): Map<string, TicketStatusResult> {
+  if (result.timedOut) {
+    return failIssues(keys, atNs, `gh timed out after ${GH_TIMEOUT_MS / 1000} s`);
+  }
+  if (result.notFound) {
+    return failIssues(keys, atNs, 'gh is not installed');
+  }
+  let answer: unknown;
+  try {
+    answer = JSON.parse(result.stdout);
+  } catch {
+    answer = null;
+  }
+  const data = isRecord(answer) ? answer['data'] : undefined;
+  if (!isRecord(answer) || !isRecord(data)) {
+    if (result.code === 0) {
+      return failIssues(keys, atNs, 'gh returned output skydeck could not read');
+    }
+    const reason = result.code === null ? 'gh was killed by a signal' : `gh exited ${result.code}`;
+    return failIssues(keys, atNs, firstLine(result.stderr) ?? reason);
+  }
+  return new Map(
+    keys.map((key, i) => {
+      const alias = `i${i}`;
+      const repository = data[alias];
+      const issue = isRecord(repository) ? repository['issue'] : undefined;
+      const outcome: TicketStatusResult = isRecord(issue)
+        ? readIssue(issue, atNs)
+        : { ok: false, atNs, error: errorFor(answer['errors'], alias) ?? 'not found' };
+      return [key.url, outcome];
+    }),
+  );
+}
+
+/**
+ * F19 (T2 a): the status of each issue of `keys` (a repeated url is asked about once), in batches
+ * of BATCH_SIZE through `gh api graphql` with fetchBatch's environment and timeout, one batch after
+ * the other; a failure of `gh` is a failed result, never an exception; no call for no key. It saves
+ * nothing: the caller stores each result for the ticket addresses of its issue. Once `signal` has
+ * fired the answer is an empty map, and no further batch starts.
+ */
+export async function fetchIssueStatuses(
+  deps: Omit<Deps, 'store'>,
+  keys: readonly PrKey[],
+  options: { signal?: AbortSignal } = {},
+): Promise<Map<string, TicketStatusResult>> {
+  const { signal } = options;
+  const unique = [...new Map(keys.map((key) => [key.url, key])).values()];
+  const results = new Map<string, TicketStatusResult>();
+  const stopped = (): boolean => signal?.aborted === true;
+  for (let start = 0; start < unique.length && !stopped(); start += BATCH_SIZE) {
+    const batch = unique.slice(start, start + BATCH_SIZE);
+    const runOptions: RunOptions = { timeoutMs: GH_TIMEOUT_MS, env: ghEnvironment(deps.env) };
+    if (signal !== undefined) runOptions.signal = signal;
+    let parsed: Map<string, TicketStatusResult>;
+    try {
+      parsed = parseIssueBatch(
+        batch,
+        await deps.runner.run('gh', issueBatchArgs(batch), runOptions),
+        deps.clock.nowNs(),
+      );
+    } catch (error) {
+      if (stopped()) break;
+      const reason = firstLine(error instanceof Error ? error.message : String(error));
+      parsed = failIssues(
+        batch,
+        deps.clock.nowNs(),
+        `gh could not be run: ${reason ?? 'unknown error'}`,
+      );
+    }
+    for (const [url, result] of parsed) results.set(url, result);
+  }
+  return stopped() ? new Map() : results;
 }
 
 /** 7.3 chip, worst first. */

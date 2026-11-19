@@ -142,6 +142,12 @@ export interface RunOptions {
    * A signal that fires after run() has answered changes nothing.
    */
   signal?: AbortSignal;
+  /**
+   * Follow-up F19: of stdout and of stderr each only the first this many bytes are kept (and
+   * decoded as UTF-8); the rest is read and dropped, so that a program that prints without end
+   * holds no memory. Without it everything is kept.
+   */
+  maxOutputBytes?: number;
 }
 
 export interface RunResult {

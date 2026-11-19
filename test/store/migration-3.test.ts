@@ -16,7 +16,7 @@ import { openStore } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import { testPlatform } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
-import { SCHEMA1, dumpDatabase, schema1Database } from '../helpers/schema1.ts';
+import { SCHEMA1, dumpDatabase, schema1Database, withoutTicketStatus } from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
 
 /** The attention row the fixture adds to its schema-2 database. */
@@ -67,6 +67,9 @@ function opened(t: TestContext, path: string): Store {
   return store;
 }
 
+/** The newest schema version, as kv holds it (F19: an open goes on with migration 4). */
+const NEWEST = String(SCHEMA_VERSION);
+
 /** session_meta's entry of sqlite_master as SQLite writes it after migration 3's ALTER TABLE. */
 function withTicketColumn(sql: string | null): string | null {
   return sql === null ? null : sql.replace(/\n\)$/, '\n, ticket_url TEXT)');
@@ -75,9 +78,12 @@ function withTicketColumn(sql: string | null): string | null {
 /**
  * `after` is `before` (a schema-2 database) migrated to 3: sqlite_master is as it was but for
  * session_meta's statement, which ends in the new column; every row of every table is as it was,
- * but each row of session_meta gains `ticket_url` NULL and kv schema_version is '3'.
+ * but each row of session_meta gains `ticket_url` NULL and kv schema_version is the newest (F19: an open goes on with
+ * migration 4, whose empty table ticket_status is left out here).
  */
-function assertMigrated(before: DatabaseDump, after: DatabaseDump): void {
+function assertMigrated(before: DatabaseDump, newest: DatabaseDump): void {
+  // F19: the open goes on with migration 4, which only adds the table ticket_status, empty.
+  const after = withoutTicketStatus(newest);
   assert.deepEqual(
     after.schema,
     before.schema.map((entry) =>
@@ -105,11 +111,11 @@ function assertMigrated(before: DatabaseDump, after: DatabaseDump): void {
     'no kv entry changed but schema_version',
   );
   assert.deepEqual(before.tables['kv']?.filter(version), [{ key: 'schema_version', value: '2' }]);
-  assert.deepEqual(after.tables['kv']?.filter(version), [{ key: 'schema_version', value: '3' }]);
+  assert.deepEqual(after.tables['kv']?.filter(version), [{ key: 'schema_version', value: NEWEST }]);
 }
 
 test('migration 3 is one ALTER TABLE that adds the nullable column ticket_url to session_meta', () => {
-  assert.equal(SCHEMA_VERSION, 3);
+  assert.ok(SCHEMA_VERSION >= 3);
   assert.equal(
     MIGRATIONS[2],
     'ALTER TABLE session_meta ADD COLUMN ticket_url TEXT;  -- F18: the ticket the user set, its address; NULL for none',
@@ -135,13 +141,13 @@ test('the fixture is a schema-2 database with a row in every table', (t) => {
   );
 });
 
-test('openStore migrates a schema-2 database to 3: every value kept, session_meta gains ticket_url', (t) => {
+test('openStore migrates a schema-2 database to 3 (and on to the newest): every value kept, session_meta gains ticket_url', (t) => {
   const path = schema2(t);
   const before = dumpDatabase(path);
 
   const store = opened(t, path);
 
-  assert.equal(store.getKv('schema_version'), '3');
+  assert.equal(store.getKv('schema_version'), NEWEST);
   assertMigrated(before, dumpDatabase(path));
   // The store reads what was there, and no session has a ticket.
   const s1 = store.meta(SCHEMA1.s1);
@@ -182,7 +188,7 @@ test('opening a migrated database again changes nothing', (t) => {
   const again = opened(t, path);
 
   assert.deepEqual(dumpDatabase(path), migrated);
-  assert.equal(again.getKv('schema_version'), '3');
+  assert.equal(again.getKv('schema_version'), NEWEST);
 });
 
 test("the server's own open (openDeck, guardSchema, 250 ms) migrates a schema-2 database and its guarded connection writes a ticket", (t) => {

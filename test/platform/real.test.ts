@@ -771,6 +771,26 @@ describe('real runner', () => {
     assert.equal(result.stdout, 'x');
   });
 
+  test('maxOutputBytes keeps the first bytes of each stream and reads the rest to its end (F19)', async (t) => {
+    const s = sandbox(t);
+    s.link('sh', 'head', 'tr');
+
+    // 200 KiB on each stream: more than a pipe holds, so a program that is not read would block.
+    const result = await realPlatform().runner.run(
+      'sh',
+      [
+        '-c',
+        'printf "first\\n"; head -c 204800 /dev/zero | tr "\\0" a; head -c 204800 /dev/zero | tr "\\0" b >&2; exit 4',
+      ],
+      { env: s.env(), maxOutputBytes: 4096, timeoutMs: 10_000 },
+    );
+
+    assert.equal(result.code, 4);
+    assert.equal(result.timedOut, false);
+    assert.equal(result.stdout, `first\n${'a'.repeat(4096 - 6)}`);
+    assert.equal(result.stderr, 'b'.repeat(4096));
+  });
+
   test('without input the child reads an empty stdin and does not wait', async (t) => {
     const s = sandbox(t);
     s.link('sh', 'cat');

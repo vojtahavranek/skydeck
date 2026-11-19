@@ -625,14 +625,43 @@ function realRunner(guard: WindowsGuard): Runner {
         }
         signal?.addEventListener('abort', abort, { once: true });
 
-        child.stdout?.setEncoding('utf8');
-        child.stdout?.on('data', (chunk: string) => {
-          stdout += chunk;
-        });
-        child.stderr?.setEncoding('utf8');
-        child.stderr?.on('data', (chunk: string) => {
-          stderr += chunk;
-        });
+        const limit = options.maxOutputBytes;
+        if (limit === undefined) {
+          child.stdout?.setEncoding('utf8');
+          child.stdout?.on('data', (chunk: string) => {
+            stdout += chunk;
+          });
+          child.stderr?.setEncoding('utf8');
+          child.stderr?.on('data', (chunk: string) => {
+            stderr += chunk;
+          });
+        } else {
+          // F19: the first `limit` bytes of each, decoded when the run is answered; the rest is
+          // read (the program is not stopped by a full pipe) and dropped.
+          const kept = (to: (text: string) => void): ((chunk: Buffer) => void) => {
+            const parts: Buffer[] = [];
+            let size = 0;
+            return (chunk) => {
+              if (size >= limit) return;
+              const part = chunk.subarray(0, limit - size);
+              parts.push(part);
+              size += part.length;
+              to(Buffer.concat(parts).toString('utf8'));
+            };
+          };
+          child.stdout?.on(
+            'data',
+            kept((text) => {
+              stdout = text;
+            }),
+          );
+          child.stderr?.on(
+            'data',
+            kept((text) => {
+              stderr = text;
+            }),
+          );
+        }
         // A child that does not read its input closes the pipe: EPIPE is not an error of ours.
         child.stdin?.on('error', () => {});
         child.on('error', (error) => {

@@ -19,7 +19,13 @@ import { isDatabaseFailure, openStore } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import { testPlatform } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
-import { SCHEMA1, dumpDatabase, schema1Database, uncommittedWrite } from '../helpers/schema1.ts';
+import {
+  SCHEMA1,
+  dumpDatabase,
+  schema1Database,
+  uncommittedWrite,
+  withoutTicketStatus,
+} from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
 
 const MIGRATION_1_TABLES = [
@@ -114,8 +120,10 @@ function opened(t: TestContext, path: string, options?: { busyTimeoutMs?: number
  * every table of migration 1 is as it was (session_meta's with ticket_url NULL), but kv
  * schema_version, which is the newest; `attention` is empty.
  */
-function assertMigrated(schema1Dump: DatabaseDump, after: DatabaseDump): void {
+function assertMigrated(schema1Dump: DatabaseDump, newest: DatabaseDump): void {
   const before = withMigration3(schema1Dump);
+  // F19: the open goes on with migration 4, which only adds the table ticket_status, empty.
+  const after = withoutTicketStatus(newest);
   assert.deepEqual(
     after.schema.filter((entry) => !isAttention(entry)),
     before.schema,

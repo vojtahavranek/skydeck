@@ -23,8 +23,12 @@ import type {
   PrState,
   SessionMeta,
   SessionPrRow,
+  TicketCategory,
+  TicketStatusResult,
+  TicketStatusRow,
   TranscriptRow,
 } from './types.ts';
+import { TICKET_CATEGORIES } from './types.ts';
 
 export interface Store {
   readonly path: string;
@@ -115,6 +119,16 @@ export interface Store {
   detachPr(sessionId: string, url: string, nowNs: Ns): boolean;
   /** All session_prs rows, detached ones included. */
   sessionPrs(): SessionPrRow[];
+
+  // ticket statuses (follow-up F19; S2 10.2): one cached row per ticket address
+  /** Every ticket_status row, ordered by url. */
+  ticketStatuses(): TicketStatusRow[];
+  /**
+   * ok: makes or sets the row of `url`: status, category, ok_at_ns = tried_at_ns = atNs, error =
+   * NULL. failure: makes or sets it with tried_at_ns = atNs and error; every other column of a row
+   * that was there stays (the last known status and its age).
+   */
+  saveTicketStatus(url: string, result: TicketStatusResult): void;
 
   // attention (S2 10.2): the server's observations, ordered by a counter, never by a clock
   /** Every attention row, ordered by session id. */
@@ -315,6 +329,22 @@ function mapPr(row: Row): PrRow {
     checks: optStr(row, 'checks') as PrChecks | null,
     okAtNs: optNs(row, 'ok_at_ns'),
     triedAtNs: optNs(row, 'tried_at_ns'),
+    error: optStr(row, 'error'),
+  };
+}
+
+/** F19: a category the row holds, or null for none — also for a word this skydeck does not know. */
+function categoryOf(text: string | null): TicketCategory | null {
+  return TICKET_CATEGORIES.find((category) => category === text) ?? null;
+}
+
+function mapTicketStatus(row: Row): TicketStatusRow {
+  return {
+    url: reqStr(row, 'url'),
+    status: optStr(row, 'status'),
+    category: categoryOf(optStr(row, 'category')),
+    okAtNs: optNs(row, 'ok_at_ns'),
+    triedAtNs: reqNs(row, 'tried_at_ns'),
     error: optStr(row, 'error'),
   };
 }
@@ -868,6 +898,34 @@ class SqliteStore implements Store {
     return this.#all('SELECT * FROM session_prs ORDER BY first_seen_ns, session_id, url').map(
       mapSessionPr,
     );
+  }
+
+  ticketStatuses(): TicketStatusRow[] {
+    return this.#all('SELECT * FROM ticket_status ORDER BY url').map(mapTicketStatus);
+  }
+
+  saveTicketStatus(url: string, result: TicketStatusResult): void {
+    if (result.ok) {
+      this.#run(
+        `INSERT INTO ticket_status (url, status, category, ok_at_ns, tried_at_ns, error)
+         VALUES (?, ?, ?, ?, ?, NULL)
+         ON CONFLICT (url) DO UPDATE SET status = excluded.status, category = excluded.category,
+           ok_at_ns = excluded.ok_at_ns, tried_at_ns = excluded.tried_at_ns, error = NULL`,
+        url,
+        result.status,
+        result.category,
+        result.atNs,
+        result.atNs,
+      );
+    } else {
+      this.#run(
+        `INSERT INTO ticket_status (url, tried_at_ns, error) VALUES (?, ?, ?)
+         ON CONFLICT (url) DO UPDATE SET tried_at_ns = excluded.tried_at_ns, error = excluded.error`,
+        url,
+        result.atNs,
+        result.error,
+      );
+    }
   }
 
   attention(): AttentionRow[] {

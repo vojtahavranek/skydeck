@@ -103,6 +103,25 @@ export type PrFetchResult =
     }
   | { ok: false; atNs: Ns; error: string };
 
+/** F19 (T3): the six categories a ticket's status can have; each is drawn in a pull request's tint. */
+export const TICKET_CATEGORIES = ['todo', 'doing', 'review', 'blocked', 'done', 'closed'] as const;
+export type TicketCategory = (typeof TICKET_CATEGORIES)[number];
+
+/** F19 (T5; S2 10.2): the cached status of a ticket's address (table ticket_status, migration 4). */
+export interface TicketStatusRow {
+  url: string;
+  status: string | null; // null until a read succeeded
+  category: TicketCategory | null; // null for none, or one this skydeck does not know
+  okAtNs: Ns | null;
+  triedAtNs: Ns;
+  error: string | null; // the failure of the last attempt; null after a success
+}
+
+/** F19: the result of one attempt to read a ticket's status. */
+export type TicketStatusResult =
+  | { ok: true; atNs: Ns; status: string; category: TicketCategory | null }
+  | { ok: false; atNs: Ns; error: string };
+
 export type PrOrigin = 'auto' | 'manual';
 export interface SessionPrRow {
   sessionId: string;

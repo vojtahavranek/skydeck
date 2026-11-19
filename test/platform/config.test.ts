@@ -217,6 +217,8 @@ describe('parseConfig', () => {
       claudeHome: null,
       claudeCommand: 'claude',
       ticketUrl: null,
+      ticketStatus: [],
+      ticketRefreshMinutes: 10,
       window: {
         port: 47613,
         edge: '/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',

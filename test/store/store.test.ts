@@ -117,9 +117,9 @@ function sessionPr(store: Store, sessionId = S1, url = URL1): SessionPrRow | und
 }
 
 describe('migrations', () => {
-  test('there are three migrations and the schema version is their count', () => {
-    assert.equal(MIGRATIONS.length, 3);
-    assert.equal(SCHEMA_VERSION, 3);
+  test('there are four migrations and the schema version is their count', () => {
+    assert.equal(MIGRATIONS.length, 4);
+    assert.equal(SCHEMA_VERSION, 4);
   });
 
   test('migration 1 is the SQL of design 9.2 character for character', () => {
@@ -148,6 +148,16 @@ describe('migrations', () => {
     assert.ok(match, 'design-step-2.md 10.2 has no "Migration 3" SQL block');
     assert.equal(MIGRATIONS[2], match[1]);
   });
+
+  test('migration 4 (F19) is the SQL of design-step-2.md 10.2 character for character', () => {
+    const design = readFileSync(
+      join(import.meta.dirname, '..', '..', 'docs', 'design-step-2.md'),
+      'utf8',
+    );
+    const match = /^\*\*Migration 4\*\* [^\n]*:\n\n```sql\n([\s\S]*?)\n```$/m.exec(design);
+    assert.ok(match, 'design-step-2.md 10.2 has no "Migration 4" SQL block');
+    assert.equal(MIGRATIONS[3], match[1]);
+  });
 });
 
 describe('openStore', () => {
@@ -172,7 +182,7 @@ describe('openStore', () => {
     }
   });
 
-  test('a new database has the connection settings, mode 600, version 3 and every table', (t) => {
+  test('a new database has the connection settings, mode 600, version 4 and every table', (t) => {
     const { store, path } = fresh(t);
 
     assert.equal(store.path, path);
@@ -183,7 +193,7 @@ describe('openStore', () => {
       foreignKeys: 1,
     });
     assert.equal(mode(path), 0o600);
-    assert.equal(store.getKv('schema_version'), '3');
+    assert.equal(store.getKv('schema_version'), '4');
     const tables = rawRows(
       path,
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
@@ -196,6 +206,7 @@ describe('openStore', () => {
       'prs',
       'session_meta',
       'session_prs',
+      'ticket_status',
       'transcripts',
     ]);
   });
@@ -253,7 +264,7 @@ describe('openStore', () => {
 
     const second = reopen();
 
-    assert.equal(second.getKv('schema_version'), '3');
+    assert.equal(second.getKv('schema_version'), '4');
     assert.equal(second.events().length, 1);
   });
 
