@@ -852,14 +852,14 @@ could not be resumed; see above`).
   numbers that lost digits as install's question does. It leaves `leftArrowOpensAgents` and the
   backup install made of the global config file alone. Removes the
   links that still point where install pointed them. It never removes a backup, not even with
-  `--purge`, and names each one. It creates nothing but that backup — and the copy of an older
-  database its open migrates (9.2) —: no directory, database or file, also none the user removed
+  `--purge`, and names each one. It creates nothing but that backup (and the copy of an older
+  database its open migrates, 9.2): no directory, database or file, also none the user removed
   after install. The database and its copies stay unless `--purge` is given,
   which also removes the data, state and configuration folders — carefully, since they can be the
   user's own (`SKYDECK_HOME=$HOME` makes them `~/data`, `~/state`, `~/config`; principle 6): from
   each it removes only what skydeck itself writes there, each entry of its kind (the database and
-  the files SQLite keeps beside it, its copies and their temporaries (9.2), the two links, the spool with `bad/`, `locks/`, `hook.log`,
-  notes being edited, the window's logs, a runtime directory of this store, `config.json`, and the
+  the files SQLite keeps beside it, its copies and their temporaries (9.2), the two links, the
+  spool with `bad/`, `locks/`, `hook.log`, notes being edited, the window's logs, a runtime directory of this store, `config.json`, and the
   temporaries of their writers; one list in `src/cli/purge.ts`, which a new file skydeck writes
   there must join), then the folder. A folder that is a symbolic link, is another user's, cannot be
   looked at, or holds anything else — `notes.txt`, an editor's backup, a directory where skydeck
@@ -1029,9 +1029,8 @@ by an older one at its open ("written by a newer skydeck").
 The way back is a copy (follow-up F21). Before the first migration an open runs on a database that
 already holds a schema — never a new one, and never one at the code's version, whose open costs no
 more than reading the version — the store writes a copy of the database as it is beside it,
-`<name>.schema<V>-<yyyymmddThhmmssZ>`: `V` the version the copy holds, the time in
-UTC. SQLite writes it (`VACUUM INTO`, on a read-only connection of its own) inside
-that migration's write lock, before anything is written: no commit can come between, so the copy
+`<name>.schema<V>-<yyyymmddThhmmssZ>`: `V` the version the copy holds, the time in UTC. SQLite
+writes it (`VACUUM INTO`, on a read-only connection of its own) inside that migration's write lock, before anything is written: no commit can come between, so the copy
 holds exactly the version its name states, also when several processes open the database at once,
 and whoever migrates has copied first. It is written into a temporary `.<copy's name>.<12
 hex>.tmp`, created with mode 600 before anything is in it (the copy holds the window's secret),
