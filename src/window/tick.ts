@@ -358,16 +358,18 @@ export function createTick(deps: TickDeps): Tick {
 
   /**
    * F19 (T4): a round of the tickets' statuses over the addresses of the sessions the pages listed
-   * (each row's ticket status: there only when a provider takes its address); the round reads
-   * those that are due. While one runs or waits the listed sessions are kept for the next.
+   * (each row's ticket status: there only when a provider takes its address), each once; the
+   * round reads those that are due. While one runs or waits the listed sessions are kept for the next.
    */
   const fetchTickets = (): void => {
     const tickets = deps.tickets;
     if (tickets === undefined || ticketsListed.size === 0) return;
-    const urls = rows.flatMap((row) =>
-      ticketsListed.has(row.id) && row.ticketStatus !== null ? [row.ticketStatus.url] : [],
+    const urls = new Set(
+      rows.flatMap((row) =>
+        ticketsListed.has(row.id) && row.ticketStatus !== null ? [row.ticketStatus.url] : [],
+      ),
     );
-    if (urls.length === 0 || tickets.round(urls)) ticketsListed = new Set();
+    if (urls.size === 0 || tickets.round([...urls])) ticketsListed = new Set();
   };
 
   /** The refresh and what rests on it; a failure is told once, a migrated store stops the server. */
