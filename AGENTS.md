@@ -87,13 +87,13 @@ or feed them from a pipe (`printf 'y\n' |`, `yes |`). Tell them first what a yes
 - `Turn the shortcut off? [y/N]` (while it is on): turns off Claude Code's ← shortcut in
   `~/.claude.json` (after a backup), so a ← meant for skydeck's list cannot send a session away.
 
-**5. Check it.** Once done, have them run `command -v skydeck` in a new terminal and tell you: it
-must print their `~/.local/bin/skydeck` (nothing: give them `export PATH="$HOME/.local/bin:$PATH"`
-for `~/.bashrc` or `~/.zshrc`, which you never edit; another path: tell them that program answers).
-Then run `~/.local/bin/skydeck doctor` and `~/.local/bin/skydeck ls` and read them out. doctor's
-lines start `ok`, `info` or `problem`, versions first; normal when new: `info     no events yet`, a
-`problem` (exit 1) for a missing or logged-out `gh`, `info` for the window's until it is used. Other
-problems are theirs.
+**5. Check it.** Once they say it is done, have them run `command -v skydeck` in a new terminal and
+tell you: it must print their `~/.local/bin/skydeck` (nothing: give them
+`export PATH="$HOME/.local/bin:$PATH"` for `~/.bashrc` or `~/.zshrc`, which you never edit; another
+path: tell them that program answers). Then run `~/.local/bin/skydeck doctor` and
+`~/.local/bin/skydeck ls` and read them out. doctor's lines start `ok`, `info` or `problem`,
+versions first; normal when new: `info     no events yet`, a `problem` (exit 1) for a missing or
+logged-out `gh`, `info` for the window's until it is used. Other problems are theirs.
 
 **6. Tell the human, at the end:** what changed (above), and that `skydeck uninstall` undoes it
 (keeping the database, the backups and the ← setting); that `skydeck window` is theirs, in a
