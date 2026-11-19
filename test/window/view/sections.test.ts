@@ -118,6 +118,7 @@ test('rowPayload: has exactly the fields of RowPayload — no note text, no sess
     'starting',
     'attention',
     'stack',
+    'ticketStatus', // F19: the ticket's status while one is known, else null
   ];
   assert.deepEqual(Object.keys(rowPayload(row, NONE)).sort(), [...keys].sort());
 });
