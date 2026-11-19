@@ -36,6 +36,7 @@ export function listRow(over: Partial<ListRow> & { id: string }): ListRow {
     prs: [],
     chip: null,
     ticket: null,
+    ticketStatus: null,
     session: ds({
       id: over.id,
       state,

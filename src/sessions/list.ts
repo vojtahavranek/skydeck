@@ -4,6 +4,7 @@ import { basename } from 'node:path';
 
 import { chipFor, prLevel } from '../github.ts';
 import type { ChipLevel } from '../github.ts';
+import type { TicketStatusRule } from '../platform/config.ts';
 import { isoFromNs } from '../platform/time.ts';
 import type { Ns } from '../platform/types.ts';
 import type {
@@ -13,9 +14,12 @@ import type {
   PrState,
   SessionMeta,
   SessionPrRow,
+  TicketCategory,
+  TicketStatusRow,
 } from '../store/types.ts';
 import { sanitize } from '../text/sanitize.ts';
-import { readTicket, ticketText } from './ticket.ts';
+import { statusProvider } from '../ticket-status.ts';
+import { readTicket, ticketAddress, ticketText } from './ticket.ts';
 import type { DerivedSession, Mark, State } from './types.ts';
 
 export type TitleSource = 'label' | 'name' | 'generated' | 'fallback';
@@ -41,6 +45,28 @@ export interface TicketView {
   text: string; // ticketText's: sanitised
 }
 
+/**
+ * F19 (T1): the status of a session's ticket — the ticket the user set, else the address its
+ * group gives through ticketUrl —, there exactly when a provider takes that address (a configured
+ * rule, or GitHub for an issue): the cached row of the address, or nothing known yet.
+ */
+export interface TicketStatusView {
+  /** The ticket's address: the one the status is of. */
+  url: string;
+  /** The ticket's short name (ticketText, F18's K2): sanitised. */
+  name: string;
+  /** The ticket is the one the user set (F18); false: its group's link. */
+  stored: boolean;
+  /** The last status read, sanitised; null before a read succeeded. */
+  status: string | null;
+  category: TicketCategory | null;
+  okAtNs: Ns | null;
+  /** The last attempt; null when it was never tried. */
+  triedAtNs: Ns | null;
+  /** The last attempt's failure, sanitised; null after a success. */
+  error: string | null;
+}
+
 export interface ListRow {
   id: string;
   shortId: string;
@@ -63,6 +89,8 @@ export interface ListRow {
   chip: { level: ChipLevel; count: number } | null;
   /** F18: the ticket the user set, null for none. */
   ticket: TicketView | null;
+  /** F19: its ticket's status, null without a ticket or a provider for its address. */
+  ticketStatus: TicketStatusView | null;
   session: DerivedSession;
 }
 
@@ -155,6 +183,32 @@ function ticketOf(stored: string | null, ticketUrl: string | null): TicketView |
   return { url: read.address, text: ticketText(read.address, ticketUrl) };
 }
 
+/**
+ * F19 (T1): the status view of a ticket's `url` (the stored ticket's address, else the group's
+ * link), named `name`; null when there is no address or no provider takes it. Its cached row is
+ * the one of that address in `cache`.
+ */
+function statusOf(
+  url: string | null,
+  name: string,
+  stored: boolean,
+  rules: readonly TicketStatusRule[],
+  cache: ReadonlyMap<string, TicketStatusRow>,
+): TicketStatusView | null {
+  if (url === null || statusProvider(url, rules) === null) return null;
+  const row = cache.get(url);
+  return {
+    url,
+    name,
+    stored,
+    status: shown(row?.status ?? null),
+    category: row?.category ?? null,
+    okAtNs: row?.okAtNs ?? null,
+    triedAtNs: row?.triedAtNs ?? null,
+    error: shown(row?.error ?? null),
+  };
+}
+
 /** The pull requests attached to each session (not detached, and known), sorted by url. */
 function attachedPrs(
   prs: readonly PrRow[],
@@ -184,7 +238,8 @@ function attachedPrs(
  * One row per derived session (none dropped, in the order given), every foreign string sanitised
  * (7.4): the title unless it is the label, the state detail, the directory, and the title and
  * error of each pull request. The store gives no order, so pull requests are sorted here. The
- * ticket's name is worked out with `ticketUrl` (F18, ticketOf).
+ * ticket's name is worked out with `ticketUrl` (F18, ticketOf). F19: `ticketStatus` gives the
+ * configured rules and the cached statuses; without it no row has a ticket status.
  */
 export function buildRows(input: {
   sessions: readonly DerivedSession[];
@@ -193,10 +248,13 @@ export function buildRows(input: {
   sessionPrs: readonly SessionPrRow[];
   groupPattern: string;
   ticketUrl: string | null;
+  ticketStatus?: { rules: readonly TicketStatusRule[]; rows: readonly TicketStatusRow[] };
 }): ListRow[] {
   const metaOf = new Map(input.metas.map((meta) => [meta.sessionId, meta]));
   const prsOf = attachedPrs(input.prs, input.sessionPrs);
   const groupPattern = new RegExp(input.groupPattern);
+  const statuses = input.ticketStatus;
+  const cache = new Map((statuses?.rows ?? []).map((row) => [row.url, row]));
   return input.sessions.map((session): ListRow => {
     const meta = metaOf.get(session.id);
     // A label and a group are clean when they are set (cleanLabel, cleanGroup); the database can be
@@ -212,6 +270,19 @@ export function buildRows(input: {
     const groupSource: GroupSource | null =
       setGroup !== null ? 'meta' : titleGroup !== null ? 'title' : null;
     const attached = prsOf.get(session.id) ?? [];
+    const ticket = ticketOf(meta?.ticket ?? null, input.ticketUrl);
+    // F19: the stored ticket, else the group's link (S2 12.5's ticketAddress).
+    const statusUrl = ticket?.url ?? ticketAddress(group, input.groupPattern, input.ticketUrl);
+    const ticketStatus =
+      statuses === undefined || statusUrl === null
+        ? null
+        : statusOf(
+            statusUrl,
+            ticket?.text ?? ticketText(statusUrl, input.ticketUrl),
+            ticket !== null,
+            statuses.rules,
+            cache,
+          );
     return {
       id: session.id,
       shortId: session.id.slice(0, SHORT_ID_LENGTH),
@@ -232,7 +303,8 @@ export function buildRows(input: {
       done: session.hidden,
       prs: attached.map(prView),
       chip: chipFor(attached),
-      ticket: ticketOf(meta?.ticket ?? null, input.ticketUrl),
+      ticket,
+      ticketStatus,
       session,
     };
   });
@@ -267,7 +339,8 @@ export function isListed(row: ListRow, showAll: boolean): boolean {
 
 /**
  * Case-insensitive substring match on title, group, note, dir, per PR "<repo>", "<number>",
- * "<repo>#<number>", and the ticket's name and address (F18). Empty filter matches all.
+ * "<repo>#<number>", the ticket's name and address (F18), and its status' text (F19). Empty
+ * filter matches all.
  */
 export function matchesFilter(row: ListRow, filter: string): boolean {
   if (filter === '') {
@@ -281,6 +354,8 @@ export function matchesFilter(row: ListRow, filter: string): boolean {
   if (row.ticket !== null) {
     texts.push(row.ticket.text, row.ticket.url);
   }
+  // F19: the status' text.
+  texts.push(row.ticketStatus?.status ?? null);
   return texts.some((text) => text !== null && text.toLowerCase().includes(needle));
 }
 

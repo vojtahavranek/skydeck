@@ -30,6 +30,7 @@ import {
 } from '../sessions/meta.ts';
 import type { Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
+import { statusProvider } from '../ticket-status.ts';
 import { failureKind } from './auth.ts';
 import { isBusy } from './busy.ts';
 import { splitFlags } from './flags.ts';
@@ -38,6 +39,7 @@ import type { ActionHandler, TerminalHub } from './hub.ts';
 import { createLaunches } from './launches.ts';
 import type { Launched } from './launches.ts';
 import type { PrFetches } from './pr-fetches.ts';
+import type { TicketFetches } from './ticket-fetches.ts';
 import { parsePageMessage } from './protocol.ts';
 import type { ActMessage, ResultMessage } from './protocol.ts';
 import { linkToOpen } from './windows.ts';
@@ -59,6 +61,9 @@ export interface ActionDeps {
   changed(): void;
   /** task 36's PrFetches (the server passes one). */
   prs: Pick<PrFetches, 'fetch' | 'refresh'>;
+  /** F19's TicketFetches (the server passes one). Absent: a ticket's status is read only by the
+   *  tick, and `ticket-refresh` answers that skydeck cannot do that action. */
+  tickets?: Pick<TicketFetches, 'fetch'>;
   /** Plan C 2.3: `act restore` (task 73's restorer, wired by task 74), which answers once the run
    *  has begun or with its refusal. Absent: the kind answers "skydeck cannot do that action". */
   restore?(sessionIds: readonly string[]): { ok: true } | { ok: false; error: string };
@@ -74,7 +79,16 @@ type EditAction = Extract<
   ActMessage,
   {
     kind:
-      'label' | 'group' | 'note' | 'done' | 'undone' | 'pr-refresh' | 'pr-add' | 'pr-rm' | 'ticket';
+      | 'label'
+      | 'group'
+      | 'note'
+      | 'done'
+      | 'undone'
+      | 'pr-refresh'
+      | 'pr-add'
+      | 'pr-rm'
+      | 'ticket'
+      | 'ticket-refresh';
   }
 >;
 
@@ -97,6 +111,8 @@ const NOT_STARTED = 'this session has not started yet; edit it once it runs';
 const NOTE_CHANGED =
   'the note was changed elsewhere while you edited it; your text is still in the box';
 const BUSY = "skydeck's database is busy; try again";
+/** F19: `ticket-refresh` for a session whose ticket no provider reads (or that has none). */
+const NO_TICKET_STATUS = "no status is read for this session's ticket";
 
 function refusal(message: string): Answer {
   return { ok: false, lines: [message], error: message, sessionId: null };
@@ -232,6 +248,15 @@ export function createActions(deps: ActionDeps): ActionHandler {
     }
   }
 
+  /** F19: a ticket's status read in the background; a failure to ask is logged by kind. */
+  function readStatus(kind: ActMessage['kind'], urls: string[]): void {
+    try {
+      deps.tickets?.fetch(urls);
+    } catch (error) {
+      log(`act ${kind}: the status was not asked for (${failureKind(error)})`);
+    }
+  }
+
   /** The answer to an edit that wrote: `ok` once the lists were told (`tell`). */
   function wrote(kind: ActMessage['kind']): Answer {
     tell(kind);
@@ -267,7 +292,10 @@ export function createActions(deps: ActionDeps): ActionHandler {
    * saveNote; `done`, `undone` markDone, markUndone; `pr-add`
    * attachManualPr (origin manual, an earlier detach cleared), then the fetch in the background
    * (D8), answered `attached <url>` without waiting for it; `pr-rm` detachSessionPr; `pr-refresh`
-   * the explicit refresh in the background, `ok` at once.
+   * the explicit refresh in the background, `ok` at once. F19: a ticket set that a provider reads
+   * has its status read at once in the background (`tickets.fetch`); `ticket-refresh` reads the
+   * status of the session's ticket (the one set, else its group's link) now, `ok` at once, or is
+   * refused when no provider reads it.
    */
   function edit(action: EditAction): Answer {
     const { sessionId } = action;
@@ -283,9 +311,22 @@ export function createActions(deps: ActionDeps): ActionHandler {
         setGroup(deck, sessionId, text === null ? null : cleanGroup(text));
         return wrote(action.kind);
       }
-      case 'ticket':
-        setTicket(deck, sessionId, requireTicket(action.text, deck.config.ticketUrl));
-        return wrote(action.kind);
+      case 'ticket': {
+        const address = requireTicket(action.text, deck.config.ticketUrl);
+        setTicket(deck, sessionId, address);
+        tell(action.kind);
+        if (address !== null && statusProvider(address, deck.config.ticketStatus) !== null) {
+          readStatus(action.kind, [address]);
+        }
+        return DONE;
+      }
+      case 'ticket-refresh': {
+        const url = loadRows(deck).find((row) => row.id === sessionId)?.ticketStatus?.url;
+        if (url === undefined) return refusal(NO_TICKET_STATUS);
+        if (deps.tickets === undefined) return refusal(NOT_AN_ACTION);
+        readStatus(action.kind, [url]);
+        return DONE;
+      }
       case 'note':
         return saveNote(action);
       case 'done':
@@ -353,6 +394,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'pr-add':
       case 'pr-rm':
       case 'ticket':
+      case 'ticket-refresh':
         return edit(action);
       case 'restore':
         return deps.restore === undefined

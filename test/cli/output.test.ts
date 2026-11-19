@@ -251,7 +251,16 @@ test('showJson: the session object, then note, ticket (F18), launch, unknownFlag
   assert.deepEqual(
     showJson({ ...row, ticket: { url: 'https://example.com/browse/ABC-1', text: 'ABC-1' } }, [])
       .ticket,
-    { url: 'https://example.com/browse/ABC-1', text: 'ABC-1' },
+    // F19: the status' fields, null without a ticket status.
+    {
+      url: 'https://example.com/browse/ABC-1',
+      text: 'ABC-1',
+      status: null,
+      category: null,
+      okAt: null,
+      triedAt: null,
+      error: null,
+    },
   );
   assert.deepEqual(json.launch, ['claude', '--model', 'opus']);
   assert.deepEqual(json.unknownFlags, []);

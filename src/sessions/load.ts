@@ -50,7 +50,7 @@ export function loadSessions(deck: Deck): DerivedSession[] {
 }
 
 /** loadSessions + store allMeta/prs/sessionPrs + buildRows with config.groupPattern and
- *  config.ticketUrl. */
+ *  config.ticketUrl; F19: and config.ticketStatus with the store's ticket statuses. */
 export function loadRows(deck: Deck): ListRow[] {
   const metas = deck.store.allMeta();
   return buildRows({
@@ -60,5 +60,6 @@ export function loadRows(deck: Deck): ListRow[] {
     sessionPrs: deck.store.sessionPrs(),
     groupPattern: deck.config.groupPattern,
     ticketUrl: deck.config.ticketUrl,
+    ticketStatus: { rules: deck.config.ticketStatus, rows: deck.store.ticketStatuses() },
   });
 }

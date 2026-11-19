@@ -139,6 +139,9 @@ export interface ResizeMessage {
  *  server reads it (src/sessions/ticket.ts `readTicket`) —, held to the URL limit (4,096 bytes: a
  *  link of up to 2,048 characters is sent whole); empty text removes it.
  *
+ *  F19 (S2 12.5): `ticket-refresh` names only the session: its ticket's status is read now,
+ *  whatever its age, in the background (the ticket dialog's ↻).
+ *
  *  F15 (S2 12.6): `favourite-add` saves `text` (a text field: at most 1,024 bytes) as one more
  *  favourite of the new form, last, or at place `at` (0 to MAX_FAVOURITES − 1; Undo's put-back of
  *  a removed one) when given; `favourite-remove` removes the favourite whose text is exactly
@@ -160,7 +163,12 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'open-link'; url: string }
   | { t: 'act'; id: number; kind: 'label' | 'group'; sessionId: string; text: string }
   | { t: 'act'; id: number; kind: 'note'; sessionId: string; text: string; base: string }
-  | { t: 'act'; id: number; kind: 'done' | 'undone' | 'pr-refresh'; sessionId: string }
+  | {
+      t: 'act';
+      id: number;
+      kind: 'done' | 'undone' | 'pr-refresh' | 'ticket-refresh';
+      sessionId: string;
+    }
   | { t: 'act'; id: number; kind: 'pr-add' | 'pr-rm'; sessionId: string; url: string }
   | { t: 'act'; id: number; kind: 'ticket'; sessionId: string; text: string }
   | { t: 'act'; id: number; kind: 'restore'; sessionIds: string[] }
@@ -270,6 +278,17 @@ export interface RowPayload {
   /** S2 12.2's block the row is drawn in (plan E6; the code calls a block a stack), null in none
    *  (always while filtering). */
   stack: StackPayload | null;
+  /** Follow-up F19 (S2 12.2): the status of the session's ticket while one is known (the row's
+   *  small chip after the pull requests' chip), null otherwise. Optional for the reader: absent (a
+   *  scripted row of the test helpers, a server before F19) is none. */
+  ticketStatus?: RowTicketPayload | null;
+}
+/** Follow-up F19: a row's ticket status — the ticket's short name, the status' text (at most 40
+ *  characters, sanitised) and its category (one of the six words), null for none. */
+export interface RowTicketPayload {
+  name: string;
+  status: string;
+  category: string | null;
 }
 export interface SectionPayload {
   name: 'open' | 'week' | 'earlier';
@@ -324,6 +343,27 @@ export interface SelectedPayload {
   /** Follow-up F18: `ticketUrl` is configured, so a bare key sets a ticket (the ticket dialog's
    *  placeholder names one only then). */
   ticketKeys: boolean;
+  /** Follow-up F19 (S2 12.5): the status of the session's ticket — the one the user set, else the
+   *  group's link — when a provider takes its address, null otherwise. Optional for the reader:
+   *  absent (a scripted list, a server before F19) is none. */
+  ticketStatus?: TicketStatusPayload | null;
+}
+/** Follow-up F19: what the header's chip and the ticket dialog show of a ticket's status. */
+export interface TicketStatusPayload {
+  /** The ticket's address and its short name (ticketText). */
+  url: string;
+  name: string;
+  /** The ticket is the one the user set; false: the group's link (its chip is shown only once a
+   *  status is known or was tried). */
+  stored: boolean;
+  /** The last status read and its category; null before a read succeeded. */
+  status: string | null;
+  category: string | null;
+  /** The last read that succeeded, and the last attempt; null for none. */
+  okAtNs: NsText | null;
+  triedAtNs: NsText | null;
+  /** The last attempt's failure in words, null after a success. */
+  error: string | null;
 }
 /** Follow-up F18: a session's ticket — its address as stored, and the short name its chip shows
  *  (`ticketText`, K2: sanitised text). */
@@ -801,6 +841,8 @@ const ACTS: Readonly<Record<string, Check>> = {
   'pr-rm': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
   // F18 (S2 12.5): a link or a key, held to the URL limit.
   ticket: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, text: PATH }),
+  // F19 (S2 12.5): the ticket dialog's ↻.
+  'ticket-refresh': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   // Stage C (plan C 2.2).
   restore: object({ t: ANY, id: COUNT, kind: ANY, sessionIds: SESSION_IDS }),
   'dismiss-restore': object({ t: ANY, id: COUNT, kind: ANY, bootId: BOOT }),

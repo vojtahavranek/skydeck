@@ -122,6 +122,8 @@ export function rows(
     sessionPrs?: readonly SessionPrRow[];
     groupPattern?: string;
     ticketUrl?: string | null;
+    /** F19: the configured rules and the cached statuses; none when not given. */
+    ticketStatus?: Parameters<typeof buildRows>[0]['ticketStatus'];
   } = {},
 ): ListRow[] {
   return buildRows({
@@ -131,6 +133,7 @@ export function rows(
     sessionPrs: extra.sessionPrs ?? [],
     groupPattern: extra.groupPattern ?? DEFAULT_CONFIG.groupPattern,
     ticketUrl: extra.ticketUrl === undefined ? DEFAULT_CONFIG.ticketUrl : extra.ticketUrl,
+    ...(extra.ticketStatus === undefined ? {} : { ticketStatus: extra.ticketStatus }),
   });
 }
 

@@ -181,6 +181,7 @@ function newSessionRow(terminal: TerminalInfo): ListRow {
     prs: [],
     chip: null,
     ticket: null,
+    ticketStatus: null,
     session,
   };
 }

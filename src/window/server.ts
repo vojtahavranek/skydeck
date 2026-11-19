@@ -48,6 +48,7 @@ import { createPages } from './pages.ts';
 import type { PageState, Pages } from './pages.ts';
 import { formatPidLine, parsePidLine } from './pidline.ts';
 import { createPrFetches } from './pr-fetches.ts';
+import { createTicketFetches } from './ticket-fetches.ts';
 import type {
   AttentionPayload,
   KeepAlivePayload,
@@ -543,6 +544,13 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       changed: () => tick?.reloadNow(),
       log,
     });
+    // F19 (T4): the reads of a ticket's status, one run at a time, aborted by the same stop.
+    const ticketFetches = createTicketFetches({
+      deck,
+      signal: stopPrs.signal,
+      changed: () => tick?.reloadNow(),
+      log,
+    });
     const acting = createActions({
       deck,
       hub: created,
@@ -551,6 +559,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       log,
       changed: () => tick?.reloadNow(),
       prs: prFetches,
+      tickets: ticketFetches,
       // Plan C 2.3: the banner's two actions, through the one restorer.
       restore: (sessionIds) => {
         const started = restorer.start({ sessionIds: [...sessionIds], all: false });
@@ -746,6 +755,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       },
       storeNewer,
       attention: attending.tick,
+      tickets: ticketFetches,
     });
     tick = startedTick;
 
@@ -911,6 +921,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       stopPrs.abort();
       await startedTick.stop();
       await prFetches.idle(); // aborted: it saves nothing more and starts no other (plan D8)
+      await ticketFetches.idle(); // F19: likewise
       attending.seen.stop(); // no hold ends from now on (plan B 2.7)
       await control.close(); // no command reaches it any more; its file goes with it
       await pages.bye(reason); // then an upgrade is answered 503 until the port closes (task 17)

@@ -7,7 +7,8 @@
  *   that ended since (S2 7.8), the rows loaded again by step 1's rule of the interactive list
  *   (A24), the mapping of the window's terminals to sessions (S2 7.5, 7.9) with the ended terminals
  *   whose session runs again dropped, attention's judgement of the window ends (B10), the automatic
- *   pull-request refresh for the sessions the pages list (design 7.3), and the pages' lists.
+ *   pull-request refresh for the sessions the pages list (design 7.3), the automatic round of their
+ *   tickets' statuses (follow-up F19), and the pages' lists.
  * - Every 30 seconds: the interop link (S2 6.4).
  * - Once a minute: keepers.log rotated (the keepers only append to it; S2 4.2).
  *
@@ -32,6 +33,7 @@ import type { Attention } from './attention.ts';
 import { failureKind } from './auth.ts';
 import type { KeeperHello } from './frames.ts';
 import type { TerminalHub, TerminalInfo } from './hub.ts';
+import type { TicketFetches } from './ticket-fetches.ts';
 import type { Interop } from './interop.ts';
 import type { KeepAlive } from './keepalive.ts';
 import { rotateLog } from './log.ts';
@@ -59,6 +61,9 @@ export interface TickDeps {
   /** Every second, before the keep-alive: look(); every refresh that worked: refreshed(), after
    *  the mapping. When either says true the pages' lists are pushed (plan B 2.7). */
   attention?: Pick<Attention, 'look' | 'refreshed'>;
+  /** F19: the server's reads of a ticket's status; every refresh offers it a round over the
+   *  tickets of the sessions the pages listed. Absent: no status is read by the tick. */
+  tickets?: Pick<TicketFetches, 'round'>;
 }
 
 export interface Tick {
@@ -70,7 +75,8 @@ export interface Tick {
    *  terminal as `hub.list()` gives it now — a lost keeper's exit whose program may still run is
    *  settled only once that program is gone or 60 s after the loss (plan task 82). */
   ended(hello: KeeperHello): void;
-  /** Sessions a page lists: the next automatic pull-request refresh asks about theirs. */
+  /** Sessions a page lists: the next automatic pull-request refresh asks about theirs, and the
+   *  next round of the tickets' statuses (F19) about their tickets. */
   listed(sessionIds: Iterable<string>): void;
   /** The next refresh loads the rows again, whatever the change marks say (the server wrote). */
   reload(): void;
@@ -182,6 +188,8 @@ export function createTick(deps: TickDeps): Tick {
   const unsettled = new Map<string, { hello: KeeperHello; terminal: TerminalInfo | null }>();
   /** The sessions the pages listed since the last pull-request refresh started. */
   let listed = new Set<string>();
+  /** F19: the sessions the pages listed since the last round of the tickets' statuses started. */
+  let ticketsListed = new Set<string>();
   /** The failure kind logged for the refresh failing now; null while it works. */
   let failing: string | null = null;
   /** The pages were told that the refresh fails (once until it works again). */
@@ -348,6 +356,20 @@ export function createTick(deps: TickDeps): Tick {
       });
   };
 
+  /**
+   * F19 (T4): a round of the tickets' statuses over the addresses of the sessions the pages listed
+   * (each row's ticket status: there only when a provider takes its address); the round reads
+   * those that are due. While one runs or waits the listed sessions are kept for the next.
+   */
+  const fetchTickets = (): void => {
+    const tickets = deps.tickets;
+    if (tickets === undefined || ticketsListed.size === 0) return;
+    const urls = rows.flatMap((row) =>
+      ticketsListed.has(row.id) && row.ticketStatus !== null ? [row.ticketStatus.url] : [],
+    );
+    if (urls.length === 0 || tickets.round(urls)) ticketsListed = new Set();
+  };
+
   /** The refresh and what rests on it; a failure is told once, a migrated store stops the server. */
   const refreshStep = (): void => {
     try {
@@ -357,6 +379,7 @@ export function createTick(deps: TickDeps): Tick {
       map();
       judgeWindowEnds();
       fetchPrs();
+      fetchTickets();
       deps.afterRefresh?.();
       failing = null;
       told = false;
@@ -427,7 +450,10 @@ export function createTick(deps: TickDeps): Tick {
       unsettled.set(hello.id, { hello, terminal });
     },
     listed(sessionIds) {
-      for (const id of sessionIds) listed.add(id);
+      for (const id of sessionIds) {
+        listed.add(id);
+        ticketsListed.add(id);
+      }
     },
     reload() {
       reloadOwed = true;

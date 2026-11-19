@@ -410,9 +410,15 @@ test('show --json carries the ticket the user set: its address and its name', as
 
   assert.equal(await main(['show', '0b5f', '--json'], d.ctx), EXIT.ok);
 
+  // F19: and its status' fields, null while no status is known (no provider reads this one).
   assert.deepEqual((JSON.parse(d.stdout()) as ShowJson).ticket, {
     url: 'https://example.com/browse/ABC-123',
     text: 'ABC-123',
+    status: null,
+    category: null,
+    okAt: null,
+    triedAt: null,
+    error: null,
   });
 });
 

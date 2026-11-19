@@ -52,6 +52,7 @@ test('selectedPayload: the command a resume would run, with the recorded flags a
     ticketUrl: null,
     ticket: null,
     ticketKeys: false,
+    ticketStatus: null,
   });
 });
 

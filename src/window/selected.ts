@@ -14,7 +14,7 @@ import type { ListRow } from '../sessions/list.ts';
 import { ticketAddress } from '../sessions/ticket.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { printableCommand } from '../text/shell.ts';
-import type { SelectedPayload } from './protocol.ts';
+import type { SelectedPayload, TicketStatusPayload } from './protocol.ts';
 
 /** The longest note the window edits, in UTF-8 bytes (plan D5): `act note`'s limit. */
 const NOTE_MAX_BYTES = 64 * 1024;
@@ -54,7 +54,9 @@ function noteOf(note: string | null): Pick<SelectedPayload, 'note' | 'noteTooLon
  * ticket address of the row's group (`ticketAddress` with the configuration's `groupPattern` and
  * `ticketUrl`), null without one; `ticket` the row's ticket (F18: its address and its name, as
  * buildRows read them), null without one; `ticketKeys` whether `ticketUrl` is configured (a bare
- * key then sets a ticket). Takes no lock and reads nothing but `deck.config`.
+ * key then sets a ticket); `ticketStatus` (F19) the status of the row's ticket — the stored one,
+ * else its group's link — when a provider takes its address (buildRows'), its times as text, null
+ * otherwise. Takes no lock and reads nothing but `deck.config`.
  */
 export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload {
   const launch = row.session.launch;
@@ -82,5 +84,22 @@ export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload {
     ticketUrl: ticketAddress(row.group, deck.config.groupPattern, deck.config.ticketUrl),
     ticket: row.ticket === null ? null : { url: row.ticket.url, text: row.ticket.text },
     ticketKeys: deck.config.ticketUrl !== null,
+    ticketStatus: ticketStatusOf(row),
+  };
+}
+
+/** F19: the row's ticket status as the page receives it (S2 12.5), null without one. */
+function ticketStatusOf(row: ListRow): TicketStatusPayload | null {
+  const view = row.ticketStatus;
+  if (view === null) return null;
+  return {
+    url: view.url,
+    name: view.name,
+    stored: view.stored,
+    status: view.status,
+    category: view.category,
+    okAtNs: view.okAtNs === null ? null : String(view.okAtNs),
+    triedAtNs: view.triedAtNs === null ? null : String(view.triedAtNs),
+    error: view.error,
   };
 }

@@ -8,7 +8,14 @@ import type { Ns } from '../platform/types.ts';
 import { SHORT_ID_LENGTH, flatRows } from '../sessions/list.ts';
 import type { ListModel, ListRow, PrView, TitleSource } from '../sessions/list.ts';
 import type { Holder, Mark, State } from '../sessions/types.ts';
-import type { LinkKind, LinkRow, PrChecks, PrReview, PrState } from '../store/types.ts';
+import type {
+  LinkKind,
+  LinkRow,
+  PrChecks,
+  PrReview,
+  PrState,
+  TicketCategory,
+} from '../store/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { shellJoin } from '../text/shell.ts';
 import { formatNoteLines, formatPrLine, formatRow, stateDetailSuffix } from './row.ts';
@@ -70,12 +77,40 @@ export interface HolderJson {
 export interface ShowJson extends SessionJson {
   doneAt: string | null;
   note: string | null;
-  /** F18: the ticket the user set — its address and its name (ticketText) —, null for none. */
-  ticket: { url: string; text: string } | null;
+  /** F18: the ticket the user set — its address and its name (ticketText) —, null for none; F19:
+   *  its status, the status' category, when it was last read and tried and the last failure,
+   *  each null when not known (or when no provider reads its address). */
+  ticket: TicketJson | null;
   launch: string[] | null;
   unknownFlags: string[];
   links: LinkJson[];
   holders: HolderJson[];
+}
+
+/** F18's ticket and F19's status of it (design 7.5). */
+export interface TicketJson {
+  url: string;
+  text: string;
+  status: string | null;
+  category: TicketCategory | null;
+  okAt: string | null;
+  triedAt: string | null;
+  error: string | null;
+}
+
+/** The stored ticket of `row` with its status (F19: the row's, of the same address), or null. */
+function ticketJson(row: ListRow): TicketJson | null {
+  if (row.ticket === null) return null;
+  const view = row.ticketStatus?.url === row.ticket.url ? row.ticketStatus : null;
+  return {
+    url: row.ticket.url,
+    text: row.ticket.text,
+    status: view?.status ?? null,
+    category: view?.category ?? null,
+    okAt: view?.okAtNs == null ? null : isoFromNs(view.okAtNs),
+    triedAt: view?.triedAtNs == null ? null : isoFromNs(view.triedAtNs),
+    error: view?.error ?? null,
+  };
 }
 
 function prJson(pr: PrView): PrJson {
@@ -160,7 +195,7 @@ export function showJson(row: ListRow, links: readonly LinkRow[]): ShowJson {
     ...sessionJson(row),
     doneAt: doneAt(row),
     note: row.note,
-    ticket: row.ticket === null ? null : { url: row.ticket.url, text: row.ticket.text },
+    ticket: ticketJson(row),
     launch: launch === null ? null : [...launch],
     unknownFlags: launch === null ? [] : unknownFlags(launch),
     links: linksOf(row, links).map((link) => ({
@@ -211,6 +246,15 @@ function prField(pr: PrView): string {
   return field('pr:', line);
 }
 
+/** F19: `ticket:` with its status (` · <status>`), and the last failure's words on a line under it. */
+function ticketLines(row: ListRow, ticket: string): string[] {
+  const view = row.ticketStatus?.url === ticket ? row.ticketStatus : null;
+  const status = view?.status == null ? '' : ` · ${view.status}`;
+  const lines = [field('ticket:', `${sanitize(ticket)}${status}`)];
+  if (view?.error != null) lines.push(field('', `status not read: ${view.error}`));
+  return lines;
+}
+
 /** `done:` with the time the user marked the session done; nothing for a session that is not hidden. */
 function doneField(row: ListRow): string[] {
   if (!row.done) {
@@ -224,7 +268,9 @@ function doneField(row: ListRow): string[] {
  * One session in full (design 7.5): its title, then one line per field. Nothing is left to a
  * relative time, so `nowNs` is not used; it is part of the contract of 2.9.4. `ticket` is the
  * session's ticket address, printed after the group when there is one: the ticket the user set
- * (F18), else the ticket link of its group (`ticketAddress`, S2 12.5) — the caller picks it.
+ * (F18), else the ticket link of its group (`ticketAddress`, S2 12.5) — the caller picks it. F19:
+ * when the row's ticket status is of that address, the line ends with ` · <status>` once a status
+ * is known, and a last read that failed adds a line under it, `status not read: <its words>`.
  * `inWindow` holds the pids of the holders that run in the window (`holdersInWindow`, S2 11.4):
  * their lines end with `(in the skydeck window)`. A row's holders are processes of this boot, so
  * a pid names one of them.
@@ -249,7 +295,7 @@ export function formatShow(
     field('marks:', row.marks.length === 0 ? '-' : row.marks.join(',')),
     field('label:', row.label ?? '-'),
     field('group:', row.group ?? '-'),
-    ...(ticket === null ? [] : [field('ticket:', sanitize(ticket))]),
+    ...(ticket === null ? [] : ticketLines(row, ticket)),
     field('dir:', row.dir === null || row.dir === '' ? '-' : row.dir),
     // A recorded word can hold anything a process was started with: sanitised before it is quoted.
     field('launch:', launch === null ? 'unknown' : shellJoin(launch.map(sanitize))),
