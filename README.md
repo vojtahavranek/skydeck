@@ -5,6 +5,8 @@ once. It shows which session is about what, what each one is doing and which one
 with your label, group, note, ticket and pull requests. A restart of the PC or of WSL ends every
 open session; skydeck offers to bring them back, each with the flags it was started with.
 
+AI agents asked to install or change skydeck read [AGENTS.md](AGENTS.md) first.
+
 ![The skydeck window: sessions under Open, Recent and a folded Earlier on the left, the selected session's header and terminal on the right.](docs/img/window.png)
 
 ## What you need
