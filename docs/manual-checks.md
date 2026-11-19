@@ -64,7 +64,9 @@ Expected:
   formatting; the file as it is now is kept in <backup path>`.
 - Three `linked ...` lines (fewer when links already exist), then
   `added the hook entries to ...; the file as it was is kept in ...settings.json.skydeck-backup-<UTC time>`,
-  then the question about old sessions if it is asked, then `skydeck is installed`.
+  then the question about old sessions if it is asked (after the line `"Done" only hides a
+  session from skydeck's list: …`), then `skydeck is installed` and five lines on what to do next,
+  the last naming the README of your checkout.
 - The backup exists, is readable by you only (`ls -l` shows `-rw-------`) and is the file you copied:
   `cmp /tmp/settings.before.json ~/.claude/settings.json.skydeck-backup-*` prints nothing (with
   more than one backup, name the one that was printed).
@@ -1934,7 +1936,7 @@ install would leave).
    skydeck is installed
    ```
 
-   and `echo $?` prints `0`. Any other line about the shortcut (`… kept changing while skydeck
+   then the five lines on what to do next, and `echo $?` prints `0`. Any other line about the shortcut (`… kept changing while skydeck
    wrote it …`, `could not turn Claude Code's ← shortcut off: …`, `… left … alone (…)`): write it
    down. The file is then as it was; leave out the rest of the check, and turn the shortcut off
    with `/config` in Claude Code ("← opens agents") if you want it off.

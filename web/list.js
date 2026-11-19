@@ -23,6 +23,10 @@
 // form a block, and whether the list is filtering are the server's (`list.filtering`); the page
 // decides no rule.
 //
+// Follow-up F22: while the list holds no session at all (list-text.js's `holdsNoSession`) it shows
+// a short note under the Open band (`.list-none`, `role="note"`): no session here yet, and the ways
+// to get one. It is drawn only then, so nothing of a list with sessions moves.
+//
 // A render never loses a click (contract 2.9): app.js renders when a list arrives and when only
 // the zone changed — the focus a mousedown moves, before its mouseup —, so every element the list
 // draws is made once and kept: a row keeps its element and every element inside it across
@@ -35,7 +39,15 @@
 import { needYouText } from './attention-text.js';
 import { createChips } from './chips.js';
 import { serverNow } from './format.js';
-import { countsText, footerText, rowText, sanitize, sectionText } from './list-text.js';
+import {
+  countsText,
+  footerText,
+  holdsNoSession,
+  NO_SESSION,
+  rowText,
+  sanitize,
+  sectionText,
+} from './list-text.js';
 import { blockInfo, MAY_START } from './pane.js';
 import { captionNeedText } from './search-text.js';
 
@@ -367,6 +379,22 @@ export function createList(root, hooks) {
   const body = element('list-body', 'div');
   const empty = element('list-empty', 'div');
   empty.textContent = 'No session matches the filter.';
+  // F22: the note while the list holds no session at all, under the Open band. A note, not a
+  // control: no listener, never in the tab order. Of `here`, style.css shows the line that fits
+  // the page (app-only, tab-only).
+  const none = element('list-none', 'div');
+  none.setAttribute('role', 'note');
+  for (const [text, only] of /** @type {const} */ ([
+    [NO_SESSION.head, ''],
+    [NO_SESSION.terminal, ''],
+    [NO_SESSION.here.app, ' app-only'],
+    [NO_SESSION.here.tab, ' tab-only'],
+    [NO_SESSION.keys, ''],
+  ])) {
+    const line = element(`none-line${only}`, 'div');
+    line.textContent = text;
+    none.append(line);
+  }
   const footer = element('list-footer', 'div');
   const footerLine = element('footer-text');
   const footerAction = element('footer-action');
@@ -818,6 +846,7 @@ export function createList(root, hooks) {
     const searching = filtering();
     const sections = list?.sections ?? [];
     const nothing = searching && sections.every((section) => section.count === 0);
+    const noSession = holdsNoSession(list, filter.value);
     /** @type {HTMLElement[]} */
     const lines = [];
     /** The cards drawn, in order. @type {BlockElements[]} */
@@ -898,6 +927,9 @@ export function createList(root, hooks) {
       });
       captionsAt(section.rows.length);
     }
+    if (noSession) {
+      lines.push(none);
+    }
     // Moved only where the order changed; lines no longer drawn are removed.
     const keep = new Set([...lines, ...cards.flatMap((block) => block.kids)]);
     for (const [id, row] of rowElements) {
@@ -920,6 +952,9 @@ export function createList(root, hooks) {
     }
     if (!keep.has(empty)) {
       empty.remove();
+    }
+    if (!keep.has(none)) {
+      none.remove();
     }
     /**
      * @param {HTMLElement} container

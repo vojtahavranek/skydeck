@@ -46,6 +46,7 @@ import { serverNow } from './format.js';
 import { createHelp } from './help.js';
 import { cancels, listKey, switcherKey, windowChord } from './keys.js';
 import { createList } from './list.js';
+import { holdsNoSession } from './list-text.js';
 import { createNotifications } from './notify.js';
 import { blockInfo, paneFor, sessionRow } from './pane.js';
 import { cutWords } from './search-text.js';
@@ -93,6 +94,7 @@ const dom = {
   banner: byId('banner'),
   list: byId('list'),
   rightZone: byId('right-zone'),
+  rightNone: byId('right-none'),
   cards: byId('cards'),
   terminal: byId('terminal'),
   focusZone: byId('focus-zone'),
@@ -1475,6 +1477,11 @@ function render() {
   const lines = pane.kind === 'resume' ? (state.lines.get(pane.row.id) ?? []) : [];
   const key = JSON.stringify(pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines]);
   state.pane = pane;
+  // F22: the right side's line while nothing is shown there and the list holds no session at all.
+  const blank = pane.kind === 'none' && holdsNoSession(state.list, state.view.filter);
+  if (dom.rightNone.hidden === blank) {
+    dom.rightNone.hidden = !blank;
+  }
   if (key === state.paneKey) {
     keepKeyboard(); // the list may have dropped what had the keyboard
     return;

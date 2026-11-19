@@ -199,7 +199,16 @@ linked /home/you/.local/bin/skydeck -> /home/you/skydeck/bin/skydeck
 linked /home/you/.local/share/skydeck/node -> /home/you/.nvm/versions/node/v24.19.0/bin/node
 added the hook entries to /home/you/.claude/settings.json; the file as it was is kept in /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
 skydeck is installed
+Open a new terminal: skydeck is found there (if not, add ~/.local/bin to your PATH).
+skydeck doctor checks the installation.
+skydeck ls lists the sessions: those Claude Code already has, and new ones as they start.
+skydeck window opens the window, from a terminal of your own, not from inside Claude Code.
+The guide: /home/you/skydeck/README.md
 ```
+
+The five lines after `skydeck is installed` say what to do next, and come last, after every other
+line, also from an install that finds everything in place (the last one names the README of your
+checkout).
 
 When there is no settings file yet (only Claude Code's folder, as can be the case on a fresh machine), the question
 is the same, no backup is made, and the line reads
@@ -208,9 +217,11 @@ that file again, as long as nobody changed it since: `removed /home/you/.claude/
 was none before skydeck install`.
 
 When Claude Code already has sessions with old transcripts, install asks one more question,
-**once** (a later install never asks again, whatever you answered):
+**once** (a later install never asks again, whatever you answered), after one line that says what
+"done" does (both on stderr):
 
 ```
+"Done" only hides a session from skydeck's list: nothing is deleted, it can still be resumed, and skydeck ls --all shows it.
 Mark 3 sessions older than 7 days as done? [y/N]
 ```
 
@@ -283,7 +294,7 @@ another user` and `it is read-only` (the shortcut is on and the file's owner wri
 mode 400 say: skydeck does not overrule that; a read-only file whose shortcut is off reads off);
 after the `y` also `leftArrowOpensAgents is in it more than once` and `skydeck cannot
 edit its text safely`. When the write fails, install says so on stderr, still ends with `skydeck is
-installed` and exits 0:
+installed` and the next steps, and exits 0:
 
 ```
 could not turn Claude Code's ← shortcut off: cannot write /home/you/.claude.json (EACCES); it was not changed; to turn it off: /config in Claude Code ("← opens agents")
@@ -759,7 +770,11 @@ effect.
 - **The list**, on the left, has three sections: **Open** (running or starting, in the window or in
   another terminal; the window's terminals carry the slots 1–9), **Recent** (not running, last
   active in the last 7 days) and **Earlier** (folded; a click on its header unfolds it). Done
-  sessions are hidden: the footer's `show`, or `a`, shows them.
+  sessions are hidden: the footer's `show`, or `a`, shows them. While there is no session at all
+  (none yet, or the last one done or gone), the list says so under Open and names the two ways to
+  get one: start `claude` in any terminal (it shows in the list as soon as it starts), or start one
+  in the window with Ctrl+Shift+N (`+ New` in a browser tab); the right side then says `Pick a
+  session in the list, or start a new one.`
 - **A session that is not running**: one click selects it and shows its resume card, with the
   exact command it will run. Enter, a double click or `Resume here` resumes it into the window.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
