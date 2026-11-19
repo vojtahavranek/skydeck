@@ -969,8 +969,8 @@ findings, all taken), and the plan above follows the rulings.
 Also ruled from review A: the `ticketUrl` check is the URL parser's (S2 16.4, task 35, D18); the
 dialogs move the keyboard nowhere (D2); one explicit fetch at a time (D8); a save sent twice is
 `ok` (D9); the safety tests of task 36; `d` and Done act once (D15); × has an Undo (D13); only
-buttons cancel their mousedown (D17); the design says "asked for by the user on 2026-11-15; the
-details ruled by the lead that day"; task 39 runs no command outside the suite; W27–W29 check the
+buttons cancel their mousedown (D17); the design says "the details
+ruled by the lead"; task 39 runs no command outside the suite; W27–W29 check the
 short id first and Undo after `d`.
 
 Ruled from review B (01:11Z, all taken): `header(row, selected, term, now)` with `selected` for
