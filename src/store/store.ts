@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import {
   chmodSync,
   closeSync,
@@ -566,7 +565,7 @@ function reasonOf(error: unknown): string {
  * `<path>.schema<version>-<stamp of nowNs>`, and returns that path. SQLite writes it (VACUUM INTO,
  * on a read-only connection of its own: VACUUM does not run inside a transaction), so it is a whole,
  * consistent database even while other connections have the database open. It is written into a
- * temporary `.<copy's name>.<12 hex>.tmp`, created with mode 600 before anything is in it (the
+ * temporary `.<copy's name>.tmp`, created with mode 600 before anything is in it (the
  * copy holds the window's secret), and renamed to its name only once it is complete; a name that is
  * taken is never written over. When the copy cannot be written it is a SkydeckError naming the
  * database, the copy and the reason, the temporary removed.
@@ -574,7 +573,8 @@ function reasonOf(error: unknown): string {
 function keepCopy(path: string, version: number, nowNs: Ns): string {
   const dir = dirname(path);
   const copy = `${path}.schema${version}-${copyStamp(nowNs)}`;
-  const temporary = join(dir, `.${basename(copy)}.${randomBytes(6).toString('hex')}.tmp`);
+  // No two processes write it at once: the caller holds the write lock.
+  const temporary = join(dir, `.${basename(copy)}.tmp`);
   const refusal = (reason: string): SkydeckError =>
     new SkydeckError(
       `the database ${path} was not upgraded: its copy ${copy} could not be written (${reason})`,

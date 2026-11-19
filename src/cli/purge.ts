@@ -77,10 +77,7 @@ export const RUNTIME_DIR: Spec = [
 export const DATA_DIR: Spec = [
   { name: /^skydeck\.db(?:-wal|-shm|-journal)?$/, kinds: ['file'] },
   { name: /^skydeck\.db\.schema[1-9][0-9]*-[0-9]{8}T[0-9]{6}Z$/, kinds: ['file'] },
-  {
-    name: new RegExp(`^\\.skydeck\\.db\\.schema[1-9][0-9]*-[0-9]{8}T[0-9]{6}Z\\.${HEX12}\\.tmp$`),
-    kinds: ['file'],
-  },
+  { name: /^\.skydeck\.db\.schema[1-9][0-9]*-[0-9]{8}T[0-9]{6}Z\.tmp$/, kinds: ['file'] },
   { name: 'skydeck-hook', kinds: ['symlink'] },
   { name: 'node', kinds: ['symlink'] },
   { name: new RegExp(`^\\.(?:skydeck-hook|node)\\.${HEX12}\\.tmp$`), kinds: ['symlink'] },

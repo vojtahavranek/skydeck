@@ -115,7 +115,7 @@ describe('uninstall and the copies (C5)', () => {
     const d = withOldDatabase(t);
     await run(d.platform, ['ls', '--json']);
     // A temporary of a copy that was cut off is skydeck's too.
-    writeFileSync(join(d.places.dataDir, `.skydeck.db.schema3-${STAMP}.0123456789ab.tmp`), '');
+    writeFileSync(join(d.places.dataDir, `.skydeck.db.schema2-${STAMP}.tmp`), '');
 
     const plain = await run(d.platform, ['uninstall']);
     assert.equal(plain.code, 0, plain.stderr);

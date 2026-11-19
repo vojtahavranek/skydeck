@@ -219,8 +219,9 @@ test('the copy has mode 600 from the moment it exists: another thread that looks
     mode: key.split(' ')[1],
     size,
   }));
+  // Written as its temporary `.<the copy's name>.tmp`, beside the database.
   assert.ok(
-    looks.some((look) => look.name?.startsWith('.') === true && look.size > 0),
+    looks.some((look) => look.name === `.skydeck.db.schema3-${STAMP}.tmp` && look.size > 0),
     `the copy was seen while it was written: ${JSON.stringify(looks)}`,
   );
   for (const look of looks) assert.equal(look.mode, '600', JSON.stringify(look));

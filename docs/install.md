@@ -430,7 +430,7 @@ global config file that is a symbolic link is never written.
 
 | Name | Default | Holds |
 |---|---|---|
-| `dataDir` | `${XDG_DATA_HOME:-~/.local/share}/skydeck` | `skydeck.db`, the links `node` and `skydeck-hook`. |
+| `dataDir` | `${XDG_DATA_HOME:-~/.local/share}/skydeck` | `skydeck.db` and its copies from before its upgrades ("Going back"), the links `node` and `skydeck-hook`. |
 | `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`, `locks/` (unused), a note while it is being edited, and `note-<session id>.md` after an editor that failed having changed it (`editor exited <n>; your text is in <path>`). |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
 | `claudeHome` | the key `claudeHome` of `config.json`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files, including the settings file and the backups. |
@@ -1896,8 +1896,9 @@ resize. It installs nothing; from then on the terminal's size changes only with 
 ## Checking: `skydeck doctor`
 
 `doctor` prints one line per check, `ok`, `info` or `problem`, and exits 1 when any line is a
-problem. It does not read new sessions in and creates nothing, so it can run on a broken
-installation.
+problem. It does not read new sessions in and creates nothing (but the copy of the database, when
+it is the first command to open one that an update upgrades: "Going back"), so it can run on a
+broken installation.
 
 | Check | A `problem` means |
 |---|---|

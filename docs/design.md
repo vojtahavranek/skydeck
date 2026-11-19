@@ -1030,12 +1030,13 @@ The way back is a copy (follow-up F21). Before the first migration an open runs 
 already holds a schema — never a new one, and never one at the code's version, whose open costs no
 more than reading the version — the store writes a copy of the database as it is beside it,
 `<name>.schema<V>-<yyyymmddThhmmssZ>`: `V` the version the copy holds, the time in UTC. SQLite
-writes it (`VACUUM INTO`, on a read-only connection of its own) inside that migration's write lock, before anything is written: no commit can come between, so the copy
-holds exactly the version its name states, also when several processes open the database at once,
-and whoever migrates has copied first. It is written into a temporary `.<copy's name>.<12
-hex>.tmp`, created with mode 600 before anything is in it (the copy holds the window's secret),
-synced, and renamed to its name once complete; a name that is taken is never written over. A copy
-that cannot be written stops the migration: the open fails with `the database <path> was not
+writes it (`VACUUM INTO`, on a read-only connection of its own) inside that migration's write
+lock, before anything is written: no commit can come between, so the copy holds exactly the
+version its name states, also when several processes open the database at once, and whoever
+migrates has copied first. It is written into a temporary `.<copy's name>.tmp` (the lock keeps a
+second writer away), created with mode 600 before anything is in it (the copy holds the window's
+secret), synced, and renamed to its name once complete; a name that is taken is never written over.
+A copy that cannot be written stops the migration: the open fails with `the database <path> was not
 upgraded: its copy <copy> could not be written (<reason>)` and the database is as it was (a command
 ends with exit 1, the window's server does not start). A migration that fails after its copy
 removes the copy again (the database is what the copy holds). Once a migration is committed, the
