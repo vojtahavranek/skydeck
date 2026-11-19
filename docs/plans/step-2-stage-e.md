@@ -1432,7 +1432,7 @@ brings stage B's migration 2 too, that order closes the window first). With noth
 update, in a WSL terminal of your own (not a `!` command inside Claude Code):
 
 ```sh
-cd ~/projects/mine/skydeck
+cd ~/skydeck
 git pull
 skydeck window          # restarts the window's server for the new build; your sessions keep
                         # running, the window reloads itself

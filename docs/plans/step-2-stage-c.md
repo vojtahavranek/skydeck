@@ -1958,7 +1958,7 @@ no pages mark yet, so close the window first, or a second window opens once.
 
 ```sh
 # close every skydeck window first (your sessions keep running in their keepers)
-cd ~/projects/mine/skydeck
+cd ~/skydeck
 git pull
 skydeck window          # restarts the window's server for the new build and opens the window;
                         # your sessions are there again

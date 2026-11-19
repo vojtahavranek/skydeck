@@ -541,8 +541,9 @@ that is what decides whether the fallback is tried.
 A link the window opens (a Ctrl+click on an address in a terminal, a pull request in the list or
 the header, the ticket chip) opens in your Windows default browser: skydeck hands it to
 `rundll32.exe url.dll,FileProtocolHandler`. With `window.links` `"edge"` it opens in your own Edge
-instead (install.md, "The `window` keys"). On a managed PC, security monitoring may record or flag
-each start of `rundll32.exe url.dll,FileProtocolHandler`; `"edge"` avoids it. Part 1 needs no
+instead (install.md, "The `window` keys"). With `"default"` each link is one start of
+`rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record;
+with `"edge"` skydeck starts Edge itself and does not use that program. Part 1 needs no
 change of your configuration; part 2 is for trying `"edge"`, and only if you want to. Every step
 types only into the throwaway session, never into one of your real work.
 
@@ -826,7 +827,7 @@ Write down: any stray characters; whether a key was swallowed.
 
 ## W20. Privilege management lets Edge, wsl.exe and rundll32.exe start
 
-The PC's privilege management (BeyondTrust on the development PC) must neither block nor ask for
+The PC's privilege-management software (the development PC has it) must neither block nor ask for
 `msedge.exe` started by `skydeck window` (W1), for the keep-alive's `wsl.exe`, which the server
 starts when it starts (`skydeck doctor`: `keep-alive wsl.exe running …`), or for `rundll32.exe`,
 which the server starts for every link the window opens with `window.links` `"default"` (W12).
