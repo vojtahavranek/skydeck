@@ -215,6 +215,34 @@ export function schema1Database(path: string): void {
 }
 
 /**
+ * A database at `path` as an older skydeck of schema `version` leaves it (follow-up F21, whose
+ * copy before a migration is tested on every older version): schema1Database's rows, then the
+ * SQL of migrations 2 to `version` (MIGRATIONS[1] to [version - 1]) and kv schema_version
+ * `version`, in one transaction, written with node:sqlite directly (openStore would migrate it to
+ * the newest schema). A RangeError for a version that is not one of MIGRATIONS'.
+ */
+export function schemaDatabase(path: string, version: number): void {
+  if (!Number.isSafeInteger(version) || version < 1 || version > MIGRATIONS.length) {
+    throw new RangeError(`no schema version ${version}`);
+  }
+  schema1Database(path);
+  if (version === 1) {
+    return;
+  }
+  const db = new DatabaseSync(path);
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    for (const sql of MIGRATIONS.slice(1, version)) {
+      db.exec(sql);
+    }
+    db.prepare("UPDATE kv SET value = ? WHERE key = 'schema_version'").run(String(version));
+    db.exec('COMMIT');
+  } finally {
+    db.close();
+  }
+}
+
+/**
  * What migration 4 (follow-up F19) adds to sqlite_master: the table ticket_status and the index of
  * its primary key. SQLite keeps the statement's text without its closing semicolon.
  */

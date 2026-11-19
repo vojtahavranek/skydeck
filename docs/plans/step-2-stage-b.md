@@ -1245,7 +1245,7 @@ of `--new-window` and a tab of `--print-url`): your sessions keep running in the
 Code):
 
 ```sh
-cd ~/projects/mine/skydeck
+cd ~/skydeck
 git pull
 skydeck window          # upgrades the database if it is not yet, restarts the window's server
                         # for the new build and opens the window again; every session is there

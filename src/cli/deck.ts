@@ -4,12 +4,15 @@ import { openDeck } from '../sessions/deck.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { refresh } from '../sessions/refresh.ts';
 import type { RefreshResult } from '../sessions/refresh.ts';
-import { isDatabaseFailure } from '../store/store.ts';
+import { isDatabaseFailure, migratedLine } from '../store/store.ts';
+import type { Store } from '../store/store.ts';
+import { sanitize } from '../text/sanitize.ts';
 import type { Context } from './context.ts';
 
 /**
- * openDeck(ctx.platform); refreshWithProgress when options.refresh; await fn(deck); and the store
- * is closed whichever way that ends. A failure of the database as a whole (locked, read-only, I/O,
+ * openDeck(ctx.platform), and the line of sayMigrated when that open migrated the database;
+ * refreshWithProgress when options.refresh; await fn(deck); and the store is closed whichever way
+ * that ends. A failure of the database as a whole (locked, read-only, I/O,
  * corrupt, full) that comes out of the refresh or of `fn` is rethrown as one SkydeckError that
  * names the database (exit 1), not as an internal error; every other error passes through as it is.
  */
@@ -20,6 +23,7 @@ export async function withDeck<T>(
 ): Promise<T> {
   const deck = openDeck(ctx.platform);
   try {
+    sayMigrated(ctx, deck.store);
     if (options.refresh) {
       refreshWithProgress(ctx, deck);
     }
@@ -33,6 +37,19 @@ export async function withDeck<T>(
       // Everything is committed already (each write is its own transaction, synchronous=FULL), and
       // an error from here would replace the one that ended the command.
     }
+  }
+}
+
+/**
+ * Follow-up F21, C3: when the open of `store` migrated the database, one line on stderr — never on
+ * stdout, so that a `--json` answer stays whole — that says to which schema version, and where the
+ * copy of it as it was is (`skydeck: the database was brought to schema version <n>; a copy of it
+ * as it was is at <path>`). Nothing otherwise. For every command that opens the store, also those
+ * that open it without withDeck (doctor, uninstall).
+ */
+export function sayMigrated(ctx: Context, store: Store): void {
+  if (store.migrated !== null) {
+    ctx.io.stderr(`skydeck: ${sanitize(migratedLine(store.migrated))}\n`);
   }
 }
 

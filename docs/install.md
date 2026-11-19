@@ -1,9 +1,10 @@
-# Installing skydeck on another machine
+# Installing and using skydeck
 
-This guide is enough on its own. It covers the prerequisites, the install, what the install changes,
-the configuration, the window of step 2, updating and uninstalling. The design is in
-[design.md](design.md) (step 2: [design-step-2.md](design-step-2.md)); the checks to run by hand
-after an install are in [manual-checks.md](manual-checks.md).
+New to skydeck? Start with [quick-start.md](quick-start.md): from nothing to using it in about ten
+minutes. This guide is the complete reference: the prerequisites, the install, what the install
+changes, the configuration, the window, updating and uninstalling. The design is in
+[design.md](design.md) (the window: [design-step-2.md](design-step-2.md)).
+[manual-checks.md](manual-checks.md) is the maintainer's checklist, not a guide.
 
 Commands are shown as typed. Paths such as `/home/you/...` are examples: skydeck prints yours.
 
@@ -52,14 +53,16 @@ and every session started in it — also by `resume --window`, `new --window` an
 
 - **Linux, or Windows with WSL2 (Ubuntu).** skydeck reads `/proc`. Native Windows and macOS are not
   supported. On Windows, run everything below inside the WSL distribution.
+  `skydeck install` refuses on a system skydeck cannot work on (one without
+  `/proc/sys/kernel/random/boot_id`), macOS included for now, and changes nothing there.
 - **Node.js 24.12 or newer.** Check with `node --version`. If there is none, or the default `node` is
   older, see "On a fresh WSL" below, and "Install", step 2, for a newer one beside an older default.
   skydeck has no runtime dependencies.
 - **Claude Code, installed on this Linux side and started at least once**, so that `~/.claude`
   exists. skydeck relies on the file formats of Claude Code 2.1.3xx (design section 14).
 - **`git`** to clone the repository.
-- **`gh`, the GitHub command line, logged in** (`gh auth login`; check with `gh auth status`). The
-  repository is private, so the clone needs it (or an SSH key that GitHub accepts). skydeck also uses it later to read pull-request status. Without it
+- **`gh`, the GitHub command line, logged in** (`gh auth login`; check with `gh auth status`), only
+  for the status of pull requests and GitHub issues; the clone does not need it. Without it
   everything else works; pull requests stay "not fetched" or show "can't read", and `skydeck doctor`
   reports a problem.
 - **WezTerm, optional.** Only for tabs; see above.
@@ -99,8 +102,8 @@ node --version
 of new terminals; when you already had another default, `nvm alias default 24` changes it. With a
 default of 24.12 or newer you never need `SKYDECK_NODE`.
 
-`gh`, from GitHub's own apt repository (the commands of cli.github.com's Linux instructions), and
-then the login:
+`gh` (only for the status of pull requests and GitHub issues), from GitHub's own apt repository
+(the commands of cli.github.com's Linux instructions), and then the login:
 
 ```sh
 (type -p wget >/dev/null || (sudo apt update && sudo apt install wget -y)) \
@@ -118,8 +121,7 @@ then the login:
 gh auth login
 ```
 
-`gh` asks a few questions. Let it set up Git's credentials when it offers (or choose SSH), or an
-HTTPS clone of the private repository asks for a password.
+`gh` asks a few questions; skydeck needs only that `gh auth status` says it is logged in.
 
 Claude Code itself: install it as Anthropic's setup page describes (code.claude.com/docs/en/setup;
 for Linux and WSL it gives `curl -fsSL https://claude.ai/install.sh | bash`), and run `claude` once.
@@ -127,15 +129,12 @@ for Linux and WSL it gives `curl -fsSL https://claude.ai/install.sh | bash`), an
 ## Install
 
 **1. Clone the repository.** Keep it where it can stay: the links that install makes point into it.
+The clone needs no login.
 
 ```sh
-gh auth login     # skip if you did it above
-gh repo clone vojtahavranek/skydeck ~/skydeck
+git clone https://github.com/vojtahavranek/skydeck.git ~/skydeck
 cd ~/skydeck
 ```
-
-Without `gh`: `git clone git@github.com:vojtahavranek/skydeck.git ~/skydeck`, with an SSH key that is
-registered on a GitHub account that can read the repository.
 
 **2. Check that skydeck starts.**
 
@@ -143,7 +142,12 @@ registered on a GitHub account that can read the repository.
 bin/skydeck --version
 ```
 
-It prints `0.1.0`. With a `node` older than 24.12 it prints one line and exits 1:
+It prints one line: the version, the commit the checkout is at and the date of that commit, such as
+`0.1.0 (f1fce49, 2026-11-19)`. `, modified` follows the date when files git tracks in the checkout
+were changed since that commit (a new file of your own does not count), and
+`0.1.0 (commit unknown)` means git could not tell (git is missing, or the folder is not a git
+checkout). Give this line when you report a problem. With a `node` older than 24.12 it prints one
+line and exits 1:
 
 ```
 skydeck needs Node.js 24.12 or newer but found 20.20.2; set SKYDECK_NODE to the path of a newer node binary.
@@ -199,7 +203,16 @@ linked /home/you/.local/bin/skydeck -> /home/you/skydeck/bin/skydeck
 linked /home/you/.local/share/skydeck/node -> /home/you/.nvm/versions/node/v24.19.0/bin/node
 added the hook entries to /home/you/.claude/settings.json; the file as it was is kept in /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
 skydeck is installed
+Open a new terminal: skydeck is found there (if not, add ~/.local/bin to your PATH).
+skydeck doctor checks the installation.
+skydeck ls lists the sessions: those Claude Code already has, and new ones as they start.
+skydeck window opens the window, from a terminal of your own, not from inside Claude Code.
+The guide: /home/you/skydeck/README.md
 ```
+
+The five lines after `skydeck is installed` say what to do next, and come last, after every other
+line, also from an install that finds everything in place (the last one names the README of your
+checkout).
 
 When there is no settings file yet (only Claude Code's folder, as can be the case on a fresh machine), the question
 is the same, no backup is made, and the line reads
@@ -208,9 +221,11 @@ that file again, as long as nobody changed it since: `removed /home/you/.claude/
 was none before skydeck install`.
 
 When Claude Code already has sessions with old transcripts, install asks one more question,
-**once** (a later install never asks again, whatever you answered):
+**once** (a later install never asks again, whatever you answered), after one line that says what
+"done" does (both on stderr):
 
 ```
+"Done" only hides a session from skydeck's list: nothing is deleted, it can still be resumed, and skydeck ls --all shows it.
 Mark 3 sessions older than 7 days as done? [y/N]
 ```
 
@@ -283,7 +298,7 @@ another user` and `it is read-only` (the shortcut is on and the file's owner wri
 mode 400 say: skydeck does not overrule that; a read-only file whose shortcut is off reads off);
 after the `y` also `leftArrowOpensAgents is in it more than once` and `skydeck cannot
 edit its text safely`. When the write fails, install says so on stderr, still ends with `skydeck is
-installed` and exits 0:
+installed` and the next steps, and exits 0:
 
 ```
 could not turn Claude Code's ← shortcut off: cannot write /home/you/.claude.json (EACCES); it was not changed; to turn it off: /config in Claude Code ("← opens agents")
@@ -332,6 +347,9 @@ skydeck doctor
 On a healthy machine every line is `ok` or `info`, and the exit code is 0:
 
 ```
+info     skydeck 0.1.0 (f1fce49, 2026-11-19)
+info     Claude Code 2.1.0
+info     system: Ubuntu 24.04.1 LTS, Linux 6.6.87.2-microsoft-standard-WSL2
 ok       hook entries present in /home/you/.claude/settings.json
 ok       /home/you/.local/share/skydeck/skydeck-hook -> /home/you/skydeck/bin/skydeck-hook
 ok       Node.js 24.19.0 (/home/you/.nvm/versions/node/v24.19.0/bin/node)
@@ -361,7 +379,9 @@ and exits 1. That happens, for example, after a clone with an SSH key and no `gh
 skydeck ls
 ```
 
-The steps to try by hand are in [manual-checks.md](manual-checks.md).
+What to do next, the window included, is in [quick-start.md](quick-start.md).
+[manual-checks.md](manual-checks.md) is the maintainer's checklist, not a guide: do not follow it to
+learn skydeck (some of its items uninstall skydeck or stop WSL).
 
 **7. Optional: check that this machine can run the tests.** `npm ci` is needed for development only:
 it installs TypeScript, Prettier, `@types/node`, `ws`, Playwright and the `@xterm/*` packages,
@@ -430,7 +450,7 @@ global config file that is a symbolic link is never written.
 
 | Name | Default | Holds |
 |---|---|---|
-| `dataDir` | `${XDG_DATA_HOME:-~/.local/share}/skydeck` | `skydeck.db`, the links `node` and `skydeck-hook`. |
+| `dataDir` | `${XDG_DATA_HOME:-~/.local/share}/skydeck` | `skydeck.db` and its copies from before its upgrades ("Going back"), the links `node` and `skydeck-hook`. |
 | `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`, `locks/` (unused), a note while it is being edited, and `note-<session id>.md` after an editor that failed having changed it (`editor exited <n>; your text is in <path>`). |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
 | `claudeHome` | the key `claudeHome` of `config.json`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files, including the settings file and the backups. |
@@ -561,16 +581,15 @@ C)" below).
 
 ### Before you rely on it
 
-Two things only you can check decide whether the window is safe for real work:
+**Try it first with a session you can lose**, started in a throwaway folder ("A new session" in
+"Using the window" below). Once that one works in the window, resume real sessions into it.
 
-- **WSL stops 15 seconds after its last Windows client ends**, and with it every session in the
-  window. The keep-alive ("Keeping WSL running" below) is meant to prevent that, but that it does is
-  **not verified** until manual check W14 of [manual-checks.md](manual-checks.md). Until W14 has
-  passed, keep one WSL terminal of your own open while the window runs, or set
-  `instanceIdleTimeout=-1` (below).
-- **Try it first with a throwaway session** in a throwaway folder: W1 (the window opens), W20 (the
-  PC's privilege management lets Edge and `wsl.exe` start) and W4 (Claude Code in the window). Then
-  resume real sessions into it.
+**WSL stops 15 seconds after its last Windows client ends**, and with it every session in the
+window. By default, while the window's server or any of its terminals runs, skydeck keeps WSL
+running with a hidden `wsl.exe`, the keep-alive ("Keeping WSL running" below). WSL's own setting,
+`instanceIdleTimeout=-1`, is the alternative that does not depend on skydeck. `skydeck doctor` says
+which of the two is in effect, and has a `problem` line when a server or a terminal runs and neither
+is.
 
 ### What it needs
 
@@ -696,7 +715,7 @@ In `config.json` ("Configuration" above), all optional:
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program: an absolute path in WSL. With `window.links` `"edge"` the links the window opens open with it too, in your own Edge profile. |
 | `window.profileDir` | `null` | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
 | `window.keepAlive` | `"wsl"` | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`. |
-| `window.links` | `"default"` | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. On a managed PC, security monitoring may record or flag each start of `rundll32.exe url.dll,FileProtocolHandler`; `"edge"` avoids it. |
+| `window.links` | `"default"` | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
 
 With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
 "Starting sessions in the window from a terminal (stage C)" below. An example, for a PC with two
@@ -729,10 +748,9 @@ as the server or any terminal of the window runs, also after `skydeck window --s
 itself when nothing is left. It shows in the Task Manager as `wsl.exe`. When it ends while the
 server runs, the server starts it again after 5 seconds, 30 seconds, then every 5 minutes, and the
 window says `WSL is not kept running: <reason>; skydeck tries again` (its title bar shows `WSL is
-not kept running` meanwhile). **That a `wsl.exe` started from inside WSL keeps WSL running is not
-verified yet**: manual check W14.
+not kept running` meanwhile).
 
-The alternative does not depend on it: WSL's own setting, which skydeck never writes. In
+The alternative does not depend on skydeck: WSL's own setting, which skydeck never writes. In
 `%USERPROFILE%\.wslconfig` on Windows (`C:\Users\<you>\.wslconfig`; create the file when there is
 none):
 
@@ -748,7 +766,7 @@ nothing is running that you want to keep. With the setting in effect `window.kee
 
 ```
 ok       .wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)
-info     keep-alive wsl.exe running (pid 4242, since 2026-11-14T09:12:03.000Z); that it keeps WSL running is unverified (manual check W14)
+info     keep-alive wsl.exe running (pid 4242, since 2026-11-14T09:12:03.000Z)
 ```
 
 and a `problem` line that names the setting while a server or a terminal runs and neither is in
@@ -759,7 +777,11 @@ effect.
 - **The list**, on the left, has three sections: **Open** (running or starting, in the window or in
   another terminal; the window's terminals carry the slots 1–9), **Recent** (not running, last
   active in the last 7 days) and **Earlier** (folded; a click on its header unfolds it). Done
-  sessions are hidden: the footer's `show`, or `a`, shows them.
+  sessions are hidden: the footer's `show`, or `a`, shows them. While there is no session at all
+  (none yet, or the last one done or gone), the list says so under Open and names the two ways to
+  get one: start `claude` in any terminal (it shows in the list as soon as it starts), or start one
+  in the window with Ctrl+Shift+N (`+ New` in a browser tab); the right side then says `The
+  selected session shows here.`
 - **A session that is not running**: one click selects it and shows its resume card, with the
   exact command it will run. Enter, a double click or `Resume here` resumes it into the window.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
@@ -1612,7 +1634,8 @@ the list's keys act on none: `l`, F2, `g`, `n`, `p` and `d` say `no session sele
 terminal of the window holds the session, the right side keeps it: the terminal with its header,
 whose controls edit that session as usual (a click on the title, ✎, `Note`, `Done`, `Pull
 requests`), and once its program has ended, the ended bar with Resume and Close. A session
-without a terminal of the window shows nothing on the right then, no card. `Done` in the header
+without a terminal of the window shows nothing on the right then, no card (only the line `The
+selected session shows here.` while the list holds no session at all). `Done` in the header
 of such a session says `Marked done. Stays under Open while it runs; hidden once it
 stops.` while it runs or starts, else `Marked done: hidden from the list. It comes back on new
 activity.` The new form (Ctrl+Shift+N) starts in its directory while a terminal of the window
@@ -1630,7 +1653,6 @@ manifest names no start address).
 
 ### Known limits of stage A
 
-- **The keep-alive is not verified** (above; W14).
 - **A second window** could open when `skydeck window` started a server while an old window was
   still open: after the server died or was stopped (`--stop`), or after a WSL restart. Since stage C
   the new server expects that window back and the command waits for it ("Restore after a restart
@@ -1899,11 +1921,13 @@ resize. It installs nothing; from then on the terminal's size changes only with 
 ## Checking: `skydeck doctor`
 
 `doctor` prints one line per check, `ok`, `info` or `problem`, and exits 1 when any line is a
-problem. It does not read new sessions in and creates nothing, so it can run on a broken
-installation.
+problem. It does not read new sessions in and creates nothing (but the copy of the database, when
+it is the first command to open one that an update upgrades: "Going back"), so it can run on a
+broken installation.
 
 | Check | A `problem` means |
 |---|---|
+| skydeck, Claude Code, system | Never a problem: the first three lines say what runs, so that a report of a problem can say it too. `skydeck` is the line `skydeck --version` prints. `Claude Code` is the first line that `<claudeCommand> --version` prints, without the ` (Claude Code)` at its end (at most 60 characters), or `Claude Code: version not read (<why>)`: `not installed`, `timed out after 5 s`, `exited <n>`, `ended by a signal`, `printed no version`, `could not be started: <code>` (such as `EACCES`), or `the configuration cannot be read` (then nothing is started). `system` is the distribution's name (`PRETTY_NAME` in `/etc/os-release`) and the kernel's release (on WSL it ends in `WSL2`), `unknown` for what cannot be read. |
 | hook entries | `SessionStart` or `SessionEnd` has no entry in the settings file that is exactly what install writes for `<dataDir>/skydeck-hook`. Run `skydeck install`. |
 | the hook link | `<dataDir>/skydeck-hook` does not resolve to a file. Run `bin/skydeck install` from the checkout. |
 | Node.js | The Node.js that runs `doctor` is older than 24.12. |
@@ -1945,9 +1969,10 @@ branch follows, and restarts the window's server for the new code. In this order
 
    The ids are the first 7 digits of each commit's id, for reading only; the update itself uses
    the whole id. When the new commits change `src/store/migrations.ts`, one more line says so:
-   `this update changes the database's upgrade steps: it may upgrade the database, and an upgraded
-   database cannot be opened by an older checkout` (see "There is no way back" below). With
-   nothing new it says `skydeck is up to date (main at 1a2b3c4, as origin/main)` and does nothing
+   `this update changes the database's upgrade steps: it may upgrade the database, which an older
+   checkout cannot open; a copy of the database as it was is kept first, and docs/install.md
+   ("Going back") says how to return to 1a2b3c4`, with the commit the checkout is at (see "Going
+   back" below). With nothing new it says `skydeck is up to date (main at 1a2b3c4, as origin/main)` and does nothing
    else: no server is looked at, stopped or started.
 2. **`--check` ends here**, with `run skydeck update to apply it`. Its fetch has changed the
    checkout's remote-tracking refs (`origin/main`) and nothing else: not your files, not your
@@ -1956,7 +1981,8 @@ branch follows, and restarts the window's server for the new code. In this order
    terminals in the window keep running`), then **moves the branch forward** to the commit it
    listed (a fast-forward, never a merge commit), then, when a window was open, **runs the new
    checkout's `skydeck window`**: that upgrades the database when the new code brings a new
-   version of it, starts the server of the new code and waits up to 7 seconds for the open window
+   version of it (after a copy of it, and says where the copy is: "Going back"), starts the server
+   of the new code and waits up to 7 seconds for the open window
    (`skydeck: waiting up to 7 s for the open window to come back; …`), which reloads itself and
    connects again (`skydeck window: a window is already open`). When no window was open it starts
    nothing and says `skydeck: the window's server was stopped for the update; skydeck window starts
@@ -2087,9 +2113,9 @@ It is the one that is certain:
    skydeck window
    ```
 
-   `skydeck window` upgrades the database when the new code brings a new version of it, restarts
-   the window's server for the new code and opens the window again: every session is there. Then
-   `skydeck doctor`, if you want.
+   `skydeck window` upgrades the database when the new code brings a new version of it (after a
+   copy of it, and says where the copy is: "Going back"), restarts the window's server for the new
+   code and opens the window again: every session is there. Then `skydeck doctor`, if you want.
 
 Without the window, `git pull` is all. The links point into the checkout, so the command and the
 hook are the new code at once, and the database upgrades itself the next time a command runs.
@@ -2104,9 +2130,9 @@ windows (close one). Even `skydeck window` run first is not certain: the old ser
 the command has asked it about its open windows. With every page closed there is none to come back.
 `skydeck update` has no such order to keep: it stops the old server first.
 
-**There is no way back to an older checkout.** A database that a newer skydeck has upgraded is not
-opened by an older one: every command of an older checkout — a second clone, or this one moved back
-with `git checkout` — refuses it with exit 1 and changes nothing:
+**An older checkout does not open an upgraded database.** A database that a newer skydeck has
+upgraded is not opened by an older one: every command of an older checkout — a second clone, or
+this one moved back with `git checkout` — refuses it with exit 1 and changes nothing:
 
 ```
 skydeck: the database /home/you/.local/share/skydeck/skydeck.db was written by a newer skydeck (schema version 2, this one knows 1); update skydeck
@@ -2124,15 +2150,96 @@ every checkout from before it refuses the database the same way (`schema version
 F19) upgrades it once more, to schema version 4: it adds one table for the statuses read so far,
 by address, and keeps everything else as it was; from then on every checkout from before it —
 the one of follow-up F18 included — refuses the database the same way (`schema version 4, this one
-knows 3`), and nothing takes the table away again. The way back is forward: its `update skydeck`
-is `skydeck update` in a checkout that has the command (from the update that brings it on), and
+knows 3`), and nothing takes the table away again. The way forward is its `update skydeck`:
+`skydeck update` in a checkout that has the command (from the update that brings it on), and
 `git pull` in an older one (which prints the same `update skydeck` and has no `skydeck update`).
 `skydeck update` runs on such a database, although no other command does: it says `skydeck: the
 database was written by a newer skydeck, so the window's server is not looked at; it is left as it
-is`, brings the checkout up to date and starts no server. skydeck keeps no copy of the database
-from before an upgrade: putting one back would drop everything recorded since, and a copy of the
-file taken while the window's server has it open may not be whole. An upgrade only adds to the
-database; it changes nothing that is in it.
+is`, brings the checkout up to date and starts no server. An upgrade only adds to the database; it
+changes nothing that is in it. The way back is the copy that skydeck keeps before it upgrades the
+database: "Going back", next.
+
+### Going back
+
+Before skydeck upgrades the database, it keeps a copy of it as it was, beside it, and says where:
+
+```
+skydeck: the database was brought to schema version 5; a copy of it as it was is at /home/you/.local/share/skydeck/skydeck.db.schema4-20261120T081500Z
+```
+
+The command that upgraded it says this line on standard error (in `skydeck update`, the `skydeck
+window` it runs when a window was open; otherwise the next command you run); when the window's
+server upgraded it, the line is in `<stateDir>/server.log`.
+The copy's name holds the schema version that is in it (`schema4`, which the checkout before the
+update knows) and the UTC time it was taken. SQLite writes it, whole, also while the window's
+server has the database open, with mode 600 like the database (it holds the window's key). Of the
+copies, the newest three stay: a fourth removes the oldest. A database that needs no upgrade is
+never copied. When the copy cannot be written (no room on the disk, a folder that is not writable,
+something of its name already there), the database is not upgraded, the command — or the window's
+server, which then does not start — ends with exit 1, and the database is as it was:
+
+```
+skydeck: the database /home/you/.local/share/skydeck/skydeck.db was not upgraded: its copy /home/you/.local/share/skydeck/skydeck.db.schema4-20261120T081500Z could not be written (database or disk is full)
+```
+
+Make room, or move away what is in the way, then run the command again.
+
+To go back to the code from before an update, and to the database as it was then, in a WSL
+terminal of your own:
+
+1. Close every skydeck window (its ×) and every browser tab of a `--print-url` address, then stop
+   the window's server:
+
+   ```sh
+   skydeck window --stop
+   ```
+
+   It says `stopped skydeck's window server; 2 terminals in the window keep running` (or `the
+   window's server is not running`); your sessions keep running in their keepers. Quit the
+   interactive list (`skydeck` with no command) in any other terminal too: from here on no skydeck
+   may have the database open.
+2. Put the checkout back at the commit the update left. `skydeck update` named it: the first id of
+   its first line (`3 new commits on origin/main (1a2b3c4..5d6e7f8):`, so `1a2b3c4`), and the line
+   about the database's upgrade steps (`… says how to return to 1a2b3c4`); `git pull` shows it as
+   `Updating 1a2b3c4..5d6e7f8`.
+
+   ```sh
+   cd ~/skydeck
+   git reset --keep 1a2b3c4
+   ```
+
+   It prints nothing; `git status` then says `Your branch is behind 'origin/main' by 3 commits, and
+   can be fast-forwarded.` (`--keep` refuses, and changes nothing, when a file you changed in the
+   checkout is one that the reset would change.)
+3. Move the database aside, and put the copy in its place (the folder is `<dataDir>`, "Where things
+   are": another one when `SKYDECK_HOME` or `XDG_DATA_HOME` is set):
+
+   ```sh
+   cd ~/.local/share/skydeck
+   ls skydeck.db*
+   mv skydeck.db ~/skydeck.db.newer
+   cp skydeck.db.schema4-20261120T081500Z skydeck.db
+   ```
+
+   `ls` lists the database and its copies; take the copy the line named (without the line: the one
+   whose name has the newest time). When `ls` also lists `skydeck.db-wal` or `skydeck.db-shm`, a
+   skydeck still has the database open — end it, and `ls` again — or one that was cut off left
+   them: then move them with the database before the `cp` (`mv skydeck.db-wal
+   ~/skydeck.db.newer-wal` and `mv skydeck.db-shm ~/skydeck.db.newer-shm`). Left beside the copy,
+   they would be read as part of it.
+4. Start again: `skydeck window`. The checkout's code opens the copy, whose schema version it
+   knows, and every session is in the window.
+
+What skydeck recorded after the copy was taken is lost: the labels, notes, groups and done marks
+set since, the pull requests and tickets attached since, and what it noted of the sessions since.
+The window's key comes back as the copy holds it: when you replaced the key since (`skydeck window
+--new-secret`), the old one is valid again, so run `skydeck window --new-secret` once more. The
+sessions themselves are not touched: their transcripts are Claude Code's own files, which
+skydeck only reads, and it reads them again. Neither are Claude Code's other files, its settings
+and the hook entries in them, nor skydeck's links. The database you moved aside (`~/skydeck.db.newer`)
+is the newer one: this checkout cannot open it; keep it until you update again, or delete it. The
+next `skydeck update` (once the mistake is fixed) upgrades the database again, and keeps a copy of
+it first.
 
 ## When the checkout or Node.js changes
 
@@ -2188,15 +2295,17 @@ agents"), or set `leftArrowOpensAgents` to `true` in `~/.claude.json` (or remove
 your sessions again. The backup install made of that file stays, and is not named; it holds your
 account details, so remove it yourself when you no longer need it.
 
-The database, the spool and `config.json` stay. Sessions that are running keep running: skydeck
-never stops a process. `uninstall` creates nothing, except that one backup when it needs it.
+The database, its copies (`skydeck.db.schema<V>-<time>`, "Going back"), the spool and
+`config.json` stay. Sessions that are running keep running: skydeck never stops a process.
+`uninstall` creates nothing, except that one backup when it needs it (and, when it is the first
+command to open a database an update upgrades, the copy kept before the upgrade).
 
 ```sh
 skydeck uninstall --purge
 ```
 
 does the same and then removes the data, state and configuration folders (`<dataDir>`, `<stateDir>`,
-`<configDir>`): from each only what skydeck writes there — the database, the spool, `hook.log`,
+`<configDir>`): from each only what skydeck writes there — the database and its copies, the spool, `hook.log`,
 `config.json`, the window's logs and runtime folder, a link inside them that `uninstall` left alone —
 and then the folder. It cannot be undone. A folder that holds anything else (a file of yours, an
 editor's backup), is a symbolic link, is another user's or cannot be read is left alone, whole; the
@@ -2228,6 +2337,7 @@ kept the backup /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
 |---|---|
 | The code, and what the links point to | The checkout (`~/skydeck` above). |
 | Labels, groups, notes, done marks, pull requests, what was recorded | The database, `<dataDir>/skydeck.db`. |
+| The database as it was before its last upgrades (the newest three) | `<dataDir>/skydeck.db.schema<V>-<time>` (see "Going back") |
 | What the hook recorded and the next command has not read yet | `<stateDir>/spool/`; files that could not be read go to `<stateDir>/spool/bad/`. |
 | The hook's own errors | `<stateDir>/hook.log` |
 | The settings file and its backups | `<claudeHome>/settings.json`, `<claudeHome>/settings.json.skydeck-backup-*` |
@@ -2246,6 +2356,7 @@ file.
 
 | You see | Do |
 |---|---|
+| `skydeck: the database … was not upgraded: its copy … could not be written (<reason>)` | Before an upgrade skydeck keeps a copy of the database, and this one could not be written: make room on the disk, or move away what is in the way (the reason says which), then run the command again. The database is as it was ("Going back"). |
 | `skydeck needs Node.js 24.12 or newer but found ...` | Set `SKYDECK_NODE` to a newer `node` (Install, step 2), then run `bin/skydeck install` so that the link `<dataDir>/node` points at it. |
 | `skydeck: cannot run 'node'; install Node.js or set SKYDECK_NODE ...` (exit 127) | There is no `node` on `PATH` and no working link. Install Node.js 24.12 or newer, or set `SKYDECK_NODE`. |
 | `skydeck: not started through bin/skydeck` | A `--here` start needs the launcher. Run skydeck as `~/.local/bin/skydeck` or `bin/skydeck`, not as `node bin/bootstrap.mjs`. |

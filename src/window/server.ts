@@ -23,6 +23,7 @@ import { SkydeckError } from '../platform/errors.ts';
 import type { HttpListener, Ns, Platform } from '../platform/types.ts';
 import { openDeck } from '../sessions/deck.ts';
 import type { Deck } from '../sessions/deck.ts';
+import { migratedLine } from '../store/store.ts';
 import type { LaunchSpec, Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { createActions } from './actions.ts';
@@ -387,6 +388,8 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     lockTaken = true;
 
     const log = serverLog(platform, join(deck.places.stateDir, 'server.log'), options.foreground);
+    // F21, C3: this server's own open migrated the database; a command would say it on stderr.
+    if (deck.store.migrated !== null) log(`server: ${migratedLine(deck.store.migrated)}`);
     // What the restore run and the launches are handed must never throw (tasks 72, 73: a hook
     // that throws ends a whole restore, its sessions' locks held for up to 60 s).
     const quietLog = (line: string): void => {

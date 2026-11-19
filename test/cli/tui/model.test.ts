@@ -334,7 +334,7 @@ test('g then enter changes nothing; clearing the group takes a deliberate delete
 });
 
 test('g starts empty when the group was only taken from the title, or there is none', () => {
-  const fromTitle = listRow({ id: S1, group: 'DE-1', groupSource: 'title', title: 'DE-1 fix' });
+  const fromTitle = listRow({ id: S1, group: 'ABC-1', groupSource: 'title', title: 'ABC-1 fix' });
   const none = listRow({ id: S2 });
   assert.deepEqual(press(initModel([fromTitle], T0), 'g').model.input, {
     purpose: 'group',

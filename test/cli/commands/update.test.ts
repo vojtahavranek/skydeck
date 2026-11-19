@@ -629,7 +629,7 @@ describe('skydeck update: what it reports (U4)', () => {
 
   test('the database line: when src/store/migrations.ts differs between HEAD and the new commit, or is gone — not when it is the same', async (t) => {
     const DB =
-      "this update changes the database's upgrade steps: it may upgrade the database, and an upgraded database cannot be opened by an older checkout\n";
+      'this update changes the database\'s upgrade steps: it may upgrade the database, which an older checkout cannot open; a copy of the database as it was is kept first, and docs/install.md ("Going back") says how to return to 0123456\n';
     const cases: [string, Record<string, string>, boolean][] = [
       [
         'changed',
@@ -978,9 +978,14 @@ describe('skydeck update: the database at step 1 (ruled by the plan owner)', () 
     const doctor = await run(tp.platform, ['doctor']);
     assert.equal(doctor.code, 1);
     assert.ok(
-      doctor.stdout.startsWith(
-        `problem  database ${tp.places.dbPath} cannot be opened (${line}); the checks that need it are skipped\n`,
-      ),
+      // After the three version lines of follow-up F20.
+      doctor.stdout
+        .split('\n')
+        .slice(3)
+        .join('\n')
+        .startsWith(
+          `problem  database ${tp.places.dbPath} cannot be opened (${line}); the checks that need it are skipped\n`,
+        ),
       doctor.stdout,
     );
     // The type that tells it apart for skydeck update keeps the name a reader prints.

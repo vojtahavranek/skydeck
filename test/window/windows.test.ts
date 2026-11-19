@@ -29,7 +29,7 @@ test('windowsPath keeps spaces, parentheses and non-ASCII names', () => {
     windowsPath('/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'),
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   );
-  assert.equal(windowsPath('/mnt/c/Users/Vojtěch'), 'C:\\Users\\Vojtěch');
+  assert.equal(windowsPath('/mnt/c/Users/me/Łódź café'), 'C:\\Users\\me\\Łódź café');
 });
 
 test('windowsPath maps the root of a drive to its root', () => {

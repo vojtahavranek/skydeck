@@ -103,7 +103,7 @@ describe('skydeck update with the real git: applying (U5, U8)', () => {
     assert.equal(
       u.stdout,
       `1 new commit on origin/main (${short(old)}..${short(made)}):\n  ${short(made)}  a new upgrade step\n` +
-        "this update changes the database's upgrade steps: it may upgrade the database, and an upgraded database cannot be opened by an older checkout\n" +
+        `this update changes the database's upgrade steps: it may upgrade the database, which an older checkout cannot open; a copy of the database as it was is kept first, and docs/install.md ("Going back") says how to return to ${short(old)}\n` +
         'run skydeck update to apply it\n',
     );
   });
@@ -406,7 +406,7 @@ describe('the real launcher across an update of itself (U6, U8)', () => {
       u.stdout,
       `1 new commit on origin/main (${short(old)}..${short(made)}):\n  ${short(made)}  a new launcher and poisoned modules\n` +
         // src/store/migrations.ts is one of the modules replaced
-        "this update changes the database's upgrade steps: it may upgrade the database, and an upgraded database cannot be opened by an older checkout\n" +
+        `this update changes the database's upgrade steps: it may upgrade the database, which an older checkout cannot open; a copy of the database as it was is kept first, and docs/install.md ("Going back") says how to return to ${short(old)}\n` +
         `updated to ${short(made)}\n`,
     );
     assert.equal(u.status, 0);

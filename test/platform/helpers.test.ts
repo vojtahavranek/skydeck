@@ -566,7 +566,7 @@ describe('testContext', () => {
     const code = await main(['--version'], c.ctx);
 
     assert.equal(code, 0);
-    assert.match(c.stdout(), /^\d+\.\d+\.\d+\n$/);
+    assert.match(c.stdout(), /^\d+\.\d+\.\d+ \(commit unknown\)\n$/);
   });
 
   test('without t, touching the platform throws a message that says what to do', () => {

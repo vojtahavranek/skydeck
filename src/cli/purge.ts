@@ -69,9 +69,15 @@ export const RUNTIME_DIR: Spec = [
 // ---------------------------------------------------------------------------------------------
 // Step 1's directories (design 9.1)
 
-/** `<dataDir>`: the database and the files SQLite keeps beside it; install's two links and their temporaries. */
+/**
+ * `<dataDir>`: the database and the files SQLite keeps beside it; the copies the store keeps before
+ * a migration and their temporaries (F21, src/store/store.ts); install's two links and their
+ * temporaries.
+ */
 export const DATA_DIR: Spec = [
   { name: /^skydeck\.db(?:-wal|-shm|-journal)?$/, kinds: ['file'] },
+  { name: /^skydeck\.db\.schema[1-9][0-9]*-[0-9]{8}T[0-9]{6}Z$/, kinds: ['file'] },
+  { name: /^\.skydeck\.db\.schema[1-9][0-9]*-[0-9]{8}T[0-9]{6}Z\.tmp$/, kinds: ['file'] },
   { name: 'skydeck-hook', kinds: ['symlink'] },
   { name: 'node', kinds: ['symlink'] },
   { name: new RegExp(`^\\.(?:skydeck-hook|node)\\.${HEX12}\\.tmp$`), kinds: ['symlink'] },

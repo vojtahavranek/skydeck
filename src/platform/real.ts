@@ -121,7 +121,8 @@ function isMissing(error: unknown): boolean {
 // The last time handed out, so that a clock that steps backwards cannot make the time go back.
 let lastNs: Ns = 0n;
 
-function realClock(): Clock {
+/** The clock of realPlatform; also the store's when it is given none (openStore). */
+export function realClock(): Clock {
   return {
     nowNs(): Ns {
       const now = BigInt(Date.now()) * NS_PER_MS;
@@ -403,6 +404,10 @@ function realProc(): Proc {
     cmdline(pid) {
       const bytes = isPid(pid) ? read(`/proc/${pid}/cmdline`) : null;
       return bytes === null ? null : new Uint8Array(bytes);
+    },
+    kernelRelease() {
+      const release = lineOf(read('/proc/sys/kernel/osrelease'));
+      return release === '' ? null : release;
     },
     memAvailableMb() {
       const kb = /^MemAvailable:\s+(\d+)\s*kB/m.exec(

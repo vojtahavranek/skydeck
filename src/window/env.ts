@@ -64,6 +64,20 @@ function dropLauncherVariables(env: Record<string, string>): void {
   delete env[LAUNCHER_CACHE];
 }
 
+/**
+ * `env`'s variables that are set, without the launcher's own (dropLauncherVariables): the
+ * environment of a Claude Code program skydeck starts outside the window, as `skydeck doctor`'s
+ * `<claudeCommand> --version` (follow-up F20).
+ */
+export function withoutLauncherVariables(env: Env): Record<string, string> {
+  // fromEntries defines own properties: a variable named __proto__ stays a variable.
+  const result: Record<string, string> = Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+  dropLauncherVariables(result);
+  return result;
+}
+
 /** Removes `name` from `env` and returns its value, or undefined when it was absent. */
 function takeOut(env: Record<string, string>, name: string): string | undefined {
   const value = env[name];
