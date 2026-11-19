@@ -241,7 +241,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | `src/cli/commands/` | `resume` and `new`: `--window`; `restore` with `"terminal": "window"` (11.4). `show`: `(in the skydeck window)` (11.4). | C |
 | the interactive list (`src/cli/tui/`) | `R` with `"terminal": "window"` sends `POST /resume` (11.4) and shows the answer's lines the way it shows a tab launch's lines today. Nothing else in the list changes. | C |
 | `src/store/`, `src/sessions/`, `src/cli/` | Follow-up F18, a session's ticket (design 7.1, 12.5): migration 3 (10.2) adds `session_meta.ticket_url`; `readTicket`, `ticketText` and `setTicket`; a list row carries the ticket, which the expiry rule (design 7.2) and the filter (design 7.4) count; the new command `skydeck ticket set` / `clear`; `show` prints the ticket as `ticket:` and in `--json`; `t` in the interactive list. | F18 |
-| `src/ticket-status.ts`, `src/github.ts`, `src/platform/config.ts`, `src/store/`, `src/sessions/list.ts`, `src/window/ticket-fetches.ts`, `tick.ts`, `actions.ts`, `protocol.ts`, `src/cli/`, `web/` | Follow-up F19, a ticket's status (design 7.3, 12.2, 12.3, 12.5): the provider of an address (a `ticketStatus` rule, else a GitHub issue), the configured program and its answer, the due rule and the fetch in `src/ticket-status.ts`, the issues' key and batch in `src/github.ts`; the keys `ticketStatus` and `ticketRefreshMinutes` (16.4); migration 4 (10.2) adds the table `ticket_status`; a list row and `list.selected` carry the status (8.2.3) and the filter finds its text (12.8); the server reads it in the background, one read at a time (10.1; the actions `ticket` and `ticket-refresh`); `skydeck ticket refresh`, `ticket set` and `show` print it; the page draws the header's chip, the row's small chip and the dialog's line and ↻ (12.2, 12.5). | F19 |
+| `src/ticket-status.ts`, `src/github.ts`, `src/platform/config.ts`, `src/store/`, `src/sessions/list.ts`, `src/window/ticket-fetches.ts`, `tick.ts`, `actions.ts`, `protocol.ts`, `src/cli/`, `web/` | Follow-up F19, a ticket's status (design 7.3, 12.2, 12.3, 12.5): the provider of an address (a `ticketStatus` rule, else a GitHub issue: `statusProvider` in `src/github.ts`, beside the issues' key and batch), the configured program and its answer, the due rule and the fetch in `src/ticket-status.ts`; the keys `ticketStatus` and `ticketRefreshMinutes` (16.4); migration 4 (10.2) adds the table `ticket_status`; a list row and `list.selected` carry the status (8.2.3) and the filter finds its text (12.8); the server reads it in the background, one read at a time (10.1; the actions `ticket` and `ticket-refresh`); `skydeck ticket refresh` reads and prints it and `show` prints it (`ticket set` reads nothing, as F18); the page draws the header's chip, the row's small chip and the dialog's line and ↻ (12.2, 12.5). | F19 |
 | `package.json`, `.prettierignore`, `tsconfig.json` | Development dependencies: `playwright`, `ws`, and the `@xterm/*` packages of 16.6 (exact versions); scripts `vendor`, `test:page`, `check` (17.5); `vendor/` added to `.prettierignore`, so that the vendored files are kept byte for byte; `web/tsconfig.json` beside the root one. | A |
 | `.github/workflows/ci.yml` | 17.5: `shellcheck` by name, the jobs `lint`, `unit (i/n)` and `page (i/n)` side by side with Node's `--test-shard`, the page suite on the newest leg only, on a runner pin of its own, the time limits. | A |
 
@@ -2543,8 +2543,12 @@ which hold in the light scheme, the dark one and the forced themes alike).
 Purple (merged) is not used. The words stay, so the colour never says anything alone. The two chips
 stand on the grounds that `test/web/pr-tints.test.ts` measures (a row, hovered and selected; the
 header), so the 4.5 : 1 rule above holds for them; `test/web/ticket-status-tints.test.ts` pins
-the mapping: each category with a colour takes its tint's two `--pr-*` variables, and the rule
-writes no colour of its own.
+the mapping — each category with a colour takes its tint's two `--pr-*` variables, and the rule
+writes no colour of its own — and the rule itself for the six categories: each one's text (its
+tint, or `--dim`) has at least 4.5 : 1 against its own background and every ground a chip stands
+on (`--panel`, `--panel2`, `--sel`), light and dark; the page suite compares each chip, in the row
+and in the header, with a pull request's chip of the same tint drawn beside it, light, dark and
+under both forced themes.
 
 ### 12.4 Attention: needs you and seen
 
@@ -2865,8 +2869,9 @@ could not be run: <the first line of the reason>`, and, for an issue GitHub does
 GitHub's own message, else `not found`. Two addresses of one issue are asked once.
 
 *When it is read.* At once, in the background, when a ticket is set or changed in the window (`act
-ticket`) and a provider takes the new address, and by `skydeck ticket set`, which waits for the
-read and prints its result; by the server's tick (10.1), for the sessions the pages list, when a
+ticket`) and a provider takes the new address (`skydeck ticket set` reads nothing, ruled by the
+lead: F18's behaviour and output; the status then comes with the server's next round while a page
+lists the session, or with `skydeck ticket refresh <ref>`); by the server's tick (10.1), for the sessions the pages list, when a
 status is due — never tried, or its last attempt older than `ticketRefreshMinutes` (16.4; 10 by
 default), or, when its category is `done` or `closed`, older than 12 hours instead —; and whatever
 its age, on demand: the dialog's ↻ (below; `act ticket-refresh`, 8.2.3) and `skydeck ticket
@@ -2912,10 +2917,9 @@ drawn again by each `list`, so that a saved result shows in it.
 and, after a failure, a line under it, `status not read: <words>`, indented to the values' column;
 its `--json`'s `ticket` (still only the ticket the user set, F18) gains `status`, `category`,
 `okAt` and `triedAt` (ISO times) and `error`, each null when not known, also when no provider reads
-it. `skydeck ticket set` prints `<short id> ticket: <address> · <status>` once the read is done
-(after a failure ` (status not read: <words>)`, and nothing after the address when no provider
-takes it); `skydeck ticket refresh <ref>` reads that session's ticket now — the one set, else its
-group's — and prints the same line, or `<short id>: no status is read for this session's ticket`;
+it. `skydeck ticket set` prints F18's line and reads nothing; `skydeck ticket refresh <ref>`
+reads that session's ticket now — the one set, else its group's — and prints `<short id> ticket:
+<address> · <status>` (after a failure ` (status not read: <words>)`), or `<short id>: no status is read for this session's ticket`;
 without `<ref>` it reads every ticket of the sessions `skydeck ls` lists, each address once, and
 prints `fetched <n>, failed <m>`. `show`, `ls` and the interactive list print what is cached and run
 nothing; `ls` is unchanged.

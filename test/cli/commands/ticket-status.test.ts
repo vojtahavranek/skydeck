@@ -1,5 +1,5 @@
-// Follow-up F19 (T4, T8): a ticket's status on the command line. `ticket set` reads the new
-// ticket's status at once; `ticket refresh <ref>` reads the session's now, whatever its age (the
+// Follow-up F19 (T4, T8): a ticket's status on the command line. `ticket set` reads none (ruled:
+// F18's behaviour and output); `ticket refresh <ref>` reads the session's now, whatever its age (the
 // ticket set, else its group's link), `ticket refresh` every listed session's; `show` prints the
 // status on the `ticket:` line and a failure's words under it, `show --json` under `ticket`. The
 // status command is answered by a runner of the test's own: no program, no network.
@@ -28,29 +28,28 @@ function statusRunner(stdout: string, code = 0, stderr = '') {
   );
 }
 
-test('ticket set reads the status at once and prints it after the address', async (t) => {
+test('ticket set reads no status (ruled): it runs nothing and prints the address alone, as F18', async (t) => {
   const d = twoSessions(t, { config: CONFIG });
   const runner = statusRunner('In Progress\ndoing\n');
 
   assert.equal(await main(['ticket', 'set', '0b5f', 'ABC-123'], withRunner(d, runner)), EXIT.ok);
-
-  assert.equal(d.stdout(), `0b5f3c1e ticket: ${TICKET} · In Progress\n`);
-  assert.deepEqual(
-    runner.calls.map((call) => [call.command, call.args]),
-    [['ticket-status', ['ABC-123', TICKET]]],
-  );
-  assert.equal(d.deck.store.ticketStatuses()[0]?.category, 'doing');
-});
-
-test('ticket set of an address no provider reads runs nothing and prints the address alone', async (t) => {
-  const d = twoSessions(t, { config: CONFIG });
-  const runner = statusRunner('x');
   assert.equal(
-    await main(['ticket', 'set', '0b5f', 'https://example.com/x/1'], withRunner(d, runner)),
+    await main(
+      ['ticket', 'set', '1c6a', 'https://github.com/owner/repo/issues/5'],
+      withRunner(d, runner),
+    ),
     EXIT.ok,
   );
-  assert.equal(d.stdout(), '0b5f3c1e ticket: https://example.com/x/1\n');
-  assert.equal(runner.calls.length, 0);
+
+  assert.equal(
+    d.stdout(),
+    `0b5f3c1e ticket: ${TICKET}\n1c6a4d2f ticket: https://github.com/owner/repo/issues/5\n`,
+  );
+  assert.equal(runner.calls.length, 0, 'no status command, no gh');
+  assert.deepEqual(d.deck.store.ticketStatuses(), []);
+  // `ticket refresh <ref>` is the command line's way to read it.
+  assert.equal(await main(['ticket', 'refresh', '0b5f'], withRunner(d, runner)), EXIT.ok);
+  assert.ok(d.stdout().endsWith(`0b5f3c1e ticket: ${TICKET} · In Progress\n`), d.stdout());
 });
 
 test('ticket refresh <ref> reads now whatever the age; a failure prints its words and keeps the old status', async (t) => {

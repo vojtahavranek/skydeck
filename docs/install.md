@@ -1131,7 +1131,8 @@ except Exception as error:
 ```
 
 **When it is read.** At once, in the background, when you set or change a ticket in the window
-(and `skydeck ticket set` waits for the read and prints its result); then by the window's server,
+(`skydeck ticket set` reads nothing: the window reads the status of a session it lists at its next
+round, or run `skydeck ticket refresh <ref>`); then by the window's server,
 for the sessions its pages list: when the address was never tried, or its last attempt is older than
 `ticketRefreshMinutes` (10 by default; 1 to 1440), and, for a status whose category is `done` or
 `closed`, when it is older than 12 hours instead. The server reads one ticket at a time, so one

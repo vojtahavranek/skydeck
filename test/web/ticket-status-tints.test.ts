@@ -6,7 +6,7 @@
 // and the header), so its contrast rule holds for them as it holds for the pull requests' chips.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { test } from 'node:test';
+import { describe, test } from 'node:test';
 
 const css = (file: string): string =>
   readFileSync(new URL(`../../web/${file}`, import.meta.url), 'utf8').replaceAll(
@@ -57,5 +57,92 @@ test("the chips draw the tint as the pull requests' chips do, and their grey wit
     'line-height: 16px;',
   ]) {
     assert.ok(chip.includes(line) && row.includes(line), line);
+  }
+});
+
+// --- the contrast rule for the six categories (as test/web/pr-tints.test.ts has it) -------------
+
+/** A category's text colour and its own background: its tint's pair, or the chip's grey. */
+const OF_CATEGORY: Record<string, { text: string; own: string | null }> = {
+  blocked: { text: '--pr-red', own: '--pr-red-bg' },
+  review: { text: '--pr-amber', own: '--pr-amber-bg' },
+  doing: { text: '--pr-blue', own: '--pr-blue-bg' },
+  done: { text: '--pr-green', own: '--pr-green-bg' },
+  todo: { text: '--dim', own: null },
+  closed: { text: '--dim', own: null },
+};
+
+/** Where the chips stand: the style sheet and rule that draw that ground, and its variable. */
+const GROUNDS = [
+  ["a row of the list (the row's chip)", 'style.css', '.list-zone', '--panel'],
+  ['a hovered row', 'list.css', '.list-row:hover', '--panel2'],
+  ['the selected row', 'list.css', ".list-row[data-selected='true']", '--sel'],
+  ["the header (the ticket's chip)", 'cards.css', '.card-header', '--panel'],
+] as const;
+
+/** The light and dark custom properties of a style sheet's :root blocks. */
+function schemes(file: string): Record<'light' | 'dark', Map<string, string>> {
+  const text = css(file);
+  const read = (block: string): Map<string, string> =>
+    new Map(
+      [...block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(([, n, v]) => [
+        n ?? '',
+        (v ?? '').trim(),
+      ]),
+    );
+  const light = /:root\s*\{([^}]*)\}/.exec(text);
+  const dark =
+    /@media \(prefers-color-scheme: dark\)\s*\{\s*:root:not\(\[data-theme='light'\]\)\s*\{([^}]*)\}/.exec(
+      text,
+    );
+  assert.ok(light !== null && dark !== null);
+  return { light: read(light[1] ?? ''), dark: read(dark[1] ?? '') };
+}
+
+function luminance(hex: string): number {
+  const channel = (at: number): number => {
+    const c = Number.parseInt(hex.slice(at, at + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
+
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+describe("the six categories' contrast: at least 4.5 : 1 on each ground the chips stand on", () => {
+  const vars = schemes('style.css');
+  test('the grounds are still the variables measured', () => {
+    for (const [where, file, selector, name] of GROUNDS) {
+      const text = css(file);
+      const at = text.indexOf(`\n${selector} {`);
+      assert.ok(at !== -1, `${file} ${selector}`);
+      const body = text.slice(at, text.indexOf('}', at));
+      assert.equal(/\bbackground(?:-color)?:\s*var\((--[\w-]+)\)/.exec(body)?.[1], name, where);
+    }
+  });
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`${scheme}: every category's text on its own background and on each ground`, (t) => {
+      const value = (name: string): string => {
+        const found = vars[scheme].get(name);
+        assert.ok(found !== undefined && /^#[0-9a-f]{6}$/i.test(found), `${scheme} ${name}`);
+        return found;
+      };
+      for (const [category, { text, own }] of Object.entries(OF_CATEGORY)) {
+        const grounds = [...new Set(GROUNDS.map(([, , , name]) => name as string))];
+        const against = [...(own === null ? [] : [own]), ...grounds];
+        const measured = against.map((ground) => {
+          const ratio = contrast(value(text), value(ground));
+          assert.ok(
+            ratio >= 4.5,
+            `${scheme} ${category} ${text} on ${ground}: ${ratio.toFixed(2)} : 1`,
+          );
+          return `${ground} ${ratio.toFixed(2)}`;
+        });
+        t.diagnostic(`${scheme} ${category} (${text}): ${measured.join(', ')}`);
+      }
+    });
   }
 });

@@ -25,11 +25,7 @@ test('ticket set <ref> <link> stores the address, and the row has it with its na
     await main(['ticket', 'set', '0b5f', 'https://github.com/owner/repo/issues/5'], d.ctx),
     0,
   );
-  // F19: a GitHub issue's status is read at once; the fake runner answers nothing gh would.
-  assert.equal(
-    d.stdout(),
-    '0b5f3c1e ticket: https://github.com/owner/repo/issues/5 (status not read: gh returned output skydeck could not read)\n',
-  );
+  assert.equal(d.stdout(), '0b5f3c1e ticket: https://github.com/owner/repo/issues/5\n');
   assert.equal(d.stderr(), '');
   assert.equal(d.deck.store.meta(S1)?.ticket, 'https://github.com/owner/repo/issues/5');
   assert.equal(d.deck.store.meta(S2), null);

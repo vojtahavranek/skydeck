@@ -1,7 +1,8 @@
 // `skydeck ticket set <ref> <link-or-key> | ticket clear <ref>` (follow-up F18; design 7.1, 7.5):
 // set a session's ticket — a whole link, or a key that ticketUrl turns into one — or remove it.
 // Follow-up F19: `ticket refresh [<ref>]` reads the status of a session's ticket now (of every
-// listed session's without <ref>), whatever its age; `ticket set` reads the new ticket's at once.
+// listed session's without <ref>), whatever its age. `ticket set` reads nothing (ruled): the status
+// comes with the window's next round for a listed session, or with `ticket refresh <ref>`.
 import { UsageError } from '../../platform/errors.ts';
 import type { Deck } from '../../sessions/deck.ts';
 import { isListed } from '../../sessions/list.ts';
@@ -25,8 +26,8 @@ const SPEC: ArgSpec = {
                                    ? & or #), or a key like ABC-123, which ticketUrl in config.json
                                    turns into its link (a key needs ticketUrl); the address is what
                                    is stored, so a later ticketUrl does not move it. An empty text
-                                   removes the ticket. Its status is read at once when a GitHub
-                                   issue's or a ticketStatus rule's.
+                                   removes the ticket. Its status is not read here: the window
+                                   reads it for a session it lists, or use ticket refresh <ref>.
   ticket clear <ref>               remove the session's ticket
   ticket refresh [<ref>]           read the status of the session's ticket now (the one set, else
                                    its group's link), or of every listed session's without <ref>
@@ -90,14 +91,11 @@ export const command: Command = {
       const address = subcommand === 'set' ? requireTicket(text, deck.config.ticketUrl) : null;
       const row = resolveRef(ref, loadRows(deck));
       setTicket(deck, row.id, address);
-      if (address === null) {
-        ctx.io.stdout(`${row.shortId} ticket cleared\n`);
-        return EXIT.ok;
-      }
-      // F19: its status at once (a failure is saved and shown, never thrown).
-      await fetchTicketStatuses(statusDeps(deck), [address]);
-      const after = loadRows(deck).find((candidate) => candidate.id === row.id);
-      ctx.io.stdout(`${row.shortId} ticket: ${sanitize(address)}${statusSuffix(after)}\n`);
+      ctx.io.stdout(
+        address === null
+          ? `${row.shortId} ticket cleared\n`
+          : `${row.shortId} ticket: ${sanitize(address)}\n`,
+      );
       return EXIT.ok;
     });
 

@@ -452,9 +452,10 @@ never received a prompt has no transcript (14).
   `open` (`doing`), `closed` (`done`), `not planned` or `duplicate` (`closed`). It is cached by
   address, one fetch and one row for the sessions that share one (design-step-2.md 10.2), and a
   fetch that fails keeps the status it had and its age and saves the failure's words, as a pull
-  request's does. It is read only by the window's server and by `skydeck ticket set` and `ticket
-  refresh` — `ls`, `show` and the interactive list print the cache and run nothing —: at once when
-  a ticket is set or changed; for the sessions the window's pages list, when the address was never
+  request's does. It is read only by the window's server and by `skydeck ticket refresh` — `ls`,
+  `show`, `ticket set` (ruled: F18's behaviour) and the interactive list print the cache or write
+  the ticket and run nothing —: at once when a ticket is set or changed in the window; for the
+  sessions the window's pages list, when the address was never
   tried or its last *attempt* is older than `ticketRefreshMinutes` (default 10) — for a status
   whose category is `done` or `closed`, older than 12 hours —; and whatever its age by the ↻ of the
   ticket's dialog and `skydeck ticket refresh`. The server runs one read at a time, so one status
@@ -500,7 +501,7 @@ The interactive list is built as two pure functions — `reduce(model, key)` and
 | `skydeck show <ref> [--json] [--refresh]` | One session: state, marks, project directory, its `ticket:` — the ticket set on it (7.1), else the address `ticketUrl` gives its group (design-step-2.md 12.5; that one not in `--json`), with ` · <status>` when its status is known (7.3) and, after a failed read, a line under it with the failure's words —, launch command (and the flags in it that skydeck does not know, which a resume does not pass on), links, note, whether it is done and since when, pull requests, holders. `--refresh` as for `ls`, for this session's pull requests. |
 | `skydeck label <ref> [<text>]` / `group <ref> [<text>]` | Set; without text (or with an empty text), clear. The text is all the arguments after `<ref>`, joined by one space. |
 | `skydeck note <ref> [--set <text>]` | Edit in `$VISUAL` / `$EDITOR` (7.1), or set directly. |
-| `skydeck ticket set <ref> <link-or-key>` / `ticket clear <ref>` / `ticket refresh [<ref>]` | Set the session's ticket from a link or a key, replacing the one before; remove it (7.1; F18). An empty text removes it too. `set` then reads the new ticket's status at once when a provider takes it, waits for the read and prints the result; `refresh` reads the status of the session's ticket, or of every listed session's without `<ref>`, now, whatever its age (7.3; F19). |
+| `skydeck ticket set <ref> <link-or-key>` / `ticket clear <ref>` / `ticket refresh [<ref>]` | Set the session's ticket from a link or a key, replacing the one before; remove it (7.1; F18). An empty text removes it too. `set` reads no status (ruled, as F18 left it): the window's server reads it for a session it lists, or `refresh` reads it; `refresh` reads the status of the session's ticket, or of every listed session's without `<ref>`, now, whatever its age (7.3; F19). |
 | `skydeck done <ref>` / `undone <ref>` | Hide / show. |
 | `skydeck pr add <ref> <url>` / `pr rm <ref> <url>` / `pr refresh` | Attach, detach, fetch status. |
 | `skydeck new [--label <text>] [--group <text>] [--here \| --tab \| --window] [-- <claude flags>]` | Start a new session in the current directory (7.7); `--window` in the skydeck window (design-step-2.md 11.4). |
