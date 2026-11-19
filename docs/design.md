@@ -940,8 +940,8 @@ relative (8).
 Configuration keys, all optional: `terminal` (`here` or `wezterm`, and since step 2 `window`,
 design-step-2.md 16.4; default `here`), `wezterm.domain`, `groupPattern`, `firstRunDoneAfterDays`,
 `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`,
-`claudeHome`, `claudeCommand`, `ticketUrl` (design-step-2.md 16.4; asked for by the user on
-2026-11-15), `ticketStatus` and `ticketRefreshMinutes` (follow-up F19, 7.3; design-step-2.md 16.4).
+`claudeHome`, `claudeCommand`, `ticketUrl` (design-step-2.md 16.4), `ticketStatus` and
+`ticketRefreshMinutes` (follow-up F19, 7.3; design-step-2.md 16.4).
 Unknown keys are an error.
 
 ### 9.2 Database
@@ -1062,7 +1062,7 @@ by an older one at its open ("written by a newer skydeck"), and there is no way 
 - `bin/skydeck` is a `sh` launcher. It picks the Node.js binary — `$SKYDECK_NODE`, else
   `<dataDir>/node`, else `node` on `PATH` — and a small plain-JavaScript bootstrap refuses
   versions older than 24.12 with a clear message.
-- `bin/skydeck-hook` is `sh` only (5.1). Measured on the target machine: about 8 ms per event,
+- `bin/skydeck-hook` is `sh` only (5.1). Measured on one machine: about 8 ms per event,
   against about 110 ms for a Node.js hook that opens the database.
 - `node:sqlite` is a release candidate in Node.js 24 and renames its classes in Node.js 26;
   keeping it inside `src/store/` limits that change to one module.
@@ -1177,7 +1177,7 @@ inspecting local files, unless marked otherwise.
 | `--session-id <uuid>` starts a session with a chosen id. | documentation |
 | `-n <name>` together with `--resume <id>` keeps the session id and gives the session that name; a later `-n` wins over a stored name, and a resume without `-n` keeps the stored name. | observed |
 | Closing the terminal (SIGHUP, or the terminal side of the pty closing) fires `SessionEnd` with reason `other` and removes the live-session file, also in the middle of a turn. SIGKILL fires nothing and leaves the file with its last `status`. | observed |
-| `claude -p` and SDK runs write no live-session file that is left behind: on 2026-11-13 all 178 files in `<claudeHome>/sessions/` on the development machine (left-over ones of killed processes included) had `entrypoint` `cli` and `kind` `interactive`, although `claude -p` runs on that machine every day. So the hook, not a live-session file, is what shows that a scripted run holds a session (5.3). A `claude -p` prompt is written to the transcript with `turnOrigin` `sdk`, so it is not user input (5.6). | observed (local files) |
+| `claude -p` and SDK runs write no live-session file that is left behind: all the files in `<claudeHome>/sessions/` on one machine where `claude -p` runs too (left-over ones of killed processes included) had `entrypoint` `cli` and `kind` `interactive`. So the hook, not a live-session file, is what shows that a scripted run holds a session (5.3). A `claude -p` prompt is written to the transcript with `turnOrigin` `sdk`, so it is not user input (5.6). | observed (local files) |
 | In a hook's environment `$CLAUDE_CODE_ENTRYPOINT` is `cli` for an interactive session and `sdk-cli` for `claude -p`. Hooks fire for `-p` runs, and their command line contains `-p`. After `/clear`, the environment and the hook input both carry the new session id. | observed |
 | A session that never received a prompt has no transcript. | observed |
 | `←` on the empty prompt of a session started in a terminal moves its conversation into a background session with a new id and opens agent view in that terminal; what is typed there then goes to the background session. Its program runs under a `claude bg-pty-host` process whose parent is init, outside the terminal's process tree. The live-session file of the background session has `kind` `bg` and a `jobId` (in the one case seen, the first eight hex digits of the new session's id); the live-session file of the terminal's own program gets `parkedJobId` with the same value. skydeck reads none of these three fields. | observed (Claude Code 2.1.311, 2026-11-16, follow-up F11); `kind` `bg`, `jobId`, `parkedJobId` not documented |

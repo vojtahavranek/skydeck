@@ -1,20 +1,20 @@
 # skydeck — design of step 2: the window
 
 Status: agreed design for step 2, to be built in the stages of section 19. Section 12 (what the
-window shows) was approved by the user on 2026-11-13 after seeing the mockup. This document is the
+window shows) was approved on a mockup. This document is the
 source of truth for step 2, next to [design.md](design.md), which stays the source of truth for
 everything step 1 built; when the code and either document disagree, one of them has a bug.
 "Design 7.6" means section 7.6 of design.md; a bare section number means a section of this
 document.
 
-Every fact this design relies on carries its status in section 21: **verified** (on the
-development machine, with a stand-in program, never the real `claude`; or by the user on their
+Every fact this design relies on carries its status in section 21: **verified** (on a WSL
+machine, with a stand-in program, never the real `claude`; or by hand on a Windows
 PC, which says so), **documentation** (with the page), **inferred**, or **UNVERIFIED** (a person
 must check it by hand; section 18).
 
 ## 1. Purpose
 
-The user installed step 1 on 2026-11-13 and used it with about 105 sessions (8 running). Resume
+Step 1 is in use with many sessions, several of them running. Resume
 works; but the overview is poor, the list is hard to move around in, and switching between
 sessions is slow, because every running session still lives in a terminal tab of its own.
 
@@ -83,8 +83,8 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   `/usr/bin/python3` (missing, or not executable) the launcher starts `serve` directly and writes
   one line saying that the server's dumps are not prevented to `server.log` (to stderr when that
   file cannot be written); a python3 elsewhere on `PATH` may still run the keepers, so the
-  server can open terminals all the same. That a limit of 1 aborts the dump on this
-  machine's kernel (6.18, not read) is **UNVERIFIED** (check W24).
+  server can open terminals all the same. That a limit of 1 aborts the dump on WSL's
+  kernel 6.18 (not read) is **UNVERIFIED** (check W24).
 - **Principle 6 (nothing is destroyed or moved automatically; skydeck never stops a process)** is
   made precise: skydeck never stops a `claude` process or a keeper (stopping a keeper would end
   its session). It may stop its own server and its own keep-alive process (6.1). The window has no
@@ -1018,8 +1018,8 @@ The server's environment (5.2), with:
   window looks like another session's child or carries its messaging token. The list lives in
   `src/claude/terminal.ts` and is **to be confirmed** (check W23): known today
   `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID` (design 14, in a hook's
-  environment) and `CLAUDECODE` (in the environment of a Claude Code session's command, seen on the
-  development machine on 2026-11-13); seen in the
+  environment) and `CLAUDECODE` (in the environment of a Claude Code session's command, seen on one
+  machine on 2026-11-13); seen in the
   environment of a Claude Code session's command, origin not yet known, `CLAUDE_CODE_CHILD_SESSION`,
   `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`,
   `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_EFFORT`. Names only, never a prefix: `CLAUDE_CODE_USE_BEDROCK`
@@ -1781,7 +1781,7 @@ or `https`, and is still at most 2,048 characters once the WHATWG URL parser has
 (so it cannot start with `-`; percent-encoding can make it several times longer, and the
 re-serialised URL is what the Windows program gets), and holds no `"` and no backslash: it becomes
 one argument of a Windows program, and either can change how that program splits its command line.
-Asked for by the user on 2026-11-15, ruled by the lead that day: the server opens it in the user's
+Ruled by the lead: the server opens it in the user's
 **Windows default browser**, where they are logged in, by running
 `/mnt/c/Windows/System32/rundll32.exe` with exactly two arguments, `url.dll,FileProtocolHandler` and
 the re-serialised URL (`explorer.exe <url>` is not used). That entry point opens what it is given as
@@ -2246,10 +2246,9 @@ gives them back when its program never started (7.8).
 ## 12. What the window shows
 
 This section is the design of the step 2 UI research (the mockup kept with the research notes)
-and its nine picks (12.11). The user looked at the mockup on 2026-11-13 and approved it ("the list
-looks ok", "overall I like it"; an Edge app window that runs like the mockup is "completely ok"),
-so what the mockup shows is decided; the pull-request chip's rule for several open pull requests
-(12.3) is the user's ruling of the same day. What the mockup cannot show — the key policy (12.9)
+and its nine picks (12.11). The mockup was approved, and so was an Edge app window that runs like
+it, so what the mockup shows is decided; the pull-request chip's rule for several open pull
+requests (12.3) is the user's ruling. What the mockup cannot show — the key policy (12.9)
 and a crashed terminal needing the user (12.4) — are the lead's decisions under the user's
 go-ahead to proceed. Every rule that orders, groups, filters or judges attention is a
 pure function in `src/window/view/` (4.3).
@@ -2259,21 +2258,21 @@ pure function in `src/window/view/` (4.3).
 A title bar, the list on the left, the selected session's header and terminal on the right, a key
 bar at the bottom. The list has three sections:
 
-- **Open**: every session that is running or starting, in the window or elsewhere (about 8).
+- **Open**: every session that is running or starting, in the window or elsewhere.
   Never folded. Order: terminals of the window by slot, then terminals without a slot by opening
   time, then sessions running in another terminal by the time they started. The order does not
   change while the window is open except when a row joins or leaves; attention is a mark on the
   row (12.4), never a move.
 - **Recent**: not running, last activity within 7 days (a rolling 7 days, not the calendar week),
   most recent first. Its title is `Recent`; its key in the code and the protocol is `week`. Its
-  header's tooltip says `last active in the last 7 days` (follow-up F5, on the owner's words
-  "Maybe recent or something like thatt?"); the other two headers have no tooltip.
+  header's tooltip says `last active in the last 7 days` (follow-up F5); the other
+  two headers have no tooltip.
 - **Earlier**: the rest, folded by default; the folded header shows the count and the time span.
   A click on its header folds and unfolds it, as ← and → do, and leaves the keyboard on the list
   (ruled by the plan owner, plan task 27).
 
-Each section's header is a band (follow-up F17, 2026-11-18; the owner, shown six pictures: "Lets go
-for X"): across the whole width of the list column, edge to edge and square, on the page's own
+Each section's header is a band (follow-up F17, 2026-11-18, picked from six
+pictures): across the whole width of the list column, edge to edge and square, on the page's own
 background (`--bg`: a step darker than the list's `--panel`, so the band looks sunk into the list),
 with a 1 px line above and below it in the line colour, 28 px high with them — within 1 px of the
 header it replaced (27.85 px), and below the rows' scroll margin, so that a row or a caption the
@@ -2289,8 +2288,8 @@ the keyboard brings into view from below rests right under its band, so that the
 list's top edge over the one stuck there, with no strip of that one above it (the other rows keep
 their scroll margin). The bar is decoration: it is not announced, and it is no control of its own (a
 click on it is a click on its header). Why a band: since F9 the cards of the blocks have a stronger
-edge than a faint rule, and the old header — a small faint title with no line — was lost among them
-(the owner: "the resent open and eatlier are not much visible now"); the band is the one thing
+edge than a faint rule, and the old header — a small faint title with no line — was lost among them;
+the band is the one thing
 stronger than the cards, in the dark scheme too, and adds next to no height (half a pixel for the
 three). Its words stay at least 4.5 : 1 against the band and Open's bar at least 3 : 1, in both
 schemes (`test/web/section-band.test.ts`).
@@ -2329,8 +2328,8 @@ fold; a session that needs you is counted there and in no other count, so that t
 order Ctrl+Shift+J goes, the server sends with each `list` (8.2.3 `needYou`): the page decides no
 rule (4.3; stage B, plan B7).
 
-**The theme switch** (follow-up F13, on the owner's question of 2026-11-18: "I set up to follow the
-OS environment but if I wanned to switch, I probably cannot?"). The page is light or dark as the
+**The theme switch** (follow-up F13, 2026-11-18: so that the theme can also be chosen by
+hand). The page is light or dark as the
 system is (Windows' Settings, Personalization, Colors: the `prefers-color-scheme` media query), and
 changes with it while it is open. A small button in the title bar, right before `Switch…` and drawn
 as it is, shows a half circle and the state's word: `Auto` (the system's, the default), `Light` or
@@ -2389,12 +2388,11 @@ equal declaration by declaration. Check W34.
   inside as ordinary rows; open by default. A click on the caption, or ← on a session of the
   card, closes it to its caption alone; a click on the caption, or → on it, opens it again. A
   filter flattens every block: flat rows, each with its group, no card. (Ruled on 2026-11-16,
-  follow-up F3, on the owner's words "it could group them togather (expanded by default, could
-  collaps) … by the state and after that by group"; until then only Recent and Earlier stacked,
+  follow-up F3: blocks in every section, open by default, grouped by the state and then by
+  group; until then only Recent and Earlier stacked,
   closed by default, and running sessions never did. Drawn as a card since follow-up F9,
-  2026-11-17, on the owner's words "I dont like the grouping. It looks like main session and some
-  subsessions like that. Also its hard to say what belongs where. The groups could be more visible
-  distingueshed."; before it the first session was the block's head, with `ORB-2107 ×4`, the
+  2026-11-17, so that a group reads as one and no session looks like another's sub-session; before
+  it the first session was the block's head, with `ORB-2107 ×4`, the
   others indented under it, and a closed block was its head and a line `+3 more`.)
 - Slot numbers 1–9 show at the left of Open's rows.
 
@@ -2518,7 +2516,7 @@ interactive list: open and finished pull requests are counted apart.
 | none open; 3 merged, 1 closed | `3 merged` |
 | none open; 1 closed | `closed` |
 
-**Colours** (asked for by the user on 2026-11-16, follow-up F4; the tints ruled by the lead). Each
+**Colours** (follow-up F4; the tints ruled by the lead). Each
 state has one quiet tint: on a chip, its text colour and a faint background of the same hue
 (`--pr-<tint>` and `--pr-<tint>-bg` in `web/style.css`, with values for both colour schemes), with
 the size, border and weight of a grey chip — the header's chip looks as the list's, with the
@@ -2528,8 +2526,8 @@ state on a line of the pull-request dialog, the quick switcher's chip — only t
 the tint's colour, without a background. A chip that sums several takes the tint of the state its
 text names, its `+<n>` too. The words stay, so the colour never says anything alone; an element
 names its state by its level (design 7.3), the page's own name for it, never a text of the
-server's. The tints stay below the attention marks (12.4), the user's one condition ("needs you /
-finished should be still more important"): only a row that needs you has a left bar and its
+server's. The tints stay below the attention marks (12.4), the user's one condition (needs
+you and finished stay the stronger marks): only a row that needs you has a left bar and its
 reason's line in the reason's colour, and its title is the boldest (700; a running session's is
 600, any other row's 400); each tint is softer than the mark's colour of its family, and its text
 is no stronger than an ordinary row's title (`--dim`): on `--panel` and on `--sel` its contrast is
@@ -2712,8 +2710,8 @@ shown: the directory is one line, cut with an ellipsis when it is long (the whol
 the page, is selected and copied whole, and is its tooltip); the short id is never cut (ruled by
 the plan owner, review of plan task 29).
 
-**The flags it was started with** (asked for by the owner on 2026-11-18, follow-up F16; the details
-ruled by the lead that day and on its reviews). The last item of the second line, after the short
+**The flags it was started with** (follow-up F16; the details
+ruled by the lead and on its reviews). The last item of the second line, after the short
 id: the flags the session was started with as the hook recorded them (design 5.3) — first the ones
 a resume passes on again (design 7.6; `passedOnFlags`) with their values, in the order recorded,
 then the ones the recording knows only by name (in no table: a resume does not pass them on), bare,
@@ -2764,7 +2762,7 @@ together when it ends, all of them ended by the server's stop; one that fails sh
 read`, as after `pr add`. A note saved in the window removes the note file a failed editor kept,
 as `note --set` does (design 7.1).
 
-**The ticket link** (asked for by the user on 2026-11-15; the details ruled by the lead that day).
+**The ticket link** (the details ruled by the lead).
 The group stays only a group (design 7.1), and nothing in the core depends on one ticket system
 (design 1): with `ticketUrl` set (16.4), the group chip opens the session's ticket. When the group
 holds a ticket key — the text `groupPattern` matches in it, made of letters, digits, `-`, `_` and
@@ -2787,7 +2785,7 @@ through a program the user configures: "A ticket's status" below). `skydeck show
 address as `ticket:` after `group:` while the session has no ticket of its own (below; its `--json`
 does not hold the group's link), followed by its status when one is read (below).
 
-**The ticket of a session** (asked for by the owner on 2026-11-18 and 19, follow-up F18, step 1;
+**The ticket of a session** (follow-up F18, step 1;
 the details ruled by the lead). A session has at most one ticket, which the user sets: a JIRA
 issue, a GitHub issue, a ticket of any tracker — whatever has an `http` or `https` address. It is
 set from one text (design 7.1): a whole link, taken as the window opens it (linkToOpen's form, 9.6:
@@ -2836,7 +2834,7 @@ ticket as `ticket:` (in place of the group's link) and in its `--json`; `skydeck
 (design 7.4). Nothing about a ticket is read from a transcript; its status, where a provider reads
 one, is fetched and shown (below, follow-up F19), and nothing else about it is fetched.
 
-**A ticket's status** (asked for by the owner on 2026-11-19, follow-up F19, step 2 of the ticket
+**A ticket's status** (follow-up F19, step 2 of the ticket
 field; the details ruled by the lead). *Whose.* The ticket whose status is read is the session's
 own (above), else the address its group gives through `ticketUrl` (the group chip's link, above).
 *By whom.* A status exists when a provider takes that address, tried in this order: the first rule
@@ -2982,8 +2980,8 @@ nothing; `ls` is unchanged.
   over the key bar — have one colour of their own (`--edge`), softer than the page's other lines
   in both colour schemes; the focused zone's coloured top edge (12.9) is the focus sign and keeps
   its colour. The notice bars over the terminal keep their own line (`--line2`): they lie over
-  the terminal, not on its frame, and must stand out from its text (ruled, F2's review 1). The owner's request of
-  2026-11-16 (follow-up F2): before it, the text touched the list and the header, and xterm.js's
+  the terminal, not on its frame, and must stand out from its text (ruled, F2's review 1). Follow-up F2:
+  before it, the text touched the list and the header, and xterm.js's
   own style painted the 4 px and 2 px it had there black, which read as a hard border, above all
   in the light scheme.
   What the server says about a terminal is shown over that terminal, as the page's own text and
@@ -3032,7 +3030,7 @@ nothing; `ls` is unchanged.
   it); design 7.7's refusals apply. It starts in
   the window (11.3). Esc in the form closes it: the form is the page's own, not the terminal's
   (12.9; accepted by the plan owner, review of plan task 26).
-  **Favourite flags** (follow-up F15, the owner's request of 2026-11-18): a ★ at the end of the
+  **Favourite flags** (follow-up F15): a ★ at the end of the
   flags field saves the field's whole text as a favourite, and a row of chips under the field
   shows every favourite, in the order they were added. skydeck keeps them for the window, in the
   store (10.2): every window and every server after a restart see the same list; not in
@@ -3261,7 +3259,7 @@ did (ruled on 2026-11-16, follow-up F3: unchanged by F9 but for its first sessio
 
 ### 12.9 Keys and focus
 
-No leader key: an app window reserves no keys (section 21; on the user's PC every chord tested
+No leader key: an app window reserves no keys (section 21; on a Windows PC every chord tested
 reached the page, Alt+Space excepted). The window takes only Ctrl+Shift chords with a letter or a
 digit, and Ctrl+Tab; never Alt, a bare Ctrl+letter, a function key or Esc, which belong to Claude
 Code and the shell. Ctrl+Shift+- stays with Claude Code (undo).
@@ -3532,17 +3530,18 @@ the manifest (`<link rel="manifest">`), whose `name` and `short_name` are `skyde
 `standalone`, and `icons` the PNGs. Whether Edge's app window and its taskbar button show it is
 check W3. Low priority: stage E (19).
 
-As built (stage E, plan E14; the picture changed by follow-up F10, 2026-11-17, on the owner's words
-"change the icon, use this [a picture], but use appropriate sizes", and a second picture for the
+As built (stage E, plan E14; the picture changed by follow-up F10, 2026-11-17, to the owner's
+picture, drawn at the sizes the window uses, and a second picture for the
 small sizes; the small files redrawn by follow-up F12, 2026-11-18, and the 16 pixel one by
 follow-up F14 the same day):
 
 - **The pictures** are the owner's, two of them, 1254 × 1254 pixels, RGBA, transparent outside
-  their dark navy rounded tile, kept exactly as they were received (their own `caBX` chunks, the
-  content credentials of the image service that made them, stay) in `scripts/icons/`, not under
-  `web/`: they are not served and not part of the build. `skydeck-source.png` (1,691,903 bytes) has
+  their dark navy rounded tile, in `scripts/icons/`, not under `web/`: they are not served and not
+  part of the build. Their image data is kept exactly as it was received; the one metadata chunk
+  each came with was removed (follow-up F27, 2026-11-19), so they hold IHDR, IDAT and IEND only,
+  like the drawn files. `skydeck-source.png` (1,670,010 bytes) has
   a blue-to-violet cloud outline and three stacked terminal windows, the front one with three
-  coloured dots and a prompt (`>_`). `skydeck-source-small.png` (1,372,751 bytes) was made after the
+  coloured dots and a prompt (`>_`). `skydeck-source-small.png` (1,349,085 bytes) was made after the
   first one turned out a blur at 16 pixels: the same tile and cloud outline with ONE terminal window
   and a bold white `>_`, no stacked windows, no dots. `test/window/icons.test.ts` pins both sha256.
   Until F10 the source was a drawing of shapes, `web/icons/skydeck.svg` (three cards on the page's
@@ -3702,7 +3701,7 @@ follow-up F14 the same day):
 - Permission is asked once, on a user gesture: a "Turn on notifications" item in the title bar
   while the permission is `default`. It is asked per origin and profile (section 21), so it stays
   granted while the port and profile folder stay the same.
-- Notifications may be blocked on the managed PC (check W11). Without them the window title
+- Notifications may be blocked on a managed PC (check W11). Without them the window title
   `(n) skydeck` and the title bar's counts still show that something needs you.
 - Nothing else notifies: terminal bells, OSC 9 and OSC 777 notifications from programs are ignored
   in the first version.
@@ -3756,8 +3755,8 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   peer with their own user id (7.1). Processes of other users cannot read the secret from the
   store (mode 600), from the window's Edge profile (where it is not extractable) or from the wire;
   they can obtain it, or the use of it, in the two cases 15.2 and 15.3 describe. Who those "other
-  users" are on this PC: no second person, but service accounts on Windows and in the distribution
-  (a local database, a web server of a development stack) and whatever runs under them. For them
+  users" are on a PC with one person: service accounts on Windows and in the distribution and
+  whatever runs under them. For them
   the two cases are a small door to the developer's shell; root and administrators own the machine
   anyway. A process that runs as the user can read the secret — and can equally run `claude` itself, read the transcripts or reach
   the WSL files from Windows (`\\wsl.localhost\…`); defending against the user's own processes is
@@ -3780,7 +3779,7 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   only as 9.6 allows.
 - **Browser extensions.** An extension that may read `127.0.0.1` pages could read the terminals and
   the secret. The window runs in its own profile folder, so the user's extensions are not there.
-  Extensions that company policy forces into every profile still are: check W13 lists them
+  Extensions that an Edge policy forces into every profile still are: check W13 lists them
   (`edge://extensions` in the window's profile, `edge://policy`).
 
 ### 15.2 The secret and the launch tokens
@@ -3964,9 +3963,9 @@ New keys, all optional:
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program (5.3; and links with `window.links` `"edge"`, 9.6). An absolute path. |
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
-| `window.links` | `"default"` | Asked for by the user on 2026-11-15, ruled by the lead that day. Where the links the window opens go (9.6): `"default"`, the Windows default browser (`rundll32.exe url.dll,FileProtocolHandler <url>`), or `"edge"`, `window.edge` in the user's own Edge profile. Anything else is refused as every key of the file is: `<file>: "window.links" must be "default" or "edge"`. |
-| `ticketUrl` | `null` | Asked for by the user on 2026-11-15; the details ruled by the lead that day. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` without a user name or password (`skydeck show` would print it, and Edge's command line would carry it) and with the same host (a host the key went into would differ), and with no `%`, or `%` with one hex digit, right before `{key}` (a key would finish that escape): where the key stands among the address's parts is the parser's to decide, not the text's (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
-| `ticketStatus` | `[]` | Asked for by the owner on 2026-11-19 (follow-up F19); the details ruled by the lead. The programs that read a ticket's status (12.5): a list of at most 8 rules, each exactly `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` is the start of a ticket's address takes it, before GitHub's own reading of an issue's address. `match`: an `http` or `https` address, printable ASCII with no white space, at most 2,048 characters, with no user name or password, that starts with `<scheme>://<host>/` exactly as the URL parser writes them — scheme and host in lower case, a default port left out —, so that `https://tickets.example.com/` never takes `https://tickets.example.com.other.net/…` and a rule whose scheme or host could never match a stored address is refused instead of silently doing nothing (the rest of its path is not checked). `command`: 1 to 16 non-empty strings without control characters; `command[0]` is the program (a name on `PATH` or a path; a relative path is relative to the home directory), and in the other words every `{url}` becomes the address and every `{key}` the ticket's key (12.5; a rule whose command uses `{key}` is not run for an address that gives none); the program is run without a shell. No credential or token belongs in a rule: a program reads its secret from a file its owner keeps. Anything else is refused as every key of the file is, after `<file>: `: `"ticketStatus" must be a list of at most 8 rules`; `"ticketStatus[N]" must be an object with "match" and "command"`; `unknown key "ticketStatus[N].<key>"`; `"ticketStatus[N].match" must be the start of an http or https address, its scheme and host in lower case and followed by "/", at most 2,048 characters`; `"ticketStatus[N].command" must be a list of 1 to 16 non-empty strings without control characters`. Read at the server's start: after a change, `skydeck window --restart`. |
+| `window.links` | `"default"` | Ruled by the lead. Where the links the window opens go (9.6): `"default"`, the Windows default browser (`rundll32.exe url.dll,FileProtocolHandler <url>`), or `"edge"`, `window.edge` in the user's own Edge profile. Anything else is refused as every key of the file is: `<file>: "window.links" must be "default" or "edge"`. |
+| `ticketUrl` | `null` | The details ruled by the lead. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` without a user name or password (`skydeck show` would print it, and Edge's command line would carry it) and with the same host (a host the key went into would differ), and with no `%`, or `%` with one hex digit, right before `{key}` (a key would finish that escape): where the key stands among the address's parts is the parser's to decide, not the text's (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
+| `ticketStatus` | `[]` | Follow-up F19; the details ruled by the lead. The programs that read a ticket's status (12.5): a list of at most 8 rules, each exactly `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` is the start of a ticket's address takes it, before GitHub's own reading of an issue's address. `match`: an `http` or `https` address, printable ASCII with no white space, at most 2,048 characters, with no user name or password, that starts with `<scheme>://<host>/` exactly as the URL parser writes them — scheme and host in lower case, a default port left out —, so that `https://tickets.example.com/` never takes `https://tickets.example.com.other.net/…` and a rule whose scheme or host could never match a stored address is refused instead of silently doing nothing (the rest of its path is not checked). `command`: 1 to 16 non-empty strings without control characters; `command[0]` is the program (a name on `PATH` or a path; a relative path is relative to the home directory), and in the other words every `{url}` becomes the address and every `{key}` the ticket's key (12.5; a rule whose command uses `{key}` is not run for an address that gives none); the program is run without a shell. No credential or token belongs in a rule: a program reads its secret from a file its owner keeps. Anything else is refused as every key of the file is, after `<file>: `: `"ticketStatus" must be a list of at most 8 rules`; `"ticketStatus[N]" must be an object with "match" and "command"`; `unknown key "ticketStatus[N].<key>"`; `"ticketStatus[N].match" must be the start of an http or https address, its scheme and host in lower case and followed by "/", at most 2,048 characters`; `"ticketStatus[N].command" must be a list of 1 to 16 non-empty strings without control characters`. Read at the server's start: after a change, `skydeck window --restart`. |
 | `ticketRefreshMinutes` | `10` | Follow-up F19. How long a ticket's status is left before the server reads it again (12.5, 10.1): a whole number of minutes from 1 to 1440, counted from the last attempt; a status whose category is `done` or `closed` is read again after 12 hours instead. Anything else is refused as every key of the file is: `<file>: "ticketRefreshMinutes" must be a whole number from 1 to 1440`. Read at the server's start. |
 
 Unknown keys inside `window` are an error, as everywhere in `config.json`.
@@ -3974,7 +3973,7 @@ Unknown keys inside `window` are an error, as everywhere in `config.json`.
 ### 16.5 Updating skydeck while terminals are open
 
 `git pull` changes the checkout — or `skydeck update`, which does it in an order that keeps the
-window (below; follow-up F8, asked for by the user on 2026-11-17, its decisions ruled by the plan
+window (below; follow-up F8, its decisions ruled by the plan
 owner). Then:
 
 - **Commands** run the new code at once, and the store migrates at the next command (design 9.2).
@@ -4147,7 +4146,7 @@ Design 12's rules hold: tests are written before the code they test, never start
 test listens on a port the system picks (port 0, given to the server directly; `window.port`
 accepts 1–65535 only, 16.4).
 
-**No Windows program, enforced.** The development machine has a real `msedge.exe`, `wsl.exe`,
+**No Windows program, enforced.** A WSL machine has a real `msedge.exe`, `wsl.exe`,
 `rundll32.exe` and `/run/WSL/1_interop`, so the rule is built in rather than only asked for. The test sandbox's
 environment carries `SKYDECK_TEST_NO_WINDOWS=1`; while it is set — in skydeck's own environment or
 in the one given to the child — the real platform refuses to start a program that is under `/mnt/`,
@@ -4309,7 +4308,7 @@ reaching the server as bytes, the CSP not blocking the page's own files, reconne
 server restarts, notifications asked only on a gesture — is only real in a browser, and the UI
 research already drove its mockup in headless Chromium. The cost is a development dependency and
 a browser download in CI, never at install time. So `playwright` (pinned exactly: 1.60.0, the
-version whose Chromium is build 1223, the build already installed on the development machine)
+version whose Chromium is build 1223)
 drives Chromium headless against a real server and keepers running the stand-in, in a small suite
 (`npm run test:page`). Chromium is not Edge: what only Edge decides (keys an app window keeps,
 its policy, notifications on the PC) stays a manual check.
@@ -4412,7 +4411,7 @@ grants a permission through Playwright.
   one of its checks reads pass (a cancelled job is not a pass), not when a command's exit code is
   0. A failing shard does not stop the others (`fail-fast` is
   off), so one run shows every failure. Only the newest leg (Node 24) runs the page suite, and it
-  runs on Ubuntu 24.04 (the development machine's system) while the other leg runs on the newest
+  runs on Ubuntu 24.04 while the other leg runs on the newest
   Ubuntu (26.04), because Playwright 1.60.0 has no Chromium for Ubuntu 26.04; the page job's
   runner pin, and with it the Node 24 leg's, is dropped when Playwright is upgraded. A run started by hand runs `lint` and
   `unit` on both legs (the oldest leg's `unit` is in shards too, so that the one workflow has one
@@ -4433,7 +4432,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 
 | # | Check | Stage | Decides |
 |---|---|---|---|
-| W1 | `skydeck window` opens an Edge app window that loads the page and connects. (That Edge reaches a server on `127.0.0.1` in WSL was verified by the user on 2026-11-13; this checks the command itself: the profile folder, the start, the wait for the page.) Write down how long Edge took from the command to the page's connection, cold and warm: the token and the command's wait last 30 seconds (5.1). | A | 5, 8.2.2 |
+| W1 | `skydeck window` opens an Edge app window that loads the page and connects. (That Edge reaches a server on `127.0.0.1` in WSL was verified on a Windows PC on 2026-11-13; this checks the command itself: the profile folder, the start, the wait for the page.) Write down how long Edge took from the command to the page's connection, cold and warm: the token and the command's wait last 30 seconds (5.1). | A | 5, 8.2.2 |
 | W2 | The chords of 12.9 that the key test of 2026-11-13 did not press reach the page and the browser does nothing: Ctrl+Shift+P, J, L, F, C, H and 1–9; and Alt+F4 still closes the window once the page is built (12.9). Whether Edge reloads on Shift+F5 and on the BrowserRefresh key (alone, with Shift, with Ctrl) when the page does not cancel them, and whether a cancelled BrowserRefresh still reloads (through `WM_APPCOMMAND`) (12.9, 15.3). In a normal tab (`--print-url`), which chords the browser keeps. | A | 12.9 |
 | W3 | The window has its own taskbar button with skydeck's icon (12.12), the same one after `skydeck window --restart` and after a WSL restart (looked at only when WSL restarts anyway: a restart ends every session; else written down as left out), and the title `(n) skydeck`; a second `skydeck window` opens no second window. Whether Edge's menu offers to install the page as an app (it has a manifest, 12.12): written down, never done. | A, B, E | 5.1, 12.1, 12.12 |
 | W4 | **Real claude** in a window terminal: status line, subagent display, spinner, redraw on resize. Then `skydeck window --restart`: the screen is exactly what it was. | A | 7.2, 7.3 |
@@ -4443,7 +4442,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W8 | Czech layout in Edge: AltGr characters (`\ [ ] { } @ # ~ \|`) and dead keys (háček, čárka) in a terminal; Ctrl+Shift+digit and Ctrl+Shift+H chords; Ctrl+Shift+- reaches Claude Code (undo). | A | 9.1, 12.9 |
 | W9 | Cascadia and Segoe draw Claude Code's `⏺ ⎿ ⏵` (headless Linux showed empty boxes). | A | the page's font list |
 | W10 | **Real claude**: rows with emoji, ZWJ and skin-tone sequences line up; `unicode-graphemes` against `unicode11`, compared with Claude Code's own layout. | A | 9.4 |
-| W11 | Desktop notifications are allowed on the managed PC: the permission prompt, a toast, a click that selects the session; and they still come when the window has been minimised for half an hour (Chromium throttles hidden pages and Edge may put them to sleep). | B | 13 |
+| W11 | Desktop notifications are allowed on the PC: the permission prompt, a toast, a click that selects the session; and they still come when the window has been minimised for half an hour (Chromium throttles hidden pages and Edge may put them to sleep). | B | 13 |
 | W12 | Ctrl+click on a link opens it in the user's default browser, logged in; with `window.links` `"edge"` (set only if the user wants to try it) in their main Edge window. The check copies the user's `config.json` aside first and gives it back at the end, and removes no file. | A | 9.6, 16.4 |
 | W13 | `edge://policy` (any `URLBlocklist`, `BrowserSignin`, `SyncDisabled`, `WebApp*`, `Extension*` entry), `edge://extensions` in the window's profile (which extensions are forced in), and whether the window's profile is signed in and syncs its history (`edge://settings/profiles`). | A | 15.1, 15.2 |
 | W14 | WSL lifetime: the lifetime script against a throwaway distribution measures the idle rule; then, with the window open and every WSL terminal closed, WSL is still running after a minute (`wsl -l -v` in PowerShell). Without the keep-alive (`"off"`) it stops. | A | 6.1 |
@@ -4461,11 +4460,11 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W26 | **Real claude**, using the alternate screen (`/tui fullscreen`, or a full-screen program it runs): `skydeck window --restart` while it is showing, compare the screen before and after, then leave the alternate screen and compare again. What a snapshot does not restore (7.2: scroll region, saved cursor, character sets) would show as a misplaced cursor or wrongly scrolled or drawn lines. | A | 7.2, 7.3 |
 | W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket where links open (W12), logged in; without `ticketUrl` the chip is plain text. The check copies the user's `config.json` aside first when there is one and gives it back at the end only when the file holds no change since but the check's own line (else the user mends it by hand); when there was none, it removes the file it created; it clears the label it set. | D | 12.5, 9.6 |
 | W28 | `+ PR` with a pull request of the user's own on the throwaway session: its item and its line in the pull-request dialog show its state within seconds (their `gh` login), the list's chip agrees, `skydeck show` agrees; × detaches it. | D | 12.3, 12.5 |
-| W29 | **Real claude**, on the user's layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key; at the end the check clears the label, group and note it set. | D | 12.5, 12.9 |
-| W30 | On the user's own sessions (about 105), without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a block's card closed with ← and opened again with → (blocks are open by default from follow-up F3, drawn as cards with a selectable caption from follow-up F9), a click on a caption, the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |
+| W29 | **Real claude**, on two layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key; at the end the check clears the label, group and note it set. | D | 12.5, 12.9 |
+| W30 | On the user's own sessions, without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a block's card closed with ← and opened again with → (blocks are open by default from follow-up F3, drawn as cards with a selectable caption from follow-up F9), a click on a caption, the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |
 | W31 | Czech and US layouts in the filter's and the switcher's fields: AltGr characters and dead keys type; Ctrl+Shift+P opens and closes the switcher on both. | E | 12.8, 12.9 |
 | W32 | `skydeck update` on the user's own installation, typed in a WSL terminal of the user's own with the window open: `--check` first (the list of new commits, or "up to date"; the window and the sessions stay as they are); then, only when it listed commits, the update itself: the window says for a few seconds that the server is not answering, then reloads itself; every session is there; no second window; `skydeck doctor` has no `problem` line that was not there before. It types into no session and presses no key in the window. | F8 | 16.5, 5.1 |
-| W33 | **Real claude**: `skydeck install` asks whether to turn Claude Code's ← shortcut off (three lines and `Turn the shortcut off? [y/N]`); `y` sets only `leftArrowOpensAgents` to `false` in `~/.claude.json`, after a backup, and `skydeck doctor` then says the shortcut is off; in a throwaway session of the window started after it, ← on its empty prompt leaves the terminal as it is (no agent view). It changes that one key of the user's on purpose (asked for on 2026-11-17) and prints neither file. | F11 | 7.9 |
+| W33 | **Real claude**: `skydeck install` asks whether to turn Claude Code's ← shortcut off (three lines and `Turn the shortcut off? [y/N]`); `y` sets only `leftArrowOpensAgents` to `false` in `~/.claude.json`, after a backup, and `skydeck doctor` then says the shortcut is off; in a throwaway session of the window started after it, ← on its empty prompt leaves the terminal as it is (no agent view). It changes that one key of the user's on purpose and prints neither file. | F11 | 7.9 |
 | W34 | **Real claude**: the title bar's theme switch in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme "Auto (match terminal)" (looked at in `/theme`, never in its files), a new throwaway session started in each forced state picks the matching one, and whether one already running changes its theme at a switch is written down (not documented). At the end the switch, Windows' mode and Claude Code's theme are as they were. | F13 | 12.1, 7.2, 9.3 |
 | W35 | **Real claude**, a throwaway session started from the New form with `--model` and one more flag: the header's second line ends in those flags, in the short id's grey, after the short id, nothing else of the line moved; its tooltip says `Started with: …`; in a narrower window they are cut first; once it ended and was closed, the resume card's "Will run" has them and the header not; resumed, the header shows them again. | F16 | 12.5 |
 | W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (the header's flags, F16, and `skydeck show`); removed with ×, `Undo` puts it back at its place. It types no prompt and touches no real session. | F15 | 12.6, 10.2 |
@@ -4531,8 +4530,8 @@ terminal may still run (7.5, 7.8). Check W16.
 and removing one, in the window (12.5) with the Undo toast; the window's chip (12.3), the header's
 one line for the pull requests and the pull-request dialog that lists each on a line of its own;
 the list keys `l`, `g`, `n`, `p`, `d` and F2; the ticket link of
-the group chip and `ticketUrl` (12.5, 16.4; asked for by the user on 2026-11-15, the details
-ruled by the lead that day). Also two parts of 12.5 that no stage named before (plan D's D11): ↻
+the group chip and `ticketUrl` (12.5, 16.4; the details
+ruled by the lead). Also two parts of 12.5 that no stage named before (plan D's D11): ↻
 in the pull-request dialog, which reads the session's pull requests now (`pr-refresh`, 8.2.3), and
 the header's "opened <time> · last active <age>" with where the title comes from. Checks
 W27–W29.
@@ -4545,12 +4544,12 @@ page's own icon (12.12). Checks W30, W31, and W3's icon on the taskbar button.
 
 - **A native window program.** The window research ranked: (1) the Edge app window, chosen; (2) a
   WebView2 host in C#, built on the PC with the `csc.exe` that ships with Windows — one unsigned
-  program, and whether the managed PC runs it is unknown (privilege-management software is
-  installed); (3) Electron, Tauri or Wails — the same unsigned-program question with more weight
+  program, and whether a managed PC runs it is unknown (privilege-management software
+  may stop it); (3) Electron, Tauri or Wails — the same unsigned-program question with more weight
   or toolchains (the official Electron build is not signed). A native host stays a later option on
   top of the same server and page. A WebView2 window hosted through PowerShell is **not an option
   at all**: choosing it because it passes under application control that would stop the same
-  program as an exe would be working around the company's control, not being allowed.
+  program as an exe would be working around an organisation's control, not being allowed.
 - **A Linux window through WSLg** (design 13: it vanishes with WSL, scales badly on mixed-DPI
   screens, and has a known input freeze after sleep).
 - **Other ways to hold terminals**, as the terminal research ranked them: one Node.js holder with
@@ -4604,34 +4603,34 @@ tracks of 2026-11-13; their prototypes and evidence are kept with the research n
 | The headless terminal answers DA1, DA2, DECRQM 2026, CPR, DSR and DECRQSS; it cannot answer OSC 10/11; xterm.js 6.0.0 has no XTVERSION answer. Starting the program before a screen side is connected makes its first probe time out and swallow the first keys. | verified (T9) |
 | xterm.js 6.0.0 sends `\r` for Shift+Enter; Ctrl+J inserts a newline in Claude Code in every terminal. | verified (xterm.js) / documentation (Claude Code terminal setup page) |
 | On WSL Claude Code pastes an image on Ctrl+V and Alt+V, reading the Windows clipboard itself through a Windows program; a dead `WSL_INTEROP` breaks it. | inferred (strings in the Claude Code 2.1.323 binary) |
-| `/run/WSL/1_interop` exists on the development machine (systemd on); a symbolic link to a live interop socket works as `WSL_INTEROP` for processes that outlive their terminal. | first part verified; second UNVERIFIED (W7) |
+| `/run/WSL/1_interop` exists on a WSL machine with systemd on; a symbolic link to a live interop socket works as `WSL_INTEROP` for processes that outlive their terminal. | first part verified; second UNVERIFIED (W7) |
 | Claude Code recognises xterm.js only from an XTVERSION reply starting `xterm.js` (or `TERM_PROGRAM=vscode`) and then changes wheel scrolling, glyph-atlas resets and link clicks. Under tmux it turns off synchronized output and its extended-keys path. | inferred (strings in the binary) |
 | Claude Code measures widths with `Bun.stringWidth(…, {ambiguousIsNarrow: true})`; `addon-unicode-graphemes` 0.4.0 gives VS16, ZWJ and skin-tone sequences two columns. | inferred (binary) / verified (addon) |
 | A hand-written RFC 6455 server on `node:http` of about 100 lines passes frames from 0 bytes to 1 MiB, fragments, ping and pong, close codes, invalid UTF-8 (1007), unmasked frames (1002), and refuses a wrong token or Origin. | verified (T7, with `ws` 8.23.0 as the client) |
 | In a Chromium `--app` window no key is reserved: every key reaches the page first, and `preventDefault` cancels the browser's action. | verified in Chromium's source (window research) |
-| In an Edge 157 app window with its own profile folder, every chord of the key test reached the page and was cancelled by it: Ctrl+W, N, T, Shift+T, Tab, Shift+Tab, R, P, F, L, J, H, O, B, G, D, U, K, E, Z, S, Q; F5, F10, F11, F12; Ctrl+Shift+V, N, W, I, S, E, Y, M, O; Ctrl+PageDown; Alt+Left, Alt+B, Alt+F, Alt+V; and Alt+F4, after which the window stayed open. Alt+Space did not reach the page (Windows keeps it for the window menu). The page loaded once and never reloaded (164 key presses, one load); `display-mode` was `standalone`; it was a secure context. | verified by the user on their PC, 2026-11-13 |
+| In an Edge 157 app window with its own profile folder, every chord of the key test reached the page and was cancelled by it: Ctrl+W, N, T, Shift+T, Tab, Shift+Tab, R, P, F, L, J, H, O, B, G, D, U, K, E, Z, S, Q; F5, F10, F11, F12; Ctrl+Shift+V, N, W, I, S, E, Y, M, O; Ctrl+PageDown; Alt+Left, Alt+B, Alt+F, Alt+V; and Alt+F4, after which the window stayed open. Alt+Space did not reach the page (Windows keeps it for the window menu). The page loaded once and never reloaded (164 key presses, one load); `display-mode` was `standalone`; it was a secure context. | verified on a Windows PC, 2026-11-13 |
 | In a normal tab the browser keeps Ctrl+W, Ctrl+F4, Ctrl+Shift+W, Alt+F4, Ctrl+N, Ctrl+Shift+N, Ctrl+T, Ctrl+Shift+T, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+PgDn and Ctrl+PgUp. A page never sees Alt+Tab or Win chords. | verified in Chromium's source; not tested in Edge (W2) |
-| `http://127.0.0.1:<port>` is a secure context (verified by the user, 2026-11-13): Notification and the async clipboard are allowed; notification permission is per origin and profile. Whether the managed PC lets notifications and clipboard writes through is not tested yet (W6, W11). | documentation |
+| `http://127.0.0.1:<port>` is a secure context (verified on a Windows PC, 2026-11-13): Notification and the async clipboard are allowed; notification permission is per origin and profile. Whether a managed PC lets notifications and clipboard writes through is not tested yet (W6, W11). | documentation |
 | An app window's taskbar identity is made of an app name generated from the address's host and path (`GenerateApplicationNameFromURL`: host, `_`, path; no port) and the profile path. | verified in Chromium's source (review, 2026-11-13); whether Edge shows skydeck's icon is W3 |
 | xterm.js 6.0.0 sends nothing for Ctrl+Shift with a letter and then does not cancel the key (it builds the control byte only without Shift); for a plain Ctrl+V it sends `\x16` and cancels the key, so the browser does not paste unless the custom key handler returns false. | verified in xterm.js 6.0.0's source (`Keyboard.ts`, `CoreBrowserTerminal`) |
 | xterm.js 6.0.0's paste handler sends the pasted text and empties its hidden textarea, but does not cancel the paste event, so the browser then puts the whole text into that textarea: after a paste of 10 MiB in headless Chromium the page sent its input at about 0.4 MB/s and answered a script in seconds; with the paste cancelled after xterm.js took it (the first fix; the page now takes the paste itself, 9.1), the same paste reached the server in under a second (plan task 28). | verified (headless Chromium 1223; the bundle's `handlePasteEvent`) |
 | xterm.js 6.0.0 wraps pasted text unfiltered (`ESC [ 2 0 0 ~`, the text, `ESC [ 2 0 1 ~`): a pasted text that holds `ESC [ 2 0 1 ~` ends its own bracketed paste, and what follows reaches the program as typed keys, Enter included. | verified (headless Chromium 1223; plan task 28's review 2) |
 | xterm.js 6.0.0's DOM renderer writes its colours, cursor and selection rules into `<style>` elements it creates at run time: under `style-src 'self'` a red cell renders black; with `'unsafe-inline'` it renders red. | verified in headless Chromium (review, 2026-11-13) |
-| On WSL a crashing process's core dump is piped to WSL's crash collector (`core_pattern` is `\|/wsl-capture-crash …`), which keeps up to `maxCrashDumpCount` (default 10) dumps in `crashDumpFolder` (default `%Temp%\wsl-crashes`). A non-dumpable process (`PR_SET_DUMPABLE` 0) produces no dump, piped or not. For a piped dump the kernel ignores a core limit of 0 and aborts only on a soft limit of exactly 1 byte (`fs/coredump.c` of Linux 6.6). | `core_pattern` verified; documentation (learn.microsoft.com/windows/wsl/wsl-config, `prctl(2)`); kernel source read for 6.6 in review; this machine's 6.18 UNVERIFIED (W24) |
-| `/run/user/<uid>` outlives the user's last terminal only when the user lingers; on the development machine the user does. | verified |
+| On WSL a crashing process's core dump is piped to WSL's crash collector (`core_pattern` is `\|/wsl-capture-crash …`), which keeps up to `maxCrashDumpCount` (default 10) dumps in `crashDumpFolder` (default `%Temp%\wsl-crashes`). A non-dumpable process (`PR_SET_DUMPABLE` 0) produces no dump, piped or not. For a piped dump the kernel ignores a core limit of 0 and aborts only on a soft limit of exactly 1 byte (`fs/coredump.c` of Linux 6.6). | `core_pattern` verified; documentation (learn.microsoft.com/windows/wsl/wsl-config, `prctl(2)`); kernel source read for 6.6 in review; 6.18 UNVERIFIED (W24) |
+| `/run/user/<uid>` outlives the user's last terminal only when the user lingers; on one machine the user does. | verified |
 | The keeper's code needs python3 3.9 or newer (`os.waitstatus_to_exitcode`); it was run on 3.12 only. | inferred (3.9) / verified (3.12) |
 | The Web Crypto flow of 8.2.2 works in Chromium: HKDF-SHA256 from the token, AES-256-GCM `unwrapKey` into a non-extractable HMAC key, a proof equal to Node.js's HMAC over the same bytes; `exportKey` fails; the key survives a round trip through IndexedDB and still signs; the page is a secure context. | verified in headless Chromium (review, 2026-11-13) |
 | `@xterm/addon-search` 0.16.0 was published with xterm.js 6.0.0 (2025-12-22) and is its latest release. | documentation (npm registry, 2026-11-13) |
-| `CLAUDECODE` is set in the environment of a command a Claude Code session runs. | verified (the development machine, 2026-11-13) |
+| `CLAUDECODE` is set in the environment of a command a Claude Code session runs. | verified (one machine, 2026-11-13) |
 | Which `CLAUDE*` variables Claude Code sets for the programs it runs, beyond `CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_SESSION_ID` and `CLAUDE_PID`. | UNVERIFIED (W23) |
 | `msedge.exe` started while an Edge on the same profile folder runs hands off and exits at once. | verified in Chromium's source |
 | Started through interop with stdio ignored and a Windows working directory, a Windows program shows no console window. | verified in WSL's source |
 | A WSL distribution stops `instanceIdleTimeout` (default 15 s) after its last Windows client exits; Linux background processes and systemd do not count; the VM stops `vmIdleTimeout` (default 60 s) after the last distribution. `.wslconfig` `[general] instanceIdleTimeout=-1` keeps it. | verified in WSL's source; not measured (W14) |
 | A `wsl.exe` started from inside WSL through interop counts as such a client. | UNVERIFIED (W14) |
-| In WSL's NAT mode a port bound to `127.0.0.1` inside WSL is reachable from Windows. From the Edge app window on the user's PC, `http://127.0.0.1:<port>` in WSL answered 132 pings of 132, in about 7 ms. | documentation; verified by the user on their PC, 2026-11-13 |
+| In WSL's NAT mode a port bound to `127.0.0.1` inside WSL is reachable from Windows. From an Edge app window on a Windows PC, `http://127.0.0.1:<port>` in WSL answered 132 pings of 132, in about 7 ms. | documentation; verified on a Windows PC, 2026-11-13 |
 | An Edge window started through interop survives a WSL stop. | inferred (W16) |
 | WSL can hang after hibernation (issue #8696); new `wsl.exe` sessions can time out on WSL 3.0.3 (#42006). | documentation (WSL issues) |
-| On the development PC: BeyondTrust privilege management is installed (policy unreadable); the Edge WebView2 runtime is installed; WSL 3.0.5 with systemd, no `.wslconfig`, NAT networking, interop on; python3 3.12. Whether unsigned programs run from user folders is unknown. | verified (read-only look under `/mnt/c`) |
+| On one Windows PC: the Edge WebView2 runtime is installed; WSL 3.0.5 with systemd, no `.wslconfig`, NAT networking, interop on; python3 3.12. Whether a managed PC runs unsigned programs from user folders is unknown. | verified (read-only look under `/mnt/c`) |
 | Sessions started in another terminal cannot be shown: their pty master belongs to that terminal; `reptyr` needs ptrace (`ptrace_scope` is 1); reading `/dev/pts/N` steals input. | verified |
 | `←` on the empty prompt of a session started in a terminal backgrounds it into a session with a new id, run under a `claude bg-pty-host` re-parented to init (outside the terminal's process tree), and opens agent view in the terminal; `leftArrowOpensAgents` `false` in the global config file turns that shortcut off for sessions started later; `--settings` cannot set that key (7.9; design.md 14). | documentation (code.claude.com/docs/en/agent-view and the settings reference, 2026-11-17); the process tree and the new id observed (Claude Code 2.1.311, follow-up F11) |
 

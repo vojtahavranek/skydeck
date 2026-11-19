@@ -533,7 +533,7 @@ Write down which symbols show as boxes.
 ## W10. Emoji line up (real claude)
 
 In the throwaway session: `print a table with two columns, a symbol and its name, with the rows
-🙂, ❤️, 👍🏽, 👨‍👩‍👧 and 🇨🇿`. Expected: the right edges of the table's lines are in one column.
+🙂, ❤️, 👍🏽, 👨‍👩‍👧 and 🇺🇳`. Expected: the right edges of the table's lines are in one column.
 Compare with the same prompt in a session in your usual terminal (Windows Terminal, WezTerm).
 The design's question here is whether the width rules of `@xterm/addon-unicode-graphemes`, which
 the window uses, match Claude Code's own layout better than `addon-unicode11`, the fallback
@@ -547,8 +547,9 @@ that is what decides whether the fallback is tried.
 A link the window opens (a Ctrl+click on an address in a terminal, a pull request in the list or
 the header, the ticket chip) opens in your Windows default browser: skydeck hands it to
 `rundll32.exe url.dll,FileProtocolHandler`. With `window.links` `"edge"` it opens in your own Edge
-instead (install.md, "The `window` keys"). On a managed PC, security monitoring may record or flag
-each start of `rundll32.exe url.dll,FileProtocolHandler`; `"edge"` avoids it. Part 1 needs no
+instead (install.md, "The `window` keys"). With `"default"` each link is one start of
+`rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record;
+with `"edge"` skydeck starts Edge itself and does not use that program. Part 1 needs no
 change of your configuration; part 2 is for trying `"edge"`, and only if you want to. Every step
 types only into the throwaway session, never into one of your real work.
 
@@ -680,7 +681,7 @@ skydeck window --restart
 Write down where the link opened in part 1 (which browser, logged in or not), the address the
 browser showed for the second link, and, if you did part 2, where it opened in part 2.
 
-## W13. What the company's Edge policy does to the window
+## W13. What an Edge policy does to the window
 
 In your own Edge, open `edge://policy` and look for entries named `URLBlocklist`, `BrowserSignin`,
 `SyncDisabled`, or starting with `WebApp` or `Extension`. Then open a normal Edge window on the
@@ -690,8 +691,8 @@ window's own profile folder (the one `skydeck doctor` names), in P:
 & "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" --user-data-dir="C:\Users\<you>\AppData\Local\skydeck\edge-profile"
 ```
 
-In that window's address bar: `edge://extensions` (which extensions run there, put in by the
-company's policy) and `edge://settings/profiles` (whether the profile is signed in and syncs its
+In that window's address bar: `edge://extensions` (which extensions run there, put in by an
+Edge policy) and `edge://settings/profiles` (whether the profile is signed in and syncs its
 history). Close that window afterwards; the skydeck window stays.
 
 Write down: the policy entries found (their names and values), the extensions listed, signed in
@@ -832,7 +833,7 @@ Write down: any stray characters; whether a key was swallowed.
 
 ## W20. Privilege management lets Edge, wsl.exe and rundll32.exe start
 
-The PC's privilege management (BeyondTrust on the development PC) must neither block nor ask for
+Where a PC runs privilege-management software, it must neither block nor ask for
 `msedge.exe` started by `skydeck window` (W1), for the keep-alive's `wsl.exe`, which the server
 starts when it starts (`skydeck doctor`: `keep-alive wsl.exe running …`), or for `rundll32.exe`,
 which the server starts for every link the window opens with `window.links` `"default"` (W12).
@@ -1244,14 +1245,14 @@ Setup: look at the right of the title bar.
 
 - `Turn on notifications` is there: Edge has not been asked yet. Start at step 1.
 - It is not there: Edge has an answer from before. When you allowed notifications then, start at
-  step 2 and leave out steps 1 and 5. When you blocked them, when Edge or the company's policy
+  step 2 and leave out steps 1 and 5. When you blocked them, when Edge or a policy
   refused, or when you do not know, do step 5 first: it shows Edge's answer. With the answer
   `Allow` there, go on with steps 2 to 4 and 6; otherwise W11 ends after step 5.
 
 1. **The prompt.** Click `Turn on notifications`. Expected: Edge's own prompt, asking whether the
    page at `127.0.0.1:47613` (or your `window.port`) may show notifications. Choose `Allow` or
    `Block`; both are valid answers. Expected either way: the button goes. When no prompt comes and
-   the button goes at once, Edge or the company's policy refused: write that down. When you close
+   the button goes at once, Edge or a policy refused: write that down. When you close
    the prompt without choosing, the button stays: click it again. When no prompt comes and the
    button stays (Edge may ask quietly, with a small icon where an address bar would be, and the
    window has none): write that down, change nothing, and leave W11 there. After `Block` or a
@@ -1427,7 +1428,7 @@ Setup:
 - VS Code's WSL window (it connects again by itself) and every WSL terminal.
 
 Windows programs should stay, the skydeck window among them (it is an Edge window): that is what
-the design expects (design-step-2.md, section 6), not yet seen on this PC — W16 writes down what
+the design expects (design-step-2.md, section 6), not yet seen on a Windows PC — W16 writes down what
 happens. A restart of the PC ends all of this and everything else.
 
 **Prepare**, before anything else. `wsl --shutdown` ends EVERY program in WSL, not only Claude
@@ -1898,7 +1899,7 @@ took to come back, the count and the slots after it, whether a second window ope
 The check of install's question about Claude Code's ← shortcut (follow-up F11;
 [install.md](install.md), Install, step 3): W33, on your own installation, with your window open.
 **It changes one setting of yours on purpose**: `leftArrowOpensAgents` in `~/.claude.json`, which
-you asked to have turned off (2026-11-17); nothing else of yours. Its end says how to put it back.
+it turns off; nothing else of yours. Its end says how to put it back.
 Steps 1 and 2 are typed in W, a WSL terminal of your own (never a `!` command inside Claude Code:
 there install has nobody to ask and takes it as a no); step 3 is in the window, in a new throwaway
 session that gets no prompt at all. Never print `~/.claude.json` itself (no `cat`, no editor): it
@@ -1990,7 +1991,7 @@ install would leave).
    at the short id, since `/exit` ends the session it is typed into), type `/exit`, then `Close` on
    its ended bar. When step 3's branch was taken, the session is ended already: only `Close`, if
    the ended bar shows; and when the list still shows a row for `skydeck-try` as running in another
-   terminal, write that down. The shortcut stays off: that is what you asked for. Sessions you
+   terminal, write that down. The shortcut stays off, on purpose. Sessions you
    started before step 1 keep it until you start them again (`/exit`, then resume them).
 
 To put the shortcut back on (not part of the check): in Claude Code, `/config`, the option "← opens

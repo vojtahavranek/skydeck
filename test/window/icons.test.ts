@@ -45,19 +45,21 @@ const IN_ICO = [16, 32, 48];
 /** The sizes drawn from the small picture; every other file is drawn from the large one. */
 const SMALL_SIZES = [16, 32, 48];
 
-/** The owner's pictures, as received: where each lives, its size in bytes and its sha256. The
- *  large one is drawn into the 192 and 512 pixel files and the maskable ones; the small one, a
- *  simpler drawing of the same, into the 16, 32 and 48 pixel files and favicon.ico. */
+/** The owner's pictures: where each lives, its size in bytes and its sha256. Each is the file as
+ *  received without the one metadata chunk it came with (removed, follow-up F27): its image data
+ *  is the received one, byte for byte. The large one is drawn into the 192 and 512 pixel files and
+ *  the maskable ones; the small one, a simpler drawing of the same, into the 16, 32 and 48 pixel
+ *  files and favicon.ico. */
 const PICTURES = {
   large: {
     path: 'scripts/icons/skydeck-source.png',
-    bytes: 1_691_903,
-    sha256: 'fe94068db275c4d89b8e612ab2b9081fba7a571c6233ade6cf012af6a8dce12f',
+    bytes: 1_670_010,
+    sha256: '803cb153662df4d2fe6d0d16fb0bcb7013683ab3e223b8849e4f6aba49e3b6f5',
   },
   small: {
     path: 'scripts/icons/skydeck-source-small.png',
-    bytes: 1_372_751,
-    sha256: '1f230e8060d7ba3fc33911dfc71104d47f92a9e18250cadcef10a22baaa62974',
+    bytes: 1_349_085,
+    sha256: 'd2477cc7a9abbd1cac7701f9ebd792c9f6362e7ed82fb8baf2a92ce49117b220',
   },
 } as const;
 type Which = keyof typeof PICTURES;
@@ -145,11 +147,10 @@ interface Png {
   chunks: string[];
 }
 
-/** The only chunks the drawn files may hold: no metadata (a text chunk could carry a name or a
- *  path of the machine that drew them, in a file the server serves). */
+/** The only chunks the drawn files and the pictures may hold: no metadata (a text chunk could
+ *  carry a name or a path of the machine that drew them, in a file the server serves; the
+ *  pictures' own metadata chunk was removed). */
 const CHUNKS = ['IHDR', 'IDAT', 'IEND'];
-/** The picture's: the same and `caBX`, the content credentials of the image service that made it. */
-const MASTER_CHUNKS = ['IHDR', 'caBX', 'IDAT', 'IEND'];
 
 /**
  * Just enough of PNG to look at the pixels: 8-bit RGB or RGBA, not interlaced, IHDR first, only
@@ -259,7 +260,7 @@ const decoded = new Map<Which, Png>();
 function picture(which: Which): Png {
   let png = decoded.get(which);
   if (png === undefined) {
-    png = decodePng(read(PICTURES[which].path), MASTER_CHUNKS);
+    png = decodePng(read(PICTURES[which].path));
     decoded.set(which, png);
   }
   return png;
@@ -686,24 +687,24 @@ function windowInFile(size: number): { left: number; right: number; top: number 
 
 for (const which of WHICH) {
   describe(`the ${which} picture, ${PICTURES[which].path}`, () => {
-    test("is the owner's file, byte for byte: its size and sha256", () => {
+    test("is the owner's file without its metadata chunk: its size and sha256", () => {
       const bytes = read(PICTURES[which].path);
 
       assert.equal(bytes.length, PICTURES[which].bytes);
       assert.equal(
         createHash('sha256').update(bytes).digest('hex'),
         PICTURES[which].sha256,
-        "the picture changed: it is the owner's file, kept as it is; a new one needs a new run of scripts/icons.ts and new numbers here",
+        "the picture changed: it is the owner's file, its image data kept as it is; a new one needs a new run of scripts/icons.ts and new numbers here",
       );
     });
 
-    test('is square, 8-bit RGBA, with the chunks IHDR, caBX, IDAT and IEND and nothing else', () => {
+    test('is square, 8-bit RGBA, with the chunks IHDR, IDAT and IEND and nothing else (no metadata)', () => {
       const png = picture(which);
 
       assert.equal(png.width, MASTER_SIZE);
       assert.equal(png.height, MASTER_SIZE);
       assert.equal(png.colourType, 6);
-      assert.deepEqual(png.chunks, MASTER_CHUNKS);
+      assert.deepEqual(png.chunks, CHUNKS);
     });
 
     test('is transparent outside its rounded tile and opaque in its middle', () => {

@@ -61,8 +61,8 @@ and every session started in it — also by `resume --window`, `new --window` an
 - **Claude Code, installed on this Linux side and started at least once**, so that `~/.claude`
   exists. skydeck relies on the file formats of Claude Code 2.1.3xx (design section 14).
 - **`git`** to clone the repository.
-- **`gh`, the GitHub command line, logged in** (`gh auth login`; check with `gh auth status`). The
-  repository is private, so the clone needs it (or an SSH key that GitHub accepts). skydeck also uses it later to read pull-request status. Without it
+- **`gh`, the GitHub command line, logged in** (`gh auth login`; check with `gh auth status`), only
+  for the status of pull requests and GitHub issues; the clone does not need it. Without it
   everything else works; pull requests stay "not fetched" or show "can't read", and `skydeck doctor`
   reports a problem.
 - **WezTerm, optional.** Only for tabs; see above.
@@ -102,8 +102,8 @@ node --version
 of new terminals; when you already had another default, `nvm alias default 24` changes it. With a
 default of 24.12 or newer you never need `SKYDECK_NODE`.
 
-`gh`, from GitHub's own apt repository (the commands of cli.github.com's Linux instructions), and
-then the login:
+`gh` (only for the status of pull requests and GitHub issues), from GitHub's own apt repository
+(the commands of cli.github.com's Linux instructions), and then the login:
 
 ```sh
 (type -p wget >/dev/null || (sudo apt update && sudo apt install wget -y)) \
@@ -121,8 +121,7 @@ then the login:
 gh auth login
 ```
 
-`gh` asks a few questions. Let it set up Git's credentials when it offers (or choose SSH), or an
-HTTPS clone of the private repository asks for a password.
+`gh` asks a few questions; skydeck needs only that `gh auth status` says it is logged in.
 
 Claude Code itself: install it as Anthropic's setup page describes (code.claude.com/docs/en/setup;
 for Linux and WSL it gives `curl -fsSL https://claude.ai/install.sh | bash`), and run `claude` once.
@@ -130,15 +129,12 @@ for Linux and WSL it gives `curl -fsSL https://claude.ai/install.sh | bash`), an
 ## Install
 
 **1. Clone the repository.** Keep it where it can stay: the links that install makes point into it.
+The clone needs no login.
 
 ```sh
-gh auth login     # skip if you did it above
-gh repo clone vojtahavranek/skydeck ~/skydeck
+git clone https://github.com/vojtahavranek/skydeck.git ~/skydeck
 cd ~/skydeck
 ```
-
-Without `gh`: `git clone git@github.com:vojtahavranek/skydeck.git ~/skydeck`, with an SSH key that is
-registered on a GitHub account that can read the repository.
 
 **2. Check that skydeck starts.**
 
@@ -719,7 +715,7 @@ In `config.json` ("Configuration" above), all optional:
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program: an absolute path in WSL. With `window.links` `"edge"` the links the window opens open with it too, in your own Edge profile. |
 | `window.profileDir` | `null` | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
 | `window.keepAlive` | `"wsl"` | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`. |
-| `window.links` | `"default"` | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. On a managed PC, security monitoring may record or flag each start of `rundll32.exe url.dll,FileProtocolHandler`; `"edge"` avoids it. |
+| `window.links` | `"default"` | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
 
 With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
 "Starting sessions in the window from a terminal (stage C)" below. An example, for a PC with two

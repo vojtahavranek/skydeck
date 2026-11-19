@@ -263,8 +263,8 @@ describe('captionNeedText (G5, F9): what a closed caption says of the sessions i
 
 describe('groupCardText (F9): the pane while a closed caption is selected', () => {
   test('the name, the number of its sessions, the needs-you part, what opens it', () => {
-    assert.deepEqual(groupCardText('DE-184319', 3, 1), {
-      title: 'DE-184319',
+    assert.deepEqual(groupCardText('ABC-123456', 3, 1), {
+      title: 'ABC-123456',
       count: '3 sessions',
       need: ' · 1 needs you',
       hint: '→ or Enter opens the group',
