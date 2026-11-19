@@ -4,12 +4,22 @@
 // entries, changes nothing and exits 1, as the file says, through the real launcher in a sandbox.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
 import { main } from '../src/cli/main.ts';
+import { NS_PER_DAY } from '../src/platform/time.ts';
 import { testContext } from './helpers/context.ts';
+import { run, transcript } from './helpers/install.ts';
+import { S1, S2, S3, T0, testPlatform } from './helpers/platform.ts';
 import { sandbox } from './helpers/sandbox.ts';
 
 const ROOT = join(import.meta.dirname, '..');
@@ -34,15 +44,16 @@ function commandTexts(text: string): string[] {
 }
 
 /**
- * The words after each `skydeck` that starts a command (`skydeck`, `bin/skydeck`,
- * `~/.local/bin/skydeck`, after `&&` or a variable's assignment …; not `~/skydeck`, `skydeck-hook`,
- * `skydeck.db` or a path given to another program), up to a shell operator or a redirection.
+ * The words after each `skydeck` that runs the command line, up to a shell operator or a
+ * redirection: one that starts a command (`skydeck`, `bin/skydeck`, `~/.local/bin/skydeck`, after
+ * `&&` or a variable's assignment …), and the bare word anywhere else (`sudo skydeck …`); not
+ * `~/skydeck`, `skydeck-hook`, `skydeck.db` or a path given to another program.
  */
 function invocations(text: string): { text: string; words: string[] }[] {
   const found: { text: string; words: string[] }[] = [];
   for (const span of commandTexts(text)) {
     for (const [, rest] of span.matchAll(
-      /(?:^|[;&|(]\s*)(?:[A-Z_]+=\S*\s+)*(?:\S*bin\/)?skydeck(?=\s|$)((?:\s+[^\s|;&<>()]+)*)/g,
+      /(?:(?:^|[;&|(]\s*)(?:[A-Z_]+=\S*\s+)*(?:\S*bin\/)?|(?<=\s))skydeck(?=\s|$)((?:\s+[^\s|;&<>()]+)*)/g,
     )) {
       found.push({ text: span, words: (rest ?? '').trim().split(/\s+/).filter(Boolean) });
     }
@@ -113,6 +124,25 @@ describe('AGENTS.md names only what the command line knows', () => {
 
   test('CLAUDE.md is exactly the import of AGENTS.md', () => {
     assert.equal(readFileSync(join(ROOT, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
+  });
+});
+
+describe("AGENTS.md's questions are install's own", () => {
+  test('the three it quotes, in its order, are the prompts install asks', async (t) => {
+    const d = testPlatform(t);
+    // Three old sessions (the second question) and a global config without the key (the third).
+    for (const id of [S1, S2, S3]) transcript(d.places, id, T0 - 10n * NS_PER_DAY);
+    writeFileSync(d.places.claudeGlobalConfig, '{}\n');
+    chmodSync(d.places.claudeGlobalConfig, 0o600);
+
+    const r = await run(d.platform, ['install'], { lines: ['y', 'n', 'n'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    const quoted = [...AGENTS.matchAll(/`([^`]*\? \[y\/N\])`/g)].map((m) => m[1]);
+    assert.deepEqual(
+      r.prompts.map((prompt) => prompt.trimEnd()),
+      quoted,
+    );
   });
 });
 

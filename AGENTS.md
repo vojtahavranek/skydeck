@@ -2,24 +2,24 @@
 
 ## Part 1: if you were asked to install skydeck for someone
 
-skydeck is a window and a command line for Claude Code, for people who run many sessions at once.
-It shows which session is about what, what each one is doing and which one needs its user.
-Installing it adds (docs/install.md, the guide, "What install changes"): two hook entries,
-`SessionStart` and `SessionEnd`, to Claude Code's settings file `~/.claude/settings.json` (a backup
-beside it, when there was a file); a link `~/.local/bin/skydeck` to this checkout; skydeck's folders
-`~/.local/share/skydeck` (its database, two links), `~/.local/state/skydeck`, `~/.config/skydeck`;
-and, only after a yes to `Turn the shortcut off?`, one key in `~/.claude.json` (after a backup).
-If `CLAUDE_CONFIG_DIR` is set, it stands for `~/.claude`, its `.claude.json` for `~/.claude.json`.
+skydeck is a window and a command line for Claude Code, for people who run many sessions at once. It
+shows which session is about what, what each one is doing and which one needs its user. Installing
+it adds (docs/install.md, the guide, "What install changes"): two hook entries, `SessionStart` and
+`SessionEnd`, to Claude Code's settings file `~/.claude/settings.json` (backing up a file that was
+there); a link `~/.local/bin/skydeck` to this checkout; skydeck's folders `~/.local/share/skydeck`
+(its database, two links), `~/.local/state/skydeck`, `~/.config/skydeck`; and, only after a yes to
+`Turn the shortcut off?`, one key in `~/.claude.json` (after a backup). If `CLAUDE_CONFIG_DIR` is
+set, it stands for `~/.claude`, its `.claude.json` for `~/.claude.json`.
 
-The work is split. YOU check, clone, preview and explain. THE HUMAN answers install's questions
-(one of them agrees to hooks in Claude Code's own settings) and opens the window, in a terminal of
-their own. Never do the human's steps. When in doubt, stop and ask the human.
+The work is split. YOU check, clone, preview and explain. THE HUMAN answers install's questions (one
+of them agrees to hooks in Claude Code's own settings) and opens the window, in a terminal of their
+own. Never do the human's steps. When in doubt, stop and ask the human.
 
 **1. Where it works.** Linux, or Windows with WSL2 with Claude Code running INSIDE WSL; the window
 also needs Microsoft Edge on the Windows side. Run `uname -sr`:
 
-- `Linux` with `WSL2` in the release: go on. `Linux` with no `microsoft` (in any case): plain
-  Linux; go on, and tell the human that the commands work there, the window does not.
+- `Linux` with `WSL2` in the release: go on. `Linux` with no `microsoft` (upper or lower case):
+  plain Linux; go on, and tell the human that the commands work there, the window does not.
 - Any other `Linux` (WSL1): STOP, skydeck needs WSL2. `Darwin`: STOP, macOS is not supported yet.
 - Anything else, or no `uname` (PowerShell, Git Bash): you run on the Windows side, where skydeck
   would record nothing. STOP: both must run inside WSL; `skydeck install` refuses by itself there.
@@ -34,34 +34,34 @@ grep -c skydeck-hook "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 ```
 
 - A path under `/mnt/` is a Windows program seen from WSL: count it as missing.
-- If `node` is older than 24.12 or missing, put `SKYDECK_NODE=<a node 24.12 or newer>` before every
-  `bin/skydeck` below. nvm keeps them in `~/.nvm/versions/node/` (your shell may not load nvm): take
-  the highest version, not the `ls`'s last (v24.9 sorts after v24.19). None: the human installs one.
+- If `node` is older than 24.12 or missing, put `SKYDECK_NODE=<node binary>` (24.12 or newer) before
+  every `bin/skydeck` below. nvm keeps them in `~/.nvm/versions/node/` (your shell may not load
+  nvm): take the highest version (`ls` puts v24.9 after v24.19). None: the human installs one.
 - `git` missing: the human installs it. `claude` missing: STOP; it must be installed on this side
   and started once (no folder in the `ls`: the human starts `claude` once). No version stops the
-  install; the guide names 2.1.3xx, the one skydeck reads: report theirs.
+  install; the guide names 2.1.3xx, the version skydeck was written for: report theirs.
 - `python3` 3.9 or newer (only for the window's terminals) and `gh` (only for the status of pull
   requests and GitHub issues) are optional: tell the human what is missing, and go on.
 - A machine without skydeck shows `skydeck: missing`, `No such file or directory` for the three
   skydeck paths (and nvm's, without nvm) and a count of 0 or no settings file. Only `~/skydeck` or
-  `~/.local/share/skydeck` (a checkout, or the data an uninstall leaves): ask the human first.
-  `skydeck` found, the link `~/.local/bin/skydeck` or a count above 0: skydeck is installed. STOP,
-  tell the human; the rest is theirs (over an install, `bin/skydeck install` acts without asking).
-- Anything that needs `sudo`, a script from the internet or a login (`gh auth login`): PRINT it
-  for the human (the guide's "On a fresh WSL" has them all); never run it yourself.
+  `~/.local/share/skydeck` (a checkout; data an uninstall left): ask the human whether to go on.
+  `skydeck` found, the link `~/.local/bin/skydeck` or a count above 0: installed. STOP and tell the
+  human; the rest is theirs (install would act without asking).
+- Anything that needs `sudo`, a script from the internet or a login (`gh auth login`): PRINT it for
+  the human (the guide's "On a fresh WSL" has them all); never run it yourself.
 
 **3. Clone, and preview the change.** Ask where the checkout should live (`~/skydeck`, or their
-choice: change it below); it stays there (install links to it). Reading this in a checkout they
-want to keep? Use it, and skip the clone. A clone that asks for a login: STOP, it is the human's.
+choice: change it below); it stays there (install links to it). Reading this in a checkout they want
+to keep? Use it, and skip the clone. A clone that asks for a login: STOP, it is the human's.
 
 ```sh
 git clone https://github.com/vojtahavranek/skydeck.git ~/skydeck
 cd ~/skydeck && bin/skydeck install </dev/null
 ```
 
-Only on a machine step 2 found without skydeck: no input means no answer, and no answer is a no,
-so the second line shows the exact entries install would add, changes nothing (every run of
-skydeck keeps a compile cache in `~/.cache/skydeck`) and exits 1, which is expected here. It prints:
+Only where step 2 found no skydeck (none on `PATH`, no link, a count of 0): with no input every
+question gets a no, so the second line shows the exact entries install would add, changes nothing
+(but skydeck's compile cache in `~/.cache/skydeck`) and exits 1, as expected. It prints:
 
 ```text
 skydeck will add these hook entries to /home/you/.claude/settings.json:
@@ -73,16 +73,15 @@ A line `the rest of the file will be rewritten …` means install would also ref
 names its backup; `ExperimentalWarning: SQLite …` and its next line (some Node.js 24 versions, at
 any place) are harmless. Show the human the whole output. Anything else (a refusal): STOP, show it.
 
-**4. The human installs.** In a terminal of their own, where they read the questions and type the
-answers, they run `cd ~/skydeck && bin/skydeck install` (with `SKYDECK_NODE=...` in front when
-their `node` is older than 24.12); Enter alone is a no. Never answer for them (no option of
-install does) and never feed them from a pipe (`printf 'y\n' |`, `yes |`). Tell them first what a
-yes does (each question comes only when it applies):
+**4. The human installs.** In a terminal of their own, where they can type the answers, they run
+`cd ~/skydeck && bin/skydeck install` (with `SKYDECK_NODE=...` in front of `bin/skydeck` when their
+`node` is older than 24.12); Enter alone is a no. Never answer for them (no option of install does)
+or feed them from a pipe (`printf 'y\n' |`, `yes |`). Tell them first what a yes to each does:
 
-- `Add them? [y/N]`: adds the two hook entries (after a backup of the file), so that skydeck
-  records every session that starts from now on. A no ends the install with nothing changed.
-- `Mark 3 sessions older than 7 days as done? [y/N]` (asked once, when there are such sessions;
-  the number varies): hides them from skydeck's list. Nothing is stopped or deleted.
+- `Add them? [y/N]`: adds the two hook entries (after a backup of the file), so that skydeck records
+  every session that starts from now on. A no ends the install with nothing changed.
+- `Mark 3 sessions older than 7 days as done? [y/N]` (asked once, when there are such sessions; the
+  number varies): hides them from skydeck's list. Nothing is stopped or deleted.
 - `Turn the shortcut off? [y/N]` (while it is on): turns off Claude Code's ← shortcut in
   `~/.claude.json` (after a backup), so a ← meant for skydeck's list cannot send a session away.
 
@@ -90,22 +89,23 @@ yes does (each question comes only when it applies):
 (if not, give them `export PATH="$HOME/.local/bin:$PATH"` for their shell's startup file,
 `~/.bashrc` or `~/.zshrc`; never edit it yourself). You may run `~/.local/bin/skydeck doctor` and
 `~/.local/bin/skydeck ls` here and read them out. `doctor` prints a line per check (`ok`, `info` or
-`problem`; exit 1 on any problem), the first three, `info`, naming the versions and the system.
-Normal on a new install: `info     no events yet`; a `problem` for a missing or logged-out `gh`;
-`info` for the window's lines, Edge's too, until it is used. Other problems: the human's to fix.
+`problem`; exit 1 on any problem); the first three, `info`, give the versions and the system. Normal
+on a new install: `info     no events yet`; a `problem` for a missing or logged-out `gh`; `info` for
+the window's lines, Edge's too, until it is used. Other problems: the human's to fix.
 
 **6. Tell the human, at the end:** what changed (above), and that `skydeck uninstall` undoes it (it
 takes the hook entries out, removes the links and stops the window's server; the database, the
 backups and the ← setting stay); that the window is theirs: `skydeck window` in a terminal of their
-own, first with a new session in a scratch folder, one they can lose (without Edge,
-`skydeck window --print-url` gives an address for any browser); and that
-[docs/quick-start.md](docs/quick-start.md) takes them through their first ten minutes.
+own, first with a new session in a scratch folder, one they can lose (without Edge:
+`skydeck window --print-url`, for any browser); and that [docs/quick-start.md](docs/quick-start.md)
+takes them through their first ten minutes.
 
 **Never:**
 
-- Run `skydeck window`, `skydeck serve`, `skydeck update` or a bare `skydeck` here: the first three
-  refuse inside Claude Code (the window's sessions would get this session's environment), and a bare
-  one is the interactive list. Install, doctor and ls work here.
+- Run `skydeck window`, `skydeck serve`, `skydeck update` or a bare `skydeck` yourself: they are the
+  human's, from a terminal of their own (the window's sessions get the environment of whoever starts
+  its server; inside Claude Code the three refuse), and a bare one is the interactive list. Install,
+  doctor and ls are fine; never `new`, `resume` or `restore` unasked (they start `claude`).
 - Follow `docs/manual-checks.md`, the maintainer's checklist: it can uninstall skydeck or stop WSL.
 - Run `skydeck uninstall` or `skydeck uninstall --purge` unasked: they undo the install, and
   `--purge` deletes the human's labels and notes for good.
