@@ -29,6 +29,7 @@ import { sanitize } from '../../text/sanitize.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
+import { sayMigrated } from '../deck.ts';
 import { EXIT } from '../exit.ts';
 import { WINDOW_CHECKS, windowView } from '../window-checks.ts';
 import type { WindowCheck, WindowView } from '../window-checks.ts';
@@ -96,6 +97,8 @@ export const command: Command = {
     const { platform } = ctx;
     const { places, config } = readConfiguration(platform, report);
     const store = openDatabase(platform, places, report);
+    // F21: an open that migrated the database says so on stderr, as every command's does.
+    if (store !== null) sayMigrated(ctx, store);
     try {
       for (const check of CHECKS) {
         try {
