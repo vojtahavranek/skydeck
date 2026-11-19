@@ -223,15 +223,30 @@ async function boxes(page: Page): Promise<Box[]> {
   });
 }
 
-/** The card of the form as an image, the mouse moved away first. */
+/**
+ * The card of the form as an image once it has settled: the keyboard in Directory (its focus ring
+ * drawn), the mouse moved away, and two shots in a row the same (a loaded machine paints late).
+ */
 async function cardImage(page: Page): Promise<Buffer> {
+  await page.waitForFunction(
+    () => (document.activeElement as HTMLInputElement | null)?.name === 'directory',
+  );
   await page.mouse.move(2, 2);
   const box = await page.evaluate(() => {
     const r = document.querySelector('#cards .card-new')?.closest('.card')?.getBoundingClientRect();
     return r === undefined ? null : { x: r.x, y: r.y, width: r.width, height: r.height };
   });
   assert.ok(box !== null, 'the card');
-  return page.screenshot({ clip: box, animations: 'disabled', caret: 'hide' });
+  const shot = (): Promise<Buffer> =>
+    page.screenshot({ clip: box, animations: 'disabled', caret: 'hide' });
+  let last = await shot();
+  for (let i = 0; i < 20; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const now = await shot();
+    if (now.equals(last)) return now;
+    last = now;
+  }
+  assert.fail('the card did not settle');
 }
 
 test("the new form's group suggestion", async (t) => {
