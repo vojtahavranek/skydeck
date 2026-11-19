@@ -38,15 +38,15 @@ grep -c skydeck-hook "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
   `bin/skydeck` below. nvm keeps them in `~/.nvm/versions/node/` (your shell may not load nvm): take
   the highest version, not the `ls`'s last (v24.9 sorts after v24.19). None: the human installs one.
 - `git` missing: the human installs it. `claude` missing: STOP; it must be installed on this side
-  and started once (no folder in the `ls`: the human starts `claude` once). No version of it stops
-  the install; the guide names 2.1.3xx as the one skydeck reads: say which one they have.
+  and started once (no folder in the `ls`: the human starts `claude` once). No version stops the
+  install; the guide names 2.1.3xx, the one skydeck reads: report theirs.
 - `python3` 3.9 or newer (only for the window's terminals) and `gh` (only for the status of pull
   requests and GitHub issues) are optional: tell the human what is missing, and go on.
 - A machine without skydeck shows `skydeck: missing`, `No such file or directory` for the three
-  skydeck paths (and for nvm's folder, without nvm) and a count of 0 (or no settings file). Only
-  `~/skydeck` there: ask whether it is the checkout to use. `skydeck` found, either link, or a count
-  above 0: skydeck is installed. STOP and tell the human; the rest is theirs, since over an install
-  `bin/skydeck install` asks nothing and goes ahead (the preview below would not be one).
+  skydeck paths (and nvm's, without nvm) and a count of 0 or no settings file. Only `~/skydeck` or
+  `~/.local/share/skydeck` (a checkout, or the data an uninstall leaves): ask the human first.
+  `skydeck` found, the link `~/.local/bin/skydeck` or a count above 0: skydeck is installed. STOP,
+  tell the human; the rest is theirs (over an install, `bin/skydeck install` acts without asking).
 - Anything that needs `sudo`, a script from the internet or a login (`gh auth login`): PRINT it
   for the human (the guide's "On a fresh WSL" has them all); never run it yourself.
 
