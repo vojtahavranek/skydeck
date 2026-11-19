@@ -15,7 +15,7 @@ F8), at "Updating skydeck"; W33 checks install's offer to turn off Claude Code's
 F13), at "The window's theme"; W35 checks the flags a session was started with in the header
 (follow-up F16), at "The flags a session was started with"; W36 checks the new form's favourite
 flags (follow-up F15), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
-session's ticket".
+session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status".
 
 Setup:
 
@@ -2317,3 +2317,199 @@ anything that differs, and where. At the end the throwaway session has no ticket
 Not tried before this check was written: all of it, in Edge. The tests run the header and the
 dialog in headless Chromium against a stand-in server and a test server whose links go to a stub;
 they never open a browser and never start `claude`.
+
+## A ticket's status
+
+The check of a ticket's status (follow-up F19; design-step-2.md 12.5, 12.2, 12.3;
+[install.md](install.md), "A ticket's status"): W38, in your window, on the throwaway session of
+"The window (step 2, stage A)" and nothing else. It asks no real tracker and not GitHub: the status
+comes from a stand-in program that you write into a throwaway folder, `~/skydeck-try/status`,
+whose three lines the check gives, and the rule for it takes only `https://example.com/try/`,
+addresses of `example.com` (a domain kept for examples: nothing of yours is on it, and nothing
+opens it). It changes one file of yours, `config.json`, which it copies aside first and gives back
+at its end after comparing the two; it sets a ticket only on the throwaway session and removes it
+at its end, and it removes only the folder it made. It types no prompt into any terminal.
+Commands are typed in W, a WSL terminal of your own (never a `!` command inside Claude Code).
+
+## W38. A ticket's status on the throwaway session
+
+Setup: skydeck updated to a commit that has follow-up F19 (`skydeck update`, W32; it upgrades the
+database once, [install.md](install.md), "There is no way back to an older checkout"); the window
+open, with the throwaway session in it. Click the throwaway session's row in the list, then look
+at the header's short id: it must be the throwaway session's (`skydeck ls` in W prints the short
+ids as the last column); write it down. **Before every key and every click below, look at it
+again.** The header's third line starts with `no pull request` (or the pull requests' chip); when
+it starts with a ticket's chip instead (an earlier run left one), go on: step 6 removes it. **Type
+text only into an open dialog**: after `t` or a click on `+ ticket` / `Ticket`, look that a dialog
+is there whose heading reads `Ticket — <the throwaway session's title>` and whose field has the
+keyboard (the cursor blinks in it); when the key bar says `the ticket is not here yet; press t
+again` instead, no dialog opened: type nothing, and press `t` again. Typed into the list, `k`
+would move to a real session and `d` mark it done. **The list takes a key only while the key bar
+says `Focus: list`**; press Ctrl+Shift+L until it does (a click on a running row gives the keyboard
+to its terminal, and what you type would reach Claude Code).
+
+**The stand-in program.** In W (`mkdir` fails when an earlier W38 left the folder: do its step 6
+first):
+
+```sh
+mkdir ~/skydeck-try/status
+printf '%s\n' '#!/bin/sh' 'cat "$HOME/skydeck-try/status/answer"' 'exit 0' > ~/skydeck-try/status/status
+chmod +x ~/skydeck-try/status/status
+printf '%s\n' 'In Progress' 'doing' > ~/skydeck-try/status/answer
+~/skydeck-try/status/status
+```
+
+The last command prints `In Progress` and, under it, `doing`: the two lines a status program
+prints (install.md). The program's three lines are `#!/bin/sh`, `cat` of the file `answer`, and
+`exit 0`; the file `answer` is what you change between the steps.
+
+**Your configuration comes first.** The paths below are the default ones: with `XDG_CONFIG_HOME`
+set, the file is under that folder (install.md, "Places"); with `SKYDECK_HOME` set, it is
+`$SKYDECK_HOME/config/config.json` (install.md, "Environment variables"). In W:
+
+```sh
+ls -l ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w38
+```
+
+- **`config.json.before-w38` is listed**: an earlier W38 did not finish. Do its step 6 first (it
+  compares the two files before anything is copied), then start again.
+- **Only `config.json` is listed**: you have a configuration, whatever it holds. Copy it aside, as
+  it is (`-n`: an existing copy is never written over):
+
+  ```sh
+  cp -p -n ~/.config/skydeck/config.json ~/.config/skydeck/config.json.before-w38
+  ```
+
+  Then add one line, on a line of its own right after the opening `{`, as its first key (with your
+  own home folder, `echo $HOME`, in place of `/home/you`):
+
+  ```
+  "ticketStatus": [ { "match": "https://example.com/try/", "command": ["/home/you/skydeck-try/status/status"] } ],
+  ```
+
+  In a file written on one line (`{ "terminal": "wezterm" }`), put the key right after `{` on
+  that line instead. In a file that holds no key yet (`{}`, `{ }`, or `{` and `}` on two lines),
+  add it without the trailing comma. When the file already holds a `"ticketStatus"` list (yours),
+  add no second key: put only the object `{ "match": "https://example.com/try/", "command":
+  [ … ] },` first in that list, and take it out again at the end.
+- **Both are missing** (`No such file or directory` twice): you have none. Create the file with
+  only this key (the command writes nothing when the file exists):
+
+  ```sh
+  mkdir -p ~/.config/skydeck
+  test -e ~/.config/skydeck/config.json || printf '{ "ticketStatus": [ { "match": "https://example.com/try/", "command": ["%s/skydeck-try/status/status"] } ] }\n' "$HOME" > ~/.config/skydeck/config.json
+  ```
+
+A mistake in the file makes every skydeck command print one line that names the file and the key
+and exit 1 (`skydeck doctor` shows it as a problem line); correct the line, or go on with step 6.
+To see that the file is valid: `skydeck ls > /dev/null` prints nothing. Then, in W (the server
+reads the file when it starts; the window stays and connects again):
+
+```sh
+skydeck window --restart
+```
+
+1. **Set the ticket.** Select the throwaway session and look at the header's short id. Look that
+   the key bar says `Focus: list`. Press `t`. Expected: the dialog `Ticket — <title>`, its field
+   empty, and no line about a status above it (no provider reads a session without a ticket).
+   Only while that dialog shows, type `https://example.com/try/TRY-1` and press Enter. Expected:
+   the dialog closes; within a second or two the header's third line starts with `TRY-1 · In
+   Progress ↗`, in blue (the pull requests' blue for `review required`), the name underlined; the
+   throwaway session's row in the list has a small chip `In Progress`, in blue, where the
+   pull-request chip stands or would stand. Point at `TRY-1 · In Progress ↗`: its tooltip is two
+   lines, `https://example.com/try/TRY-1` and `In Progress, checked <age> ago` (an age such as
+   `12s`). Press `t` again (look at the dialog's heading): above its field the line `In Progress
+   · checked <age> ago` and a `↻` at the line's right end, whose tooltip is `read its status now`;
+   press Esc. **Do not click the chip** (it would open `example.com`).
+2. **Each category, with ↻.** For each row of the table, in this order: in W, write the answer
+   (the command below the table: its first word is the status, its second the category); in the
+   window look at the header's
+   short id, look that the list has the keyboard and press `t`, look at the dialog's heading, then
+   click `↻` (the keyboard stays in the field). Expected: within a second or two the dialog's
+   line reads `<the status> · checked <age> ago`. Press Esc, and look at the chip in the header
+   and the small chip in the throwaway session's row:
+
+   | The answer's lines | Colour of the two chips |
+   |---|---|
+   | `Blocked by legal`, `blocked` | red |
+   | `In Review`, `review` | amber |
+   | `In Progress`, `doing` | blue |
+   | `Done`, `done` | green |
+   | `Backlog`, `todo` | grey, as a draft pull request's chip |
+   | `Won't Fix`, `closed` | grey |
+
+   ```sh
+   printf '%s\n' 'Blocked by legal' 'blocked' > ~/skydeck-try/status/answer
+   ```
+
+   (the same command with the row's two lines in place of those). Write down each colour, and
+   whether the colours are the ones the pull requests' chips have in your list for `failing`,
+   `pending`, `review required`, `approved` and a draft (a pull request of yours may show them).
+3. **The cut, and a word that is no category.** In W: `printf '%s\n' 'A very long status text
+   that is cut' 'urgent' > ~/skydeck-try/status/answer`; then ↻ as in step 2. Expected: the
+   header's chip reads `TRY-1 · A very long status text that is cut ↗` (the whole status, grey:
+   `urgent` is no category; in a narrow window the end of the status is cut with `…` first); the
+   row's small chip `A very long s…` (13 characters and `…`), with the tooltip `TRY-1 · A very
+   long status text that is cut`. Put `In Progress` and `doing` back (the `printf` of the
+   stand-in's setup).
+4. **A failure keeps the status.** In W: `chmod -x ~/skydeck-try/status/status`. In the window
+   (short id, `Focus: list`, `t`, heading) click `↻`. Expected: the dialog's line reads `status
+   not read: the status command could not be run: …` (Node's own words follow) then ` · last In
+   Progress, checked <age> ago`; after Esc the chip still reads `TRY-1 · In Progress ↗`, in blue,
+   and its tooltip has three lines: the address, `status not read: the status command could not be
+   run: …`, and `In Progress, checked <age> ago` (the age of the last success, which grows). Then
+   `chmod +x ~/skydeck-try/status/status`, click `↻` again (dialog first, as above): the line is
+   `In Progress · checked <age> ago` again, and the tooltip has two lines.
+5. **`skydeck show`.** In W: `skydeck show <short id>`. Expected: right after the `group:` line, a
+   line that starts with `ticket:` and ends with `https://example.com/try/TRY-1 · In Progress`.
+   Then `skydeck ticket refresh <short id>`: it prints `<short id> ticket:
+   https://example.com/try/TRY-1 · In Progress`. With `chmod -x` as in step 4, the same command
+   prints that line with ` (status not read: the status command could not be run: …)` after it,
+   and `skydeck show <short id>` adds a line `status not read: …` under `ticket:`; put `chmod +x`
+   back, and look that the next `skydeck ticket refresh <short id>` has no failure.
+6. **Put everything back.**
+   - **The ticket.** Look at the header's short id, click `Ticket` and look that the dialog shows.
+     Press Ctrl+A, then Delete, then Enter. Expected: the dialog closes, the chip is gone, the row's
+     small chip is gone, the button reads `+ ticket`; `skydeck show <short id>` prints no
+     `ticket:` line.
+   - **Your configuration**, by the branch you took above:
+     - **You made the copy.** Compare first; copy nothing yet:
+
+       ```sh
+       diff ~/.config/skydeck/config.json.before-w38 ~/.config/skydeck/config.json
+       ```
+
+       It must show only your own change: the `ticketStatus` line (or object) you added, after `> `
+       (with a line such as `1a2` above it); for a file on one line, that line before (`< `) and
+       after (`> `), differing only by your rule (with `1c1` above them). Only then put the copy
+       back, and remove it once the two are the same:
+
+       ```sh
+       cp -p ~/.config/skydeck/config.json.before-w38 ~/.config/skydeck/config.json
+       cmp ~/.config/skydeck/config.json.before-w38 ~/.config/skydeck/config.json && rm ~/.config/skydeck/config.json.before-w38
+       ```
+
+       **When `diff` says `config.json: No such file or directory`**, the file was removed since
+       (after an unfinished run), and your keys are only in the copy: put the copy back with the
+       same `cp -p` line, then `cmp` and `rm` as above. **When `diff` shows anything else**, the
+       file was changed since the copy was made (by you or by a program): copy nothing back. Look
+       at both files, take out of `config.json` by hand the rule this check added, keep everything
+       else, and only then remove the copy (`rm ~/.config/skydeck/config.json.before-w38`).
+     - **You had no file before**: `cat ~/.config/skydeck/config.json` must print exactly the one
+       line this check wrote; then remove the file this run created,
+       `rm ~/.config/skydeck/config.json`. When it holds more, something was added since: take out
+       only the `ticketStatus` key, by hand.
+
+     Then `skydeck window --restart`.
+   - **The stand-in.** `rm -r ~/skydeck-try/status` (the folder this check made; `ls
+     ~/skydeck-try` no longer lists `status`).
+
+Write down: for each step whether it went as expected; the colour of each chip in step 2, and
+whether it matched the pull requests' colours; the words of the failure in step 4; whether the
+tooltip's age grew; anything that differs, and where. At the end the throwaway session has no
+ticket, `config.json` is as it was before this check, and `~/skydeck-try/status` is gone.
+
+Not tried before this check was written: all of it, in Edge. The tests run the header, the row and
+the dialog in headless Chromium against a stand-in server, and the server and the commands with
+stand-in programs on test databases; they never ask a real tracker, never call the real `gh` and
+never start `claude`.

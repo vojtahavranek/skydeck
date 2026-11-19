@@ -241,6 +241,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | `src/cli/commands/` | `resume` and `new`: `--window`; `restore` with `"terminal": "window"` (11.4). `show`: `(in the skydeck window)` (11.4). | C |
 | the interactive list (`src/cli/tui/`) | `R` with `"terminal": "window"` sends `POST /resume` (11.4) and shows the answer's lines the way it shows a tab launch's lines today. Nothing else in the list changes. | C |
 | `src/store/`, `src/sessions/`, `src/cli/` | Follow-up F18, a session's ticket (design 7.1, 12.5): migration 3 (10.2) adds `session_meta.ticket_url`; `readTicket`, `ticketText` and `setTicket`; a list row carries the ticket, which the expiry rule (design 7.2) and the filter (design 7.4) count; the new command `skydeck ticket set` / `clear`; `show` prints the ticket as `ticket:` and in `--json`; `t` in the interactive list. | F18 |
+| `src/ticket-status.ts`, `src/github.ts`, `src/platform/config.ts`, `src/store/`, `src/sessions/list.ts`, `src/window/ticket-fetches.ts`, `tick.ts`, `actions.ts`, `protocol.ts`, `src/cli/`, `web/` | Follow-up F19, a ticket's status (design 7.3, 12.2, 12.3, 12.5): the provider of an address (a `ticketStatus` rule, else a GitHub issue), the configured program and its answer, the due rule and the fetch in `src/ticket-status.ts`, the issues' key and batch in `src/github.ts`; the keys `ticketStatus` and `ticketRefreshMinutes` (16.4); migration 4 (10.2) adds the table `ticket_status`; a list row and `list.selected` carry the status (8.2.3) and the filter finds its text (12.8); the server reads it in the background, one read at a time (10.1; the actions `ticket` and `ticket-refresh`); `skydeck ticket refresh`, `ticket set` and `show` print it; the page draws the header's chip, the row's small chip and the dialog's line and ↻ (12.2, 12.5). | F19 |
 | `package.json`, `.prettierignore`, `tsconfig.json` | Development dependencies: `playwright`, `ws`, and the `@xterm/*` packages of 16.6 (exact versions); scripts `vendor`, `test:page`, `check` (17.5); `vendor/` added to `.prettierignore`, so that the vendored files are kept byte for byte; `web/tsconfig.json` beside the root one. | A |
 | `.github/workflows/ci.yml` | 17.5: `shellcheck` by name, the jobs `lint`, `unit (i/n)` and `page (i/n)` side by side with Node's `--test-shard`, the page suite on the newest leg only, on a runner pin of its own, the time limits. | A |
 
@@ -1495,6 +1496,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `pr-add`, `pr-rm` | `sessionId`, `url` | 12.5. |
 | `pr-refresh` | `sessionId` | An explicit refresh of that session's pull requests (design 7.3). |
 | `ticket` | `sessionId`, `text` (a link or a key as typed; empty removes the ticket) | 12.5 (follow-up F18): the server reads `text` by design 7.1's rule (`readTicket`) and stores the address, replacing the ticket before; a refusal's words are the result's error, nothing stored. `text` is held to the URL limit, so that a link of 2,048 characters is sent whole. Every page's `list` follows. |
+| `ticket-refresh` | `sessionId` | 12.5 (follow-up F19): reads the status of the session's ticket — the one set, else the group's link — now, whatever its age, in the background, answered `ok` at once; every page's `list` follows when the result is saved. Refused with `no status is read for this session's ticket` when no provider takes its address, or the session has none. `ticket` also asks for the read when a provider takes the new address. |
 | `close-terminal` | `term` | Forgets an ended or not-started terminal's last screen (7.8). Refused for a terminal whose program runs (principle 6). |
 | `open-link` | `url` | 9.6. |
 | `dismiss-restore` | `bootId` (the earlier boot the banner offers, a lower-case UUID: the form of `/proc/sys/kernel/random/boot_id`) | 12.7. |
@@ -1527,7 +1529,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view is filtering and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line and folds nothing), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view is filtering and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line and folds nothing), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -1830,7 +1832,8 @@ Nothing of a terminal is stored: a server restart rediscovers terminals from
 The **tick**, every second: read the live-session files (`readLiveFiles`, cheap) for state changes
 and turn ends (10.3); check the keep-alive. Every second tick: the refresh every command runs
 (design 5.3: ingest, reconcile, transcript scan, lock sweep), the automatic pull-request refresh
-(design 7.3) for the sessions the pages list, and a reload of the rows when that refresh saved
+(design 7.3) for the sessions the pages list, a round of the tickets' statuses (below, from
+follow-up F19), and a reload of the rows when that refresh saved
 something, a live file or its trust changed, another process committed to the store
 (`Store.dataVersion()`), or a minute passed — the interactive list's rule — or when a row's last
 holding that was alive at the last load is gone now (stage B, ruled 2026-11-15): a session's end
@@ -1848,6 +1851,24 @@ start of every write transaction, and before every write that is a single statem
 store is newer than the server knows (a command of an updated checkout migrated it, 16.5), the
 write is not made and the server stops (5.5) with `bye "skydeck was updated; run skydeck window"`.
 A tick between the migration and the next write therefore writes nothing into the migrated store.
+
+**The tickets' statuses** (follow-up F19, design 7.3), in the same second tick, beside the pull
+requests' refresh. The server keeps the sessions the pages listed since its last round and takes
+their ticket addresses — each row's `ticketStatus.url`, there only when a provider takes the
+address (12.5) —; while no read runs or waits it starts a round: it reads the cached rows again,
+keeps the addresses that are due — never tried, or last attempted more than `ticketRefreshMinutes`
+ago (10 by default), or, for a status whose category is `done` or `closed`, more than 12 hours ago
+— and reads them: the GitHub issues first, in batches of their own through `gh`, then the
+configured programs one after the other, at most 5 of them in a round (the rest is due again at the
+next one). While a read runs or waits the listed sessions are kept for the next round. A read that
+was asked for — a ticket set or changed (`act ticket`), the ticket dialog's ↻ (`act
+ticket-refresh`) — does not wait for the tick: it runs in the background at once, whatever the
+age, and so that no more than one status program runs in the server at a time, whoever asked, the
+reads asked for while one runs wait for it and then run together. Each saved result makes the
+server load the rows again and send the lists, as an edit does (within a second). Nothing is read
+for a session no page lists, and nothing at all for an address no provider takes. The server reads
+`ticketStatus` and `ticketRefreshMinutes` at its start only (16.4); its stop aborts a running read
+and saves nothing more of it.
 
 Cost, from step 1's measurements: an idle refresh is about 16 ms at 3,000 recorded sessions and
 about 60 ms when 3,000 transcripts are listed; at one every 2 seconds that is under 3% of one core.
@@ -1905,6 +1926,31 @@ update, the version read again inside the write lock. **There is no way back**: 
 older skydeck refuses the database at its open ("written by a newer skydeck", exit 1), a server of an
 older checkout still running stops at its next write (10.1's guard), and nothing removes the column
 (install.md, "There is no way back to an older checkout").
+
+**Migration 4** (follow-up F19, a ticket's status, design 7.3 and 12.5):
+
+```sql
+CREATE TABLE ticket_status (
+  url          TEXT PRIMARY KEY,  -- a ticket's address (F19), as a session's ticket gives it
+  status       TEXT,              -- its status' text; NULL until a read succeeded
+  category     TEXT,              -- todo | doing | review | blocked | done | closed; NULL for none
+  ok_at_ns     INTEGER,           -- the last read that succeeded
+  tried_at_ns  INTEGER NOT NULL,  -- the last attempt
+  error        TEXT               -- the last attempt's failure; NULL after a success
+);
+```
+
+It only adds a table, so every other table keeps its rows as they were and a reader of schema 3
+still reads them. A row is made at the first attempt to read an address, and never removed: an
+address no session uses any more keeps its row (a few bytes). A read that succeeded sets `status`,
+`category`, `ok_at_ns` (equal to `tried_at_ns`) and a NULL `error`; one that failed sets only
+`tried_at_ns` and `error`, so that the last status and the time of its read stay. Like every
+migration it runs in one transaction with its `kv` update, the version read again inside the write
+lock. **There is no way back**, as for migration 3: from then on an older skydeck (one of schema 3,
+F18's) refuses the database at its open ("written by a newer skydeck … update skydeck", exit 1), a
+server of an older checkout still running stops at its next write (10.1's guard), and nothing
+removes the table (install.md, "There is no way back to an older checkout").
+`test/store/migration-4.test.ts` migrates a filled schema-3 database and compares every value.
 
 `kv` entries (no migration; `kv` is free text):
 
@@ -2303,6 +2349,17 @@ equal declaration by declaration. Check W34.
   mark of design 6.3 in words (`continued` and `2 processes` too) and the expiring one as `expires
   soon`: the row carries only that the session is expiring, not when its transcript is deleted
   (ruled by the plan owner, plan task 27).
+- **The ticket's status** (follow-up F19). While the session's ticket — the one set on it, else its
+  group's link (12.5) — has a known status, a second small chip stands right after the
+  pull-request chip: the status' text cut at 14 characters (13 and `…` when it is longer), in the
+  tint of its category (12.3), in the pull-request chip's box (6 px of padding at each side, a 1 px
+  border in `--line2`, a radius of 9 px, 11 px text on a 16 px line: 18 px high); its tooltip is
+  `<name> · <status>`, the whole status. A ticket with no status known — one that was never read,
+  or whose reads all failed — shows nothing: the chip is hidden and takes no room, so that a row
+  without one is drawn exactly as before F19; with one, the title gives it the room (the title
+  alone shrinks, as for the pull-request chip). The quick switcher's rows do not show it. The
+  server sends the row's `ticketStatus` (8.2.3), the page cuts the text and draws the chip, and
+  the filter finds the text (12.8).
 - No group headers, except the caption of a block (below): most groups have one session. The
   group (design 7.1) is printed dim at the start of the title when the title does not already
   start with it. In every section the rows of one group sit together as a block, drawn as a card:
@@ -2468,6 +2525,27 @@ header; the dialog; the switcher and its highlighted item), in both schemes
 | merged (`3 merged`, a merged line of the dialog) | purple |
 | draft, closed, not fetched, can't read, a state the page does not know | grey, as before |
 
+**A ticket's status** (follow-up F19) takes the same tints and no new colour, by its category — one
+of six words, which the page checks against its own list (`knownCategory`; any other word, and no
+category, is grey) —: its chip in the list's row (12.2) and the ticket's chip in the header (12.5)
+carry the word in `data-category`, and the rule `:where(.row-ticket, .header-ticket)` of
+`web/style.css` maps it to the variables of the pull requests' tints (`--pr-*` and `--pr-*-bg`,
+which hold in the light scheme, the dark one and the forced themes alike).
+
+| Category | Tint | The pull requests' level of that tint |
+|---|---|---|
+| `blocked` | red (`--pr-red`) | checks failing, changes requested |
+| `review` | amber (`--pr-amber`) | checks pending |
+| `doing` | blue (`--pr-blue`) | review required |
+| `done` | green (`--pr-green`) | approved and green |
+| `todo`, `closed`, none, or a word the page does not know | grey (`--dim`), as a draft or a closed pull request's chip | draft, closed, not fetched, can't read |
+
+Purple (merged) is not used. The words stay, so the colour never says anything alone. The two chips
+stand on the grounds that `test/web/pr-tints.test.ts` measures (a row, hovered and selected; the
+header), so the 4.5 : 1 rule above holds for them; `test/web/ticket-status-tints.test.ts` pins
+the mapping: each category with a colour takes its tint's two `--pr-*` variables, and the rule
+writes no colour of its own.
+
 ### 12.4 Attention: needs you and seen
 
 A session **needs you** for one of three reasons, in this order:
@@ -2590,8 +2668,9 @@ click copies the whole id), where the title comes from, from follow-up F16 the f
 was started with (below), and buttons Note and Done / Undone. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
-F18 the session's ticket first (below), then the window's chip (12.3), then the open ones side by
-side as far as they fit (`repo #n · failing`; a click opens one, 9.6), and at the line's right end
+F18 the session's ticket first (below, with its status from F19), then the window's chip (12.3),
+then the open ones side by side as far as they fit (`repo #n · failing`; a click opens one, 9.6),
+and at the line's right end
 the ticket's button (`+ ticket`, `Ticket` while one is set) and a button that opens the
 pull-request dialog (`+ PR` while none is attached) — and **one line for the note**: its first line (a click edits it), or a quiet hint
 while there is none. Both lines are there for every session, with and without pull requests or a
@@ -2676,10 +2755,11 @@ The chip never edits: the ✎ beside it and `g` edit the group, with and without
 there is no group the dashed `+ group` sets one. So nothing a program wrote into a title can add a
 host, a path or a query: the key holds no `/`, `?`, `#`, `@`, `:`, `%` or white space, and the URL
 parser, not the text, decides that `{key}` stands after the host (16.4). The address reaches the
-page as a string of `list` and is shown only as text; it never becomes markup. skydeck reads nothing
-from the ticket system: no API, no login. `skydeck show` prints the address as `ticket:` after
-`group:` while the session has no ticket of its own (below; its `--json` does not hold the group's
-link).
+page as a string of `list` and is shown only as text; it never becomes markup. skydeck itself reads
+nothing from the ticket system: no API, no login (a status, when one is read, comes through `gh` or
+through a program the user configures: "A ticket's status" below). `skydeck show` prints the
+address as `ticket:` after `group:` while the session has no ticket of its own (below; its `--json`
+does not hold the group's link), followed by its status when one is read (below).
 
 **The ticket of a session** (asked for by the owner on 2026-11-18 and 19, follow-up F18, step 1;
 the details ruled by the lead). A session has at most one ticket, which the user sets: a JIRA
@@ -2715,7 +2795,8 @@ about 690 px without one (on `main` before F18, about 620 px: the new button tak
 every session's line), and narrower the line is clipped at its end. The header's four lines and
 their heights never change, at any width (ruled by the lead: no layout change in F18; a narrower
 button or another place for it is the owner's later choice). The name is one part of the
-chip, so that a later status can stand beside it (not built: step 2 of the request). The button
+chip, so that a status can stand beside it (follow-up F19, below; those widths are F18's, of a
+chip without a status). The button
 `+ ticket` (`Ticket` while one is set) stands just before the pull-request button, which keeps its
 place at the line's end; it and `t` in the list (12.9) open the ticket's dialog: one field holding
 the ticket's address (empty while there is none), its placeholder `a link`, and `, or a key like
@@ -2723,10 +2804,114 @@ ABC-123` only while `ticketUrl` is configured (`list.selected.ticketKeys`); Ente
 Cancel close, a refusal shows the server's words under the field and keeps the text, as in the
 other dialogs. The group chip and its link are unchanged: the two stand side by side, the group's
 link worked out from the group as above, the ticket the one the user set. The filter (12.8) finds a
-session by its ticket's name and address; `skydeck show` prints the ticket as `ticket:` (in place
-of the group's link) and in its `--json`; `skydeck ticket set <ref> <link-or-key>` and `skydeck
-ticket clear <ref>` set and remove it, and `t` in the interactive list (design 7.4). Nothing about
-a ticket is fetched, nothing read from a transcript, and the list's rows do not show it.
+session by its ticket's name and address, and by its status' text (F19); `skydeck show` prints the
+ticket as `ticket:` (in place of the group's link) and in its `--json`; `skydeck ticket set <ref>
+<link-or-key>` and `skydeck ticket clear <ref>` set and remove it, and `t` in the interactive list
+(design 7.4). Nothing about a ticket is read from a transcript; its status, where a provider reads
+one, is fetched and shown (below, follow-up F19), and nothing else about it is fetched.
+
+**A ticket's status** (asked for by the owner on 2026-11-19, follow-up F19, step 2 of the ticket
+field; the details ruled by the lead). *Whose.* The ticket whose status is read is the session's
+own (above), else the address its group gives through `ticketUrl` (the group chip's link, above).
+*By whom.* A status exists when a provider takes that address, tried in this order: the first rule
+of `ticketStatus` (16.4) whose `match` is the start of the address — a program the user names —;
+else, for an issue's address `https://github.com/<owner>/<repo>/issues/<n>` (a pull request's key
+rules, with `issues` for `pull`: the host in any case, with or without `www.`, anything after the
+number stripped), GitHub, through `gh`. The address of a pull request (`/pull/<n>`) gets no status,
+even when a rule's `match` would take it, and an address no provider takes has none: everything is
+then as F18 left it. One fetch and one cached row (10.2) belong to an address, however many
+sessions share it. skydeck holds no tracker's own code but GitHub issues' and handles no
+credential: a program reads its secret from a file its owner keeps, never from `config.json`.
+
+*The program.* A rule is exactly `{ "match": …, "command": [ … ] }`. `command[0]` is the program — a
+name looked up on `PATH`, or a path, a relative one being relative to the user's home directory —
+and the rest are its arguments; in the arguments only, never in the program, every `{url}` becomes
+the address and every `{key}` the ticket's short name (the key when the address fits `ticketUrl`,
+`KEY` for a path `/browse/KEY`, as the chip's name above), both in one pass, so that what was put
+in is not read again. The runner starts it without a shell, as a list of words, so that an address
+with spaces, quotes, `;` or `$(…)` arrives as one argument, unchanged; its standard input is
+`/dev/null` (closed); it runs in the server's environment (the command's own for `skydeck ticket
+…`) with the user's home directory as its working directory, for 10 seconds, and is then killed;
+of its standard output and of its standard error the first 4 KiB (4,096 bytes) are kept, the rest
+is read and dropped.
+
+*The answer's contract.* The first line of the program's standard output is the status' text: a
+carriage return at its end dropped, escape sequences and control characters dropped and tabs turned
+into spaces (design 7.4's sanitiser), trimmed, its first 40 characters kept. The second line, if
+there is one, is the category, one of six words — `todo`, `doing`, `review`, `blocked`, `done`,
+`closed` —, trimmed and compared in lower case; any other second line means no category (grey); the
+lines after it are ignored. A **failure** keeps the status the address had and its age and saves
+the failure's words, which the window shows: for a timeout, `the status command timed out after 10
+s`; for a program that is not found, `the status command <its last path part> is not installed`;
+for an exit other than 0, the first line of standard error that has anything on it once sanitised
+(at most 200 characters, a cut one ending in `…`), else `the status command exited <n>` (`the
+status command was killed by a signal` when a signal ended it); for an exit 0 with an empty first
+line, `the status command printed no status`; for a program that cannot be started (not
+executable), `the status command could not be run: <the first line of the reason>`.
+
+*GitHub issues.* `gh api graphql --hostname github.com`, in a batch of its own — the pull
+requests' query is not changed —, one alias for each issue, `i<n>: repository(owner: …, name: …) {
+issue(number: …) { state stateReason } }`, at most 50 to a call, 10 seconds, `gh` in the caller's
+environment without `GH_HOST`, `GH_FORCE_TTY` and `CLICOLOR_FORCE` and with `GH_PROMPT_DISABLED=1`
+and `NO_COLOR=1`, as for the pull requests. `OPEN` reads `open` (category `doing`); `CLOSED` as
+`COMPLETED` reads `closed` (`done`), as `NOT_PLANNED` `not planned` (`closed`), as `DUPLICATE`
+`duplicate` (`closed`), without a reason `closed` and no category; a reason or a state not known
+here reads as its own words in lower case with `_` as spaces, and no category. A failure has the
+pull requests' words: `gh timed out after 10 s`, `gh is not installed`, `gh returned output skydeck
+could not read`, the first line of standard error (when `gh` is not logged in: `To get started
+with GitHub CLI, please run:  gh auth login`), `gh exited <n>` (`gh was killed by a signal`), `gh
+could not be run: <the first line of the reason>`, and, for an issue GitHub does not find,
+GitHub's own message, else `not found`. Two addresses of one issue are asked once.
+
+*When it is read.* At once, in the background, when a ticket is set or changed in the window (`act
+ticket`) and a provider takes the new address, and by `skydeck ticket set`, which waits for the
+read and prints its result; by the server's tick (10.1), for the sessions the pages list, when a
+status is due — never tried, or its last attempt older than `ticketRefreshMinutes` (16.4; 10 by
+default), or, when its category is `done` or `closed`, older than 12 hours instead —; and whatever
+its age, on demand: the dialog's ↻ (below; `act ticket-refresh`, 8.2.3) and `skydeck ticket
+refresh`. The server runs one read at a time, so one status program at a time, and starts at most
+5 programs in a round of its tick (10.1). A saved result reaches every page within a second, as an
+edit does. Nothing is read for a session no page lists, and nothing at all for an address no
+provider takes. The server reads `ticketStatus` and `ticketRefreshMinutes` at its start only:
+after changing either, `skydeck window --restart`.
+
+**The ticket's chip with its status.** Once a status is known the chip reads `<name> · <status> ↗`
+in the category's tint (12.3: the text colour and the faint background of the tint; grey, `--dim`
+with no tinted background, for `todo`, `closed` and no category) in place of F18's accent colour,
+the name still underlined and the status not. Its tooltip holds the address, then `<status>,
+checked <age> ago` (the age of the last attempt, which is the last read when it succeeded); after
+a failure `status not read: <words>` and, under it, the last known status and its age (`<status>,
+checked <age> ago`, the age of the last read that succeeded). While no status is known the chip is
+F18's (accent colour, underlined name, ` ↗`), its tooltip the address and, after a failed first
+attempt, `status not read: <words>` under it. A ticket that comes from the group (not stored) has
+the chip only once a status is known or an attempt was made, so that a session whose ticket no
+provider reads looks as F18 left it; a click on it opens its address, the button stays `+ ticket`
+(it names the ticket the user set), and the group chip and its link do not change. The header
+keeps its four lines and their heights: when the line is short of room the open pull requests give
+way first, then the status part is cut, with an ellipsis, before the name (it shrinks a thousand
+times as fast), and only then the name; the chip may be up to 36em wide with a status (24em
+without, as in F18).
+
+**The ticket dialog's status line.** While a provider reads the session's ticket, the dialog (`t`,
+the header's button) has, above its field, a line `In Progress · checked 3m ago` — after a
+failure `status not read: <words> · last <status>, checked <age> ago`, or `status not read:
+<words>` while no status is known, and `status not read yet` before any attempt — and a ↻ at its
+right end (its title is `read its status now`); without a provider the line and the ↻ are not
+there. ↻ sends `act ticket-refresh`, is disabled while the answer is awaited, leaves the keyboard
+in the field, and a refusal shows under the field as the dialog's other refusals do. The line is
+drawn again by each `list`, so that a saved result shows in it.
+
+**In the commands.** `skydeck show` prints its `ticket:` line with ` · <status>` after the address
+and, after a failure, a line under it, `status not read: <words>`, indented to the values' column;
+its `--json`'s `ticket` (still only the ticket the user set, F18) gains `status`, `category`,
+`okAt` and `triedAt` (ISO times) and `error`, each null when not known, also when no provider reads
+it. `skydeck ticket set` prints `<short id> ticket: <address> · <status>` once the read is done
+(after a failure ` (status not read: <words>)`, and nothing after the address when no provider
+takes it); `skydeck ticket refresh <ref>` reads that session's ticket now — the one set, else its
+group's — and prints the same line, or `<short id>: no status is read for this session's ticket`;
+without `<ref>` it reads every ticket of the sessions `skydeck ls` lists, each address once, and
+prints `fetched <n>, failed <m>`. `show`, `ls` and the interactive list print what is cached and run
+nothing; `ls` is unchanged.
 
 ### 12.6 The right side
 
@@ -2919,7 +3104,8 @@ written without quote marks (`> restore`).
 ### 12.8 Search
 
 - `/` filters the list: title, group, note, pull-request repository and number, the ticket (its
-  name and address, F18), directory, short id; several words must all match; while a filter is set it includes done sessions, unfolds
+  name and address, F18, and the text of its status, F19), directory, short id; several words must
+  all match; while a filter is set it includes done sessions, unfolds
   every section and flattens every block (12.2: flat rows, each with its group, no card). A filter that leaves no row says so: `No session matches the filter.`
   (ruled by the plan owner, plan task 27).
 - Chips: Running, Open PR, Has note, Show done.
@@ -2935,10 +3121,11 @@ One rule matches for the filter and for the switcher:
   space) into words, each lower-cased. A row matches when every word, in any order, is found in
   one of its fields — the title, the group, the note (sanitised line by line), the directory, of
   each attached pull request `owner/repo`, its number and `owner/repo#number`, and the ticket's
-  name and address (F18) (design 7.4's fields) — or, for a word of at least 4 characters, when the session's id starts with it (the
-  short id, and the whole id). Four characters, so that `fix 2` does not match nearly every
-  session through the hex digits of its id. A word is never found across two fields. (Stage A had
-  design 7.4's filter: one text, the fields of 7.4.)
+  name, address (F18) and status' text (F19) (design 7.4's fields) — or, for a word of at least 4
+  characters, when the session's id starts with it (the short id, and the whole id). Four
+  characters, so that `fix 2` does not match nearly every session through the hex digits of its
+  id. A word is never found across two fields. (Stage A had design 7.4's filter: one text, the
+  fields of 7.4.)
 - **Bounds.** A search text is at most 1,024 bytes of UTF-8; at most 16 words count (the page cuts
   a longer text after its 16th word and says so), each in its first 64 UTF-16 units; each field
   is searched in its first 16,384 units (a note in the first 16,384 units of its raw text). No
@@ -3723,6 +3910,8 @@ New keys, all optional:
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
 | `window.links` | `"default"` | Asked for by the user on 2026-11-15, ruled by the lead that day. Where the links the window opens go (9.6): `"default"`, the Windows default browser (`rundll32.exe url.dll,FileProtocolHandler <url>`), or `"edge"`, `window.edge` in the user's own Edge profile. Anything else is refused as every key of the file is: `<file>: "window.links" must be "default" or "edge"`. |
 | `ticketUrl` | `null` | Asked for by the user on 2026-11-15; the details ruled by the lead that day. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` without a user name or password (`skydeck show` would print it, and Edge's command line would carry it) and with the same host (a host the key went into would differ), and with no `%`, or `%` with one hex digit, right before `{key}` (a key would finish that escape): where the key stands among the address's parts is the parser's to decide, not the text's (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
+| `ticketStatus` | `[]` | Asked for by the owner on 2026-11-19 (follow-up F19); the details ruled by the lead. The programs that read a ticket's status (12.5): a list of at most 8 rules, each exactly `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` is the start of a ticket's address takes it, before GitHub's own reading of an issue's address. `match`: an `http` or `https` address, printable ASCII with no white space, at most 2,048 characters, with no user name or password, that starts with `<scheme>://<host>/` exactly as the URL parser writes them — scheme and host in lower case, a default port left out —, so that `https://tickets.example.com/` never takes `https://tickets.example.com.other.net/…` and a rule that could never match a stored address is refused instead of silently doing nothing. `command`: 1 to 16 non-empty strings without control characters; `command[0]` is the program (a name on `PATH` or a path; a relative path is relative to the home directory), and in the other words every `{url}` becomes the address and every `{key}` the ticket's short name; the program is run without a shell. No credential or token belongs in a rule: a program reads its secret from a file its owner keeps. Anything else is refused as every key of the file is, after `<file>: `: `"ticketStatus" must be a list of at most 8 rules`; `"ticketStatus[N]" must be an object with "match" and "command"`; `unknown key "ticketStatus[N].<key>"`; `"ticketStatus[N].match" must be the start of an http or https address, its scheme and host in lower case and followed by "/", at most 2,048 characters`; `"ticketStatus[N].command" must be a list of 1 to 16 non-empty strings without control characters`. Read at the server's start: after a change, `skydeck window --restart`. |
+| `ticketRefreshMinutes` | `10` | Follow-up F19. How long a ticket's status is left before the server reads it again (12.5, 10.1): a whole number of minutes from 1 to 1440, counted from the last attempt; a status whose category is `done` or `closed` is read again after 12 hours instead. Anything else is refused as every key of the file is: `<file>: "ticketRefreshMinutes" must be a whole number from 1 to 1440`. Read at the server's start. |
 
 Unknown keys inside `window` are an error, as everywhere in `config.json`.
 
@@ -4225,6 +4414,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W35 | **Real claude**, a throwaway session started from the New form with `--model` and one more flag: the header's second line ends in those flags, in the short id's grey, after the short id, nothing else of the line moved; its tooltip says `Started with: …`; in a narrower window they are cut first; once it ended and was closed, the resume card's "Will run" has them and the header not; resumed, the header shows them again. | F16 | 12.5 |
 | W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (the header's flags, F16, and `skydeck show`); removed with ×, `Undo` puts it back at its place. It types no prompt and touches no real session. | F15 | 12.6, 10.2 |
 | W37 | A ticket on a throwaway session (follow-up F18): set by a whole link (`https://example.com/browse/TRY-1`, a host that opens nothing private), the header's third line starts with its chip `TRY-1 ↗`, its tooltip the address, a click opens it where links open (W12); set by a key only while `ticketUrl` is configured (else that step is skipped); removed with an empty text, the chip gone and `+ ticket` back; `skydeck show` prints `ticket:` while one is set. Every step checks the header's short id or the dialog's heading first; at the end the session has no ticket. | F18 | 12.5, 10.2 |
+| W38 | A ticket's status on the throwaway session (follow-up F19), asking no real tracker: a stand-in program the owner writes in a throwaway folder (`~/skydeck-try/status`, its three lines given) answers for a `ticketStatus` rule whose `match` is `https://example.com/try/`; the ticket `https://example.com/try/TRY-1` on the throwaway session shows `TRY-1 · In Progress ↗` in blue in the header and `In Progress` in the row's small chip; the answer changed to each category and ↻ pressed in the ticket dialog: `blocked` red, `review` amber, `doing` blue, `done` green, `todo` and `closed` grey; a failure (the program made not executable) keeps the old status and its tooltip says `status not read: …`; `skydeck show` prints `ticket:` with ` · <status>`. Every step checks the header's short id or the dialog's heading first; at the end the ticket is removed, `config.json` is as it was (restored from a copy), and the stand-in is deleted. | F19 | 12.5, 12.2, 12.3, 10.2 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

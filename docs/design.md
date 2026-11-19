@@ -379,6 +379,9 @@ Marks are shown next to the state.
   key when the address fits `ticketUrl`, `KEY` for a path `/browse/KEY`, `repo #n` for a GitHub
   issue or pull request, else the last part of the path, else the host) is worked out from the
   address, never stored. `skydeck ticket set|clear`, `t` in the interactive list, and the window.
+  A ticket can have a **status** (follow-up F19): a GitHub issue's, or the one a configured program
+  prints; it is shown beside the ticket, never in its place, and cached by its address (7.3;
+  design-step-2.md 10.2, 12.5).
 - **Done.** Hides the session. It never stops a process. A done session is shown again when it
   has activity after the done time: `user` input (5.6) in its transcript, or a `start` event with
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the
@@ -435,6 +438,27 @@ never received a prompt has no transcript (14).
 - **Chip.** A row shows one chip for all attached pull requests: the worst state among them in
   this order — can't read, not fetched, checks failing, changes requested, checks pending, review
   required, draft, approved and green, merged, closed — and the count.
+- **A ticket's status** (follow-up F19). The ticket of a session — the one set on it (7.1), else the
+  address its group gives through `ticketUrl` (design-step-2.md 12.5) — has a status when a
+  *provider* takes its address: first the configuration's `ticketStatus`, a list of at most 8
+  rules, the first whose `match` starts the address, each naming a program that prints the status
+  (run as a list of words, never through a shell: install.md, "A ticket's status"); else, for the
+  address of a GitHub issue (`https://github.com/<owner>/<repo>/issues/<number>`, keyed as a pull
+  request is, with `issues` for `pull`), `gh api graphql` in batches of its own — the pull
+  requests' query is not touched — with the pull requests' limits (50 to a batch, 10 seconds, the
+  same environment and failure words). A pull request's address gets no status, whatever a rule's
+  `match` says. A status is a text of at most 40 characters and, optionally, one of six categories
+  (`todo`, `doing`, `review`, `blocked`, `done`, `closed`) that only colours it; a GitHub issue is
+  `open` (`doing`), `closed` (`done`), `not planned` or `duplicate` (`closed`). It is cached by
+  address, one fetch and one row for the sessions that share one (design-step-2.md 10.2), and a
+  fetch that fails keeps the status it had and its age and saves the failure's words, as a pull
+  request's does. It is read only by the window's server and by `skydeck ticket set` and `ticket
+  refresh` — `ls`, `show` and the interactive list print the cache and run nothing —: at once when
+  a ticket is set or changed; for the sessions the window's pages list, when the address was never
+  tried or its last *attempt* is older than `ticketRefreshMinutes` (default 10) — for a status
+  whose category is `done` or `closed`, older than 12 hours —; and whatever its age by the ↻ of the
+  ticket's dialog and `skydeck ticket refresh`. The server runs one read at a time, so one status
+  program at a time, and starts at most 5 programs in a round of its tick (design-step-2.md 10.1).
 
 ### 7.4 The list
 
@@ -461,8 +485,8 @@ otherwise it behaves like `skydeck ls`.
 
 Keys: arrows or `j`/`k` move; `Enter` detail; `l` label; `g` group; `n` note; `t` ticket (F18); `d`
 done or undo; `p` pull requests; `R` resume; `/` filter; `a` show all; `r` refresh; `q` quit. The
-filter matches title, group, note, pull-request repository and number, project directory, and the
-ticket's short name and address.
+filter matches title, group, note, pull-request repository and number, project directory, the
+ticket's short name and address, and the text of its status (F19).
 
 The interactive list is built as two pure functions — `reduce(model, key)` and
 `render(model, size)` — with a thin terminal wrapper, so it is tested without a terminal.
@@ -473,10 +497,10 @@ The interactive list is built as two pure functions — `reduce(model, key)` and
 |---|---|
 | `skydeck` | Interactive list. |
 | `skydeck ls [--all] [--json] [--refresh]` | Print the list. `--refresh` first fetches the pull requests of the sessions it prints that are not merged or closed (7.3). |
-| `skydeck show <ref> [--json] [--refresh]` | One session: state, marks, project directory, its `ticket:` — the ticket set on it (7.1), else the address `ticketUrl` gives its group (design-step-2.md 12.5; that one not in `--json`) —, launch command (and the flags in it that skydeck does not know, which a resume does not pass on), links, note, whether it is done and since when, pull requests, holders. `--refresh` as for `ls`, for this session's pull requests. |
+| `skydeck show <ref> [--json] [--refresh]` | One session: state, marks, project directory, its `ticket:` — the ticket set on it (7.1), else the address `ticketUrl` gives its group (design-step-2.md 12.5; that one not in `--json`), with ` · <status>` when its status is known (7.3) and, after a failed read, a line under it with the failure's words —, launch command (and the flags in it that skydeck does not know, which a resume does not pass on), links, note, whether it is done and since when, pull requests, holders. `--refresh` as for `ls`, for this session's pull requests. |
 | `skydeck label <ref> [<text>]` / `group <ref> [<text>]` | Set; without text (or with an empty text), clear. The text is all the arguments after `<ref>`, joined by one space. |
 | `skydeck note <ref> [--set <text>]` | Edit in `$VISUAL` / `$EDITOR` (7.1), or set directly. |
-| `skydeck ticket set <ref> <link-or-key>` / `ticket clear <ref>` | Set the session's ticket from a link or a key, replacing the one before; remove it (7.1; F18). An empty text removes it too. |
+| `skydeck ticket set <ref> <link-or-key>` / `ticket clear <ref>` / `ticket refresh [<ref>]` | Set the session's ticket from a link or a key, replacing the one before; remove it (7.1; F18). An empty text removes it too. `set` then reads the new ticket's status at once when a provider takes it, waits for the read and prints the result; `refresh` reads the status of the session's ticket, or of every listed session's without `<ref>`, now, whatever its age (7.3; F19). |
 | `skydeck done <ref>` / `undone <ref>` | Hide / show. |
 | `skydeck pr add <ref> <url>` / `pr rm <ref> <url>` / `pr refresh` | Attach, detach, fetch status. |
 | `skydeck new [--label <text>] [--group <text>] [--here \| --tab \| --window] [-- <claude flags>]` | Start a new session in the current directory (7.7); `--window` in the skydeck window (design-step-2.md 11.4). |
@@ -514,7 +538,10 @@ show it sanitised, 7.4), so that it can be used as a path; the characters a term
 are written as `\uXXXX` escapes like in any other string of the JSON. Sessions are in list order. A pull request's `state`,
 `review`, `checks` and `okAt` are null until it has been fetched. `show --json` prints one
 session object with `doneAt` (the time it was marked done while it is done, else null), `note`,
-`ticket` (`{ "url", "text" }`: the ticket set on it and its short name, 7.1; else null),
+`ticket` (`{ "url", "text", "status", "category", "okAt", "triedAt", "error" }`: the ticket set on
+it, its short name (7.1) and, from follow-up F19, its status, its category, the times of the last
+success and of the last attempt (ISO) and the last failure's words (7.3), each of those null when
+not known, also when no provider reads the ticket; else null),
 `launch` (argument list or null), `unknownFlags` (the names of the flags in `launch` that skydeck
 does not know; `[]` without a launch command), `links` and `holders` added; each holder is
 `{ "pid", "bootId", "procStart", "since", "scripted" }`, where `scripted` (`true` or `false`) says
@@ -887,7 +914,8 @@ Configuration keys, all optional: `terminal` (`here` or `wezterm`, and since ste
 design-step-2.md 16.4; default `here`), `wezterm.domain`, `groupPattern`, `firstRunDoneAfterDays`,
 `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`,
 `claudeHome`, `claudeCommand`, `ticketUrl` (design-step-2.md 16.4; asked for by the user on
-2026-11-15). Unknown keys are an error.
+2026-11-15), `ticketStatus` and `ticketRefreshMinutes` (follow-up F19, 7.3; design-step-2.md 16.4).
+Unknown keys are an error.
 
 ### 9.2 Database
 
@@ -989,8 +1017,9 @@ CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `kind` in `events` can also be `scripted` or `scripted-end` (5.3); such a row has `detail` `''`
 and no `argv` or `name`. The column is free text, so this needs no migration.
 
-Step 2 adds migration 2 (the table `attention`) and migration 3 (follow-up F18: the nullable column
-`ticket_url` of `session_meta`, the ticket of 7.1, by the first `ALTER TABLE`); their SQL is in
+Step 2 adds migration 2 (the table `attention`), migration 3 (follow-up F18: the nullable column
+`ticket_url` of `session_meta`, the ticket of 7.1, by the first `ALTER TABLE`) and migration 4
+(follow-up F19: the table `ticket_status`, a cached ticket status by address, 7.3); their SQL is in
 design-step-2.md 10.2. A migration is never undone: a database migrated by a newer skydeck is refused
 by an older one at its open ("written by a newer skydeck"), and there is no way back (install.md).
 
@@ -1026,7 +1055,8 @@ by an older one at its open ("written by a newer skydeck"), and there is no way 
 | `src/claude/settings.ts` | Adds and removes hook entries; reads `cleanupPeriodDays`. | platform |
 | `src/claude/global-config.ts` | Reads `leftArrowOpensAgents` in the global config file and sets it to `false`, nothing else (8). | platform |
 | `src/sessions/` | Ingest, reconcile, the transcript scan, derived state and marks (6), the list model, reference resolution, the resume guard and lock, restore planning and running. | platform, text, store, claude, github (its pure functions: the scan attaches pull requests by key, the list computes the chip), terminals (as an interface) |
-| `src/github.ts` | Pull-request keys, batched status, cache rules (7.3). | platform, store |
+| `src/github.ts` | Pull-request keys, batched status, cache rules (7.3); from F19 also GitHub issues' keys and batched status. | platform, store |
+| `src/ticket-status.ts` | A ticket's status (F19, 7.3): which provider takes an address, the configured program and its answer, when a status is due, the fetch that saves it. | github, platform, sessions (the ticket's name), store, text |
 | `src/terminals/` | The terminal interface and its implementations: `here` (handoff file), `wezterm`. | platform, text |
 | `src/cli/` | Arguments, commands, output formats, the interactive list. | everything above |
 

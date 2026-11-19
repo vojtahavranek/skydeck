@@ -229,7 +229,7 @@ describe("the header's ticket chip (T6)", () => {
   test('every text is sanitised again; a category the page does not know is grey', () => {
     const shown = ticketHeader(
       selected({
-        ticketStatus: status({ status: 'In \u001b[31mReview‮', category: 'later', error: null }),
+        ticketStatus: status({ status: 'In \u001b[31mReview\u202e', category: 'later', error: null }),
       }),
       NOW_NS,
     );

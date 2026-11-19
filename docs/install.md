@@ -455,6 +455,8 @@ ignored.
 | `claudeHome` | `null` | Claude Code's folder. `null` means `$CLAUDE_CONFIG_DIR`, else `~/.claude`. Must be an absolute path (no `~`). |
 | `claudeCommand` | `"claude"` | The program `resume`, `new` and `restore` (and `R` in the list) run. One word: a name on `PATH` or an absolute path. It is not split into arguments. The window runs it too. |
 | `ticketUrl` | `null` | A ticket's address with `{key}` where the ticket key goes, for Jira `"https://example.atlassian.net/browse/{key}"`. The group chip of the window's header then opens the session's ticket, and `skydeck show` prints its address as a `ticket:` line (while the session has no ticket of its own); a bare key then also sets a session's ticket ("The ticket link", "The ticket of a session"). `null`: no link. What it accepts, and its line when it is refused: "The ticket link", in "The window (step 2)". |
+| `ticketStatus` | `[]` | The programs that read a ticket's status, for the trackers `gh` does not know (a GitHub issue's status needs only `gh`): a list of at most 8 rules `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` starts a ticket's address takes it. The program is run without a shell, with `{url}` and `{key}` filled into its arguments, and prints the status on one line and its category on the next. The rule, the answer and a complete example: "A ticket's status", in "The window (step 2)". `[]`: only GitHub issues have a status. A program never gets a secret from here: it reads its own from a file you keep. |
+| `ticketRefreshMinutes` | `10` | The least time between two automatic reads of a ticket's status, in whole minutes from 1 to 1440, counted from the last attempt; a status that is `done` or `closed` is read again after 12 hours instead. The window's server reads both ticket keys when it starts: `skydeck window --restart` after a change. |
 | `window` | see the window's section | The window's keys `window.port`, `window.edge`, `window.profileDir` and `window.keepAlive`: "The window (step 2)", "The `window` keys". |
 
 The numbers must be positive integers. An example that uses WezTerm tabs and a lower-case ticket key:
@@ -817,7 +819,10 @@ is one line, cut with an ellipsis when it is long:
    tooltip (`Started with: …`), they are the first thing cut when the line is short of room, and
    while the resume card shows its command ("Will run") they are left out of the header;
 3. the session's ticket, when you set one ("The ticket link" below): its name with ` ↗`,
-   such as `ABC-123 ↗` or `repo #5 ↗`, its address as its tooltip, a click opens it; then the pull
+   such as `ABC-123 ↗` or `repo #5 ↗`, its address as its tooltip, a click opens it — with ` ·
+   In Progress` after the name, in the state's colour, when its status is read ("A ticket's
+   status" below); for a session without a ticket of its own whose group's link has a status,
+   that status alone, in its colour, the group chip naming the ticket —; then the pull
    requests: the window's chip (below), the open ones side by side as far as they fit
    (`acme/web #7 · failing`; a click opens one in your default browser), and at the right end
    `+ ticket` (`Ticket` while one is set) and `Pull requests`; while none is attached, `no pull
@@ -842,6 +847,8 @@ requests — …`): look at it before you save.
 - The note's box holds the whole note. An empty note removes it.
 - The ticket's field holds the ticket's address, empty while there is none; its hint is `a link`,
   and `a link, or a key like ABC-123` while `ticketUrl` is set. An empty field removes the ticket.
+  While a status is read for the session's ticket, a line above the field says it (`In Progress ·
+  checked 3m ago`), and a `↻` at its right end reads it now ("A ticket's status" below).
 - **Enter** saves (`Save`); in the note Enter is a line break and **Ctrl+Enter** saves. A refused
   save keeps the dialog open with your text and says why under the field: for a label that
   `skydeck label` refuses, the same line; for a note that another window or `skydeck note`
@@ -934,7 +941,8 @@ a key such as `ABC-123` at its start — the chip shows the group with `↗` aft
 `ABC-123 cleanup ↗`), underlined, with the ticket's address as its tooltip, and a click on it that
 selected no text opens the ticket in your default browser (`window.links`). Without such a key,
 or without `ticketUrl`, the chip is plain text. The chip never edits: ✎ and `g` edit the group.
-skydeck reads nothing from the ticket system.
+skydeck itself reads nothing from the ticket system (a status comes through `gh` or a program you
+name: "A ticket's status" below).
 
 `ticketUrl` must be an `http` or `https` address with `{key}` exactly once, after its host, with
 no user name or password, no white space, control character, `"` or backslash, no `%` (or `%` and
@@ -985,9 +993,171 @@ The chip shows a short name worked out from the address: the key when the addres
 GitHub issue or pull request, else the last part of the address's path (at most 24 characters),
 else its host. Its tooltip is the whole address; a click that selected no text opens it in your
 default browser (`window.links`). The filter and the quick switcher find a session by its ticket's
-name and address. `skydeck show <ref>` prints it as `ticket:` (in place of the group's link) and
-in `--json` as `"ticket": { "url": …, "text": … }`. skydeck reads nothing from the ticket's system;
-the list's rows do not show it. The ticket is kept in the database (migration 3, below).
+name and address (and by its status' text, next). `skydeck show <ref>` prints it as `ticket:` (in
+place of the group's link) and in `--json` as `"ticket": { "url": …, "text": … }` (and its status,
+next). skydeck itself reads nothing from the ticket's system; what stands beside the ticket, its
+status, is read through `gh` or a program you name, in "A ticket's status" next. The ticket is kept
+in the database (migration 3, below).
+
+#### A ticket's status
+
+A ticket can show **where it stands**: `TRY-1 · In Progress ↗` on the header's third line, `In
+Progress` in a small chip of the row, in a colour that says which of six kinds of state it is
+(follow-up F19). It is optional: a ticket with no status is exactly what "The ticket link"
+above describes. It is read for the ticket you set and, for a session that has none, for the
+address its group gives ("The ticket link"); an address is read once, however many sessions have
+it. Two kinds of address have a status:
+
+- **A GitHub issue**, `https://github.com/<owner>/<repo>/issues/<n>`, needs nothing but `gh`,
+  logged in as it is for the pull requests (`gh auth login`). Its status is `open` (blue), `closed`
+  (green, for an issue closed as completed), `not planned` or `duplicate` (grey). The address of a
+  pull request (`/pull/<n>`) has no status.
+- **A ticket of any other tracker** needs a rule in `ticketStatus` ("Configuration" above) and a
+  program of yours that prints its status. skydeck holds no tracker's own code and no password or
+  token, and none belongs in `config.json`: **a real program reads its secret from a file that you
+  keep, with mode 600**, never from skydeck's configuration.
+
+A rule names the start of the addresses it takes and the program, with its arguments:
+
+```json
+{
+  "ticketStatus": [
+    {
+      "match": "https://tickets.example.com/browse/",
+      "command": ["/home/you/bin/tickets-status", "{key}"]
+    }
+  ]
+}
+```
+
+`ticketStatus` is a list of at most 8 rules, each exactly `match` and `command`; the first whose
+`match` is the start of a ticket's address takes it, before skydeck's own reading of a GitHub
+issue. `match` is an `http` or `https` address in printable ASCII with no white space, at most
+2,048 characters and with no user name or password, and it starts with `<scheme>://<host>/` as
+skydeck keeps addresses: the scheme and the host in lower case, a default port left out. That is
+why `https://tickets.example.com/` never takes `https://tickets.example.com.other.net/…`, and why a
+rule that could never match a kept address is refused instead of silently doing nothing.
+`command` is 1 to 16 non-empty strings without control characters: the program first — a name on
+`PATH`, or a path, a relative one being relative to your home directory —, then its arguments. A
+mistake is one of the file's lines as for every key (each after the file's path and `: `):
+
+```
+"ticketStatus" must be a list of at most 8 rules
+"ticketStatus[0]" must be an object with "match" and "command"
+unknown key "ticketStatus[0].url"
+"ticketStatus[0].match" must be the start of an http or https address, its scheme and host in lower case and followed by "/", at most 2,048 characters
+"ticketStatus[0].command" must be a list of 1 to 16 non-empty strings without control characters
+"ticketRefreshMinutes" must be a whole number from 1 to 1440
+```
+
+**What the program is given.** The words of `command`; in the arguments, never in the program,
+every `{url}` becomes the ticket's address and every `{key}` its short name (the key when the
+address fits `ticketUrl`, `KEY` for an address ending in `/browse/KEY`: the name its chip shows),
+both in one pass, so that what was put in is not read again. **There is never a shell.** skydeck
+starts the program itself, with the words as a list: an address with spaces, quotes, `;` or `$(…)`
+in it arrives as one argument, unchanged, and nothing in it is run. Its standard input is closed
+(`/dev/null`); it runs in the server's environment (in the command's own for `skydeck ticket set`
+and `skydeck ticket refresh`) with your home directory as its working directory, for at most 10
+seconds, and is then killed; of its standard output and of its standard error the first 4 KiB
+(4,096 bytes) are kept, and the rest is read and dropped.
+
+**What the program must print, and its exit code.** Exit code 0 and, on standard output, up to two
+lines:
+
+```
+In Progress
+doing
+```
+
+Line 1 is the status' text: a carriage return at its end dropped, escape sequences and control
+characters dropped (a tab becomes a space), trimmed, its first 40 characters kept. Line 2, if
+there is one, is the category, one of six words, trimmed and compared in lower case, that gives the
+colour; the pull requests' colours, no new ones ("The window's chip" above):
+
+| Category | Colour |
+|---|---|
+| `todo` | grey |
+| `doing` | blue |
+| `review` | amber |
+| `blocked` | red |
+| `done` | green |
+| `closed` | grey |
+
+Any other second line means no category, which is grey too; the lines after it are ignored. A
+program that fails — a timeout, a missing program, an exit other than 0, an empty first line — does
+not lose the status you had: it stays, with its age, and the failure's words are shown beside it
+(the chip's tooltip, the dialog's line, `skydeck show`):
+
+- `the status command timed out after 10 s`;
+- `the status command <name> is not installed`, with the last part of the program's path;
+- for an exit other than 0, the first line of its standard error that has anything on it (at most
+  200 characters, a cut one ending in `…`), else `the status command exited <n>`, or `the status
+  command was killed by a signal`;
+- `the status command printed no status`, for an exit 0 with an empty first line;
+- `the status command could not be run: <why>`, for a program that cannot be started (it is not
+  executable, say).
+
+For a GitHub issue the failures have the pull requests' words: `gh timed out after 10 s`, `gh is
+not installed`, the first line of `gh`'s own message (not logged in: `To get started with GitHub
+CLI, please run:  gh auth login`), `gh exited <n>`, and `not found` or GitHub's message for an
+issue it does not find. `gh` is called as for the pull requests (`gh api graphql --hostname
+github.com`, in batches of 50, 10 seconds, no `GH_HOST`).
+
+**An example**, for a made-up tracker at `https://tickets.example.com/`, whose API answers
+`{"state": "In Progress"}` for `GET /api/tickets/<key>` to a bearer token. Save it as
+`/home/you/bin/tickets-status`, make it executable (`chmod +x`), put the token alone in a file that
+only you can read (`chmod 600 ~/.config/tickets-token`), and try it by hand (`tickets-status
+ABC-123; echo $?`) before the rule above points at it:
+
+```python
+#!/usr/bin/env python3
+import json, os, sys, urllib.parse, urllib.request
+
+CATEGORIES = {"new": "todo", "in progress": "doing", "in review": "review",
+              "on hold": "blocked", "resolved": "done", "cancelled": "closed"}
+try:
+    with open(os.path.expanduser("~/.config/tickets-token")) as secret:
+        token = secret.read().strip()
+    url = "https://tickets.example.com/api/tickets/" + urllib.parse.quote(sys.argv[1], safe="")
+    request = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
+    with urllib.request.urlopen(request, timeout=8) as reply:
+        state = json.load(reply)["state"]
+    print(state)                                  # line 1: the status' text
+    print(CATEGORIES.get(state.lower(), ""))      # line 2: its category, or nothing
+except Exception as error:
+    print("tickets.example.com: %s" % error, file=sys.stderr)
+    sys.exit(1)                                   # one line on stderr: the failure's words
+```
+
+**When it is read.** At once, in the background, when you set or change a ticket in the window
+(and `skydeck ticket set` waits for the read and prints its result); then by the window's server,
+for the sessions its pages list: when the address was never tried, or its last attempt is older than
+`ticketRefreshMinutes` (10 by default; 1 to 1440), and, for a status whose category is `done` or
+`closed`, when it is older than 12 hours instead. The server reads one ticket at a time, so one
+status program runs at a time, and starts at most 5 programs in one round, the rest in the next.
+Nothing is read for a session the window does not list, and nothing at all for an address no
+provider takes. **Now, whatever its age:** `↻` in the ticket's dialog, or `skydeck ticket refresh
+[<ref>]` — for one session's ticket (the one you set, else its group's), printing `<short id>
+ticket: <address> · <status>` (after a failure ` (status not read: <why>)`), or `<short id>: no
+status is read for this session's ticket`; without `<ref>` for every ticket of the sessions
+`skydeck ls` lists, each address once, printing `fetched 3, failed 0`. A result reaches every open
+window within a second. The window's server reads `ticketStatus` and `ticketRefreshMinutes` when it
+starts: after you change either, run `skydeck window --restart`.
+
+**Where it shows.** The ticket's chip becomes `<name> · <status> ↗`, in the category's colour (the
+name still underlined); its tooltip holds the address, then `In Progress, checked 3m ago`, or, after
+a failure, `status not read: <why>` and under it the last status and its age. A ticket that is only
+the group's link has the chip once a status is known or was tried; the button stays `+ ticket`,
+since it names the ticket you set. The row of the list gets a second small chip after the
+pull-request chip: the status cut at 14 characters (`…` when cut), in the same colour, `<name> ·
+<status>` in its tooltip, and nothing at all while no status is known. The ticket's dialog has a
+line above its field, `In Progress · checked 3m ago` (`status not read: <why> · last In Progress,
+checked 3m ago` after a failure, `status not read yet` before the first attempt), and the `↻`. The
+filter and the quick switcher find a session by its status' text too. `skydeck show <ref>` prints
+`ticket:` with ` · <status>` after the address and, after a failure, a line `status not read:
+<why>` under it; its `--json` `ticket` gains `status`, `category`, `okAt`, `triedAt` and `error`
+(each null when not known). The statuses are kept in the database (migration 4, below).
+
 
 #### Which sessions need you (stage B)
 
@@ -1928,12 +2098,16 @@ from before it says. The update that brings a session's ticket (follow-up F18) u
 more, to schema version 3: it adds one empty column for the ticket to the table of labels, groups
 and notes, and keeps every label, group, note, done mark and pull request as it was; from then on
 every checkout from before it refuses the database the same way (`schema version 3, this one knows
-2`), and nothing takes the column away again. The way back is forward: its `update skydeck` is `skydeck update` in a
-checkout that has the command (from the update that brings it on), and `git pull` in an older one
-(which prints the same `update skydeck` and has no `skydeck update`). `skydeck update` runs
-on such a database, although no other command does: it says `skydeck: the database was written by
-a newer skydeck, so the window's server is not looked at; it is left as it is`, brings the checkout
-up to date and starts no server. skydeck keeps no copy of the database
+2`), and nothing takes the column away again. The update that brings a ticket's status (follow-up
+F19) upgrades it once more, to schema version 4: it adds one table for the statuses read so far,
+by address, and keeps everything else as it was; from then on every checkout from before it —
+the one of follow-up F18 included — refuses the database the same way (`schema version 4, this one
+knows 3`), and nothing takes the table away again. The way back is forward: its `update skydeck`
+is `skydeck update` in a checkout that has the command (from the update that brings it on), and
+`git pull` in an older one (which prints the same `update skydeck` and has no `skydeck update`).
+`skydeck update` runs on such a database, although no other command does: it says `skydeck: the
+database was written by a newer skydeck, so the window's server is not looked at; it is left as it
+is`, brings the checkout up to date and starts no server. skydeck keeps no copy of the database
 from before an upgrade: putting one back would drop everything recorded since, and a copy of the
 file taken while the window's server has it open may not be whole. An upgrade only adds to the
 database; it changes nothing that is in it.

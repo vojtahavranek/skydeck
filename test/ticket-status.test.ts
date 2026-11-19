@@ -159,7 +159,7 @@ describe('readStatusAnswer (T2 b, T3)', () => {
       status: 'In Review',
       category: 'review',
     });
-    assert.deepEqual(read(ran('\u001b[31mBlocked\u001b[0m\u0007 by\u0000 QA‮\ndone')), {
+    assert.deepEqual(read(ran('\u001b[31mBlocked\u001b[0m\u0007 by\u0000 QA\u202e\ndone')), {
       ok: true,
       atNs: T0,
       status: 'Blocked by QA',
