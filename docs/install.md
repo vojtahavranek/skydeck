@@ -2206,7 +2206,9 @@ terminal of your own:
 
 What skydeck recorded after the copy was taken is lost: the labels, notes, groups and done marks
 set since, the pull requests and tickets attached since, and what it noted of the sessions since.
-The sessions themselves are not touched: their transcripts are Claude Code's own files, which
+The window's key comes back as the copy holds it: when you replaced the key since (`skydeck window
+--new-secret`), the old one is valid again, so run `skydeck window --new-secret` once more. The
+sessions themselves are not touched: their transcripts are Claude Code's own files, which
 skydeck only reads, and it reads them again. Neither are Claude Code's other files, its settings
 and the hook entries in them, nor skydeck's links. The database you moved aside (`~/skydeck.db.newer`)
 is the newer one: this checkout cannot open it; keep it until you update again, or delete it. The

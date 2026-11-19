@@ -26,13 +26,14 @@ import { basename, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 import { Worker } from 'node:worker_threads';
 
 import { SkydeckError } from '../../src/platform/errors.ts';
 import type { Ns } from '../../src/platform/types.ts';
-import { SCHEMA_VERSION } from '../../src/store/migrations.ts';
+import { MIGRATIONS, SCHEMA_VERSION } from '../../src/store/migrations.ts';
 import { openStore } from '../../src/store/store.ts';
-import type { Store } from '../../src/store/store.ts';
+import type { Migrated, Store } from '../../src/store/store.ts';
 import { SEC, T0 } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
 import type { Sandbox } from '../helpers/sandbox.ts';
@@ -299,6 +300,47 @@ test('processes that open an old database at the same moment: one migrated datab
   }
 });
 
+test('an open that waited for the write lock while another skydeck migrated a step copies what it finds inside the lock, under that version’s name', async (t) => {
+  assert.ok(SCHEMA_VERSION >= 3, 'a step is left for the opener after the holder’s');
+  const { path, dir, sb } = old(t, 1);
+  // The test holds the write lock, as a skydeck in the middle of its migration does.
+  const holder = new DatabaseSync(path);
+  holder.exec('BEGIN IMMEDIATE');
+  const code = `
+    const [storeUrl, path] = process.argv.slice(1);
+    const { openStore } = await import(storeUrl);
+    process.stdout.write('opening\\n');
+    const store = openStore(path);
+    process.stdout.write(JSON.stringify(store.migrated));
+    store.close();
+  `;
+  const proc = spawn(process.execPath, ['--input-type=module', '-e', code, STORE_URL, path], {
+    env: sb.env(),
+  });
+  let stdout = '';
+  let stderr = '';
+  proc.stdout.setEncoding('utf8').on('data', (text: string) => (stdout += text));
+  proc.stderr.setEncoding('utf8').on('data', (text: string) => (stderr += text));
+  const exited = once(proc, 'exit');
+  while (!stdout.includes('opening\n')) await sleep(20);
+  // By now it has most likely read schema 1 and waits for the lock (its busy timeout is 5 s); one
+  // that reads only after the commit below finds 2 at once, and must copy the same.
+  await sleep(500);
+  holder.exec(MIGRATIONS[1] ?? '');
+  holder.prepare("UPDATE kv SET value = '2' WHERE key = 'schema_version'").run();
+  holder.exec('COMMIT');
+  holder.close();
+  const [status] = (await exited) as [number | null];
+
+  assert.equal(status, 0, stderr);
+  const migrated = JSON.parse(stdout.slice('opening\n'.length)) as Migrated;
+  assert.equal(migrated.version, SCHEMA_VERSION);
+  assert.match(basename(migrated.copy), /^skydeck\.db\.schema2-[0-9]{8}T[0-9]{6}Z$/);
+  assert.equal(versionOf(migrated.copy), '2');
+  assert.deepEqual(beside(dir), [basename(migrated.copy)]);
+  assert.equal(versionOf(path), String(SCHEMA_VERSION));
+});
+
 test('a name in the way of the copy (a file, a folder, a link): the migration does not run, the error names the database, the copy and the reason, and nothing is changed', (t) => {
   const makers: Record<string, (path: string) => void> = {
     file: (path) => writeFileSync(path, 'mine'),
@@ -474,6 +516,8 @@ test('only regular files whose whole name is a copy’s are removed: a link, a f
     'skydeck.db.schema1_20200103T000000Z',
     'skydeck.db.Schema1-20200103T000000Z',
     'xskydeck.db.schema1-20200103T000000Z',
+    'skydeck-db.schema1-20200103T000000Z',
+    'skydeck.dbxschema1-20200103T000000Z',
     '.skydeck.db.schema1-20200103T000000Z.0123456789ab.tmp',
     'other.db.schema1-20200103T000000Z',
   ];
