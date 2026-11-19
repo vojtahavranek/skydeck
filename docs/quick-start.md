@@ -87,10 +87,11 @@ The list has three sections:
 - **Earlier**: the older ones, folded. Click its band to unfold it.
 
 A running session's second line says what it does: `working` (Claude Code is busy), `waiting` (it
-waits for you) or `running` (it runs and reports nothing more). A hollow ring marks a session that
-does not run, a red diamond with the word `crashed` one that ended unexpectedly; point at a mark to
-read what it means. Two or more sessions of one group sit together in a block: click
-the group's name to close or open it. The title bar counts the sessions in each state.
+waits for you, at its prompt or on a question such as a permission) or `running` (it runs and
+reports nothing more). A hollow ring marks a session that does not run; a red diamond and the mark
+`crashed` (or `crashed mid-turn`), one that ended unexpectedly. Point at a mark to read what it
+means. Two or more sessions of one group sit together in a block: click the group's name to close
+or open it. The title bar counts the sessions in each state.
 
 ### Open a session's terminal
 
