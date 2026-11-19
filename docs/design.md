@@ -883,6 +883,24 @@ could not be resumed; see above`).
   of the report; so is a configuration file that cannot be read or a database that is missing or
   cannot be opened, and the checks that do not need it still run.
 
+  Before every other line, three `info` lines say what runs (follow-up F20); none is ever a
+  problem, none changes the exit code, and none names a path. (1) `skydeck <version line>`, the
+  line `skydeck --version` prints: `<package version> (<short commit>, <commit date>)` of the
+  checkout the running code is in, wherever it is run from, with `, modified` after the date when
+  tracked files differ from that commit, and `<package version> (commit unknown)` when git is
+  missing, the app root is not a git checkout (git's search stops there), or an answer is not a
+  commit or does not come within 2 seconds. Two git calls side by side, `log -1` and `status
+  --porcelain --untracked-files=no`, never through a shell, without the variables that point git at
+  another repository (`GIT_DIR` and its kin, as for `skydeck update`) and with no optional lock, so
+  that nothing is written in the checkout; `--version` never fails and prints nothing on stderr.
+  (2) `Claude Code <version>`: the first line `<claudeCommand> --version` prints (no shell, stdin
+  closed, 5 seconds, at most 4 KiB read, control characters dropped, at most 60 characters kept),
+  compared with nothing; or `Claude Code: version not read (<why>)` (`not installed`, `timed out
+  after 5 s`, `exited <n>`, `ended by a signal`, `printed no version`, `could not be started:
+  <code>`, or `the configuration cannot be read`, when nothing is started: the configuration's
+  problem line follows the three). (3) `system: <PRETTY_NAME of /etc/os-release>, Linux <kernel
+  release>`, each part `unknown` when it cannot be read.
+
 `docs/install.md` is the guide for setting skydeck up on another machine.
 
 ## 9. Data

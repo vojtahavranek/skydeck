@@ -143,7 +143,11 @@ registered on a GitHub account that can read the repository.
 bin/skydeck --version
 ```
 
-It prints `0.1.0`. With a `node` older than 24.12 it prints one line and exits 1:
+It prints one line: the version, the commit the checkout is at and the date of that commit, such as
+`0.1.0 (f1fce49, 2026-11-19)`. `, modified` follows the date when files of the checkout were changed
+since that commit, and `0.1.0 (commit unknown)` means git could not tell (git is missing, or the
+folder is not a git checkout). Give this line when you report a problem. With a `node` older than
+24.12 it prints one line and exits 1:
 
 ```
 skydeck needs Node.js 24.12 or newer but found 20.20.2; set SKYDECK_NODE to the path of a newer node binary.
@@ -332,6 +336,9 @@ skydeck doctor
 On a healthy machine every line is `ok` or `info`, and the exit code is 0:
 
 ```
+info     skydeck 0.1.0 (f1fce49, 2026-11-19)
+info     Claude Code 2.1.0 (Claude Code)
+info     system: Ubuntu 24.04.1 LTS, Linux 6.6.87.2-microsoft-standard-WSL2
 ok       hook entries present in /home/you/.claude/settings.json
 ok       /home/you/.local/share/skydeck/skydeck-hook -> /home/you/skydeck/bin/skydeck-hook
 ok       Node.js 24.19.0 (/home/you/.nvm/versions/node/v24.19.0/bin/node)
@@ -1901,6 +1908,7 @@ installation.
 
 | Check | A `problem` means |
 |---|---|
+| skydeck, Claude Code, system | Never a problem: the first three lines say what runs, so that a report of a problem can say it too. `skydeck` is the line `skydeck --version` prints. `Claude Code` is the first line that `<claudeCommand> --version` prints (at most 60 characters), or `Claude Code: version not read (<why>)`: `not installed`, `timed out after 5 s`, `exited <n>`, `printed no version`, or `the configuration cannot be read` (then nothing is started). `system` is the distribution's name (`PRETTY_NAME` in `/etc/os-release`) and the kernel's release (on WSL it ends in `WSL2`), `unknown` for what cannot be read. |
 | hook entries | `SessionStart` or `SessionEnd` has no entry in the settings file that is exactly what install writes for `<dataDir>/skydeck-hook`. Run `skydeck install`. |
 | the hook link | `<dataDir>/skydeck-hook` does not resolve to a file. Run `bin/skydeck install` from the checkout. |
 | Node.js | The Node.js that runs `doctor` is older than 24.12. |
