@@ -118,10 +118,28 @@ export const command: Command = {
       }
       await offerLeftArrowOff(ctx, deck);
       ctx.io.stdout('skydeck is installed\n');
+      for (const line of nextSteps(deck.platform)) {
+        ctx.io.stdout(`${sanitize(line)}\n`);
+      }
       return EXIT.ok;
     });
   },
 };
+
+/**
+ * Follow-up F22: what a new user does next, after `skydeck is installed` — on every install that
+ * succeeds, also one that found everything in place. Each line is shorter than 100 characters but
+ * the guide's, which names the README of this checkout.
+ */
+function nextSteps(platform: Platform): string[] {
+  return [
+    'Open a new terminal: skydeck is found there (if not, add ~/.local/bin to your PATH).',
+    'skydeck doctor checks the installation.',
+    'skydeck ls lists the sessions: those Claude Code already has, and new ones as they start.',
+    'skydeck window opens the window, from a terminal of your own, not from inside Claude Code.',
+    `The guide: ${join(platform.appRoot, 'README.md')}`,
+  ];
+}
 
 /** Each link and where install points it (uninstall.ts removes exactly these). */
 function linksFor(platform: Platform, places: Places): Link[] {
@@ -295,6 +313,11 @@ function writeSettings(ctx: Context, deck: Deck, prepared: Prepared): void {
   );
 }
 
+/** Follow-up F22: what the first-run question's "done" means, for someone new to skydeck. */
+const DONE_ONLY_HIDES =
+  '"Done" only hides a session from skydeck\'s list: nothing is deleted, it can still be ' +
+  'resumed, and skydeck ls --all shows it.';
+
 /**
  * Design 7.1 "First run", once (D20): the listed sessions that are not running and whose last
  * activity is older than firstRunDoneAfterDays may be marked as done. Nothing changes without a yes.
@@ -310,13 +333,15 @@ async function offerFirstRun(ctx: Context, deck: Deck): Promise<void> {
   const old = loadRows(deck).filter(
     (row) => isListed(row, false) && row.state === 'not-running' && row.lastActivityNs < before,
   );
-  const mark =
-    old.length > 0 &&
-    isYes(
+  let mark = false;
+  if (old.length > 0) {
+    ctx.io.stderr(`${DONE_ONLY_HIDES}\n`);
+    mark = isYes(
       await ctx.io.readLine(
         `Mark ${count(old.length, 'session')} older than ${count(days, 'day')} as done? [y/N] `,
       ),
     );
+  }
   store.transaction(() => {
     if (mark) {
       for (const row of old) {
