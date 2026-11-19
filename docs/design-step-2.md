@@ -3509,11 +3509,12 @@ small sizes; the small files redrawn by follow-up F12, 2026-11-18, and the 16 pi
 follow-up F14 the same day):
 
 - **The pictures** are the owner's, two of them, 1254 × 1254 pixels, RGBA, transparent outside
-  their dark navy rounded tile, kept exactly as they were received (their own `caBX` chunks, the
-  content credentials of the image service that made them, stay) in `scripts/icons/`, not under
-  `web/`: they are not served and not part of the build. `skydeck-source.png` (1,691,903 bytes) has
+  their dark navy rounded tile, in `scripts/icons/`, not under `web/`: they are not served and not
+  part of the build. Their image data is kept exactly as it was received; the one metadata chunk
+  each came with was removed (follow-up F27, 2026-11-19), so they hold IHDR, IDAT and IEND only,
+  like the drawn files. `skydeck-source.png` (1,670,010 bytes) has
   a blue-to-violet cloud outline and three stacked terminal windows, the front one with three
-  coloured dots and a prompt (`>_`). `skydeck-source-small.png` (1,372,751 bytes) was made after the
+  coloured dots and a prompt (`>_`). `skydeck-source-small.png` (1,349,085 bytes) was made after the
   first one turned out a blur at 16 pixels: the same tile and cloud outline with ONE terminal window
   and a bold white `>_`, no stacked windows, no dots. `test/window/icons.test.ts` pins both sha256.
   Until F10 the source was a drawing of shapes, `web/icons/skydeck.svg` (three cards on the page's

@@ -54,8 +54,9 @@ import { fileURLToPath } from 'node:url';
 
 import type { Browser, Page } from 'playwright';
 
-/** The owner's pictures, relative to the checkout: kept as they were received, and not under web/
- *  (they are not served and not part of the build). */
+/** The owner's pictures, relative to the checkout: their image data kept as it was received (the
+ *  one metadata chunk they came with removed), and not under web/ (they are not served and not
+ *  part of the build). */
 export const SOURCE = 'scripts/icons/skydeck-source.png';
 export const SOURCE_SMALL = 'scripts/icons/skydeck-source-small.png';
 /** The sizes drawn on a transparent background, and those of them that go into favicon.ico. */
