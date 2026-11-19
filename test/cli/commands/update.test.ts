@@ -629,7 +629,7 @@ describe('skydeck update: what it reports (U4)', () => {
 
   test('the database line: when src/store/migrations.ts differs between HEAD and the new commit, or is gone — not when it is the same', async (t) => {
     const DB =
-      "this update changes the database's upgrade steps: it may upgrade the database, and an upgraded database cannot be opened by an older checkout\n";
+      'this update changes the database\'s upgrade steps: it may upgrade the database, which an older checkout cannot open; a copy of the database as it was is kept first, and docs/install.md ("Going back") says how to return to 0123456\n';
     const cases: [string, Record<string, string>, boolean][] = [
       [
         'changed',

@@ -30,6 +30,8 @@
 
 /** @import { ElsewherePayload, ExitMessage, ResultMessage, RowPayload, SelectedPayload, TerminalPayload } from '../src/window/protocol.ts' */
 /** @import { EditWhat } from './keys.js' */
+/** @import { NewFormDefaults } from './new-form-text.js' */
+import { chipWords } from './favourite-text.js';
 import { favouriteControls } from './favourites.js';
 import {
   noteLine,
@@ -954,7 +956,7 @@ export function createCards(root, deps) {
       card.dataset['card'] = 'group';
       showCard(`group:${info.section}\n${info.group}`, buildGroup, [info]);
     },
-    /** @param {{ dir: string, dirs: string[] }} defaults */
+    /** @param {NewFormDefaults} defaults */
     newForm(defaults) {
       card.dataset['card'] = 'new';
       shown = null; // a form opened again starts from its defaults
@@ -977,7 +979,10 @@ export function createCards(root, deps) {
  * in a field, on the ★ or the row, or Start sends `act new` with the flags field's text; the
  * server's answer is shown in the form, which stays open on a refusal so that the input can be
  * fixed. Esc closes it (app.js, in the capture phase). The field always starts empty.
- * @param {{ dir: string, dirs: string[] }} defaults
+ * F28: the group field's list is the groups the list shows, and when the session the form takes
+ * its directory from is in a group, one chip right after the field puts that group into it (a
+ * click, or Enter or Space on it); the field itself starts empty, as every field but Directory.
+ * @param {NewFormDefaults} defaults
  * @param {CardsDeps} deps
  * @returns {HTMLFormElement}
  */
@@ -1018,6 +1023,20 @@ function newFormOf(defaults, deps) {
   form.append(known);
   const label = field('label', 'Label', '', 'optional; a ticket key at its start is the group');
   const group = field('group', 'Group', '', 'optional');
+  if (defaults.groups.length > 0) {
+    const groups = /** @type {HTMLDataListElement} */ (element('datalist', 'card-groups'));
+    groups.id = 'card-new-groups';
+    for (const one of defaults.groups) {
+      const option = document.createElement('option');
+      option.value = one;
+      groups.append(option);
+    }
+    group.setAttribute('list', groups.id);
+    group.closest('label')?.after(groups);
+  }
+  if (defaults.group !== null) {
+    groupChip(group, defaults.group);
+  }
   const flags = field('flags', 'Flags for claude', '', 'optional, e.g. --model opus');
   flags.classList.add('mono');
   // The field's name is its label's words alone, not the ★'s too, which the label also holds.
@@ -1066,4 +1085,37 @@ function newFormOf(defaults, deps) {
       });
   });
   return form;
+}
+
+/**
+ * F28: the chip of `name` (the group of the session the new form takes its directory from, as the
+ * list shows it) right after the Group field, on its line: drawn as a favourite's chip, its text
+ * cut as a chip's (28 characters, `…`), the whole name in its title and its name for assistive
+ * technology, which say what it does. A click (its mousedown cancelled: it takes no keyboard), or
+ * Enter or Space on it — a button, Tab's stop right after the field —, puts the name into the
+ * field in place of what is there; it starts nothing and stays.
+ * @param {HTMLInputElement} group the Group field, in its line's label
+ * @param {string} name
+ */
+function groupChip(group, name) {
+  const chip = /** @type {HTMLButtonElement} */ (
+    element('button', 'card-group-chip mono', chipWords(name))
+  );
+  chip.type = 'button';
+  const tip = `Use the group ${name}`;
+  chip.title = tip;
+  chip.setAttribute('aria-label', tip);
+  chip.addEventListener('mousedown', (event) => event.preventDefault());
+  chip.addEventListener('click', () => {
+    group.value = name;
+  });
+  const withChip = element('span', 'card-group-field');
+  group.replaceWith(withChip);
+  withChip.append(group, chip);
+  // The field's name is its label's words alone, not the chip's too, which the label also holds.
+  const words = group.closest('label')?.querySelector('.card-label');
+  if (words instanceof HTMLElement) {
+    words.id = 'card-new-group-label';
+    group.setAttribute('aria-labelledby', words.id);
+  }
 }

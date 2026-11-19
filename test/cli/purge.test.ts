@@ -5,10 +5,14 @@
 import assert from 'node:assert/strict';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   renameSync,
+  rmdirSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { createServer } from 'node:net';
@@ -67,6 +71,9 @@ const EVERYTHING: Record<string, { spec: Spec; entries: Record<string, Maker> }>
       'skydeck.db-wal': file('skydeck.db-wal'),
       'skydeck.db-shm': file('skydeck.db-shm'),
       'skydeck.db-journal': file('skydeck.db-journal'),
+      'skydeck.db.schema<V>-<time>': file('skydeck.db.schema3-20261112T090000Z'),
+      'skydeck.db.schema<V>-<time> (another)': file('skydeck.db.schema12-20261113T101112Z'),
+      '.skydeck.db.schema<V>-<time>.tmp': file('.skydeck.db.schema3-20261112T090000Z.tmp'),
       'skydeck-hook': link('skydeck-hook'),
       node: link('node'),
       '.skydeck-hook.<hex>.tmp': link('.skydeck-hook.0123456789ab.tmp'),
@@ -189,6 +196,35 @@ describe('purgeDir: what it does not remove', () => {
       kind: 'left',
       why: 'is not a directory',
     });
+  });
+
+  test('a link or a folder with a copy’s name in the data directory (F21): left alone, what it points at whole', (t) => {
+    for (const make of ['link', 'folder'] as const) {
+      const { platform, root } = platformOf(t);
+      const dir = join(root, 'data');
+      mkdirSync(dir);
+      writeFileSync(join(dir, 'skydeck.db'), '');
+      const target = join(root, 'mine');
+      writeFileSync(target, 'mine');
+      for (const name of [
+        'skydeck.db.schema3-20261112T090000Z',
+        '.skydeck.db.schema3-20261112T090000Z.tmp',
+      ]) {
+        const path = join(dir, name);
+        if (make === 'link') symlinkSync(target, path);
+        else mkdirSync(path);
+
+        assert.deepEqual(
+          purgeDir(platform, dir, DATA_DIR),
+          { kind: 'left', why: `holds ${name}, which skydeck did not write` },
+          `${make} ${name}`,
+        );
+        assert.ok(lstatSync(path), `${make} ${name}`);
+        if (make === 'link') unlinkSync(path);
+        else rmdirSync(path);
+      }
+      assert.equal(readFileSync(target, 'utf8'), 'mine');
+    }
   });
 
   test('a subdirectory of another user: left alone and named', (t) => {

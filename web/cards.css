@@ -632,6 +632,46 @@
 .card-undo:hover {
   text-decoration: underline;
 }
+/* F28: the Group field and, when the session the form takes its directory from is in a group, the
+   chip of that group right after it on its line (web/cards.js): a favourite's chip in look, its
+   text cut at 28 characters with `…` and, short of room, at half the line, the whole name in its
+   title; no taller than the field, so the line keeps its height. Without a chip no wrapper is
+   made: the form is the form as before. */
+.card-group-field {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+.card-group-field .card-field {
+  flex: 1 1 auto;
+}
+.card-group-chip {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre;
+  padding: 0 7px;
+  border: 1px solid var(--line2);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--dim);
+  font-size: 11.5px;
+  line-height: 18px;
+  cursor: pointer;
+}
+.card-group-chip:hover {
+  border-color: var(--selline);
+}
+.card-group-chip:focus {
+  outline: none;
+}
+.card-group-chip:focus-visible {
+  outline: 2px solid var(--selline);
+  outline-offset: 1px;
+}
 
 /* The key help's content (web/help.js). */
 .help-box {

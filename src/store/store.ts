@@ -1,9 +1,22 @@
-import { chmodSync } from 'node:fs';
+import {
+  chmodSync,
+  closeSync,
+  fchmodSync,
+  fsyncSync,
+  lstatSync,
+  openSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+} from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue, SQLOutputValue, StatementSync } from 'node:sqlite';
 
 import { SkydeckError } from '../platform/errors.ts';
-import type { Ns } from '../platform/types.ts';
+import { realClock } from '../platform/real.ts';
+import { isoFromNs } from '../platform/time.ts';
+import type { Clock, Ns } from '../platform/types.ts';
 import { MIGRATIONS, SCHEMA_VERSION } from './migrations.ts';
 import type {
   AttentionRow,
@@ -30,8 +43,24 @@ import type {
 } from './types.ts';
 import { TICKET_CATEGORIES } from './types.ts';
 
+/**
+ * What an open did to a database that held a schema already (follow-up F21): the schema version it
+ * brought the database to, and the copy of the database as it was that it wrote before its first
+ * migration.
+ */
+export interface Migrated {
+  version: number;
+  copy: string;
+}
+
 export interface Store {
   readonly path: string;
+  /**
+   * F21: what this open migrated of a database that held a schema already, and where the copy it
+   * kept first is; null when it migrated nothing (the database was at the code's version, another
+   * process migrated it meanwhile, or it was new). The command says it (migratedLine).
+   */
+  readonly migrated: Migrated | null;
   /** Closes the connection; a second call does nothing. */
   close(): void;
   /**
@@ -420,8 +449,16 @@ function schemaVersion(db: DatabaseSync, path: string): number {
   return version;
 }
 
-/** Runs the migrations the database lacks, each in one transaction with the kv update. */
-function migrate(db: DatabaseSync, path: string): void {
+/**
+ * Runs the migrations the database lacks, each in one transaction with the kv update. F21: before
+ * the first one it runs on a database that held a schema when this open came to it (not a new one),
+ * it keeps a copy of the database as it is (keepCopy), inside that migration's write lock; a copy
+ * that cannot be written fails the open, the migration not run. Once that migration is committed,
+ * older copies go (pruneCopies); when it fails, the database is as the copy is, and the copy is
+ * removed again. Returns what it migrated of such a database, null when nothing. A database at the
+ * code's version costs no more than reading its version once (every command opens the store).
+ */
+function migrate(db: DatabaseSync, path: string, clock: Pick<Clock, 'nowNs'>): Migrated | null {
   const tooNew = (version: number): DatabaseNewerError =>
     new DatabaseNewerError(
       `the database ${path} was written by a newer skydeck (schema version ${version}, this one knows ${SCHEMA_VERSION}); update skydeck`,
@@ -430,29 +467,207 @@ function migrate(db: DatabaseSync, path: string): void {
   if (found > SCHEMA_VERSION) {
     throw tooNew(found);
   }
+  if (found === SCHEMA_VERSION) {
+    return null;
+  }
+  let copy: string | null = null;
   // The version is read again inside the write lock: a second process may have migrated meanwhile.
   while (schemaVersion(db, path) < SCHEMA_VERSION) {
-    inTransaction(db, () => {
-      const version = schemaVersion(db, path);
-      if (version > SCHEMA_VERSION) {
-        throw tooNew(version);
+    const step: { kept: string | null } = { kept: null };
+    try {
+      inTransaction(db, () => {
+        const version = schemaVersion(db, path);
+        if (version > SCHEMA_VERSION) {
+          throw tooNew(version);
+        }
+        if (version === SCHEMA_VERSION) {
+          return; // another process migrated while this one waited for the lock
+        }
+        const sql = MIGRATIONS[version];
+        if (sql === undefined) {
+          // Cannot happen while SCHEMA_VERSION is MIGRATIONS.length; stopping here keeps a mistake
+          // in that from becoming a loop that never ends.
+          throw new Error(`migration ${version + 1} is missing`);
+        }
+        if (found > 0 && copy === null) {
+          // Inside the write lock, before anything is written: no other connection commits until
+          // this one does, so the copy holds `version`, and whoever migrates has copied first.
+          step.kept = keepCopy(path, version, clock.nowNs());
+        }
+        db.exec(sql);
+        db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(
+          'schema_version',
+          String(version + 1),
+        );
+      });
+    } catch (error) {
+      if (step.kept !== null) {
+        removeQuietly(step.kept); // rolled back: the database is what the copy holds
       }
-      if (version === SCHEMA_VERSION) {
-        return; // another process migrated while this one waited for the lock
-      }
-      const sql = MIGRATIONS[version];
-      if (sql === undefined) {
-        // Cannot happen while SCHEMA_VERSION is MIGRATIONS.length; stopping here keeps a mistake
-        // in that from becoming a loop that never ends.
-        throw new Error(`migration ${version + 1} is missing`);
-      }
-      db.exec(sql);
-      db.prepare('INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)').run(
-        'schema_version',
-        String(version + 1),
-      );
-    });
+      throw error;
+    }
+    if (step.kept !== null) {
+      copy = step.kept;
+      pruneCopies(dirname(path), basename(path), basename(copy));
+    }
   }
+  return copy === null ? null : { version: SCHEMA_VERSION, copy };
+}
+
+/** Removes a file this open wrote, on a way that ends in an error anyway. */
+function removeQuietly(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {
+    // It stays: a temporary is never taken for a copy (pruneCopies, purge.ts), a copy is a whole one.
+  }
+}
+
+/** F21 C2: how many copies stay beside the database: the one just written and the newest others. */
+const COPIES_KEPT = 3;
+
+/** F21 C1: the time in a copy's name, the UTC time `yyyymmddThhmmssZ`. */
+function copyStamp(ns: Ns): string {
+  return isoFromNs(ns)
+    .replace(/\.\d+Z$/, 'Z')
+    .replace(/[-:]/g, '');
+}
+
+/**
+ * F21: the whole name of a copy of the database named `name` (`<name>.schema<V>-<stamp>`, V a
+ * version as skydeck writes one), with V and the stamp as its groups.
+ */
+function copyPattern(name: string): RegExp {
+  const literal = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${literal}\\.schema([1-9][0-9]*)-([0-9]{8}T[0-9]{6}Z)$`);
+}
+
+/** Whether anything (a link too, followed or not) has the name `path`. */
+function taken(path: string): boolean {
+  return lstatSync(path, { throwIfNoEntry: false }) !== undefined;
+}
+
+/** What went wrong, for a refusal: SQLite's message; of a file error, `<code>: <what>` without its path. */
+function reasonOf(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === 'string' && /^E[A-Z0-9]+$/.test(code)) {
+    // Node.js says `<code>: <what>, <call> '<path>'`, and the path is the temporary's.
+    return error.message.split(', ')[0] ?? code;
+  }
+  return error.message;
+}
+
+/**
+ * F21 C1: writes a copy of the database `path` as it is — schema `version`, read by the caller
+ * inside its write lock, which no commit can pass until the caller's — beside it as
+ * `<path>.schema<version>-<stamp of nowNs>`, and returns that path. SQLite writes it (VACUUM INTO,
+ * on a read-only connection of its own: VACUUM does not run inside a transaction), so it is a whole,
+ * consistent database even while other connections have the database open. It is written into a
+ * temporary `.<copy's name>.tmp`, created with mode 600 before anything is in it (the
+ * copy holds the window's secret), and renamed to its name only once it is complete; a name that is
+ * taken is never written over. When the copy cannot be written it is a SkydeckError naming the
+ * database, the copy and the reason, the temporary removed.
+ */
+function keepCopy(path: string, version: number, nowNs: Ns): string {
+  const dir = dirname(path);
+  const copy = `${path}.schema${version}-${copyStamp(nowNs)}`;
+  // No two processes write it at once: the caller holds the write lock.
+  const temporary = join(dir, `.${basename(copy)}.tmp`);
+  const refusal = (reason: string): SkydeckError =>
+    new SkydeckError(
+      `the database ${path} was not upgraded: its copy ${copy} could not be written (${reason})`,
+      1,
+    );
+  const inTheWay = 'something of that name is there already';
+  let made = false;
+  try {
+    if (taken(copy)) {
+      throw refusal(inTheWay);
+    }
+    const fd = openSync(temporary, 'wx', 0o600);
+    made = true;
+    try {
+      fchmodSync(fd, 0o600); // exactly 600, whatever the umask took away
+    } finally {
+      closeSync(fd);
+    }
+    const reader = new DatabaseSync(path, { readOnly: true });
+    try {
+      reader.exec('PRAGMA busy_timeout = 5000');
+      reader.exec('PRAGMA synchronous = FULL'); // the copy is on the disk before the migration runs
+      reader.prepare('VACUUM INTO ?').run(temporary);
+    } finally {
+      reader.close();
+    }
+    if (taken(copy)) {
+      throw refusal(inTheWay);
+    }
+    renameSync(temporary, copy);
+    made = false;
+  } catch (error) {
+    if (made) {
+      removeQuietly(temporary);
+    }
+    throw error instanceof SkydeckError ? error : refusal(reasonOf(error));
+  }
+  syncDirectory(dir);
+  return copy;
+}
+
+/** The copy's name on the disk before the migration's commit; a folder that cannot be synced is no refusal. */
+function syncDirectory(dir: string): void {
+  try {
+    const fd = openSync(dir, 'r');
+    try {
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    // Some file systems refuse to sync a folder; the copy itself is synced.
+  }
+}
+
+/**
+ * F21 C2: of the copies of the database `name` in `dir` — the regular files whose whole name is a
+ * copy's (copyPattern), never a link, a folder or a name that merely starts or ends alike — `written`
+ * stays, and so do the newest others by the time in their names (not by their files' times), three
+ * in all; the others are removed. Best effort: what cannot be listed or removed stays, and the
+ * migration goes on.
+ */
+function pruneCopies(dir: string, name: string, written: string): void {
+  const pattern = copyPattern(name);
+  try {
+    const others = readdirSync(dir)
+      .flatMap((entry) => {
+        const match = entry === written ? null : pattern.exec(entry);
+        return match === null ? [] : [{ entry, stamp: match[2] ?? '' }];
+      })
+      .filter(({ entry }) => lstatSync(join(dir, entry), { throwIfNoEntry: false })?.isFile())
+      .sort((a, b) =>
+        a.stamp === b.stamp ? (b.entry < a.entry ? -1 : 1) : b.stamp < a.stamp ? -1 : 1,
+      );
+    for (const { entry } of others.slice(COPIES_KEPT - 1)) {
+      try {
+        unlinkSync(join(dir, entry));
+      } catch {
+        // It stays; the next copy tries again.
+      }
+    }
+  } catch {
+    // The folder could not be listed, or an entry looked at: nothing more is removed.
+  }
+}
+
+/**
+ * F21 C3: what is said of a migration, by a command on stderr after `skydeck: `, by the server in
+ * its log.
+ */
+export function migratedLine(migrated: Migrated): string {
+  return `the database was brought to schema version ${migrated.version}; a copy of it as it was is at ${migrated.copy}`;
 }
 
 /**
@@ -481,10 +696,17 @@ function migrate(db: DatabaseSync, path: string): void {
  * timeout once it is open, so that a store another process keeps locked fails a piece of the
  * server's work quickly instead of freezing it for 5 s; the migrations at open still wait 5000.
  * Default 5000, the commands' value. A value that is not a whole number 0–2^31−1 is a RangeError.
+ *
+ * Follow-up F21: before it migrates a database that holds a schema already, it writes a copy of the
+ * database as it is beside it (`<path>.schema<V>-<yyyymmddThhmmssZ>`, the UTC time of `clock`, the
+ * platform's real clock by default: design 11) and keeps the newest three; `migrated` says what it did. When the copy cannot
+ * be written the migration does not run, and the open fails with a SkydeckError naming the database,
+ * the copy and the reason (`the database <path> was not upgraded: its copy <copy> could not be
+ * written (<reason>)`). A new database and one at SCHEMA_VERSION are never copied.
  */
 export function openStore(
   path: string,
-  options: { guardSchema?: boolean; busyTimeoutMs?: number } = {},
+  options: { guardSchema?: boolean; busyTimeoutMs?: number; clock?: Pick<Clock, 'nowNs'> } = {},
 ): Store {
   const busyTimeoutMs = options.busyTimeoutMs;
   if (
@@ -494,6 +716,7 @@ export function openStore(
     throw new RangeError(`not a busy timeout in ms: ${busyTimeoutMs}`);
   }
   let db: DatabaseSync | undefined;
+  let migrated: Migrated | null;
   try {
     db = new DatabaseSync(path, { readBigInts: true });
     // First, so the -wal and -shm files that SQLite creates later take the mode of this file.
@@ -502,7 +725,7 @@ export function openStore(
     db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA synchronous = FULL');
     db.exec('PRAGMA foreign_keys = ON');
-    migrate(db, path);
+    migrated = migrate(db, path, options.clock ?? realClock());
     if (busyTimeoutMs !== undefined) {
       // After the migrations, which wait the full 5 s for a command that holds the lock.
       db.exec(`PRAGMA busy_timeout = ${busyTimeoutMs}`);
@@ -517,7 +740,7 @@ export function openStore(
     refusal.cause = error; // SkydeckError has no options argument; the stack of the SQLite error stays
     throw refusal;
   }
-  return new SqliteStore(db, path, options.guardSchema === true);
+  return new SqliteStore(db, path, options.guardSchema === true, migrated);
 }
 
 /**
@@ -579,13 +802,15 @@ function pragma(db: DatabaseSync, name: string): SQLOutputValue {
 
 class SqliteStore implements Store {
   readonly path: string;
+  readonly migrated: Migrated | null;
   readonly #db: DatabaseSync;
   readonly #guardSchema: boolean;
 
-  constructor(db: DatabaseSync, path: string, guardSchema: boolean) {
+  constructor(db: DatabaseSync, path: string, guardSchema: boolean, migrated: Migrated | null) {
     this.#db = db;
     this.path = path;
     this.#guardSchema = guardSchema;
+    this.migrated = migrated;
   }
 
   // Reads go through #all and #get, which refuse anything but a SELECT (prepareRead); writes through

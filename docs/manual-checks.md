@@ -18,7 +18,7 @@ F8), at "Updating skydeck"; W33 checks install's offer to turn off Claude Code's
 (follow-up F11), at "Claude Code's ← shortcut"; W34 checks the title bar's theme switch (follow-up
 F13), at "The window's theme"; W35 checks the flags a session was started with in the header
 (follow-up F16), at "The flags a session was started with"; W36 checks the new form's favourite
-flags (follow-up F15), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
+flags (follow-up F15) and its group chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
 session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status".
 
 Setup:
@@ -2197,9 +2197,10 @@ The check of the new form's favourite flags (follow-up F15; design-step-2.md 12.
 [install.md](install.md), "A new session"): W36, in the window, with the throwaway folder
 `~/skydeck-try` and one new throwaway session that gets no prompt at all. It saves one favourite of
 its own, `--verbose --model sonnet`, and removes it at its end; a favourite you saved yourself stays
-as it is: the check never clicks the × of a chip whose text is not the check's own. Steps that
-type a command are typed in W, a WSL terminal of your own (never a `!` command inside Claude
-Code).
+as it is: the check never clicks the × of a chip whose text is not the check's own. Its step 7
+selects one session of yours, with one click on its row, only to look at the form's group chip:
+it starts and changes nothing there, and the step ends on the throwaway session. Steps that type a command are typed in W, a WSL terminal of your own (never a `!` command
+inside Claude Code).
 
 ## W36. Favourite flags in the new form (real claude)
 
@@ -2225,8 +2226,9 @@ form, while in a session's terminal it reaches Claude Code.
 3. **Start a session with it.** Before any key: only when the right side shows `New session` and
    the caret is in Directory (its first field), press Ctrl+A and type the throwaway folder's full
    path over its text (`/home/<you>/skydeck-try`); type nothing otherwise (press Ctrl+Shift+N
-   again, or click into Directory, and look again). Leave the label and the group empty. Click
-   the chip `--verbose --model sonnet`. Expected: the flags field holds exactly `--verbose --model
+   again, or click into Directory, and look again). Leave the label and the group empty (a chip
+   after the Group field, step 7's, is not clicked here). Click the chip `--verbose --model
+   sonnet`. Expected: the flags field holds exactly `--verbose --model
    sonnet`, and the chip is on; the caret is still in Directory (a click on a chip leaves it where
    it was). Press Enter only when Directory holds exactly that path and the flags field exactly
    that text. **Type no prompt into the new session.** Look that it is the new one: the header
@@ -2245,7 +2247,23 @@ form, while in a session's terminal it reaches Claude Code.
 6. **After a restart.** In W, `skydeck window --restart`. The window says for a few seconds that
    the server is not answering, then shows every session again. Press Ctrl+Shift+N. Expected: the
    same chips in the same order as in step 2, every one off. Press Esc (the form shows).
-7. **The end.** End the throwaway session: click its row in the list (the folder `skydeck-try`,
+7. **The group chip** (follow-up F28). In the list, find a session of yours that is in a group
+   and whose row shows now: in an open card (its sessions drawn under the caption) or with the
+   group's name on its row. Never take one with a coloured bar at its left (a session that needs
+   you and stays selected for 1.5 seconds is marked seen), and leave a closed card closed (`▸`,
+   the group's name and a number, no session under it: a selected caption gives no chip). Click
+   that row once, on its title (a double click on a session that is not running resumes it),
+   then press Ctrl+Shift+N, and look that the right side shows `New session`. Expected: right
+   after the Group field a chip with that group's name (a name longer than 28 characters ends in
+   `…`), and the Group field itself empty. Point at the chip: its title reads `Use the group
+   <name>`, with the whole name. Click it. Expected: the Group field holds exactly the name, and
+   the caret is still in Directory. Press Esc (the form shows): the form closes, and nothing was
+   started. Then click the throwaway session's row once and look at the header's short id: it is
+   the one of step 3. Press Ctrl+Shift+N, and look that the right side shows `New session`.
+   Expected: no chip after the Group field (the throwaway session is in no group). Press Esc (the
+   form shows). With no session of yours in a group, or none whose row shows without a coloured
+   bar, leave out the first half and write that down.
+8. **The end.** End the throwaway session: click its row in the list (the folder `skydeck-try`,
    the short id of step 3) and look at the header's short id; look that its terminal has the
    keyboard (the key bar says `Focus: terminal`; else Ctrl+Shift+L until it does); type `/exit`
    and Enter, then `Close` on its ended bar. Then remove the check's favourite: Ctrl+Shift+N, look
@@ -2254,7 +2272,8 @@ form, while in a session's terminal it reaches Claude Code.
    The chips are then those of the setup.
 
 Write down: the favourites of the setup (how many, their texts); for each step whether it went as
-expected; the `launch:` line of step 4; anything that differs, and where.
+expected; the `launch:` line of step 4; the chip's text and title of step 7; anything that
+differs, and where.
 
 Not tried before this check was written: all of it, in Edge. The tests run the form in headless
 Chromium against a stand-in server, and the server on test databases; they never start `claude`.
@@ -2271,7 +2290,7 @@ are typed in W, a WSL terminal of your own (never a `!` command inside Claude Co
 ## W37. A ticket on the throwaway session
 
 Setup: skydeck updated to a commit that has follow-up F18 (`skydeck update`, W32; it upgrades the
-database once, [install.md](install.md), "There is no way back to an older checkout"); the window
+database once, [install.md](install.md), "An older checkout does not open an upgraded database"); the window
 open, with the throwaway session in it. Click the throwaway session's row in the list, then look at
 the header's short id: it must be the throwaway session's (`skydeck ls` in W prints the short ids
 as the last column); write it down. **Before every key and every click below, look at it again.**
@@ -2341,7 +2360,7 @@ Commands are typed in W, a WSL terminal of your own (never a `!` command inside 
 ## W38. A ticket's status on the throwaway session
 
 Setup: skydeck updated to a commit that has follow-up F19 (`skydeck update`, W32; it upgrades the
-database once, [install.md](install.md), "There is no way back to an older checkout"); the window
+database once, [install.md](install.md), "An older checkout does not open an upgraded database"); the window
 open, with the throwaway session in it. Click the throwaway session's row in the list, then look
 at the header's short id: it must be the throwaway session's (`skydeck ls` in W prints the short
 ids as the last column); write it down. **Before every key and every click below, look at it

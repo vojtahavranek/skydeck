@@ -35,6 +35,7 @@ import { withoutLauncherVariables } from '../../window/env.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
+import { sayMigrated } from '../deck.ts';
 import { EXIT } from '../exit.ts';
 import { versionLine } from '../version.ts';
 import { WINDOW_CHECKS, windowView } from '../window-checks.ts';
@@ -110,6 +111,8 @@ export const command: Command = {
       report('problem', problem);
     }
     const store = openDatabase(platform, places, report);
+    // F21: an open that migrated the database says so on stderr, as every command's does.
+    if (store !== null) sayMigrated(ctx, store);
     try {
       for (const check of CHECKS) {
         try {
@@ -261,7 +264,7 @@ function openDatabase(platform: Platform, places: Places, report: Report): Store
       report('problem', `database ${dbPath} does not exist; run skydeck install`);
       return null;
     }
-    return openStore(dbPath);
+    return openStore(dbPath, { clock: platform.clock });
   } catch (error) {
     report(
       'problem',

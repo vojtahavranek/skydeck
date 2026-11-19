@@ -1236,7 +1236,8 @@ test('the right side', async (t) => {
             (o) => (o as HTMLOptionElement).value,
           ),
         ),
-        ['/dirs/<img src=x>'],
+        // The Directory field's list, then the Group field's (F28: the groups the list shows).
+        ['/dirs/<img src=x>', '<b>g</b>'],
       );
     },
   );

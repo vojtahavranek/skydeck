@@ -40,6 +40,7 @@ import type { Spec } from '../purge.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
 import type { Context } from '../context.ts';
+import { sayMigrated } from '../deck.ts';
 import { EXIT } from '../exit.ts';
 import { backupBase, createBackup } from '../settings-backup.ts';
 
@@ -50,7 +51,8 @@ const SPEC: ArgSpec = {
     "Puts Claude Code's settings file back as it was before install when nobody changed it\n" +
     'since, otherwise removes only the two hook entries install wrote (after a new backup of\n' +
     'the file, when that rewrites more than those entries), and removes the links install\n' +
-    'made. The database stays. The backups of the settings file are kept (it names them).\n' +
+    'made. The database and its copies (skydeck.db.schema<V>-<time>, kept before an\n' +
+    'upgrade) stay. The backups of the settings file are kept (it names them).\n' +
     "First it stops the window's server; the terminals in the window keep running.\n" +
     '\n' +
     '  --purge  also remove what skydeck wrote into the data, state, configuration and\n' +
@@ -89,7 +91,7 @@ export const command: Command = {
       showProfileFolder(ctx, config);
       undo(ctx, places, { hash: null, backup: null });
     } else {
-      runtimeDirs = await withStoreAt(places.dbPath, async (store) => {
+      runtimeDirs = await withStoreAt(ctx, places.dbPath, async (store) => {
         const dirs = runtimeDirsOf(platform, places, store.getKv('window_runtime_dir'));
         if (purge) refuseWhileKeepersMayLive(platform, dirs, BEFORE);
         await stopTheServer(ctx, { platform, places, config, store });
@@ -152,12 +154,18 @@ export const command: Command = {
 };
 
 /**
- * fn(store) on the existing database, closed afterwards. As in withDeck, a failure of the database
- * as a whole is an error naming it, not an internal error.
+ * fn(store) on the existing database, closed afterwards. As in withDeck, the line of an open that
+ * migrated it is said first (F21), and a failure of the database as a whole is an error naming it,
+ * not an internal error.
  */
-async function withStoreAt<T>(path: string, fn: (store: Store) => Promise<T>): Promise<T> {
-  const store = openStore(path);
+async function withStoreAt<T>(
+  ctx: Context,
+  path: string,
+  fn: (store: Store) => Promise<T>,
+): Promise<T> {
+  const store = openStore(path, { clock: ctx.platform.clock });
   try {
+    sayMigrated(ctx, store);
     return await fn(store);
   } catch (error) {
     if (isDatabaseFailure(error)) {

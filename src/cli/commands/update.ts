@@ -305,8 +305,10 @@ function report(update: Update): string[] {
     lines.push(`  … and ${update.count - update.commits.length} more`);
   }
   if (update.upgradesDatabase) {
+    // F21: the store keeps a copy of the database before it upgrades it; the guide says how to go
+    // back to the commit the checkout is at now, which this line names.
     lines.push(
-      "this update changes the database's upgrade steps: it may upgrade the database, and an upgraded database cannot be opened by an older checkout",
+      `this update changes the database's upgrade steps: it may upgrade the database, which an older checkout cannot open; a copy of the database as it was is kept first, and docs/install.md ("Going back") says how to return to ${short(update.oldId)}`,
     );
   }
   return lines;

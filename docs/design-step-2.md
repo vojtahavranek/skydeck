@@ -1922,10 +1922,11 @@ The first `ALTER TABLE`: it adds one nullable column and nothing else, so every 
 column more). The column holds the address as `readTicket` gave it (an `http` or `https` link the
 window may open, a key already filled into `ticketUrl`), never the text as typed: a later change of
 `ticketUrl` moves no stored ticket. Like every migration it runs in one transaction with its `kv`
-update, the version read again inside the write lock. **There is no way back**: from then on an
-older skydeck refuses the database at its open ("written by a newer skydeck", exit 1), a server of an
-older checkout still running stops at its next write (10.1's guard), and nothing removes the column
-(install.md, "There is no way back to an older checkout").
+update, the version read again inside the write lock. **An older skydeck refuses it**: from then on
+an older skydeck refuses the database at its open ("written by a newer skydeck", exit 1), a server of
+an older checkout still running stops at its next write (10.1's guard), and nothing removes the
+column. The way back is the copy the store keeps before a migration (design 9.2, follow-up F21;
+install.md, "Going back").
 
 **Migration 4** (follow-up F19, a ticket's status, design 7.3 and 12.5):
 
@@ -1946,10 +1947,11 @@ address no session uses any more keeps its row (a few bytes). A read that succee
 `category`, `ok_at_ns` (equal to `tried_at_ns`) and a NULL `error`; one that failed sets only
 `tried_at_ns` and `error`, so that the last status and the time of its read stay. Like every
 migration it runs in one transaction with its `kv` update, the version read again inside the write
-lock. **There is no way back**, as for migration 3: from then on an older skydeck (one of schema 3,
-F18's) refuses the database at its open ("written by a newer skydeck … update skydeck", exit 1), a
-server of an older checkout still running stops at its next write (10.1's guard), and nothing
-removes the table (install.md, "There is no way back to an older checkout").
+lock. **An older skydeck refuses it**, as for migration 3: from then on an older skydeck (one of
+schema 3, F18's) refuses the database at its open ("written by a newer skydeck … update skydeck",
+exit 1), a server of an older checkout still running stops at its next write (10.1's guard), and
+nothing removes the table; the way back is the copy kept before the migration (design 9.2,
+install.md "Going back").
 `test/store/migration-4.test.ts` migrates a filled schema-3 database and compares every value.
 
 `kv` entries (no migration; `kv` is free text):
@@ -3079,6 +3081,27 @@ nothing; `ls` is unchanged.
   or Undo takes no keyboard. The form opens with the flags field empty and every chip off, whatever was
   used before: no favourite is ever on without a click, and Start sends the field's text, as
   before.
+  **The group of the selected session** (follow-up F28, the owner's request of 2026-11-19: a new
+  session that belongs with one already open should land in its group). When the session the
+  form takes its directory from (the rule above, the same session) is in a group — its stored
+  group, or the key at the start of its title, as the list shows it —, one chip with that group's
+  name stands right after the Group field, on its line: in the look of a favourite's chip, cut at
+  28 characters with `…` and, short of room, at half the line, its hover title and its name for
+  assistive technology `Use the group <name>` with the whole name. It costs the form no height
+  (the line keeps the field's), and a form without it is the form as before, but that once the
+  list has a group the Group field shows the browser's own arrow at its right end while it has the
+  keyboard or the mouse, as Directory does (what a list of completions brings). A click on the
+  chip, or Enter or Space on it (a button, the stop of Tab right after the field), puts the name
+  into the Group field in place of what is there (the page sets the field's text, which the
+  browser's own undo, Ctrl+Z, then does not take back: the favourites' named limit); it starts
+  nothing, takes no keyboard on a click and stays. Nothing is filled in by itself (the owner's
+  choice of a one-click suggestion over a filled-in field: a wrong group would misfile the
+  session, and a related session is the rarer case), so without the click the field is empty as
+  before; Start sends the field's text, so a group the session has only through its title's key
+  becomes the new session's own stored group. The Group field offers as completions the groups of
+  the list's sessions (a closed block's too), each once, as the list shows them, the selected
+  session's first, then in the list's order — as the Directory field offers the known
+  directories. The form takes both when it opens, as it takes its directory.
 - **Nothing, while the list holds no session at all** (follow-up F22): one muted line above the
   empty cards, `The selected session shows here.` (12.1), also while a session the
   list no longer shows (the last one marked done) is still selected; the New form takes the right
@@ -3998,7 +4021,9 @@ owner). Then:
 
 **`skydeck update [--check]`** (src/cli/commands/update.ts) updates the checkout it runs from
 (`platform.appRoot`). It is a command the user types; nothing checks for an update or applies one by
-itself, and there is no prompt, no `doctor` run at its end and no way back.
+itself, and there is no prompt, no `doctor` run at its end and no command to go back (the store
+keeps a copy of the database before it migrates it, design 9.2; install.md, "Going back", gives the
+steps by hand).
 
 1. **It looks, and refuses** (exit 1, one line, nothing changed) in this order: `CLAUDECODE` set
    without `--check` (the server it restarts would give every session in the window that
@@ -4021,7 +4046,9 @@ itself, and there is no prompt, no `doctor` run at its end and no way back.
    (<old>..<new>):` and one line per commit, newest first, at most 20 (`… and <m> more`). Ids are
    the first 7 hexadecimal digits of the commit's id, for reading only; the fast-forward uses the
    whole id. When `src/store/migrations.ts` differs between HEAD and the new commit (or is gone),
-   one more line says that the update may upgrade the database (`SCHEMA_VERSION` is computed, so
+   one more line says that the update may upgrade the database, that a copy of it as it was is kept
+   first (design 9.2), and that install.md ("Going back") says how to return to HEAD's commit,
+   which it names (`SCHEMA_VERSION` is computed, so
    the file's change is the fact that can be known without running the new code; no file of the
    new commit is run or imported to learn more). `--check` ends with `run skydeck update to apply
    it`.
@@ -4467,7 +4494,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W33 | **Real claude**: `skydeck install` asks whether to turn Claude Code's ← shortcut off (three lines and `Turn the shortcut off? [y/N]`); `y` sets only `leftArrowOpensAgents` to `false` in `~/.claude.json`, after a backup, and `skydeck doctor` then says the shortcut is off; in a throwaway session of the window started after it, ← on its empty prompt leaves the terminal as it is (no agent view). It changes that one key of the user's on purpose and prints neither file. | F11 | 7.9 |
 | W34 | **Real claude**: the title bar's theme switch in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme "Auto (match terminal)" (looked at in `/theme`, never in its files), a new throwaway session started in each forced state picks the matching one, and whether one already running changes its theme at a switch is written down (not documented). At the end the switch, Windows' mode and Claude Code's theme are as they were. | F13 | 12.1, 7.2, 9.3 |
 | W35 | **Real claude**, a throwaway session started from the New form with `--model` and one more flag: the header's second line ends in those flags, in the short id's grey, after the short id, nothing else of the line moved; its tooltip says `Started with: …`; in a narrower window they are cut first; once it ended and was closed, the resume card's "Will run" has them and the header not; resumed, the header shows them again. | F16 | 12.5 |
-| W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (the header's flags, F16, and `skydeck show`); removed with ×, `Undo` puts it back at its place. It types no prompt and touches no real session. | F15 | 12.6, 10.2 |
+| W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (the header's flags, F16, and `skydeck show`); removed with ×, `Undo` puts it back at its place; with a session of the user's in a group selected, the form shows that group's chip, and a click puts the name into the Group field (nothing started). It types no prompt and changes no real session. | F15, F28 | 12.6, 10.2 |
 | W37 | A ticket on a throwaway session (follow-up F18): set by a whole link (`https://example.com/browse/TRY-1`, a host that opens nothing private), the header's third line starts with its chip `TRY-1 ↗`, its tooltip the address, a click opens it where links open (W12); set by a key only while `ticketUrl` is configured (else that step is skipped); removed with an empty text, the chip gone and `+ ticket` back; `skydeck show` prints `ticket:` while one is set. Every step checks the header's short id or the dialog's heading first; at the end the session has no ticket. | F18 | 12.5, 10.2 |
 | W38 | A ticket's status on the throwaway session (follow-up F19), asking no real tracker: a stand-in program the owner writes in a throwaway folder (`~/skydeck-try/status`, its three lines given) answers for a `ticketStatus` rule whose `match` is `https://example.com/try/`; the ticket `https://example.com/try/TRY-1` on the throwaway session shows `TRY-1 · In Progress ↗` in blue in the header and `In Progress` in the row's small chip; the answer changed to each category and ↻ pressed in the ticket dialog: `blocked` red, `review` amber, `doing` blue, `done` green, `todo` and `closed` grey; a failure (the program made not executable) keeps the old status and its tooltip says `status not read: …`; `skydeck show` prints `ticket:` with ` · <status>`. Every step checks the header's short id or the dialog's heading first; at the end the ticket is removed, `config.json` is as it was (restored from a copy), and the stand-in is deleted. | F19 | 12.5, 12.2, 12.3, 10.2 |
 

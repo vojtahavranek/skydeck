@@ -40,7 +40,7 @@ export function resolveDeckPlaces(platform: Platform): { places: Places; config:
  * dataDir, stateDir, configDir, spoolDir, locksDir → openStore(dbPath, options). Throws
  * ConfigError; a directory it cannot create, or a database it cannot open, is a SkydeckError (exit
  * 1) naming it. `guardSchema` and `busyTimeoutMs` are for the server's deck only (openStore, S2
- * 10.1, 14).
+ * 10.1, 14). The platform's clock names a copy the store keeps before a migration (F21).
  */
 export function openDeck(
   platform: Platform,
@@ -60,5 +60,10 @@ export function openDeck(
       throw new SkydeckError(`cannot create the directory ${dir} (${describeError(error)})`);
     }
   }
-  return { platform, places, config, store: openStore(places.dbPath, options) };
+  return {
+    platform,
+    places,
+    config,
+    store: openStore(places.dbPath, { ...options, clock: platform.clock }),
+  };
 }

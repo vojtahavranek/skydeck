@@ -121,7 +121,8 @@ function isMissing(error: unknown): boolean {
 // The last time handed out, so that a clock that steps backwards cannot make the time go back.
 let lastNs: Ns = 0n;
 
-function realClock(): Clock {
+/** The clock of realPlatform; also the store's when it is given none (openStore). */
+export function realClock(): Clock {
   return {
     nowNs(): Ns {
       const now = BigInt(Date.now()) * NS_PER_MS;

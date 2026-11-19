@@ -856,13 +856,14 @@ could not be resumed; see above`).
   numbers that lost digits as install's question does. It leaves `leftArrowOpensAgents` and the
   backup install made of the global config file alone. Removes the
   links that still point where install pointed them. It never removes a backup, not even with
-  `--purge`, and names each one. It creates nothing but that backup: no directory, database or
-  file, also none the user removed after install. The database stays unless `--purge` is given,
+  `--purge`, and names each one. It creates nothing but that backup (and the copy of an older
+  database its open migrates, 9.2): no directory, database or file, also none the user removed
+  after install. The database and its copies stay unless `--purge` is given,
   which also removes the data, state and configuration folders — carefully, since they can be the
   user's own (`SKYDECK_HOME=$HOME` makes them `~/data`, `~/state`, `~/config`; principle 6): from
   each it removes only what skydeck itself writes there, each entry of its kind (the database and
-  the files SQLite keeps beside it, the two links, the spool with `bad/`, `locks/`, `hook.log`,
-  notes being edited, the window's logs, a runtime directory of this store, `config.json`, and the
+  the files SQLite keeps beside it, its copies and their temporaries (9.2), the two links, the
+  spool with `bad/`, `locks/`, `hook.log`, notes being edited, the window's logs, a runtime directory of this store, `config.json`, and the
   temporaries of their writers; one list in `src/cli/purge.ts`, which a new file skydeck writes
   there must join), then the folder. A folder that is a symbolic link, is another user's, cannot be
   looked at, or holds anything else — `notes.txt`, an editor's backup, a directory where skydeck
@@ -883,7 +884,8 @@ could not be resumed; see above`).
   folder and file under `<claudeHome>/projects` can be read (5.6; a folder that is a file or a
   symbolic link to nothing is a problem); Claude Code's ← shortcut, read as install reads it
   (`ok` when off, `info` when on or unknown, never a problem: it is the user's choice); `gh`
-  present and logged in; the terminal adapter. It does not refresh and creates nothing. A check that fails unexpectedly is one problem line, not the end
+  present and logged in; the terminal adapter. It does not refresh and creates nothing (but the
+  copy of an older database its open migrates, 9.2, whose line it says on stderr). A check that fails unexpectedly is one problem line, not the end
   of the report; so is a configuration file that cannot be read or a database that is missing or
   cannot be opened, and the checks that do not need it still run.
 
@@ -917,7 +919,7 @@ could not be resumed; see above`).
 
 | Name | Default | Holds |
 |---|---|---|
-| `dataDir` | `${XDG_DATA_HOME:-~/.local/share}/skydeck` | `skydeck.db`, the `node` and `skydeck-hook` links. |
+| `dataDir` | `${XDG_DATA_HOME:-~/.local/share}/skydeck` | `skydeck.db` and the copies kept before its migrations (9.2), the `node` and `skydeck-hook` links. |
 | `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`; `locks/` is created but unused (resume locks are in the database, 7.6). |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
 | `claudeHome` | the configuration key `claudeHome`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files. |
@@ -1048,7 +1050,28 @@ Step 2 adds migration 2 (the table `attention`), migration 3 (follow-up F18: the
 `ticket_url` of `session_meta`, the ticket of 7.1, by the first `ALTER TABLE`) and migration 4
 (follow-up F19: the table `ticket_status`, a cached ticket status by address, 7.3); their SQL is in
 design-step-2.md 10.2. A migration is never undone: a database migrated by a newer skydeck is refused
-by an older one at its open ("written by a newer skydeck"), and there is no way back (install.md).
+by an older one at its open ("written by a newer skydeck").
+
+The way back is a copy (follow-up F21). Before the first migration an open runs on a database that
+already holds a schema — never a new one, and never one at the code's version, whose open costs no
+more than reading the version — the store writes a copy of the database as it is beside it,
+`<name>.schema<V>-<yyyymmddThhmmssZ>`: `V` the version the copy holds, the time in UTC. SQLite
+writes it (`VACUUM INTO`, on a read-only connection of its own) inside that migration's write
+lock, before anything is written: no commit can come between, so the copy holds exactly the
+version its name states, also when several processes open the database at once, and whoever
+migrates has copied first. It is written into a temporary `.<copy's name>.tmp` (the lock keeps a
+second writer away), created with mode 600 before anything is in it (the copy holds the window's
+secret), synced, and renamed to its name once complete; a name that is taken is never written over.
+A copy that cannot be written stops the migration: the open fails with `the database <path> was not
+upgraded: its copy <copy> could not be written (<reason>)` and the database is as it was (a command
+ends with exit 1, the window's server does not start). A migration that fails after its copy
+removes the copy again (the database is what the copy holds). Once a migration is committed, the
+copies beyond the newest three by the time in their names — the one just written always among them;
+only regular files whose whole name is a copy's, never a link, a folder or a name that merely
+starts alike — are removed, best effort. The command whose open migrated says `skydeck: the
+database was brought to schema version <n>; a copy of it as it was is at <path>` on stderr (never
+on stdout); the server writes the line to its log. install.md ("Going back") gives the steps to put
+a copy back. No migration, setting or command comes with it.
 
 ## 10. Technology
 
@@ -1074,7 +1097,7 @@ by an older one at its open ("written by a newer skydeck"), and there is no way 
 | `bin/skydeck-hook` | The hook (5.1, 5.2). | — |
 | `src/platform/` | Interfaces and real implementations for clock, files, `/proc`, running programs; resolving the places in 9.1; reading the configuration. | — |
 | `src/text/` | The sanitiser; shell quoting. | — |
-| `src/store/` | The database: connection settings, migrations, typed functions. The only SQL. | platform |
+| `src/store/` | The database: connection settings, migrations and the copy kept before them (9.2), typed functions. The only SQL. | platform |
 | `src/claude/hookinput.ts` | Parses a spool file into a normalised event (5.3). | text |
 | `src/claude/live.ts` | Reads live-session files; the liveness rule (5.5). | platform |
 | `src/claude/transcripts.ts` | Finds and incrementally reads transcripts (5.6). | platform |

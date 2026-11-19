@@ -47,6 +47,7 @@ import { createHelp } from './help.js';
 import { cancels, listKey, switcherKey, windowChord } from './keys.js';
 import { createList } from './list.js';
 import { holdsNoSession } from './list-text.js';
+import { newFormDefaults } from './new-form-text.js';
 import { createNotifications } from './notify.js';
 import { blockInfo, paneFor, sessionRow } from './pane.js';
 import { cutWords } from './search-text.js';
@@ -1507,20 +1508,13 @@ function render() {
       cards.header(pane.row, selected, null, listNow);
       cards.resumeCard(pane.row, selected, lines);
       break;
-    case 'new': {
-      // The selected session's directory (S2 12.6): a hidden selection's too while a terminal of
-      // the window shows it (E13; review 2, ruled), since its header was what the user saw.
-      const selectedOne = sessionRow(state.list, state.selected);
-      const row =
-        selectedOne !== null &&
-        (selectedOne.terminal !== null || rowOf(selectedOne.id) !== undefined)
-          ? selectedOne
-          : undefined;
-      const dirs = state.list?.dirs ?? [];
+    case 'new':
+      // The selected session's directory (S2 12.6) and, F28, its group as the Group field's chip:
+      // a hidden selection's too while a terminal of the window shows it (E13; review 2, ruled),
+      // since its header was what the user saw (new-form-text.js).
       cards.header(null, null, null, listNow);
-      cards.newForm({ dir: row?.dir ?? dirs[0] ?? '', dirs });
+      cards.newForm(newFormDefaults(state.list, state.selected));
       break;
-    }
     case 'group':
       // F9: a closed caption is selected: the group's card, no header, no terminal.
       cards.header(null, null, null, listNow);

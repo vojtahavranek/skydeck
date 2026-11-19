@@ -218,6 +218,9 @@ describe('uninstall --purge: a directory that is not only skydeck’s is left al
   test('a foreign file whose name looks like skydeck’s but is not its shape is left alone', async (t) => {
     for (const name of [
       'skydeck.db.bak',
+      'skydeck.db.schema3-20261112T090000Z.bak',
+      'skydeck.db.schema3-20261112T090000Z-journal',
+      'skydeck.db.schema03-20261112T090000Z',
       'note-x.md',
       '.note-x.md.swp',
       'hook.log.1',
