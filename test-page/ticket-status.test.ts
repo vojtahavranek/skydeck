@@ -216,6 +216,15 @@ const CATEGORIES: [string | null, Tint | null][] = [
   [null, null],
 ];
 
+/** A pull request's level of each tint (S2 12.3's table), and of the grey a draft keeps. */
+const LEVEL_OF_TINT: Record<Tint | 'grey', string> = {
+  red: 'checks-failing',
+  amber: 'checks-pending',
+  blue: 'review-required',
+  green: 'approved-green',
+  grey: 'draft',
+};
+
 /** The themes a case runs in: the system's light and dark, and each forced against the system. */
 const THEMES: { name: string; system: 'light' | 'dark'; forced: 'light' | 'dark' | null }[] = [
   { name: 'light', system: 'light', forced: null },
@@ -239,13 +248,18 @@ test("F19: a ticket's status in the header, in the list's rows, the filter and �
   await t.test(
     "every category's tint on the header's chip and the row's chip — the pull requests' tint of that colour, or grey — light, dark and under each forced theme; the words are `<name> · <status> ↗`",
     async (t) => {
-      const rows = CATEGORIES.map(([category], at) =>
-        resting(at === 0 ? S1 : `7d1e3c5a-2b4f-4a6e-8c0d-${String(at).padStart(12, '0')}`, {
+      // Each row also has a pull request whose level has the same tint (a draft: grey), so that
+      // the two chips are compared as drawn, light and dark and under the forced themes.
+      const rows = CATEGORIES.map(([category, tint], at) => {
+        const prs = [{ ...pr(at + 1), level: LEVEL_OF_TINT[tint ?? 'grey'] }];
+        return resting(at === 0 ? S1 : `7d1e3c5a-2b4f-4a6e-8c0d-${String(at).padStart(12, '0')}`, {
           title: `ticket ${String(category)}`,
           lastActivityNs: String(NOW_NS - BigInt(at + 1) * MIN_NS),
           ticketStatus: { name: 'ABC-123', status: `S ${String(category)}`, category },
-        }),
-      );
+          prs,
+          chip: windowChip(prs as { level: string }[]),
+        });
+      });
       const ids = rows.map((row) => row['id'] as string);
       const s = await scripted(t, chromium, {
         rows,
@@ -285,6 +299,28 @@ test("F19: a ticket's status in the header, in the list's rows, the filter and �
             [chip?.text, chip?.color, chip?.background],
             [`S ${String(category)}`, want.color, want.background],
             `${where}: the row's chip`,
+          );
+          // The pull requests' own chips of that tint, beside them: the same colours.
+          const theirs = await s.page.evaluate((id) => {
+            const look = (selector: string) => {
+              const element = document.querySelector(selector) as HTMLElement;
+              const style = getComputedStyle(element);
+              return [style.color, style.backgroundColor];
+            };
+            return {
+              row: look(`#list [data-id="${id}"] .row-chip`),
+              header: look('#cards .header-chip'),
+            };
+          }, id);
+          assert.deepEqual(
+            [chip?.color, chip?.background],
+            theirs.row,
+            `${where}: as the row's PR chip`,
+          );
+          assert.deepEqual(
+            [header?.color, header?.background],
+            theirs.header,
+            `${where}: as the header's PR chip`,
           );
           // The box of the pull requests' chip (list.css .row-chip).
           assert.deepEqual(

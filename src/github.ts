@@ -4,6 +4,7 @@
  * answers `gh` with a fake runner and never touches the network.
  */
 
+import type { TicketStatusRule } from './platform/config.ts';
 import { nsFromMs } from './platform/time.ts';
 import type { Clock, Env, Ns, RunOptions, RunResult, Runner } from './platform/types.ts';
 import type { Store } from './store/store.ts';
@@ -489,6 +490,28 @@ export function refreshPrs(
 }
 
 // --- follow-up F19: the status of a GitHub issue that is a session's ticket (T2 a, T3) ----------
+
+/** F19: who reads the status of an address — GitHub (an issue, by its key) or a configured command. */
+export type StatusProvider =
+  { kind: 'github'; key: PrKey } | { kind: 'command'; rule: TicketStatusRule };
+
+/**
+ * F19 (T1, T2): the provider of `url`'s status. A pull request's address gets none (T2 a: not in
+ * this step), whatever the rules say. Else the first rule of `ticketStatus` whose `match` starts
+ * `url` (rules come before GitHub), else GitHub for an issue's address (`issueKey`), else none.
+ * Here, beside the keys it reads, so that the list model (src/sessions/) can ask it: sessions may
+ * import github, not src/ticket-status.ts (design 11).
+ */
+export function statusProvider(
+  url: string,
+  rules: readonly TicketStatusRule[],
+): StatusProvider | null {
+  if (prKey(url) !== null) return null;
+  const rule = rules.find((candidate) => url.startsWith(candidate.match));
+  if (rule !== undefined) return { kind: 'command', rule };
+  const key = issueKey(url);
+  return key === null ? null : { kind: 'github', key };
+}
 
 /** F19: the longest status text kept (the configured command's limit, T2 b). */
 const ISSUE_STATUS_LENGTH = 40;

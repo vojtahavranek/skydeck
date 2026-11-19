@@ -1,8 +1,7 @@
 /**
- * Follow-up F19: a ticket's status (S2 10.2, 12.3, 12.5, 16.4; design 7.1). Which provider reads
- * the status of a ticket's address — the first configured rule (`ticketStatus`) whose `match`
- * starts it, else GitHub for an issue's address, else none —, the configured command and its
- * answer, when a status is due again, and the fetch that saves the results in the store, one row
+ * Follow-up F19: a ticket's status (S2 10.2, 12.3, 12.5, 16.4; design 7.1). The configured command
+ * and its answer (which provider reads an address is github.ts's `statusProvider`, so that the
+ * list model can ask it without importing this file), when a status is due again, and the fetch that saves the results in the store, one row
  * per address. Only `Runner`, `Clock` and `Store` reach the outside world, so a test answers with
  * a fake runner and never runs a program; the window's and the commands' callers pass the real
  * ones. A configured program is run as the user: as a list of words, never through a shell, stdin
@@ -11,7 +10,7 @@
  */
 import { basename } from 'node:path';
 
-import { fetchIssueStatuses, issueKey, prKey } from './github.ts';
+import { fetchIssueStatuses, statusProvider } from './github.ts';
 import type { PrKey } from './github.ts';
 import type { TicketStatusRule } from './platform/config.ts';
 import { nsFromMs } from './platform/time.ts';
@@ -35,26 +34,6 @@ export const FINISHED_REFRESH_HOURS = 12;
 const ERROR_LENGTH = 200;
 
 const MS_PER_MINUTE = 60_000;
-
-/** Who reads the status of an address: GitHub (an issue, by its key) or a configured command. */
-export type StatusProvider =
-  { kind: 'github'; key: PrKey } | { kind: 'command'; rule: TicketStatusRule };
-
-/**
- * T1, T2: the provider of `url`'s status. A pull request's address gets none (T2 a: not in this
- * step), whatever the rules say. Else the first rule whose `match` starts `url` (rules come before
- * GitHub), else GitHub for an issue's address (`issueKey`), else none.
- */
-export function statusProvider(
-  url: string,
-  rules: readonly TicketStatusRule[],
-): StatusProvider | null {
-  if (prKey(url) !== null) return null;
-  const rule = rules.find((candidate) => url.startsWith(candidate.match));
-  if (rule !== undefined) return { kind: 'command', rule };
-  const key = issueKey(url);
-  return key === null ? null : { kind: 'github', key };
-}
 
 /** The two placeholders of a command's arguments. */
 const PLACEHOLDERS = /\{url\}|\{key\}/g;

@@ -2,7 +2,7 @@
 // sanitised, which rows are listed, how they are filtered, grouped and ordered. Pure.
 import { basename } from 'node:path';
 
-import { chipFor, prLevel } from '../github.ts';
+import { chipFor, prLevel, statusProvider } from '../github.ts';
 import type { ChipLevel } from '../github.ts';
 import type { TicketStatusRule } from '../platform/config.ts';
 import { isoFromNs } from '../platform/time.ts';
@@ -18,7 +18,6 @@ import type {
   TicketStatusRow,
 } from '../store/types.ts';
 import { sanitize } from '../text/sanitize.ts';
-import { statusProvider } from '../ticket-status.ts';
 import { readTicket, ticketAddress, ticketText } from './ticket.ts';
 import type { DerivedSession, Mark, State } from './types.ts';
 

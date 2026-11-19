@@ -874,7 +874,6 @@ export function createCards(root, deps) {
         setData(ticketItem, 'status', 'true');
         setData(ticketItem, 'category', ticketShown.category);
       }
-      setData(ticketItem, 'group', String(alone));
       setText(ticketButton, ticketSet ? 'Ticket' : '+ ticket');
       setTip(ticketButton, ticketSet ? 'the ticket (t)' : 'set a ticket (t)');
       // None attached exactly when there is no chip (S2 12.3).

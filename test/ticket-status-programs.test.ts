@@ -6,7 +6,7 @@
 // example program of docs/install.md is valid Python whose failure path — no token file, which it
 // reads before it would ask anything — prints one line on stderr and exits 1.
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -57,6 +57,45 @@ test('a program named by a relative path runs from the home directory', async (t
   const row = await readWith(t, s, { match: 'https://example.com/try/', command: ['bin/status'] });
 
   assert.deepEqual([row.status, row.category, row.error], ['In Review', 'review', null]);
+});
+
+test('an address with spaces, quotes, `;` and `$(…)` reaches the program as one argument, unchanged; nothing in it runs', async (t) => {
+  const s = sandbox(t);
+  const program = join(s.home, 'record-args');
+  // Writes each argument it gets on a line of its own, then answers a status.
+  writeFileSync(
+    program,
+    `#!${process.execPath}\nrequire('node:fs').writeFileSync('args.json', JSON.stringify(process.argv.slice(2)));\nprocess.stdout.write('ok\\n');\n`,
+  );
+  chmodSync(program, 0o755);
+  const address = `https://example.com/try/a b "c" 'd';$(touch made-by-the-address)\`touch made-too\`|&>x`;
+  const store = openStore(join(s.root, 'skydeck.db'));
+  t.after(() => {
+    store.close();
+  });
+  const { runner, clock } = realPlatform();
+
+  await fetchTicketStatuses(
+    {
+      runner,
+      clock,
+      env: s.env(),
+      store,
+      homeDir: s.home,
+      rules: [{ match: 'https://example.com/try/', command: [program, '{url}', 'key={key}'] }],
+      ticketUrl: null,
+    },
+    [address],
+  );
+
+  const args = JSON.parse(readFileSync(join(s.home, 'args.json'), 'utf8')) as string[];
+  assert.equal(args.length, 2);
+  assert.equal(args[0], address);
+  assert.ok(args[1]?.startsWith('key='));
+  assert.equal(store.ticketStatuses()[0]?.status, 'ok');
+  for (const made of ['made-by-the-address', 'made-too', 'x']) {
+    assert.ok(!readdirSync(s.home).includes(made), `${made} was not made`);
+  }
 });
 
 test('a program that is not executable fails in the words W38 quotes', async (t) => {

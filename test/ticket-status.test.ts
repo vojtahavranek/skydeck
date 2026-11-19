@@ -3,10 +3,12 @@
 // words run without a shell: `{url}` and `{key}` in an argument are replaced, each argument stays
 // ONE argument whatever the address holds. Only fake runners here: no program, no network.
 import assert from 'node:assert/strict';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
+import { statusProvider } from '../src/github.ts';
 import type { TicketStatusRule } from '../src/platform/config.ts';
 import { NS_PER_MINUTE } from '../src/platform/time.ts';
 import type { RunResult } from '../src/platform/types.ts';
@@ -21,7 +23,6 @@ import {
   fetchTicketStatuses,
   readStatusAnswer,
   statusCommand,
-  statusProvider,
   statusesDue,
 } from '../src/ticket-status.ts';
 import { T0, fakeClock, fakeRunner, runResult } from './helpers/platform.ts';
@@ -483,5 +484,19 @@ describe('fetchTicketStatuses (T2, T4)', () => {
     assert.deepEqual(counts, { fetched: 0, failed: 0 });
     assert.equal(w.runner.calls.length, 1);
     assert.deepEqual(w.store.ticketStatuses(), []);
+  });
+});
+
+describe('the layering (design 11)', () => {
+  test('nothing in src/sessions/ imports src/ticket-status.ts: the list model asks github.ts', () => {
+    const dir = join(import.meta.dirname, '..', 'src', 'sessions');
+    for (const name of readdirSync(dir).filter((file) => file.endsWith('.ts'))) {
+      const text = readFileSync(join(dir, name), 'utf8');
+      const from = [...text.matchAll(/^import\s[^;]*?from\s+'([^']+)';/gms)].map((m) => m[1]);
+      assert.ok(
+        !from.some((path) => path?.includes('ticket-status')),
+        `${name}: ${from.join(', ')}`,
+      );
+    }
   });
 });

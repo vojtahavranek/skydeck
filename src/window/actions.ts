@@ -12,6 +12,7 @@
  * when S2 9.6 allows it, and an edit is made by step 1's own functions (design 7.1, 7.3) on a
  * session the store knows. No action carries a program or an argument list (S2 8.3).
  */
+import { statusProvider } from '../github.ts';
 import { RefError, SkydeckError } from '../platform/errors.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { cleanGroup, cleanLabel } from '../sessions/labels.ts';
@@ -30,7 +31,6 @@ import {
 } from '../sessions/meta.ts';
 import type { Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
-import { statusProvider } from '../ticket-status.ts';
 import { failureKind } from './auth.ts';
 import { isBusy } from './busy.ts';
 import { splitFlags } from './flags.ts';

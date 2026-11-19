@@ -1055,8 +1055,8 @@ by an older one at its open ("written by a newer skydeck"), and there is no way 
 | `src/claude/settings.ts` | Adds and removes hook entries; reads `cleanupPeriodDays`. | platform |
 | `src/claude/global-config.ts` | Reads `leftArrowOpensAgents` in the global config file and sets it to `false`, nothing else (8). | platform |
 | `src/sessions/` | Ingest, reconcile, the transcript scan, derived state and marks (6), the list model, reference resolution, the resume guard and lock, restore planning and running. | platform, text, store, claude, github (its pure functions: the scan attaches pull requests by key, the list computes the chip), terminals (as an interface) |
-| `src/github.ts` | Pull-request keys, batched status, cache rules (7.3); from F19 also GitHub issues' keys and batched status. | platform, store |
-| `src/ticket-status.ts` | A ticket's status (F19, 7.3): which provider takes an address, the configured program and its answer, when a status is due, the fetch that saves it. | github, platform, sessions (the ticket's name), store, text |
+| `src/github.ts` | Pull-request keys, batched status, cache rules (7.3); from F19 also GitHub issues' keys and batched status, and which provider takes a ticket's address (`statusProvider`: a configured rule, else a GitHub issue). | platform, store |
+| `src/ticket-status.ts` | A ticket's status (F19, 7.3): the configured program and its answer, when a status is due, the fetch that saves it. | github, platform, sessions (the ticket's name), store, text |
 | `src/terminals/` | The terminal interface and its implementations: `here` (handoff file), `wezterm`. | platform, text |
 | `src/cli/` | Arguments, commands, output formats, the interactive list. | everything above |
 
