@@ -3080,8 +3080,10 @@ nothing; `ls` is unchanged.
   used before: no favourite is ever on without a click, and Start sends the field's text, as
   before.
 - **Nothing, while the list holds no session at all** (follow-up F22): one muted line above the
-  empty cards, `Pick a session in the list, or start a new one.` (12.1). With sessions, nothing
-  selected still shows nothing (12.9).
+  empty cards, `Pick a session in the list, or start a new one.` (12.1), also while a session the
+  list no longer shows (the last one marked done) is still selected; the New form takes the right
+  side, and the line goes while it is shown. With sessions, nothing shown on the right still shows
+  nothing (12.9).
 
 ### 12.7 The restore banner
 
@@ -3368,12 +3370,14 @@ the terminal). They are buttons: Tab from the filter field reaches them, Enter o
 one, and while one has the keyboard no list key acts, as on any button of the list zone. The selection is never on a row the
 list does not show: when the selected row stops being shown otherwise (a filter, done sessions
 hidden again, the row gone from the list), no row is selected — the right side shows a terminal
-of the window that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the
+of the window that holds the session, else nothing (but 12.1's line while the list holds no
+session at all) —, Enter does nothing, and ↑ ↓ start from the
 first row shown (ruled by the plan owner, plan task 27); when the list shows the row again, it is
 selected again. From stage E the right side takes such a session's row from the list's
 `selectedRow` (8.2.3): its terminal is shown with its header (stage D's, so that the header's
 controls and their dialogs edit that session) and its ended bar with Resume and Close (12.6); a
-session without a terminal of the window shows nothing, never its card. The header's Done on such
+session without a terminal of the window shows nothing (but 12.1's line while the list holds no
+session at all), never its card. The header's Done on such
 a session takes its toast from the row, since it is in no section: `Marked done. Stays under Open
 while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
 the lead on 2026-11-15). The list keys (`l`, F2,

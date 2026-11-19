@@ -1624,7 +1624,8 @@ the list's keys act on none: `l`, F2, `g`, `n`, `p` and `d` say `no session sele
 terminal of the window holds the session, the right side keeps it: the terminal with its header,
 whose controls edit that session as usual (a click on the title, ✎, `Note`, `Done`, `Pull
 requests`), and once its program has ended, the ended bar with Resume and Close. A session
-without a terminal of the window shows nothing on the right then, no card. `Done` in the header
+without a terminal of the window shows nothing on the right then, no card (only the line `Pick a
+session in the list, or start a new one.` while the list holds no session at all). `Done` in the header
 of such a session says `Marked done. Stays under Open while it runs; hidden once it
 stops.` while it runs or starts, else `Marked done: hidden from the list. It comes back on new
 activity.` The new form (Ctrl+Shift+N) starts in its directory while a terminal of the window

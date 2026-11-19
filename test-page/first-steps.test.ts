@@ -255,6 +255,16 @@ test('the window with no session at all (follow-up F22)', async (t) => {
       // The Open band stays, with its count 0 (S2 12.1: Open is always there).
       await showsText(s.page, '#list .list-section[data-section="open"] .section-count', /^0$/);
 
+      // The New form, opened from there, takes the right side: the line goes while the form is
+      // shown (the note stays in the list), and comes back when Esc closes it.
+      await s.page.locator('#new-button').click();
+      await s.page.waitForSelector('#right-zone[data-pane="new"]', { state: 'attached' });
+      const form = await until(s.page, (x) => x.right === null, 'the line gone under the form');
+      assert.equal(form.note, NOTE_TAB);
+      await s.page.keyboard.press('Escape');
+      await s.page.waitForSelector('#right-zone[data-pane="none"]', { state: 'attached' });
+      await until(s.page, (x) => x.right === RIGHT, 'the line back after Esc');
+
       // In the app window (not a tab) the note names the key: the page's own app-only rule.
       await s.page.evaluate(() => {
         document.documentElement.dataset['display'] = 'app';
@@ -332,13 +342,35 @@ test('the window with no session at all (follow-up F22)', async (t) => {
       await until(s.page, (x) => x.note !== null && x.right !== null, 'the last ones gone');
       s.send(listOf(rows));
       await until(s.page, (x) => x.note === null && x.right === null, 'back');
-      // The selection went with its row (S2 12.9), and no list selects a session for the user
-      // again: the same one selected by a click, so that the right side shows what it showed.
+      // S1 is selected again once it is listed again (S2 12.9); the click makes the selection
+      // certain, so that the right side shows what it showed.
       await clickRow(s.page, S1);
       await s.page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
       await s.page.mouse.move(0, 0);
       await sleep(300);
       assert.deepEqual(await boxes(s.page), before);
+      assert.deepEqual(s.problems, []);
+    },
+  );
+
+  await t.test(
+    'a session arriving while the right side shows nothing either way (the last one gone, then a new one; nothing is selected for the user): the note and the line go',
+    async (t) => {
+      const s = await scripted(t, chromium, () => listOf([row(S1, 'alpha work')]), 76);
+      await s.page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+
+      s.send(listOf([])); // the last one marked done, or gone: nothing selected
+      await until(s.page, (x) => x.note !== null && x.right === RIGHT, 'no session');
+      s.send(listOf([row(S2, 'beta work')])); // `claude` started in another terminal
+      await showsText(s.page, `#list [data-id="${S2}"]`, /beta work/);
+      // No list selects a session once one was selected: the right side still shows nothing,
+      // and the line goes with the note.
+      await s.page.waitForSelector('#right-zone[data-pane="none"]', { state: 'attached' });
+      await until(s.page, (x) => x.note === null && x.right === null, 'a session again');
+      await sleep(300);
+      const after = await shown(s.page);
+      assert.equal(after.note, null);
+      assert.equal(after.right, null);
       assert.deepEqual(s.problems, []);
     },
   );

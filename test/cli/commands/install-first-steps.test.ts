@@ -104,7 +104,7 @@ describe('install: the next steps after "skydeck is installed" (F22)', () => {
     assert.ok(afterLastStderr(r.writes).endsWith(tail), JSON.stringify(r.writes.slice(-8)));
   });
 
-  test("at most five lines, each shorter than 100 characters but the guide's path, in plain words", (t) => {
+  test("at most five lines, each but the guide's shorter than 100 characters", (t) => {
     const d = testPlatform(t);
     const lines = nextSteps(d.platform);
 
@@ -112,7 +112,6 @@ describe('install: the next steps after "skydeck is installed" (F22)', () => {
     for (const line of lines.slice(0, -1)) {
       assert.ok(line.length < 100, `${line.length}: ${line}`);
     }
-    assert.ok('The guide: '.length + '/home/you/skydeck/README.md'.length < 100);
   });
 
   test("the guide's line names the README of this checkout, which exists", async (t) => {
