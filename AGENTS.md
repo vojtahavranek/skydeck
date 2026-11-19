@@ -9,7 +9,7 @@ and `SessionEnd`, to Claude Code's settings file `~/.claude/settings.json` (with
 it, when there was a file); a link `~/.local/bin/skydeck` to this checkout; skydeck's own folders
 `~/.local/share/skydeck` (its database, two links), `~/.local/state/skydeck`, `~/.config/skydeck`;
 and, only after a yes to `Turn the shortcut off?`, one key in `~/.claude.json` (after a backup).
-When `CLAUDE_CONFIG_DIR` is set, Claude Code's files are in that folder instead of `~/.claude`.
+If `CLAUDE_CONFIG_DIR` is set, it stands for `~/.claude`, its `.claude.json` for `~/.claude.json`.
 
 The work is split. YOU check, clone, preview and explain. THE HUMAN answers install's questions
 (one of them agrees to hooks in Claude Code's own settings) and opens the window, in a terminal of
@@ -34,11 +34,12 @@ grep -c skydeck-hook "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 ```
 
 - A path under `/mnt/` is a Windows program seen from WSL: count it as missing.
-- `node` must be `v24.12.0` or newer. Your shell may not load nvm: if it is older or missing, put
-  `SKYDECK_NODE=$HOME/.nvm/versions/node/<the newest v24 the ls shows>/bin/node` in front of every
-  `bin/skydeck` below. No v24.12 or newer at all: the human installs one ("On a fresh WSL").
+- `node` must be `v24.12.0` or newer. If it is older or missing (your shell may not load nvm), put
+  `SKYDECK_NODE=<path of a node 24.12 or newer>` in front of every `bin/skydeck` below; nvm's are
+  `~/.nvm/versions/node/v24.x.y/bin/node` (take the newest). None at all: the human installs one.
 - `git` missing: the human installs it. `claude` missing: STOP; Claude Code must be installed on
-  this side and started once (its folder missing in the `ls`: the human starts `claude` once).
+  this side and started once (its folder missing in the `ls`: the human starts `claude` once). Any
+  version of it goes on: report it, nothing checks it.
 - `python3` 3.9 or newer (only for the window's terminals) and `gh` (only for the status of pull
   requests and GitHub issues) are optional: tell the human what is missing, and go on.
 - A machine without skydeck shows `skydeck: missing`, `No such file or directory` for the two
@@ -48,8 +49,8 @@ grep -c skydeck-hook "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
   for the human (the guide's "On a fresh WSL" has them all); never run it yourself.
 
 **3. Clone, and preview the change.** Ask where the checkout should live (`~/skydeck`, or their
-choice: change it below); it stays there (install links to it). A clone that asks for a login:
-STOP, it is the human's.
+choice: change it below); it stays there (install links to it). Reading this in a checkout they
+want to keep? Use it, and skip the clone. A clone that asks for a login: STOP, it is the human's.
 
 ```sh
 git clone https://github.com/vojtahavranek/skydeck.git ~/skydeck
@@ -74,7 +75,7 @@ human the whole output. Anything else (a refusal, `hook entries already present`
 `SKYDECK_NODE=...` if you needed one) in a terminal of their own, where they can read the
 questions and type the answers; Enter alone is a no. Never answer for them (install has no option
 that does) and never feed them from a pipe (`printf 'y\n' |`, `yes |`). Tell them first what a
-yes to each question does; each is asked only when it applies, in this order:
+yes does (each question comes only when it applies):
 
 - `Add them? [y/N]`: adds the two hook entries (after a backup of the file), so that skydeck
   records every session that starts from now on. A no ends the install with nothing changed.
@@ -83,9 +84,9 @@ yes to each question does; each is asked only when it applies, in this order:
 - `Turn the shortcut off? [y/N]` (while it is on): turns off Claude Code's ← shortcut in
   `~/.claude.json` (after a backup), so a ← meant for skydeck's list cannot send a session away.
 
-**5. Check it.** Ask them to open a new terminal: `skydeck` is found there (if not, give them
-`export PATH="$HOME/.local/bin:$PATH"` for their `~/.bashrc`; never edit their shell files). You
-may run `~/.local/bin/skydeck doctor` and `~/.local/bin/skydeck ls` from this session and read
+**5. Check it.** Ask them to open a new terminal: `skydeck` is found there (if not, give them the
+line `export PATH="$HOME/.local/bin:$PATH"` for `~/.bashrc` or `~/.zshrc`; never edit those
+yourself). You may run `~/.local/bin/skydeck doctor` and `~/.local/bin/skydeck ls` here and read
 them out. `doctor` prints one line per check, `ok`, `info` or `problem` (exit 1 on any problem),
 the first three `info`: skydeck's and Claude Code's versions, the system. Normal on a new install:
 `info     no events yet`; a `problem` for a missing or logged-out `gh` (fine without pull-request
@@ -102,22 +103,21 @@ status); `info` for the window's lines, Edge's too, until it is used. Other prob
 
 **Never:**
 
-- Run `skydeck window`, `skydeck serve`, `skydeck update` or a bare `skydeck` from this session:
-  the first three refuse inside Claude Code (every session in the window would inherit this
-  session's environment), and a bare `skydeck` on a terminal is the interactive list.
-- Follow `docs/manual-checks.md`, the maintainer's checklist: items uninstall skydeck, stop WSL.
+- Run `skydeck window`, `skydeck serve`, `skydeck update` or a bare `skydeck` here: the first three
+  refuse inside Claude Code (the window's sessions would inherit its environment); a bare one is
+  the interactive list.
+- Follow `docs/manual-checks.md`, the maintainer's checklist: it can uninstall skydeck or stop WSL.
 - Run `skydeck uninstall` or `skydeck uninstall --purge` unasked: they undo the install, and
   `--purge` deletes the human's labels and notes for good.
 - Edit Claude Code's settings files by hand: uninstall undoes exactly the change install made.
 - Use `sudo`, or pipe a script from the internet into a shell: print it for the human.
 - Run `npm ci` or the tests as part of an install: they are for changing the code (part 2).
-- Paste `doctor`'s output outside this conversation without asking: it holds paths and user names.
+- Paste what `doctor` or `ls` print outside this conversation unasked: paths, user names, titles.
 
 ## Part 2: if you were asked to change skydeck's code
 
-- `src/`: the commands (`src/cli/commands/`, a file each) and the window's server; `web/`: the page
-  (plain JavaScript); `bin/`: launcher, hook, keeper; `test/`, `test-page/`: the tests (helpers in
-  `test/helpers/`) and the page tests (headless Chromium); `docs/`.
+- `src/`: commands (`src/cli/commands/`, a file each), the window's server; `web/`: the page (plain
+  JavaScript); `bin/`: launcher, hook, keeper; `test/`, `test-page/`: tests and page tests; `docs/`.
 - Node.js 24.12 or newer runs the TypeScript as it is. `npm ci`, `npm run format`, `npm run check`
   (format, types, tests, page tests; these need `npx playwright install chromium`, no `sudo`).
 - Rules that must not break: no runtime dependency (Node.js's own modules only), and
