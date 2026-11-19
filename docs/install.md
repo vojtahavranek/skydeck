@@ -52,6 +52,8 @@ and every session started in it — also by `resume --window`, `new --window` an
 
 - **Linux, or Windows with WSL2 (Ubuntu).** skydeck reads `/proc`. Native Windows and macOS are not
   supported. On Windows, run everything below inside the WSL distribution.
+  `skydeck install` refuses on a system skydeck cannot work on (one without
+  `/proc/sys/kernel/random/boot_id`), macOS included for now, and changes nothing there.
 - **Node.js 24.12 or newer.** Check with `node --version`. If there is none, or the default `node` is
   older, see "On a fresh WSL" below, and "Install", step 2, for a newer one beside an older default.
   skydeck has no runtime dependencies.

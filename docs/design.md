@@ -805,7 +805,11 @@ could not be resumed; see above`).
   backup. Every check that can stop install runs before it creates anything, and the question is
   asked before anything is created too, so a refusal or a no leaves no directory, database or link
   behind (apart from the compile cache under `~/.cache/skydeck` that every run of the launcher
-  creates, 10): a link is created or re-pointed only where there is nothing or a symbolic link;
+  creates, 10). First of all, before config.json is read, a system without a boot id (5.5; macOS,
+  for now) stops it with one line, exit 1: skydeck works on Linux and on Windows with WSL2 only,
+  and nothing was changed; a boot id that cannot be read for another reason stops it naming the
+  cause (follow-up F23; decided by the boot id, not by the system's name). Then: a link is created
+  or re-pointed only where there is nothing or a symbolic link;
   a settings file that cannot be read or is not JSON stops it; so does a settings path that is a symbolic link
   to nothing (install names the link and its target and never replaces it with a file), and a
   missing Claude Code directory (never created for it). After the yes, install reads the settings
