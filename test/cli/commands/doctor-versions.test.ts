@@ -10,7 +10,7 @@ import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
 import pkg from '../../../package.json' with { type: 'json' };
-import type { Files, Platform, RunResult, Runner } from '../../../src/platform/types.ts';
+import type { Platform, RunResult, Runner } from '../../../src/platform/types.ts';
 import { claudeFolders, run } from '../../helpers/install.ts';
 import type { Run } from '../../helpers/install.ts';
 import { fakeRunner, realTestPlatform, runResult, testPlatform } from '../../helpers/platform.ts';
@@ -20,9 +20,8 @@ import { standinCommand } from '../../helpers/standin.ts';
 const ID = `f1fce49${'0'.repeat(33)}`;
 const SKYDECK = `info     skydeck ${pkg.version} (f1fce49, 2026-11-19)`;
 const OS_RELEASE = '/etc/os-release';
-const KERNEL = '/proc/sys/kernel/osrelease';
 const UBUNTU = 'NAME="Ubuntu"\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04.1 LTS"\nID=ubuntu\n';
-const WSL_KERNEL = '6.6.87.2-microsoft-standard-WSL2\n';
+const WSL_KERNEL = '6.6.87.2-microsoft-standard-WSL2';
 const SYSTEM = 'info     system: Ubuntu 24.04.1 LTS, Linux 6.6.87.2-microsoft-standard-WSL2';
 
 /** A machine with Claude Code's folders and skydeck installed; the stand-in may run in it. */
@@ -34,22 +33,27 @@ async function installedMachine(t: TestContext): Promise<TestPlatform> {
   return d;
 }
 
-/** Files whose /etc/os-release and kernel release say what `system` gives (null: not there). */
-function systemFiles(
-  d: TestPlatform,
-  system: { osRelease?: string | null | Error; kernel?: string | null | Error } = {},
-): Files {
-  const real = d.platform.files;
-  const answer = (value: string | null | Error | undefined, fallback: string): string | null => {
-    if (value instanceof Error) throw value;
-    return value === undefined ? fallback : value;
-  };
+/** What the system line reads: /etc/os-release (an Error is thrown) and the kernel release. */
+interface System {
+  osRelease?: string | null | Error;
+  kernel?: string | null;
+}
+
+/** The files and /proc of `d`, but for what `system` says (null: cannot be read). */
+function systemParts(d: TestPlatform, system: System = {}): Pick<Platform, 'files' | 'proc'> {
+  const { files, proc } = d.platform;
   return {
-    ...real,
-    readText(path) {
-      if (path === OS_RELEASE) return answer(system.osRelease, UBUNTU);
-      if (path === KERNEL) return answer(system.kernel, WSL_KERNEL);
-      return real.readText(path);
+    files: {
+      ...files,
+      readText(path) {
+        if (path !== OS_RELEASE) return files.readText(path);
+        if (system.osRelease instanceof Error) throw system.osRelease;
+        return system.osRelease === undefined ? UBUNTU : system.osRelease;
+      },
+    },
+    proc: {
+      ...proc,
+      kernelRelease: () => (system.kernel === undefined ? WSL_KERNEL : system.kernel),
     },
   };
 }
@@ -70,7 +74,7 @@ async function doctor(
   d: TestPlatform,
   options: {
     answers?: Record<string, Partial<RunResult>>;
-    system?: Parameters<typeof systemFiles>[1];
+    system?: System;
     platform?: Partial<Platform>;
   } = {},
 ): Promise<DoctorRun> {
@@ -91,7 +95,7 @@ async function doctor(
     return runResult({});
   });
   const r = await run(
-    { ...d.platform, runner, files: systemFiles(d, options.system), ...options.platform },
+    { ...d.platform, runner, ...systemParts(d, options.system), ...options.platform },
     ['doctor'],
   );
   const lines = r.stdout.split('\n').filter((line) => line !== '');
@@ -130,11 +134,7 @@ describe('doctor: the three lines at the top (follow-up F20)', () => {
 
     const r = await doctor(t, d);
 
-    assert.deepEqual(firstThree(r), [
-      SKYDECK,
-      'info     Claude Code 0.0.0-standin (Claude Code)',
-      SYSTEM,
-    ]);
+    assert.deepEqual(firstThree(r), [SKYDECK, 'info     Claude Code 0.0.0-standin', SYSTEM]);
     assert.match(r.lines[3] ?? '', /^ok {7}hook entries present in /);
     assert.deepEqual(r.problems, []);
     // The program was started once, with --version alone, stdin closed, 5 s, 4 KiB kept, in
@@ -185,11 +185,7 @@ describe('doctor: the three lines at the top (follow-up F20)', () => {
       answers: { 'claude --version': { stdout: '2.1.0 (Claude Code)\n' } },
     });
 
-    assert.deepEqual(firstThree(r, 1), [
-      SKYDECK,
-      'info     Claude Code 2.1.0 (Claude Code)',
-      SYSTEM,
-    ]);
+    assert.deepEqual(firstThree(r, 1), [SKYDECK, 'info     Claude Code 2.1.0', SYSTEM]);
     assert.match(r.lines[3] ?? '', /^problem {2}database .* does not exist; run skydeck install$/);
   });
 
@@ -295,19 +291,40 @@ describe('doctor: the Claude Code line (follow-up F20)', () => {
     assert.ok(!r.stdout.includes('title'), r.stdout);
   });
 
-  test('a first line with spaces around it: trimmed', async (t) => {
-    const { line } = await claudeLine(t, (d) =>
-      program(d, 'claude', `printf '  2.1.5 (Claude Code)  \\r\\n'`),
-    );
-    assert.equal(line, 'info     Claude Code 2.1.5 (Claude Code)');
+  // Ruled by the plan owner: Claude Code prints `<version> (Claude Code)`, and the line already
+  // says whose version it is.
+  test('a first line that ends with exactly " (Claude Code)": that part is dropped, after the cleaning, before the cut', async (t) => {
+    const nines = '9'.repeat(70);
+    for (const [body, shown] of [
+      [`printf '  2.1.5 (Claude Code)  \\r\\n'`, '2.1.5'],
+      [`printf '2.1.5\\t(Claude Code)\\n'`, '2.1.5'],
+      [`printf '\\033[1m2.1.5 (Claude Code)\\033[0m\\n'`, '2.1.5'],
+      [`printf '${nines} (Claude Code)\\n'`, '9'.repeat(60)],
+    ] as const) {
+      const { line } = await claudeLine(t, (d) => program(d, 'claude', body));
+      assert.equal(line, `info     Claude Code ${shown}`, body);
+    }
+  });
+
+  test('any other first line is shown as it is, cleaned and cut', async (t) => {
+    for (const first of [
+      '2.1.5 (claude code)',
+      '2.1.5 (Claude Code) beta',
+      '2.1.5 (Claude Code).',
+      '2.1.5(Claude Code)',
+      '(Claude Code)',
+      'Claude Code 2.1.5',
+    ]) {
+      const { line } = await claudeLine(t, (d) =>
+        program(d, 'claude', `printf '%s\\n' '${first}'`),
+      );
+      assert.equal(line, `info     Claude Code ${first}`, first);
+    }
   });
 });
 
 describe('doctor: the system line (follow-up F20)', () => {
-  async function systemLine(
-    t: TestContext,
-    system: Parameters<typeof systemFiles>[1],
-  ): Promise<string> {
+  async function systemLine(t: TestContext, system: System): Promise<string> {
     const d = await installedMachine(t);
     const r = await doctor(t, d, { system });
     assert.deepEqual(r.problems, [], r.stdout);
@@ -321,7 +338,7 @@ describe('doctor: the system line (follow-up F20)', () => {
     );
     const denied = Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
     assert.equal(
-      await systemLine(t, { osRelease: denied, kernel: denied }),
+      await systemLine(t, { osRelease: denied, kernel: '' }),
       'info     system: unknown, Linux unknown',
     );
   });
@@ -348,17 +365,21 @@ describe('doctor: the system line (follow-up F20)', () => {
     }
   });
 
-  test('the kernel release as it is, without its newline', async (t) => {
+  test('the kernel release as the platform reads it (Proc.kernelRelease), cleaned', async (t) => {
     assert.equal(
-      await systemLine(t, { kernel: '6.8.0-48-generic\n' }),
+      await systemLine(t, { kernel: '6.8.0-48-generic' }),
       'info     system: Ubuntu 24.04.1 LTS, Linux 6.8.0-48-generic',
+    );
+    assert.equal(
+      await systemLine(t, { kernel: '6.8.0\x1b[2J-odd\x07' }),
+      'info     system: Ubuntu 24.04.1 LTS, Linux 6.8.0-odd',
     );
   });
 
-  test('on this machine: both parts are read', async (t) => {
+  test("on this machine: its own /etc/os-release is read (the kernel is the test platform's)", async (t) => {
     const d = await installedMachine(t);
     const r = await run({ ...d.platform }, ['doctor']);
     const line = r.stdout.split('\n')[2] ?? '';
-    assert.match(line, /^info {5}system: \S.*, Linux \S+$/);
+    assert.match(line, /^info {5}system: \S.*, Linux 6\.6\.0-test$/);
   });
 });

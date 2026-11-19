@@ -19,7 +19,7 @@ import {
 } from 'node:fs';
 import { on, once } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { homedir, tmpdir, userInfo } from 'node:os';
+import { homedir, release, tmpdir, userInfo } from 'node:os';
 import { basename, join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -734,6 +734,13 @@ describe('real proc', () => {
     const mb = realPlatform().proc.memAvailableMb();
 
     assert.ok(mb !== null && mb > 0 && Number.isInteger(mb), String(mb));
+  });
+
+  test('kernelRelease is the kernel release uname gives, without a newline (follow-up F20)', () => {
+    const kernel = realPlatform().proc.kernelRelease();
+
+    assert.equal(kernel, release());
+    assert.match(kernel ?? '', /^\S+$/);
   });
 });
 

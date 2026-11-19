@@ -404,6 +404,10 @@ function realProc(): Proc {
       const bytes = isPid(pid) ? read(`/proc/${pid}/cmdline`) : null;
       return bytes === null ? null : new Uint8Array(bytes);
     },
+    kernelRelease() {
+      const release = lineOf(read('/proc/sys/kernel/osrelease'));
+      return release === '' ? null : release;
+    },
     memAvailableMb() {
       const kb = /^MemAvailable:\s+(\d+)\s*kB/m.exec(
         read('/proc/meminfo')?.toString('utf8') ?? '',

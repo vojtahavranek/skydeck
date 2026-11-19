@@ -1,6 +1,8 @@
 // What Claude Code says its version is (follow-up F20), for `skydeck doctor`: the first line that
-// `<claudeCommand> --version` prints, kept short and printable, and compared with nothing. Here
-// because it is what skydeck knows of a Claude Code command line (design principle 9).
+// `<claudeCommand> --version` prints, kept short and printable, and compared with nothing. Claude
+// Code prints `<version> (Claude Code)`; that last part is dropped, since the line doctor shows
+// already says whose version it is (ruled by the plan owner). Here because it is what skydeck knows
+// of a Claude Code command line (design principle 9).
 import type { Runner, RunResult } from '../platform/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 
@@ -10,6 +12,8 @@ export const CLAUDE_VERSION_MS = 5_000;
 const KEPT_BYTES = 4096;
 /** Of its first line only this many characters are kept. */
 const KEPT_CHARACTERS = 60;
+/** How Claude Code's own line ends: dropped when the first line ends with exactly this. */
+const OWN_NAME = ' (Claude Code)';
 
 /** The version it printed, or why there is none. */
 export type ClaudeVersion = { version: string } | { why: string };
@@ -32,8 +36,9 @@ export async function readClaudeVersion(
   const why = failure(result);
   if (why !== null) return { why };
   // Escape sequences and control characters dropped (a tab or a carriage return becomes a space),
-  // then the spaces around it, then what is beyond the limit.
-  const first = sanitize(result.stdout.split('\n')[0] ?? '').trim();
+  // then the spaces around it, then Claude Code's own name at its end, then what is beyond the limit.
+  const cleaned = sanitize(result.stdout.split('\n')[0] ?? '').trim();
+  const first = cleaned.endsWith(OWN_NAME) ? cleaned.slice(0, -OWN_NAME.length) : cleaned;
   const version = Array.from(first).slice(0, KEPT_CHARACTERS).join('').trimEnd();
   return version === '' ? { why: 'printed no version' } : { version };
 }

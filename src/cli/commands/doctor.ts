@@ -24,7 +24,7 @@ import type { Config } from '../../platform/config.ts';
 import { SkydeckError } from '../../platform/errors.ts';
 import { resolvePlaces } from '../../platform/paths.ts';
 import type { Places } from '../../platform/paths.ts';
-import type { Env, Files, Ns, Platform, RunResult } from '../../platform/types.ts';
+import type { Env, Ns, Platform, RunResult } from '../../platform/types.ts';
 import { resolveDeckPlaces } from '../../sessions/deck.ts';
 import { describeError } from '../../sessions/problems.ts';
 import { openStore } from '../../store/store.ts';
@@ -82,9 +82,8 @@ const SPOOL_LIMIT = 1000;
 const LOG_TAIL_BYTES = 16 * 1024;
 const LOG_LINES = 5;
 const PROGRAM_TIMEOUT_MS = 10_000;
-/** Where the system line reads the distribution's name and the kernel's release. */
+/** Where the system line reads the distribution's name (the kernel's release is Proc's). */
 const OS_RELEASE = '/etc/os-release';
-const KERNEL_RELEASE = '/proc/sys/kernel/osrelease';
 
 export const command: Command = {
   name: 'doctor',
@@ -175,7 +174,7 @@ async function reportVersions(
 ): Promise<void> {
   report('info', `skydeck ${await versionLine(platform)}`);
   report('info', await claudeCodeLine(platform, config));
-  report('info', systemLine(platform.files));
+  report('info', systemLine(platform));
 }
 
 /**
@@ -208,9 +207,9 @@ async function claudeCodeLine(platform: Platform, config: Config | null): Promis
 }
 
 /** `system: <PRETTY_NAME of /etc/os-release>, Linux <kernel release>`, `unknown` for what cannot be read. */
-function systemLine(files: Files): string {
-  const name = printable(prettyName(readOrNull(files, OS_RELEASE)));
-  const release = printable(readOrNull(files, KERNEL_RELEASE));
+function systemLine({ files, proc }: Platform): string {
+  const name = printable(prettyName(orNull(() => files.readText(OS_RELEASE))));
+  const release = printable(orNull(() => proc.kernelRelease()));
   return `system: ${name ?? 'unknown'}, Linux ${release ?? 'unknown'}`;
 }
 
@@ -242,10 +241,10 @@ function printable(text: string | null): string | null {
   return kept === '' ? null : kept;
 }
 
-/** A file's text; null when it is not there or cannot be read. */
-function readOrNull(files: Files, path: string): string | null {
+/** What `read` gives; null when it throws (a file that cannot be read). */
+function orNull(read: () => string | null): string | null {
   try {
-    return files.readText(path);
+    return read();
   } catch {
     return null;
   }
