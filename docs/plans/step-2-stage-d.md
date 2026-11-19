@@ -715,7 +715,7 @@ and Done; and fill the pull-request dialog with every attached pull request.
 **Behaviour.** The four lines of D12, each one line of a fixed height whatever it holds, so that
 nothing skydeck knows about a session resizes a shown terminal (ruled). Line 1: the title (a click
 that selected no text opens the label dialog through `deps.edit`); the group chip as D14 (with
-`selected.ticketUrl`: `DE-123 ↗`, underlined, tooltip the address, a click that selected no text
+`selected.ticketUrl`: `ABC-123 ↗`, underlined, tooltip the address, a click that selected no text
 sends `act open-link` with it; else plain text, tooltip `group (from the title)` when it is), the ✎
 (the group dialog), or the dashed `+ group` while there is no group; the state pill as stage A's;
 the buttons Note (the note dialog) and Done / Undone (`deps.done`). When the line is short of room

@@ -169,9 +169,9 @@ test('sanitised: a name or title is shown trimmed', () => {
 });
 
 test('sanitised: a title that starts with a line break still gives its ticket group', () => {
-  const row = rowOf(ds({ id: S1, transcript: { aiTitle: '\nDE-1 fix' } }));
-  assert.equal(row.title, 'DE-1 fix');
-  assert.equal(row.group, 'DE-1');
+  const row = rowOf(ds({ id: S1, transcript: { aiTitle: '\nABC-1 fix' } }));
+  assert.equal(row.title, 'ABC-1 fix');
+  assert.equal(row.group, 'ABC-1');
 });
 
 // --- groups -----------------------------------------------------------------------------------------

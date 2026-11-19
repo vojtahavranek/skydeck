@@ -47,8 +47,9 @@ const SMALL_SIZES = [16, 32, 48];
 
 /** The owner's pictures: where each lives, its size in bytes and its sha256. Each is the file as
  *  received without the one metadata chunk it came with (removed, follow-up F27): its image data
- *  is the received one, byte for byte. The large one is drawn into the 192 and 512 pixel files and the maskable ones; the small one, a
- *  simpler drawing of the same, into the 16, 32 and 48 pixel files and favicon.ico. */
+ *  is the received one, byte for byte. The large one is drawn into the 192 and 512 pixel files and
+ *  the maskable ones; the small one, a simpler drawing of the same, into the 16, 32 and 48 pixel
+ *  files and favicon.ico. */
 const PICTURES = {
   large: {
     path: 'scripts/icons/skydeck-source.png',

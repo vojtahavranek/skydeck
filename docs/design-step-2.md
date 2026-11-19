@@ -2366,7 +2366,7 @@ equal declaration by declaration. Check W34.
   inside as ordinary rows; open by default. A click on the caption, or ← on a session of the
   card, closes it to its caption alone; a click on the caption, or → on it, opens it again. A
   filter flattens every block: flat rows, each with its group, no card. (Ruled on 2026-11-16,
-  follow-up F3: blocks in every section, open by default, ordered by the state and then by
+  follow-up F3: blocks in every section, open by default, grouped by the state and then by
   group; until then only Recent and Earlier stacked,
   closed by default, and running sessions never did. Drawn as a card since follow-up F9,
   2026-11-17, so that a group reads as one and no session looks like another's sub-session; before
@@ -4278,7 +4278,7 @@ reaching the server as bytes, the CSP not blocking the page's own files, reconne
 server restarts, notifications asked only on a gesture — is only real in a browser, and the UI
 research already drove its mockup in headless Chromium. The cost is a development dependency and
 a browser download in CI, never at install time. So `playwright` (pinned exactly: 1.60.0, the
-version whose Chromium is build 1223, the build already installed on one machine)
+version whose Chromium is build 1223)
 drives Chromium headless against a real server and keepers running the stand-in, in a small suite
 (`npm run test:page`). Chromium is not Edge: what only Edge decides (keys an app window keeps,
 its policy, notifications on the PC) stays a manual check.
