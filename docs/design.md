@@ -1114,7 +1114,7 @@ Specified in [design-step-2.md](design-step-2.md), which also says how step 2 am
   terminal owns the pty, and one Node.js server keeps each terminal's screen state, so that
   restarting or updating the server never ends a session and a reconnect shows the exact screen.
 - **WSL lifetime.** While the window has terminals, skydeck tries to keep WSL from stopping by
-  itself by holding a `wsl.exe` (that this works is not verified yet), or the user's `.wslconfig`
+  itself by holding a `wsl.exe`, or the user's `.wslconfig`
   keeps it; `doctor` says which protection is in effect, and the page notices when WSL has stopped
   anyway and offers restore.
 - **Keys follow the developer's terminal:** Ctrl+V pastes text, Ctrl+Shift+V sends the raw key
