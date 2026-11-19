@@ -561,16 +561,15 @@ C)" below).
 
 ### Before you rely on it
 
-Two things only you can check decide whether the window is safe for real work:
+**Try it first with a session you can lose**, started in a throwaway folder. Once that one works in
+the window, resume real sessions into it.
 
-- **WSL stops 15 seconds after its last Windows client ends**, and with it every session in the
-  window. The keep-alive ("Keeping WSL running" below) is meant to prevent that, but that it does is
-  **not verified** until manual check W14 of [manual-checks.md](manual-checks.md). Until W14 has
-  passed, keep one WSL terminal of your own open while the window runs, or set
-  `instanceIdleTimeout=-1` (below).
-- **Try it first with a throwaway session** in a throwaway folder: W1 (the window opens), W20 (the
-  PC's privilege management lets Edge and `wsl.exe` start) and W4 (Claude Code in the window). Then
-  resume real sessions into it.
+**WSL stops 15 seconds after its last Windows client ends**, and with it every session in the
+window. By default, while the window's server or any of its terminals runs, skydeck keeps WSL
+running with a hidden `wsl.exe`, the keep-alive ("Keeping WSL running" below). WSL's own setting,
+`instanceIdleTimeout=-1`, is the alternative that does not depend on skydeck. `skydeck doctor` says
+which of the two is in effect, and has a `problem` line when a server or a terminal runs and neither
+is.
 
 ### What it needs
 
@@ -729,10 +728,9 @@ as the server or any terminal of the window runs, also after `skydeck window --s
 itself when nothing is left. It shows in the Task Manager as `wsl.exe`. When it ends while the
 server runs, the server starts it again after 5 seconds, 30 seconds, then every 5 minutes, and the
 window says `WSL is not kept running: <reason>; skydeck tries again` (its title bar shows `WSL is
-not kept running` meanwhile). **That a `wsl.exe` started from inside WSL keeps WSL running is not
-verified yet**: manual check W14.
+not kept running` meanwhile).
 
-The alternative does not depend on it: WSL's own setting, which skydeck never writes. In
+The alternative does not depend on skydeck: WSL's own setting, which skydeck never writes. In
 `%USERPROFILE%\.wslconfig` on Windows (`C:\Users\<you>\.wslconfig`; create the file when there is
 none):
 
@@ -748,7 +746,7 @@ nothing is running that you want to keep. With the setting in effect `window.kee
 
 ```
 ok       .wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)
-info     keep-alive wsl.exe running (pid 4242, since 2026-11-14T09:12:03.000Z); that it keeps WSL running is unverified (manual check W14)
+info     keep-alive wsl.exe running (pid 4242, since 2026-11-14T09:12:03.000Z)
 ```
 
 and a `problem` line that names the setting while a server or a terminal runs and neither is in
@@ -1627,7 +1625,6 @@ manifest names no start address).
 
 ### Known limits of stage A
 
-- **The keep-alive is not verified** (above; W14).
 - **A second window** could open when `skydeck window` started a server while an old window was
   still open: after the server died or was stopped (`--stop`), or after a WSL restart. Since stage C
   the new server expects that window back and the command waits for it ("Restore after a restart
