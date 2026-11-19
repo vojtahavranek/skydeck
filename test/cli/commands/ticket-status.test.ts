@@ -9,10 +9,10 @@ import { test } from 'node:test';
 import type { ShowJson } from '../../../src/cli/output.ts';
 import { EXIT } from '../../../src/cli/exit.ts';
 import { main } from '../../../src/cli/main.ts';
-import { setGroup, setTicket } from '../../../src/sessions/meta.ts';
-import { S1, S2, fakeRunner, runResult } from '../../helpers/platform.ts';
+import { markDone, setGroup, setTicket } from '../../../src/sessions/meta.ts';
+import { S1, S2, S3, fakeRunner, runResult } from '../../helpers/platform.ts';
 import type { RunCall } from '../../helpers/platform.ts';
-import { twoSessions, withRunner } from '../../helpers/session-files.ts';
+import { twoSessions, withRunner, writeTranscript } from '../../helpers/session-files.ts';
 
 const MATCH = 'https://tickets.example.com/browse/';
 const CONFIG = {
@@ -87,16 +87,20 @@ test("ticket refresh <ref> reads a group's link too; without a provider it says 
   assert.equal(none.calls.length, 0);
 });
 
-test('ticket refresh without <ref> reads every listed session’s ticket, one address once', async (t) => {
+test('ticket refresh without <ref> reads every session\u2019s ticket, done ones included (as pr refresh), one address once', async (t) => {
   const d = twoSessions(t, { config: CONFIG });
   setTicket(d.deck, S1, TICKET);
   setGroup(d.deck, S2, 'ABC-123'); // the same address, through ticketUrl
+  const done = 'https://tickets.example.com/browse/DONE-1';
+  writeTranscript(d, S3);
+  setTicket(d.deck, S3, done);
+  markDone(d.deck, S3);
   const runner = statusRunner('New\ntodo');
 
   assert.equal(await main(['ticket', 'refresh'], withRunner(d, runner)), 0);
 
-  assert.equal(d.stdout(), 'fetched 1, failed 0\n');
-  assert.equal(runner.calls.length, 1);
+  assert.equal(d.stdout(), 'fetched 2, failed 0\n');
+  assert.deepEqual(runner.calls.map((call) => call.args[0]).sort(), ['ABC-123', 'DONE-1']);
   assert.ok((await main(['ticket', 'refresh', 'a', 'b'], d.ctx)) === EXIT.usage);
 });
 
@@ -136,6 +140,14 @@ test("show: a group's link gets its status on the one ticket line", async (t) =>
   d.deck.store.saveTicketStatus(TICKET, { ok: true, atNs: 1n, status: 'Done', category: 'done' });
   assert.equal(await main(['show', '0b5f'], d.ctx), EXIT.ok);
   assert.ok(d.stdout().includes(`\nticket:    ${TICKET} · Done\n`), d.stdout());
+});
+
+test("show --json: a group's ticket is not in it, also with a status (ruled: the stored ticket only)", async (t) => {
+  const d = twoSessions(t, { config: CONFIG });
+  setGroup(d.deck, S1, 'ABC-123');
+  d.deck.store.saveTicketStatus(TICKET, { ok: true, atNs: 1n, status: 'Done', category: 'done' });
+  assert.equal(await main(['show', '0b5f', '--json'], d.ctx), EXIT.ok);
+  assert.equal((JSON.parse(d.stdout()) as ShowJson).ticket, null);
 });
 
 test('show --json: the status, its category, the times and the error under `ticket`', async (t) => {

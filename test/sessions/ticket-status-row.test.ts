@@ -136,6 +136,20 @@ test('two sessions sharing an address share its one cached row', () => {
   assert.equal(b?.ticketStatus?.status, 'Blocked');
 });
 
+test('a first read that failed shows no status, only its words', () => {
+  const row = rowOf(ds({ id: S1 }), {
+    metas: [meta(S1, { ticket: TICKET })],
+    ticketStatus: {
+      rules: [RULE],
+      rows: [cached(TICKET, { status: null, category: null, okAtNs: null, error: 'down' })],
+    },
+  });
+  assert.deepEqual(
+    [row.ticketStatus?.status, row.ticketStatus?.category, row.ticketStatus?.error],
+    [null, null, 'down'],
+  );
+});
+
 test('a failure keeps the last status beside its words; foreign text is sanitised', () => {
   const row = rowOf(ds({ id: S1 }), {
     metas: [meta(S1, { ticket: TICKET })],

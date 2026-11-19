@@ -1036,7 +1036,8 @@ issue. `match` is an `http` or `https` address in printable ASCII with no white 
 2,048 characters and with no user name or password, and it starts with `<scheme>://<host>/` as
 skydeck keeps addresses: the scheme and the host in lower case, a default port left out. That is
 why `https://tickets.example.com/` never takes `https://tickets.example.com.other.net/…`, and why a
-rule that could never match a kept address is refused instead of silently doing nothing.
+rule whose scheme or host could never match a kept address is refused instead of silently doing
+nothing (the rest of the path is not checked: write it as the addresses are written).
 `command` is 1 to 16 non-empty strings without control characters: the program first — a name on
 `PATH`, or a path, a relative one being relative to your home directory —, then its arguments. A
 mistake is one of the file's lines as for every key (each after the file's path and `: `):
@@ -1051,15 +1052,25 @@ unknown key "ticketStatus[0].url"
 ```
 
 **What the program is given.** The words of `command`; in the arguments, never in the program,
-every `{url}` becomes the ticket's address and every `{key}` its short name (the key when the
-address fits `ticketUrl`, `KEY` for an address ending in `/browse/KEY`: the name its chip shows),
-both in one pass, so that what was put in is not read again. **There is never a shell.** skydeck
-starts the program itself, with the words as a list: an address with spaces, quotes, `;` or `$(…)`
-in it arrives as one argument, unchanged, and nothing in it is run. Its standard input is closed
-(`/dev/null`); it runs in the server's environment (in the command's own for `skydeck ticket set`
-and `skydeck ticket refresh`) with your home directory as its working directory, for at most 10
-seconds, and is then killed; of its standard output and of its standard error the first 4 KiB
-(4,096 bytes) are kept, and the rest is read and dropped.
+every `{url}` becomes the ticket's address and every `{key}` the ticket's **key**, both in one pass,
+so that what was put in is not read again. The key is never the chip's name: it is the part the
+address holds where your `ticketUrl` has `{key}`, else the `KEY` of an address ending in
+`/browse/KEY`, else the last part of the address's path as it is written (not decoded) — whole,
+never cut, when it is a key: letters, digits, `.`, `_` and `-`, starting with a letter or a digit
+(so never an option such as `--help`), at most 128 characters. An address that gives no key is not
+handed to a rule whose command uses `{key}`: the program is not run, and the read fails with `the
+ticket's address gives no key for {key}; use {url} in the rule`, the status it had kept. A program
+still checks what it is given. **There is never a shell.** skydeck starts the program itself, with
+the words as a list: an address with spaces, quotes, `;` or `$(…)` in it arrives as one argument,
+unchanged, and nothing in it is run. Its standard input is closed (`/dev/null`); it runs in the
+server's environment (in the command's own for `skydeck ticket refresh`) with your home directory
+as its working directory, for at most 10 seconds; of its standard output and of its standard error
+the first 4 KiB (4,096 bytes) are kept, and the rest is read and dropped. **skydeck stops only the
+program it started** — after 10 seconds, and when the window's server stops — **not what that
+program started**: a script bounds what it runs (`curl --max-time 8 …`, `timeout 8 …`), or runs
+its last command with `exec`, so that nothing is left behind by a tracker that never answers. What
+the program prints on standard error is kept and shown (the line of a failure): it must never
+print its secret.
 
 **What the program must print, and its exit code.** Exit code 0 and, on standard output, up to two
 lines:
@@ -1141,9 +1152,11 @@ Nothing is read for a session the window does not list, and nothing at all for a
 provider takes. **Now, whatever its age:** `↻` in the ticket's dialog, or `skydeck ticket refresh
 [<ref>]` — for one session's ticket (the one you set, else its group's), printing `<short id>
 ticket: <address> · <status>` (after a failure ` (status not read: <why>)`), or `<short id>: no
-status is read for this session's ticket`; without `<ref>` for every ticket of the sessions
-`skydeck ls` lists, each address once, printing `fetched 3, failed 0`. A result reaches every open
-window within a second. The window's server reads `ticketStatus` and `ticketRefreshMinutes` when it
+status is read for this session's ticket`; without `<ref>` for the ticket of every session, done
+ones included (as `skydeck pr refresh` reads every session's pull requests), each address once,
+printing `fetched 3, failed 0` at its end, one program after the other. A result the window's
+server read reaches every open window within a second; one that a command read, at the server's
+next refresh (within 2 seconds). The window's server reads `ticketStatus` and `ticketRefreshMinutes` when it
 starts: after you change either, run `skydeck window --restart`.
 
 **Where it shows.** The ticket's chip becomes `<name> · <status> ↗`, in the category's colour (the
@@ -1157,7 +1170,8 @@ stays `+ ticket`, since it names the ticket you set. The row of the list gets a 
 pull-request chip: the status cut at 14 characters (`…` when cut), in the same colour, `<name> ·
 <status>` in its tooltip, and nothing at all while no status is known. The ticket's dialog has a
 line above its field, `In Progress · checked 3m ago` (`status not read: <why> · last In Progress,
-checked 3m ago` after a failure, `status not read yet` before the first attempt), and the `↻`. The
+checked 3m ago` after a failure, `status not read yet` before the first attempt; one line, whole
+in its tooltip), and the `↻`. The
 filter and the quick switcher find a session by its status' text too. `skydeck show <ref>` prints
 `ticket:` with ` · <status>` after the address and, after a failure, a line `status not read:
 <why>` under it; its `--json` `ticket` gains `status`, `category`, `okAt`, `triedAt` and `error`

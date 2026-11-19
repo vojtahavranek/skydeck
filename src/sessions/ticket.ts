@@ -198,3 +198,31 @@ export function ticketText(url: string, ticketUrl: string | null): string {
     .at(-1);
   return last === undefined ? sanitize(parsed.host) : cut(last);
 }
+
+/** F19: the longest key a part of a path gives `{key}`, in characters. */
+export const TICKET_KEY_LENGTH = 128;
+
+/**
+ * Follow-up F19 (review 2, ruled): the ticket's KEY for a status command's `{key}` — never the
+ * chip's display name (ticketText). In this order: the key the address holds in the place of the
+ * configured `ticketUrl`'s `{key}`; else the `KEY` of a path `/browse/KEY`; else the last part of
+ * the path that is not empty, as written (not percent-decoded), when it is a key by TICKET_KEY's
+ * rule — letters, digits, `.`, `_` and `-`, starting with a letter or a digit, so never an option
+ * like `--help` — of at most TICKET_KEY_LENGTH characters, whole (never cut). Null when the
+ * address gives none. Pure.
+ */
+export function ticketKeyOf(url: string, ticketUrl: string | null): string | null {
+  const key = keyIn(url, ticketUrl);
+  if (key !== null) return key;
+  const parsed = URL.parse(url);
+  if (parsed === null) return null;
+  const browse = BROWSE.exec(parsed.pathname);
+  if (browse?.[1] !== undefined) return browse[1];
+  const last = parsed.pathname
+    .split('/')
+    .filter((part) => part !== '')
+    .at(-1);
+  return last !== undefined && last.length <= TICKET_KEY_LENGTH && TICKET_KEY.test(last)
+    ? last
+    : null;
+}

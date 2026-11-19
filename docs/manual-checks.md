@@ -2436,13 +2436,21 @@ skydeck window --restart
    | `In Progress`, `doing` | blue |
    | `Done`, `done` | green |
    | `Backlog`, `todo` | grey, as a draft pull request's chip |
-   | `Won't Fix`, `closed` | grey |
+   | `Rejected`, `closed` | grey |
+
+   The six commands, one for each row (each is one line; type or paste one, then do the window's
+   part of the step):
 
    ```sh
    printf '%s\n' 'Blocked by legal' 'blocked' > ~/skydeck-try/status/answer
+   printf '%s\n' 'In Review' 'review' > ~/skydeck-try/status/answer
+   printf '%s\n' 'In Progress' 'doing' > ~/skydeck-try/status/answer
+   printf '%s\n' 'Done' 'done' > ~/skydeck-try/status/answer
+   printf '%s\n' 'Backlog' 'todo' > ~/skydeck-try/status/answer
+   printf '%s\n' 'Rejected' 'closed' > ~/skydeck-try/status/answer
    ```
 
-   (the same command with the row's two lines in place of those). Write down each colour, and
+   Write down each colour, and
    whether the colours are the ones the pull requests' chips have in your list for `failing`,
    `pending`, `review required`, `approved` and a draft (a pull request of yours may show them).
 3. **The cut, and a word that is no category.** In W: `printf '%s\n' 'A very long status text
@@ -2450,12 +2458,16 @@ skydeck window --restart
    header's chip reads `TRY-1 · A very long status text that is cut ↗` (the whole status, grey:
    `urgent` is no category; in a narrow window the end of the status is cut with `…` first); the
    row's small chip `A very long s…` (13 characters and `…`), with the tooltip `TRY-1 · A very
-   long status text that is cut`. Put `In Progress` and `doing` back (the `printf` of the
-   stand-in's setup).
+   long status text that is cut`. Then put `In Progress` and `doing` back, in W: `printf '%s\n'
+   'In Progress' 'doing' > ~/skydeck-try/status/answer`, and read it: ↻ as in step 2. Expected:
+   the dialog's line reads `In Progress · checked <age> ago`, and the header's chip `TRY-1 · In
+   Progress ↗`, in blue (a failure keeps the status last READ: step 4 needs this read).
 4. **A failure keeps the status.** In W: `chmod -x ~/skydeck-try/status/status`. In the window
-   (short id, `Focus: list`, `t`, heading) click `↻`. Expected: the dialog's line reads `status
-   not read: the status command could not be run: spawn /home/you/skydeck-try/status/status
-   EACCES · last In Progress, checked <age> ago` (with your home folder in place of `/home/you`);
+   (short id, `Focus: list`, `t`, heading) click `↻`. Expected: the dialog's line starts with
+   `status not read: the status command could not be run: spawn` (one line, cut with `…` where the
+   dialog ends); point at it: its tooltip has it whole, `status not read: the status command could
+   not be run: spawn /home/you/skydeck-try/status/status EACCES · last In Progress, checked <age>
+   ago` (with your home folder in place of `/home/you`);
    after Esc the chip still reads `TRY-1 · In Progress ↗`, in blue, and its tooltip has three
    lines: the address, `status not read: the status command could not be run: spawn
    /home/you/skydeck-try/status/status EACCES`, and `In Progress, checked <age> ago` (the age of
@@ -2510,7 +2522,9 @@ skydeck window --restart
 Write down: for each step whether it went as expected; the colour of each chip in step 2, and
 whether it matched the pull requests' colours; the words of the failure in step 4; whether the
 tooltip's age grew; anything that differs, and where. At the end the throwaway session has no
-ticket, `config.json` is as it was before this check, and `~/skydeck-try/status` is gone.
+ticket, `config.json` is as it was before this check, and `~/skydeck-try/status` is gone. One
+thing stays: skydeck's cache keeps a row for `https://example.com/try/TRY-1` (a few bytes; it
+removes none), which nothing shows once no session has that ticket.
 
 Not tried before this check was written: all of it, in Edge. The tests run the header, the row and
 the dialog in headless Chromium against a stand-in server, and the server and the commands with

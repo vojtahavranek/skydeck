@@ -14,7 +14,7 @@ import type { TestContext } from 'node:test';
 import type { TicketStatusRule } from '../src/platform/config.ts';
 import { realPlatform } from '../src/platform/real.ts';
 import { openStore } from '../src/store/store.ts';
-import { fetchTicketStatuses } from '../src/ticket-status.ts';
+import { NO_KEY, fetchTicketStatuses } from '../src/ticket-status.ts';
 import { sandbox } from './helpers/sandbox.ts';
 import type { Sandbox } from './helpers/sandbox.ts';
 
@@ -82,20 +82,97 @@ test('an address with spaces, quotes, `;` and `$(…)` reaches the program as on
       env: s.env(),
       store,
       homeDir: s.home,
-      rules: [{ match: 'https://example.com/try/', command: [program, '{url}', 'key={key}'] }],
+      rules: [{ match: 'https://example.com/try/', command: [program, '{url}', 'plain'] }],
       ticketUrl: null,
     },
     [address],
   );
 
   const args = JSON.parse(readFileSync(join(s.home, 'args.json'), 'utf8')) as string[];
-  assert.equal(args.length, 2);
-  assert.equal(args[0], address);
-  assert.ok(args[1]?.startsWith('key='));
+  assert.deepEqual(args, [address, 'plain'], 'byte for byte, one argument each');
   assert.equal(store.ticketStatuses()[0]?.status, 'ok');
   for (const made of ['made-by-the-address', 'made-too', 'x']) {
     assert.ok(!readdirSync(s.home).includes(made), `${made} was not made`);
   }
+});
+
+test("{key} is the ticket's key, whole and as written; an address that gives none is not run and fails in words, keeping the old status", async (t) => {
+  const s = sandbox(t);
+  const program = join(s.home, 'record-key');
+  writeFileSync(
+    program,
+    `#!${process.execPath}\nrequire('node:fs').appendFileSync('keys.txt', process.argv[2] + '\\n');\nprocess.stdout.write('Open\\ndoing\\n');\n`,
+  );
+  chmodSync(program, 0o755);
+  const store = openStore(join(s.root, 'skydeck.db'));
+  t.after(() => {
+    store.close();
+  });
+  const { runner, clock } = realPlatform();
+  const T = 'https://tickets.example.com';
+  const uuid = '3f2b9c1e-8d4a-4b6e-9f0c-1a2b3c4d5e6f';
+  const read = (urls: string[], ticketUrl: string | null = null) =>
+    fetchTicketStatuses(
+      {
+        runner,
+        clock,
+        env: s.env(),
+        store,
+        homeDir: s.home,
+        rules: [{ match: `${T}/`, command: [program, '{key}'] }],
+        ticketUrl,
+      },
+      urls,
+    );
+  const keysRead = (): string[] => {
+    try {
+      return readFileSync(join(s.home, 'keys.txt'), 'utf8').split('\n').slice(0, -1);
+    } catch {
+      return [];
+    }
+  };
+
+  await read([
+    `${T}/browse/ABC-123`,
+    `${T}/t/a-very-long-slug-of-the-ticket`,
+    `${T}/tickets/${uuid}`,
+  ]);
+  await read([`${T}/t/XYZ-7/view`], `${T}/t/{key}/view`);
+  assert.deepEqual(
+    keysRead().sort(),
+    ['ABC-123', 'XYZ-7', 'a-very-long-slug-of-the-ticket', uuid].sort(),
+  );
+
+  // Saved once with a status: a later read of an address without a key keeps it.
+  store.saveTicketStatus(`${T}/browse/--help`, {
+    ok: true,
+    atNs: 1n,
+    status: 'Done',
+    category: 'done',
+  });
+  await read([`${T}/browse/--help`, `${T}/t/-x`, `${T}/t/%2D%2Dconfig%3D%2Ftmp%2Fx`]);
+  assert.equal(keysRead().length, 4, 'none of the three was run');
+  const byUrl = new Map(store.ticketStatuses().map((row) => [row.url, row]));
+  for (const url of [`${T}/browse/--help`, `${T}/t/-x`, `${T}/t/%2D%2Dconfig%3D%2Ftmp%2Fx`]) {
+    assert.equal(byUrl.get(url)?.error, NO_KEY, url);
+  }
+  assert.equal(NO_KEY, "the ticket's address gives no key for {key}; use {url} in the rule");
+  assert.deepEqual([byUrl.get(`${T}/browse/--help`)?.status], ['Done'], 'the old status kept');
+
+  // A rule with {url} only runs for any address.
+  await fetchTicketStatuses(
+    {
+      runner,
+      clock,
+      env: s.env(),
+      store,
+      homeDir: s.home,
+      rules: [{ match: `${T}/`, command: [program, '{url}'] }],
+      ticketUrl: null,
+    },
+    [`${T}/t/-x`],
+  );
+  assert.equal(keysRead().at(-1), `${T}/t/-x`);
 });
 
 test('a program that is not executable fails in the words W38 quotes', async (t) => {
@@ -156,4 +233,37 @@ test("install.md's example program is valid Python; without its token file it sa
   const lines = failed.stderr.split('\n').filter((line) => line !== '');
   assert.equal(lines.length, 1, failed.stderr);
   assert.match(lines[0] ?? '', /^tickets\.example\.com: \[Errno 2\] No such file or directory: /);
+});
+
+test('every command line W38 gives is valid sh (sh -n), the six answers and the stand-in included', async (t) => {
+  const s = sandbox(t);
+  s.link('sh');
+  const text = readFileSync(join(DOCS, 'manual-checks.md'), 'utf8');
+  const start = text.indexOf('## W38.');
+  assert.ok(start !== -1, 'W38 is there');
+  const end = text.indexOf('\n## ', start + 1);
+  const w38 = text.slice(start, end === -1 ? undefined : end);
+  const commands: string[] = [];
+  // The lines of its sh blocks.
+  for (const [, body] of w38.matchAll(/```sh\n([^]*?)\n\s*```/g)) {
+    for (const line of (body ?? '').split('\n')) {
+      if (line.trim() !== '') commands.push(line.trim());
+    }
+  }
+  // Its inline commands (a span may be wrapped over two lines of the text).
+  const words = /^(?:printf|chmod|cp|diff|cmp|rm|mkdir|ls|cat|test|skydeck|echo)\b/;
+  const outside = w38.replaceAll(/```[^]*?```/g, '');
+  for (const [, span] of outside.matchAll(/`([^`]+)`/g)) {
+    const command = (span ?? '').replaceAll(/\s*\n\s*/g, ' ').trim();
+    if (words.test(command)) commands.push(command);
+  }
+  assert.ok(commands.length >= 20, `${commands.length} commands found`);
+  assert.ok(commands.some((command) => command.includes("'Rejected' 'closed'")));
+  const { runner } = realPlatform();
+  for (const command of commands) {
+    // A placeholder such as <short id> stands for one word.
+    const line = command.replaceAll(/<[^<>]+>/g, 'X');
+    const checked = await runner.run('sh', ['-n', '-c', line], { env: s.env() });
+    assert.equal(checked.code, 0, `${command}: ${checked.stderr}`);
+  }
 });

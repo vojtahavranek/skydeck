@@ -72,6 +72,15 @@ describe('statusProvider (T1, T2)', () => {
     assert.equal(statusProvider('https://example.com/browse/ABC-1', [JIRA]), null);
     assert.equal(statusProvider('https://tickets.example.com.other.net/browse/X-1', [ANY]), null);
     assert.equal(statusProvider(TICKET, []), null);
+    // Only at the START of the address: one that holds the match further on is not the rule's.
+    assert.equal(
+      statusProvider('https://other.example/go?to=https://tickets.example.com/browse/ABC-1', [
+        JIRA,
+      ]),
+      null,
+    );
+    // An issue's path on another host is no GitHub issue.
+    assert.equal(statusProvider('https://example.com/owner/repo/issues/5', []), null);
   });
 });
 

@@ -184,12 +184,12 @@ function ticketOf(stored: string | null, ticketUrl: string | null): TicketView |
 
 /**
  * F19 (T1): the status view of a ticket's `url` (the stored ticket's address, else the group's
- * link), named `name`; null when there is no address or no provider takes it. Its cached row is
+ * link), named by `name` (asked only when a provider takes the address); null when there is no address or no provider takes it. Its cached row is
  * the one of that address in `cache`.
  */
 function statusOf(
   url: string | null,
-  name: string,
+  name: () => string,
   stored: boolean,
   rules: readonly TicketStatusRule[],
   cache: ReadonlyMap<string, TicketStatusRow>,
@@ -198,7 +198,7 @@ function statusOf(
   const row = cache.get(url);
   return {
     url,
-    name,
+    name: name(),
     stored,
     status: shown(row?.status ?? null),
     category: row?.category ?? null,
@@ -277,7 +277,8 @@ export function buildRows(input: {
         ? null
         : statusOf(
             statusUrl,
-            ticket?.text ?? ticketText(statusUrl, input.ticketUrl),
+            // Worked out only when a provider takes the address (review 2, C7).
+            () => ticket?.text ?? ticketText(statusUrl, input.ticketUrl),
             ticket !== null,
             statuses.rules,
             cache,

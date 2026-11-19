@@ -102,6 +102,8 @@ export function createTicketFetches(deps: {
       }
     })().finally(() => {
       current = null;
+      // Review 2 (C6): a read asked for after the loop's last look still runs.
+      if (waiting !== null && !signal.aborted) start(async () => {});
     });
   };
 

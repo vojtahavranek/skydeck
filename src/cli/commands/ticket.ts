@@ -1,11 +1,10 @@
 // `skydeck ticket set <ref> <link-or-key> | ticket clear <ref>` (follow-up F18; design 7.1, 7.5):
 // set a session's ticket — a whole link, or a key that ticketUrl turns into one — or remove it.
 // Follow-up F19: `ticket refresh [<ref>]` reads the status of a session's ticket now (of every
-// listed session's without <ref>), whatever its age. `ticket set` reads nothing (ruled): the status
+// session's without <ref>, done ones included, as `pr refresh`), whatever its age. `ticket set` reads nothing (ruled): the status
 // comes with the window's next round for a listed session, or with `ticket refresh <ref>`.
 import { UsageError } from '../../platform/errors.ts';
 import type { Deck } from '../../sessions/deck.ts';
-import { isListed } from '../../sessions/list.ts';
 import type { ListRow } from '../../sessions/list.ts';
 import { loadRows } from '../../sessions/load.ts';
 import { requireTicket, setTicket } from '../../sessions/meta.ts';
@@ -30,7 +29,8 @@ const SPEC: ArgSpec = {
                                    reads it for a session it lists, or use ticket refresh <ref>.
   ticket clear <ref>               remove the session's ticket
   ticket refresh [<ref>]           read the status of the session's ticket now (the one set, else
-                                   its group's link), or of every listed session's without <ref>
+                                   its group's link); without <ref> of every session's, done ones
+                                   included, as pr refresh reads every session's pull requests
 `,
   flags: {},
   min: 1,
@@ -115,8 +115,9 @@ export const command: Command = {
           ctx.io.stdout(`${row.shortId} ticket: ${sanitize(url)}${statusSuffix(after)}\n`);
           return EXIT.ok;
         }
+        // As `skydeck pr refresh` without a session: every session's, done ones included.
         const urls = rows.flatMap((row) =>
-          isListed(row, false) && row.ticketStatus !== null ? [row.ticketStatus.url] : [],
+          row.ticketStatus === null ? [] : [row.ticketStatus.url],
         );
         const { fetched, failed } = await fetchTicketStatuses(statusDeps(deck), urls);
         ctx.io.stdout(`fetched ${fetched}, failed ${failed}\n`);

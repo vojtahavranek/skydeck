@@ -2830,14 +2830,25 @@ credential: a program reads its secret from a file its owner keeps, never from `
 *The program.* A rule is exactly `{ "match": …, "command": [ … ] }`. `command[0]` is the program — a
 name looked up on `PATH`, or a path, a relative one being relative to the user's home directory —
 and the rest are its arguments; in the arguments only, never in the program, every `{url}` becomes
-the address and every `{key}` the ticket's short name (the key when the address fits `ticketUrl`,
-`KEY` for a path `/browse/KEY`, as the chip's name above), both in one pass, so that what was put
-in is not read again. The runner starts it without a shell, as a list of words, so that an address
-with spaces, quotes, `;` or `$(…)` arrives as one argument, unchanged; its standard input is
-`/dev/null` (closed); it runs in the server's environment (the command's own for `skydeck ticket
-…`) with the user's home directory as its working directory, for 10 seconds, and is then killed;
-of its standard output and of its standard error the first 4 KiB (4,096 bytes) are kept, the rest
-is read and dropped.
+the address and every `{key}` the ticket's KEY (ruled on review 2: never the chip's display name),
+both in one pass, so that what was put in is not read again. The key (`ticketKeyOf`) is the part
+the address holds in the place of the configured `ticketUrl`'s `{key}`; else the `KEY` of a path
+`/browse/KEY`; else the last part of the path that is not empty, as written (not percent-decoded),
+whole, when it passes the key rule above (letters, digits, `.`, `_`, `-`, starting with a letter or
+a digit: never an option such as `--help`) and holds at most 128 characters. When a rule's command
+uses `{key}` and the address gives none, the program is not run and the read fails with `the
+ticket's address gives no key for {key}; use {url} in the rule`, the old status kept; a program
+still checks what it is given. The runner starts it without a shell, as a list of words, so that
+an address with spaces, quotes, `;` or `$(…)` arrives as one argument, unchanged; its standard
+input is `/dev/null` (closed); it runs in the server's environment (the command's own for
+`skydeck ticket refresh`; the launcher's variables that 7.4 strips for a terminal's program stay
+in it) with the user's home directory as its working directory, for 10 seconds; of its standard
+output and of its standard error the first 4 KiB (4,096 bytes) are kept, the rest is read and
+dropped. skydeck kills only the program it started — at the 10 seconds and at the server's stop —,
+not what that program started (ruled: a process group is a later choice of the owner's): a script
+bounds what it starts (`curl --max-time 8`, `timeout 8 …`) or ends with `exec`. The first line of
+standard error is kept in the database and shown (never logged): a program must not print its
+secret.
 
 *The answer's contract.* The first line of the program's standard output is the status' text: a
 carriage return at its end dropped, escape sequences and control characters dropped and tabs turned
@@ -2876,8 +2887,9 @@ status is due — never tried, or its last attempt older than `ticketRefreshMinu
 default), or, when its category is `done` or `closed`, older than 12 hours instead —; and whatever
 its age, on demand: the dialog's ↻ (below; `act ticket-refresh`, 8.2.3) and `skydeck ticket
 refresh`. The server runs one read at a time, so one status program at a time, and starts at most
-5 programs in a round of its tick (10.1). A saved result reaches every page within a second, as an
-edit does. Nothing is read for a session no page lists, and nothing at all for an address no
+5 programs in a round of its tick (10.1); `skydeck ticket refresh` runs its own reads in its own
+process, one after the other. A result the server saved reaches every page within a second, as an
+edit does; one a command saved, with the server's next refresh (within 2 seconds, 10.1). Nothing is read for a session no page lists, and nothing at all for an address no
 provider takes. The server reads `ticketStatus` and `ticketRefreshMinutes` at its start only:
 after changing either, `skydeck window --restart`.
 
@@ -2907,8 +2919,9 @@ without, as in F18).
 the header's button) has, above its field, a line `In Progress · checked 3m ago` — after a
 failure `status not read: <words> · last <status>, checked <age> ago`, or `status not read:
 <words>` while no status is known, and `status not read yet` before any attempt —, in the
-dialog's own grey (it takes no tint: the header's chip and the row's carry the colour), and a ↻ at
-its right end (its title is `read its status now`); without a provider the line and the ↻ are not
+dialog's own grey (it takes no tint: the header's chip and the row's carry the colour), one line
+cut with an ellipsis where the dialog ends and whole as its tooltip, and a ↻ at its right end (its
+title is `read its status now`); without a provider the line and the ↻ are not
 there. ↻ sends `act ticket-refresh`, is disabled while the answer is awaited, leaves the keyboard
 in the field, and a refusal shows under the field as the dialog's other refusals do. The line is
 drawn again by each `list`, so that a saved result shows in it.
@@ -2920,8 +2933,10 @@ its `--json`'s `ticket` (still only the ticket the user set, F18) gains `status`
 it. `skydeck ticket set` prints F18's line and reads nothing; `skydeck ticket refresh <ref>`
 reads that session's ticket now — the one set, else its group's — and prints `<short id> ticket:
 <address> · <status>` (after a failure ` (status not read: <words>)`), or `<short id>: no status is read for this session's ticket`;
-without `<ref>` it reads every ticket of the sessions `skydeck ls` lists, each address once, and
-prints `fetched <n>, failed <m>`. `show`, `ls` and the interactive list print what is cached and run
+without `<ref>` it reads the ticket of every session, done ones included (as `skydeck pr refresh`
+reads every session's pull requests), each address once, one program after the other (in the
+command's own process: the server's one-at-a-time rule is the server's), and prints `fetched <n>,
+failed <m>`. `show`, `ls` and the interactive list print what is cached and run
 nothing; `ls` is unchanged.
 
 ### 12.6 The right side
@@ -3921,7 +3936,7 @@ New keys, all optional:
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
 | `window.links` | `"default"` | Asked for by the user on 2026-11-15, ruled by the lead that day. Where the links the window opens go (9.6): `"default"`, the Windows default browser (`rundll32.exe url.dll,FileProtocolHandler <url>`), or `"edge"`, `window.edge` in the user's own Edge profile. Anything else is refused as every key of the file is: `<file>: "window.links" must be "default" or "edge"`. |
 | `ticketUrl` | `null` | Asked for by the user on 2026-11-15; the details ruled by the lead that day. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` without a user name or password (`skydeck show` would print it, and Edge's command line would carry it) and with the same host (a host the key went into would differ), and with no `%`, or `%` with one hex digit, right before `{key}` (a key would finish that escape): where the key stands among the address's parts is the parser's to decide, not the text's (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
-| `ticketStatus` | `[]` | Asked for by the owner on 2026-11-19 (follow-up F19); the details ruled by the lead. The programs that read a ticket's status (12.5): a list of at most 8 rules, each exactly `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` is the start of a ticket's address takes it, before GitHub's own reading of an issue's address. `match`: an `http` or `https` address, printable ASCII with no white space, at most 2,048 characters, with no user name or password, that starts with `<scheme>://<host>/` exactly as the URL parser writes them — scheme and host in lower case, a default port left out —, so that `https://tickets.example.com/` never takes `https://tickets.example.com.other.net/…` and a rule that could never match a stored address is refused instead of silently doing nothing. `command`: 1 to 16 non-empty strings without control characters; `command[0]` is the program (a name on `PATH` or a path; a relative path is relative to the home directory), and in the other words every `{url}` becomes the address and every `{key}` the ticket's short name; the program is run without a shell. No credential or token belongs in a rule: a program reads its secret from a file its owner keeps. Anything else is refused as every key of the file is, after `<file>: `: `"ticketStatus" must be a list of at most 8 rules`; `"ticketStatus[N]" must be an object with "match" and "command"`; `unknown key "ticketStatus[N].<key>"`; `"ticketStatus[N].match" must be the start of an http or https address, its scheme and host in lower case and followed by "/", at most 2,048 characters`; `"ticketStatus[N].command" must be a list of 1 to 16 non-empty strings without control characters`. Read at the server's start: after a change, `skydeck window --restart`. |
+| `ticketStatus` | `[]` | Asked for by the owner on 2026-11-19 (follow-up F19); the details ruled by the lead. The programs that read a ticket's status (12.5): a list of at most 8 rules, each exactly `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` is the start of a ticket's address takes it, before GitHub's own reading of an issue's address. `match`: an `http` or `https` address, printable ASCII with no white space, at most 2,048 characters, with no user name or password, that starts with `<scheme>://<host>/` exactly as the URL parser writes them — scheme and host in lower case, a default port left out —, so that `https://tickets.example.com/` never takes `https://tickets.example.com.other.net/…` and a rule whose scheme or host could never match a stored address is refused instead of silently doing nothing (the rest of its path is not checked). `command`: 1 to 16 non-empty strings without control characters; `command[0]` is the program (a name on `PATH` or a path; a relative path is relative to the home directory), and in the other words every `{url}` becomes the address and every `{key}` the ticket's key (12.5; a rule whose command uses `{key}` is not run for an address that gives none); the program is run without a shell. No credential or token belongs in a rule: a program reads its secret from a file its owner keeps. Anything else is refused as every key of the file is, after `<file>: `: `"ticketStatus" must be a list of at most 8 rules`; `"ticketStatus[N]" must be an object with "match" and "command"`; `unknown key "ticketStatus[N].<key>"`; `"ticketStatus[N].match" must be the start of an http or https address, its scheme and host in lower case and followed by "/", at most 2,048 characters`; `"ticketStatus[N].command" must be a list of 1 to 16 non-empty strings without control characters`. Read at the server's start: after a change, `skydeck window --restart`. |
 | `ticketRefreshMinutes` | `10` | Follow-up F19. How long a ticket's status is left before the server reads it again (12.5, 10.1): a whole number of minutes from 1 to 1440, counted from the last attempt; a status whose category is `done` or `closed` is read again after 12 hours instead. Anything else is refused as every key of the file is: `<file>: "ticketRefreshMinutes" must be a whole number from 1 to 1440`. Read at the server's start. |
 
 Unknown keys inside `window` are an error, as everywhere in `config.json`.

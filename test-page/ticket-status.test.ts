@@ -622,7 +622,8 @@ test("F19: a ticket's status in the header, in the list's rows, the filter and �
       mkdirSync(join(home, 'status'), { recursive: true });
       writeFileSync(
         join(home, 'status-standin.mjs'),
-        "import { readFileSync } from 'node:fs';\nprocess.stdout.write(readFileSync('status/answer.txt', 'utf8'));\n",
+        // `fail` in the answer: one line on stderr, exit 1.
+        "import { readFileSync } from 'node:fs';\nconst text = readFileSync('status/answer.txt', 'utf8');\nif (text.startsWith('fail')) { process.stderr.write('tickets.example.com: 503 Service Unavailable, the tracker is down for maintenance\\n'); process.exitCode = 1; } else { process.stdout.write(text); }\n",
       );
       const answer = (text: string) => writeFileSync(join(home, 'status', 'answer.txt'), text);
       answer('In Review\nreview\n');
@@ -660,6 +661,25 @@ test("F19: a ticket's status in the header, in the list's rows, the filter and �
         timeout: PAGE_WAIT_MS,
       });
       await showsText(l.page, '#editor .edit-ticket-words', /^In Review · checked \d+s ago$/);
+      await l.page.locator('#editor .edit-ticket-refresh').click();
+      await showsText(l.page, '#editor .edit-ticket-words', /^Done · checked \d+s ago$/);
+      // A failure: the line keeps the last status after the words; cut in the dialog, whole as
+      // its tooltip.
+      answer('fail');
+      await l.page.locator('#editor .edit-ticket-refresh').click();
+      const failed = await eventually(async () => {
+        const got = await l.page.evaluate(() => {
+          const words = document.querySelector('#editor .edit-ticket-words') as HTMLElement;
+          return { text: words.textContent ?? '', tip: words.title };
+        });
+        return got.text.startsWith('status not read: ') ? got : null;
+      }, 'the failure line');
+      assert.match(
+        failed.text,
+        /^status not read: tickets\.example\.com: 503 Service Unavailable, the tracker is down for maintenance · last Done, checked \d+s ago$/,
+      );
+      assert.equal(failed.tip, failed.text, 'the whole line as its tooltip');
+      answer('Done\ndone\n');
       await l.page.locator('#editor .edit-ticket-refresh').click();
       await showsText(l.page, '#editor .edit-ticket-words', /^Done · checked \d+s ago$/);
       assert.equal(

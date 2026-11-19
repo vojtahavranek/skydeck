@@ -15,7 +15,7 @@ import type { PrKey } from './github.ts';
 import type { TicketStatusRule } from './platform/config.ts';
 import { nsFromMs } from './platform/time.ts';
 import type { Clock, Env, Ns, RunOptions, RunResult, Runner } from './platform/types.ts';
-import { ticketText } from './sessions/ticket.ts';
+import { ticketKeyOf } from './sessions/ticket.ts';
 import type { Store } from './store/store.ts';
 import { TICKET_CATEGORIES } from './store/types.ts';
 import type { TicketStatusResult, TicketStatusRow } from './store/types.ts';
@@ -40,7 +40,7 @@ const PLACEHOLDERS = /\{url\}|\{key\}/g;
 
 /**
  * T2 b: the program and the arguments of `rule` for `url`: in each argument (never in the
- * program) every `{url}` becomes the address and every `{key}` the ticket's short name, in one
+ * program) every `{url}` becomes the address and every `{key}` the ticket's key (ticketKeyOf), in one
  * pass, so that what was put in is not read again. Each argument stays one argument, whatever the
  * address holds: nothing is split, quoted or given to a shell.
  */
@@ -143,7 +143,7 @@ export interface StatusDeps {
   homeDir: string;
   /** The configuration's `ticketStatus`. */
   rules: readonly TicketStatusRule[];
-  /** The configuration's `ticketUrl`, for `{key}` (ticketText, F18's K2). */
+  /** The configuration's `ticketUrl`, for `{key}` (ticketKeyOf: the key it puts in an address). */
   ticketUrl: string | null;
 }
 
@@ -156,14 +156,30 @@ function childEnvironment(env: Env): Record<string, string> {
   return result;
 }
 
-/** One run of a status command for `url`; a runner that rejects (not executable) is a failure. */
+/** A rule's command uses `{key}` in one of its arguments (never in the program, T2 b). */
+function usesKey(rule: TicketStatusRule): boolean {
+  return rule.command.slice(1).some((arg) => arg.includes('{key}'));
+}
+
+/** Review 2 (ruled): the read of an address that gives no key for a command that needs one. */
+export const NO_KEY = "the ticket's address gives no key for {key}; use {url} in the rule";
+
+/**
+ * One run of a status command for `url`; a runner that rejects (not executable) is a failure.
+ * `{key}` is the ticket's key (ticketKeyOf); when the command uses `{key}` and the address gives
+ * none, the program is not run and the read fails (NO_KEY), the old status kept.
+ */
 async function runCommand(
   deps: StatusDeps,
   rule: TicketStatusRule,
   url: string,
   signal: AbortSignal | undefined,
 ): Promise<TicketStatusResult> {
-  const { program, args } = statusCommand(rule, url, ticketText(url, deps.ticketUrl));
+  const key = ticketKeyOf(url, deps.ticketUrl);
+  if (key === null && usesKey(rule)) {
+    return { ok: false, atNs: deps.clock.nowNs(), error: NO_KEY };
+  }
+  const { program, args } = statusCommand(rule, url, key ?? '');
   const options: RunOptions = {
     cwd: deps.homeDir,
     timeoutMs: STATUS_TIMEOUT_MS,

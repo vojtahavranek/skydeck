@@ -210,6 +210,10 @@ export function createEditor(root, deps) {
         : null;
     ticketLine.hidden = line === null;
     setText(ticketWords, line?.text ?? '');
+    // One line, cut with an ellipsis in a narrow dialog: the whole of it as its tooltip.
+    if (ticketWords.title !== (line?.text ?? '')) {
+      ticketWords.title = line?.text ?? '';
+    }
     ticketRefresh.disabled = current !== null && refreshingTicket.has(current.row.id);
   };
 
