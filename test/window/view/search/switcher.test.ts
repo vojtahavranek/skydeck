@@ -18,6 +18,8 @@ interface Spec {
   id: string;
   title?: string;
   group?: string;
+  /** F18: the ticket's address. */
+  ticket?: string;
   done?: boolean;
   open?: boolean;
   need?: boolean;
@@ -37,7 +39,12 @@ function candidate(spec: Spec): SwitchCandidate {
       hidden: spec.done ?? false,
       transcript: { customTitle: spec.title ?? 'neutral' },
     }),
-    { metas: spec.group === undefined ? [] : [meta(spec.id, { group: spec.group })] },
+    {
+      metas:
+        spec.group === undefined && spec.ticket === undefined
+          ? []
+          : [meta(spec.id, { group: spec.group ?? null, ticket: spec.ticket ?? null })],
+    },
   );
   return {
     row: rowPayload(row, { terminal: null, elsewhere: null }),
@@ -224,6 +231,19 @@ test('switcherPayload: a word may be in any field, each word in a field of its o
   assert.deepEqual(ranked(switcherPayload('orb-2107 title', candidates, [])), [
     'a:not-running',
     'b:not-running',
+  ]);
+});
+
+test("switcherPayload: a session's ticket (F18) finds it, by its name and by its address", () => {
+  const candidates = [
+    candidate({ id: 'a', title: 'the title', ticket: 'https://github.com/owner/tools/issues/42' }),
+    candidate({ id: 'b', title: 'tools #42 is not this one' }),
+    candidate({ id: 'c', title: 'other', ticket: 'https://example.com/browse/ABC-7' }),
+  ];
+  assert.deepEqual(ranked(switcherPayload('tools #42 owner', candidates, [])), ['a:not-running']);
+  assert.deepEqual(ranked(switcherPayload('abc-7', candidates, [])), ['c:not-running']);
+  assert.deepEqual(ranked(switcherPayload('example.com/browse', candidates, [])), [
+    'c:not-running',
   ]);
 });
 
