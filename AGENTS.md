@@ -61,7 +61,7 @@ git clone https://github.com/vojtahavranek/skydeck.git ~/skydeck
 cd ~/skydeck && bin/skydeck install </dev/null
 ```
 
-Only where step 2 stopped nothing (no link, a count of 0, no `config.json`): with no input every
+Only where step 2 stopped nothing (no link, no count above 0, no `config.json`): with no input every
 question gets a no, so the second line shows the exact entries install would add, changes nothing
 (but skydeck's compile cache in `~/.cache/skydeck`) and exits 1, as expected. It prints:
 
@@ -103,9 +103,9 @@ terminal of their own, first with a new session in a scratch folder they can los
 **Never:**
 
 - Run `skydeck window`, `skydeck serve`, `skydeck update` or a bare `skydeck` yourself: they are the
-  human's, from a terminal of their own (the window's sessions get the environment of whoever starts
-  its server; inside Claude Code the three refuse), and a bare one is the interactive list. Install,
-  doctor and ls are fine; never `new`, `resume` or `restore` unasked (they start `claude`).
+  human's, in their own terminal (the window's sessions get the environment of whoever starts its
+  server; inside Claude Code the three refuse); a bare one is the interactive list. The preview,
+  `doctor` and `ls` are yours; never `new`, `resume` or `restore` unasked (they start `claude`).
 - Follow `docs/manual-checks.md`, the maintainer's checklist: it can uninstall skydeck or stop WSL.
 - Run `skydeck uninstall` or `skydeck uninstall --purge` unasked: they undo the install, and
   `--purge` deletes the human's labels and notes for good.
