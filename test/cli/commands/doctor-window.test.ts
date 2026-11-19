@@ -475,7 +475,9 @@ describe('doctor: the keep-alive', () => {
         `^info {5}keep-alive wsl\\.exe running \\(pid ${script.pid}, since \\d{4}-\\d\\d-\\d\\dT[^)]*\\)$`,
       ),
     );
-    assert.doesNotMatch(r.stdout, /unverified|manual check/i);
+    assert.doesNotMatch(r.stdout, /unverified|not verified|manual check/i);
+    const keepAliveLines = r.lines.filter((line) => line.includes('keep-alive'));
+    assert.ok(!keepAliveLines.some((line) => /\bW\d+\b/.test(line)), r.stdout);
   });
 
   test('neither protection while a keeper lives: a problem', async (t) => {

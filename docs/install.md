@@ -561,8 +561,8 @@ C)" below).
 
 ### Before you rely on it
 
-**Try it first with a session you can lose**, started in a throwaway folder. Once that one works in
-the window, resume real sessions into it.
+**Try it first with a session you can lose**, started in a throwaway folder ("A new session" in
+"Using the window" below). Once that one works in the window, resume real sessions into it.
 
 **WSL stops 15 seconds after its last Windows client ends**, and with it every session in the
 window. By default, while the window's server or any of its terminals runs, skydeck keeps WSL
