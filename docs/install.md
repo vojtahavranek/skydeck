@@ -144,10 +144,11 @@ bin/skydeck --version
 ```
 
 It prints one line: the version, the commit the checkout is at and the date of that commit, such as
-`0.1.0 (f1fce49, 2026-11-19)`. `, modified` follows the date when files of the checkout were changed
-since that commit, and `0.1.0 (commit unknown)` means git could not tell (git is missing, or the
-folder is not a git checkout). Give this line when you report a problem. With a `node` older than
-24.12 it prints one line and exits 1:
+`0.1.0 (f1fce49, 2026-11-19)`. `, modified` follows the date when files git tracks in the checkout
+were changed since that commit (a new file of your own does not count), and
+`0.1.0 (commit unknown)` means git could not tell (git is missing, or the folder is not a git
+checkout). Give this line when you report a problem. With a `node` older than 24.12 it prints one
+line and exits 1:
 
 ```
 skydeck needs Node.js 24.12 or newer but found 20.20.2; set SKYDECK_NODE to the path of a newer node binary.
@@ -1908,7 +1909,7 @@ installation.
 
 | Check | A `problem` means |
 |---|---|
-| skydeck, Claude Code, system | Never a problem: the first three lines say what runs, so that a report of a problem can say it too. `skydeck` is the line `skydeck --version` prints. `Claude Code` is the first line that `<claudeCommand> --version` prints, without the ` (Claude Code)` at its end (at most 60 characters), or `Claude Code: version not read (<why>)`: `not installed`, `timed out after 5 s`, `exited <n>`, `printed no version`, or `the configuration cannot be read` (then nothing is started). `system` is the distribution's name (`PRETTY_NAME` in `/etc/os-release`) and the kernel's release (on WSL it ends in `WSL2`), `unknown` for what cannot be read. |
+| skydeck, Claude Code, system | Never a problem: the first three lines say what runs, so that a report of a problem can say it too. `skydeck` is the line `skydeck --version` prints. `Claude Code` is the first line that `<claudeCommand> --version` prints, without the ` (Claude Code)` at its end (at most 60 characters), or `Claude Code: version not read (<why>)`: `not installed`, `timed out after 5 s`, `exited <n>`, `ended by a signal`, `printed no version`, `could not be started: <code>` (such as `EACCES`), or `the configuration cannot be read` (then nothing is started). `system` is the distribution's name (`PRETTY_NAME` in `/etc/os-release`) and the kernel's release (on WSL it ends in `WSL2`), `unknown` for what cannot be read. |
 | hook entries | `SessionStart` or `SessionEnd` has no entry in the settings file that is exactly what install writes for `<dataDir>/skydeck-hook`. Run `skydeck install`. |
 | the hook link | `<dataDir>/skydeck-hook` does not resolve to a file. Run `bin/skydeck install` from the checkout. |
 | Node.js | The Node.js that runs `doctor` is older than 24.12. |
