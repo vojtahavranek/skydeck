@@ -1942,9 +1942,10 @@ branch follows, and restarts the window's server for the new code. In this order
 
    The ids are the first 7 digits of each commit's id, for reading only; the update itself uses
    the whole id. When the new commits change `src/store/migrations.ts`, one more line says so:
-   `this update changes the database's upgrade steps: it may upgrade the database, and an upgraded
-   database cannot be opened by an older checkout` (see "There is no way back" below). With
-   nothing new it says `skydeck is up to date (main at 1a2b3c4, as origin/main)` and does nothing
+   `this update changes the database's upgrade steps: it may upgrade the database, which an older
+   checkout cannot open; a copy of the database as it was is kept first, and docs/install.md
+   ("Going back") says how to return to 1a2b3c4`, with the commit the checkout is at (see "Going
+   back" below). With nothing new it says `skydeck is up to date (main at 1a2b3c4, as origin/main)` and does nothing
    else: no server is looked at, stopped or started.
 2. **`--check` ends here**, with `run skydeck update to apply it`. Its fetch has changed the
    checkout's remote-tracking refs (`origin/main`) and nothing else: not your files, not your
@@ -1953,7 +1954,8 @@ branch follows, and restarts the window's server for the new code. In this order
    terminals in the window keep running`), then **moves the branch forward** to the commit it
    listed (a fast-forward, never a merge commit), then, when a window was open, **runs the new
    checkout's `skydeck window`**: that upgrades the database when the new code brings a new
-   version of it, starts the server of the new code and waits up to 7 seconds for the open window
+   version of it (after a copy of it, and says where the copy is: "Going back"), starts the server
+   of the new code and waits up to 7 seconds for the open window
    (`skydeck: waiting up to 7 s for the open window to come back; …`), which reloads itself and
    connects again (`skydeck window: a window is already open`). When no window was open it starts
    nothing and says `skydeck: the window's server was stopped for the update; skydeck window starts
@@ -2084,9 +2086,9 @@ It is the one that is certain:
    skydeck window
    ```
 
-   `skydeck window` upgrades the database when the new code brings a new version of it, restarts
-   the window's server for the new code and opens the window again: every session is there. Then
-   `skydeck doctor`, if you want.
+   `skydeck window` upgrades the database when the new code brings a new version of it (after a
+   copy of it, and says where the copy is: "Going back"), restarts the window's server for the new
+   code and opens the window again: every session is there. Then `skydeck doctor`, if you want.
 
 Without the window, `git pull` is all. The links point into the checkout, so the command and the
 hook are the new code at once, and the database upgrades itself the next time a command runs.
@@ -2101,9 +2103,9 @@ windows (close one). Even `skydeck window` run first is not certain: the old ser
 the command has asked it about its open windows. With every page closed there is none to come back.
 `skydeck update` has no such order to keep: it stops the old server first.
 
-**There is no way back to an older checkout.** A database that a newer skydeck has upgraded is not
-opened by an older one: every command of an older checkout — a second clone, or this one moved back
-with `git checkout` — refuses it with exit 1 and changes nothing:
+**An older checkout does not open an upgraded database.** A database that a newer skydeck has
+upgraded is not opened by an older one: every command of an older checkout — a second clone, or
+this one moved back with `git checkout` — refuses it with exit 1 and changes nothing:
 
 ```
 skydeck: the database /home/you/.local/share/skydeck/skydeck.db was written by a newer skydeck (schema version 2, this one knows 1); update skydeck
@@ -2121,15 +2123,94 @@ every checkout from before it refuses the database the same way (`schema version
 F19) upgrades it once more, to schema version 4: it adds one table for the statuses read so far,
 by address, and keeps everything else as it was; from then on every checkout from before it —
 the one of follow-up F18 included — refuses the database the same way (`schema version 4, this one
-knows 3`), and nothing takes the table away again. The way back is forward: its `update skydeck`
-is `skydeck update` in a checkout that has the command (from the update that brings it on), and
+knows 3`), and nothing takes the table away again. The way forward is its `update skydeck`:
+`skydeck update` in a checkout that has the command (from the update that brings it on), and
 `git pull` in an older one (which prints the same `update skydeck` and has no `skydeck update`).
 `skydeck update` runs on such a database, although no other command does: it says `skydeck: the
 database was written by a newer skydeck, so the window's server is not looked at; it is left as it
-is`, brings the checkout up to date and starts no server. skydeck keeps no copy of the database
-from before an upgrade: putting one back would drop everything recorded since, and a copy of the
-file taken while the window's server has it open may not be whole. An upgrade only adds to the
-database; it changes nothing that is in it.
+is`, brings the checkout up to date and starts no server. An upgrade only adds to the database; it
+changes nothing that is in it. The way back is the copy that skydeck keeps before it upgrades the
+database: "Going back", next.
+
+### Going back
+
+Before skydeck upgrades the database, it keeps a copy of it as it was, beside it, and says where:
+
+```
+skydeck: the database was brought to schema version 5; a copy of it as it was is at /home/you/.local/share/skydeck/skydeck.db.schema4-20261120T081500Z
+```
+
+The command that upgraded it says this line on standard error (in `skydeck update`, the `skydeck
+window` it runs when a window was open; otherwise the next command you run); when the window's
+server upgraded it, the line is in `<stateDir>/server.log`.
+The copy's name holds the schema version that is in it (`schema4`, which the checkout before the
+update knows) and the UTC time it was taken. SQLite writes it, whole, also while the window's
+server has the database open, with mode 600 like the database (it holds the window's key). Of the
+copies, the newest three stay: a fourth removes the oldest. A database that needs no upgrade is
+never copied. When the copy cannot be written (no room on the disk, a folder that is not writable,
+something of its name already there), the database is not upgraded, the command — or the window's
+server, which then does not start — ends with exit 1, and the database is as it was:
+
+```
+skydeck: the database /home/you/.local/share/skydeck/skydeck.db was not upgraded: its copy /home/you/.local/share/skydeck/skydeck.db.schema4-20261120T081500Z could not be written (database or disk is full)
+```
+
+Make room, or move away what is in the way, then run the command again.
+
+To go back to the code from before an update, and to the database as it was then, in a WSL
+terminal of your own:
+
+1. Close every skydeck window (its ×) and every browser tab of a `--print-url` address, then stop
+   the window's server:
+
+   ```sh
+   skydeck window --stop
+   ```
+
+   It says `stopped skydeck's window server; 2 terminals in the window keep running` (or `the
+   window's server is not running`); your sessions keep running in their keepers. Quit the
+   interactive list (`skydeck` with no command) in any other terminal too: from here on no skydeck
+   may have the database open.
+2. Put the checkout back at the commit the update left. `skydeck update` named it: the first id of
+   its first line (`3 new commits on origin/main (1a2b3c4..5d6e7f8):`, so `1a2b3c4`), and the line
+   about the database's upgrade steps (`… says how to return to 1a2b3c4`); `git pull` shows it as
+   `Updating 1a2b3c4..5d6e7f8`.
+
+   ```sh
+   cd ~/skydeck
+   git reset --keep 1a2b3c4
+   ```
+
+   It prints nothing; `git status` then says `Your branch is behind 'origin/main' by 3 commits, and
+   can be fast-forwarded.` (`--keep` refuses, and changes nothing, when a file you changed in the
+   checkout is one that the reset would change.)
+3. Move the database aside, and put the copy in its place (the folder is `<dataDir>`, "Where things
+   are": another one when `SKYDECK_HOME` or `XDG_DATA_HOME` is set):
+
+   ```sh
+   cd ~/.local/share/skydeck
+   ls skydeck.db*
+   mv skydeck.db ~/skydeck.db.newer
+   cp skydeck.db.schema4-20261120T081500Z skydeck.db
+   ```
+
+   `ls` lists the database and its copies; take the copy the line named (without the line: the one
+   whose name has the newest time). When `ls` also lists `skydeck.db-wal` or `skydeck.db-shm`, a
+   skydeck still has the database open — end it, and `ls` again — or one that was cut off left
+   them: then move them with the database before the `cp` (`mv skydeck.db-wal
+   ~/skydeck.db.newer-wal` and `mv skydeck.db-shm ~/skydeck.db.newer-shm`). Left beside the copy,
+   they would be read as part of it.
+4. Start again: `skydeck window`. The checkout's code opens the copy, whose schema version it
+   knows, and every session is in the window.
+
+What skydeck recorded after the copy was taken is lost: the labels, notes, groups and done marks
+set since, the pull requests and tickets attached since, and what it noted of the sessions since.
+The sessions themselves are not touched: their transcripts are Claude Code's own files, which
+skydeck only reads, and it reads them again. Neither are Claude Code's other files, its settings
+and the hook entries in them, nor skydeck's links. The database you moved aside (`~/skydeck.db.newer`)
+is the newer one: this checkout cannot open it; keep it until you update again, or delete it. The
+next `skydeck update` (once the mistake is fixed) upgrades the database again, and keeps a copy of
+it first.
 
 ## When the checkout or Node.js changes
 
@@ -2185,15 +2266,17 @@ agents"), or set `leftArrowOpensAgents` to `true` in `~/.claude.json` (or remove
 your sessions again. The backup install made of that file stays, and is not named; it holds your
 account details, so remove it yourself when you no longer need it.
 
-The database, the spool and `config.json` stay. Sessions that are running keep running: skydeck
-never stops a process. `uninstall` creates nothing, except that one backup when it needs it.
+The database, its copies (`skydeck.db.schema<V>-<time>`, "Going back"), the spool and
+`config.json` stay. Sessions that are running keep running: skydeck never stops a process.
+`uninstall` creates nothing, except that one backup when it needs it (and, when it is the first
+command to open a database an update upgrades, the copy kept before the upgrade).
 
 ```sh
 skydeck uninstall --purge
 ```
 
 does the same and then removes the data, state and configuration folders (`<dataDir>`, `<stateDir>`,
-`<configDir>`): from each only what skydeck writes there — the database, the spool, `hook.log`,
+`<configDir>`): from each only what skydeck writes there — the database and its copies, the spool, `hook.log`,
 `config.json`, the window's logs and runtime folder, a link inside them that `uninstall` left alone —
 and then the folder. It cannot be undone. A folder that holds anything else (a file of yours, an
 editor's backup), is a symbolic link, is another user's or cannot be read is left alone, whole; the
@@ -2225,6 +2308,7 @@ kept the backup /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
 |---|---|
 | The code, and what the links point to | The checkout (`~/skydeck` above). |
 | Labels, groups, notes, done marks, pull requests, what was recorded | The database, `<dataDir>/skydeck.db`. |
+| The database as it was before its last upgrades (the newest three) | `<dataDir>/skydeck.db.schema<V>-<time>` (see "Going back") |
 | What the hook recorded and the next command has not read yet | `<stateDir>/spool/`; files that could not be read go to `<stateDir>/spool/bad/`. |
 | The hook's own errors | `<stateDir>/hook.log` |
 | The settings file and its backups | `<claudeHome>/settings.json`, `<claudeHome>/settings.json.skydeck-backup-*` |
@@ -2243,6 +2327,7 @@ file.
 
 | You see | Do |
 |---|---|
+| `skydeck: the database … was not upgraded: its copy … could not be written (<reason>)` | Before an upgrade skydeck keeps a copy of the database, and this one could not be written: make room on the disk, or move away what is in the way (the reason says which), then run the command again. The database is as it was ("Going back"). |
 | `skydeck needs Node.js 24.12 or newer but found ...` | Set `SKYDECK_NODE` to a newer `node` (Install, step 2), then run `bin/skydeck install` so that the link `<dataDir>/node` points at it. |
 | `skydeck: cannot run 'node'; install Node.js or set SKYDECK_NODE ...` (exit 127) | There is no `node` on `PATH` and no working link. Install Node.js 24.12 or newer, or set `SKYDECK_NODE`. |
 | `skydeck: not started through bin/skydeck` | A `--here` start needs the launcher. Run skydeck as `~/.local/bin/skydeck` or `bin/skydeck`, not as `node bin/bootstrap.mjs`. |

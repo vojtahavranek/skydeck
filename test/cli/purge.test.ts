@@ -69,7 +69,9 @@ const EVERYTHING: Record<string, { spec: Spec; entries: Record<string, Maker> }>
       'skydeck.db-journal': file('skydeck.db-journal'),
       'skydeck.db.schema<V>-<time>': file('skydeck.db.schema3-20261112T090000Z'),
       'skydeck.db.schema<V>-<time> (another)': file('skydeck.db.schema12-20261113T101112Z'),
-      '.skydeck.db.schema<V>-<time>.<hex>.tmp': file('.skydeck.db.schema3-20261112T090000Z.0123456789ab.tmp'),
+      '.skydeck.db.schema<V>-<time>.<hex>.tmp': file(
+        '.skydeck.db.schema3-20261112T090000Z.0123456789ab.tmp',
+      ),
       'skydeck-hook': link('skydeck-hook'),
       node: link('node'),
       '.skydeck-hook.<hex>.tmp': link('.skydeck-hook.0123456789ab.tmp'),

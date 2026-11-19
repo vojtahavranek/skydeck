@@ -2264,7 +2264,7 @@ are typed in W, a WSL terminal of your own (never a `!` command inside Claude Co
 ## W37. A ticket on the throwaway session
 
 Setup: skydeck updated to a commit that has follow-up F18 (`skydeck update`, W32; it upgrades the
-database once, [install.md](install.md), "There is no way back to an older checkout"); the window
+database once, [install.md](install.md), "An older checkout does not open an upgraded database"); the window
 open, with the throwaway session in it. Click the throwaway session's row in the list, then look at
 the header's short id: it must be the throwaway session's (`skydeck ls` in W prints the short ids
 as the last column); write it down. **Before every key and every click below, look at it again.**
@@ -2334,7 +2334,7 @@ Commands are typed in W, a WSL terminal of your own (never a `!` command inside 
 ## W38. A ticket's status on the throwaway session
 
 Setup: skydeck updated to a commit that has follow-up F19 (`skydeck update`, W32; it upgrades the
-database once, [install.md](install.md), "There is no way back to an older checkout"); the window
+database once, [install.md](install.md), "An older checkout does not open an upgraded database"); the window
 open, with the throwaway session in it. Click the throwaway session's row in the list, then look
 at the header's short id: it must be the throwaway session's (`skydeck ls` in W prints the short
 ids as the last column); write it down. **Before every key and every click below, look at it

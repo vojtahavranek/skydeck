@@ -214,7 +214,11 @@ test('the copy has mode 600 from the moment it exists: another thread that looks
   const [seen] = (await once(looker, 'message')) as [[string, number][]];
 
   assert.ok(store.migrated !== null);
-  const looks = seen.map(([key, size]) => ({ name: key.split(' ')[0], mode: key.split(' ')[1], size }));
+  const looks = seen.map(([key, size]) => ({
+    name: key.split(' ')[0],
+    mode: key.split(' ')[1],
+    size,
+  }));
   assert.ok(
     looks.some((look) => look.name?.startsWith('.') === true && look.size > 0),
     `the copy was seen while it was written: ${JSON.stringify(looks)}`,
@@ -484,7 +488,10 @@ test('only regular files whose whole name is a copy’s are removed: a link, a f
   );
   assert.equal(readFileSync(target, 'utf8'), 'mine');
   for (const name of alike) assert.equal(readFileSync(join(dir, name), 'utf8'), 'mine', name);
-  assert.equal(readFileSync(join(dir, 'skydeck.db.schema1-20200102T000000Z', 'inside'), 'utf8'), 'mine');
+  assert.equal(
+    readFileSync(join(dir, 'skydeck.db.schema1-20200102T000000Z', 'inside'), 'utf8'),
+    'mine',
+  );
 });
 
 test('the copy just written stays when the clock is behind the times in the other names; the newest two of those stay with it', (t) => {
