@@ -234,6 +234,14 @@ test("order: the sections' order, a closed block's caption at its place among th
   ]);
 });
 
+test("a caption placed past its section's rows is drawn by no list (web/list.js), so it is offered by none", () => {
+  const list = listOf([
+    section('open', [grouped(S1, 'o1')], [caption('c-past', 2), caption('c-end', 1)]),
+    section('week', [], [caption('c-far', 3)]),
+  ]);
+  assert.deepEqual(newFormDefaults(list, null).groups, ['o1', 'c-end']);
+});
+
 test('a group is exact text: case, a trailing space, NFC and NFD, and names of Object members are groups of their own', () => {
   const names = ['abc', 'ABC', 'x', 'x ', 'é', 'é', '__proto__', 'constructor', 'toString'];
   const list = listOf(

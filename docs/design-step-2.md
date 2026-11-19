@@ -3068,8 +3068,9 @@ nothing; `ls` is unchanged.
   assistive technology `Use the group <name>` with the whole name. It costs the form no height
   (the line keeps the field's), and a form without it is the form as before. A click on it, or
   Enter or Space on it (a button, the stop of Tab right after the field), puts the name into the
-  Group field in place of what is there; it starts nothing, takes no keyboard on a click and
-  stays. Nothing is filled in by itself (the owner's choice of a one-click suggestion over a
+  Group field in place of what is there (the page sets the field's text, which the browser's own
+  undo, Ctrl+Z, then does not take back: the favourites' named limit); it starts nothing, takes
+  no keyboard on a click and stays. Nothing is filled in by itself (the owner's choice of a one-click suggestion over a
   filled-in field: a wrong group would misfile the session, and a related session is the rarer
   case), so without the click the
   field is empty as before; Start sends the field's text, so a group the session has only through

@@ -52,8 +52,10 @@ function sourceRow(list, selected) {
 /**
  * The groups the list shows, each once, in its order: section by section, a closed block's
  * caption (F9: none of its rows is in `rows`) at its place among the rows — right before
- * `rows[at]`, captions at one place in their order. A group is its shown text (`shown`), exact:
- * `abc` and `ABC`, `x` and `x `, NFC and NFD are different groups. A row without one adds none.
+ * `rows[at]`, or after the last row for `rows.length`, captions at one place in their order; one
+ * placed past the rows is drawn by no list (web/list.js), so it is offered by none. A group is
+ * its shown text (`shown`), exact: `abc` and `ABC`, `x` and `x `, NFC and NFD are different
+ * groups. A row without one adds none.
  * @param {ListMessage | null} list
  * @returns {string[]}
  */
@@ -72,7 +74,7 @@ function listedGroups(list) {
     /** @param {number} at */
     const captionsAt = (at) => {
       for (const caption of captions) {
-        if (caption.at === at || (at === section.rows.length && caption.at > at)) {
+        if (caption.at === at) {
           add(caption.group);
         }
       }

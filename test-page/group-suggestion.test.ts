@@ -37,7 +37,7 @@ type Row = Record<string, unknown>;
 const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
 const MIN = 60_000_000_000n;
 const DIRS = ['/home/u/alpha', '/home/u/beta', '/home/u/gamma'];
-const LONG = 'platform-option-cache-misses-per-brand-and-region';
+const LONG = 'image-cache-memory-growth-under-load';
 
 /** The rows of the default world: a title's key, a stored group, none, the stored group again. */
 const ROWS: Row[] = [

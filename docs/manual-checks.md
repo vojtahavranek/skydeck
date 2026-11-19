@@ -2191,8 +2191,8 @@ The check of the new form's favourite flags (follow-up F15; design-step-2.md 12.
 `~/skydeck-try` and one new throwaway session that gets no prompt at all. It saves one favourite of
 its own, `--verbose --model sonnet`, and removes it at its end; a favourite you saved yourself stays
 as it is: the check never clicks the × of a chip whose text is not the check's own. Its step 7
-selects a session of yours only to look at the form's group chip: it starts nothing in that
-group. Steps that type a command are typed in W, a WSL terminal of your own (never a `!` command
+selects one session of yours, with one click on its row, only to look at the form's group chip:
+it starts and changes nothing there, and the step ends on the throwaway session. Steps that type a command are typed in W, a WSL terminal of your own (never a `!` command
 inside Claude Code).
 
 ## W36. Favourite flags in the new form (real claude)
@@ -2219,8 +2219,9 @@ form, while in a session's terminal it reaches Claude Code.
 3. **Start a session with it.** Before any key: only when the right side shows `New session` and
    the caret is in Directory (its first field), press Ctrl+A and type the throwaway folder's full
    path over its text (`/home/<you>/skydeck-try`); type nothing otherwise (press Ctrl+Shift+N
-   again, or click into Directory, and look again). Leave the label and the group empty. Click
-   the chip `--verbose --model sonnet`. Expected: the flags field holds exactly `--verbose --model
+   again, or click into Directory, and look again). Leave the label and the group empty (a chip
+   after the Group field, step 7's, is not clicked here). Click the chip `--verbose --model
+   sonnet`. Expected: the flags field holds exactly `--verbose --model
    sonnet`, and the chip is on; the caret is still in Directory (a click on a chip leaves it where
    it was). Press Enter only when Directory holds exactly that path and the flags field exactly
    that text. **Type no prompt into the new session.** Look that it is the new one: the header
@@ -2239,16 +2240,22 @@ form, while in a session's terminal it reaches Claude Code.
 6. **After a restart.** In W, `skydeck window --restart`. The window says for a few seconds that
    the server is not answering, then shows every session again. Press Ctrl+Shift+N. Expected: the
    same chips in the same order as in step 2, every one off. Press Esc (the form shows).
-7. **The group chip** (follow-up F28). Click the row of a session of yours that is in a group
-   (inside a group's card, or with the group's name on its row; a click only shows it, it resumes
-   nothing), then press Ctrl+Shift+N, and look that the right side shows `New session`. Expected:
-   right after the Group field a chip with that group's name (a name longer than 28 characters
-   ends in `…`), and the Group field itself empty. Point at the chip: its title reads `Use the
-   group <name>`, with the whole name. Click it. Expected: the Group field holds exactly the
-   name, and the caret is still in Directory. Press Esc (the form shows): the form closes, and
-   nothing was started. Then click the row of a session in no group, press Ctrl+Shift+N:
-   no chip. Press Esc (the form shows). With no session of yours in a group, leave this step out
-   and write that down.
+7. **The group chip** (follow-up F28). In the list, find a session of yours that is in a group
+   and whose row shows now: in an open card (its sessions drawn under the caption) or with the
+   group's name on its row. Never take one with a coloured bar at its left (a session that needs
+   you and stays selected for 1.5 seconds is marked seen), and leave a closed card closed (`▸`,
+   the group's name and a number, no session under it: a selected caption gives no chip). Click
+   that row once, on its title (a double click on a session that is not running resumes it),
+   then press Ctrl+Shift+N, and look that the right side shows `New session`. Expected: right
+   after the Group field a chip with that group's name (a name longer than 28 characters ends in
+   `…`), and the Group field itself empty. Point at the chip: its title reads `Use the group
+   <name>`, with the whole name. Click it. Expected: the Group field holds exactly the name, and
+   the caret is still in Directory. Press Esc (the form shows): the form closes, and nothing was
+   started. Then click the throwaway session's row once and look at the header's short id: it is
+   the one of step 3. Press Ctrl+Shift+N, and look that the right side shows `New session`.
+   Expected: no chip after the Group field (the throwaway session is in no group). Press Esc (the
+   form shows). With no session of yours in a group, or none whose row shows without a coloured
+   bar, leave out the first half and write that down.
 8. **The end.** End the throwaway session: click its row in the list (the folder `skydeck-try`,
    the short id of step 3) and look at the header's short id; look that its terminal has the
    keyboard (the key bar says `Focus: terminal`; else Ctrl+Shift+L until it does); type `/exit`
