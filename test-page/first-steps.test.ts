@@ -44,7 +44,7 @@ const KEYS = 'Ctrl+Shift+H shows every key.';
 /** The note as a browser tab shows it (the suite's pages are tabs), line by line. */
 const NOTE_TAB = [HEAD, IN_A_TERMINAL, HERE_TAB, KEYS].join('\n');
 const NOTE_APP = [HEAD, IN_A_TERMINAL, HERE_APP, KEYS].join('\n');
-const RIGHT = "A session's terminal shows here once you start one.";
+const RIGHT = 'The selected session shows here.';
 const NO_MATCH = 'No session matches the filter.';
 
 const MIN = 60_000_000_000n;

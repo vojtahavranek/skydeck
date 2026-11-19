@@ -773,8 +773,8 @@ effect.
   sessions are hidden: the footer's `show`, or `a`, shows them. While there is no session at all
   (none yet, or the last one done or gone), the list says so under Open and names the two ways to
   get one: start `claude` in any terminal (it shows in the list as soon as it starts), or start one
-  in the window with Ctrl+Shift+N (`+ New` in a browser tab); the right side then says `A
-  session's terminal shows here once you start one.`
+  in the window with Ctrl+Shift+N (`+ New` in a browser tab); the right side then says `The
+  selected session shows here.`
 - **A session that is not running**: one click selects it and shows its resume card, with the
   exact command it will run. Enter, a double click or `Resume here` resumes it into the window.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
@@ -1624,8 +1624,8 @@ the list's keys act on none: `l`, F2, `g`, `n`, `p` and `d` say `no session sele
 terminal of the window holds the session, the right side keeps it: the terminal with its header,
 whose controls edit that session as usual (a click on the title, ✎, `Note`, `Done`, `Pull
 requests`), and once its program has ended, the ended bar with Resume and Close. A session
-without a terminal of the window shows nothing on the right then, no card (only the line `A
-session's terminal shows here once you start one.` while the list holds no session at all). `Done` in the header
+without a terminal of the window shows nothing on the right then, no card (only the line `The
+selected session shows here.` while the list holds no session at all). `Done` in the header
 of such a session says `Marked done. Stays under Open while it runs; hidden once it
 stops.` while it runs or starts, else `Marked done: hidden from the list. It comes back on new
 activity.` The new form (Ctrl+Shift+N) starts in its directory while a terminal of the window

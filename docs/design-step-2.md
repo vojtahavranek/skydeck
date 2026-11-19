@@ -2311,13 +2311,14 @@ keeps its own line, `No session matches the filter.` (12.8). It comes and goes w
 no reload: it goes when the first session is listed and comes back when the last one is done or
 gone (the footer then says how many are done). With sessions it is not in the list at all, so
 nothing of a list with sessions moves. The right side, blank before while nothing is selected
-there, then has one line in the same colour above the empty cards, `A session's terminal shows
-here once you start one.` (12.6); it is no card of a session. Whether the list holds no session is
-one rule of the page's (`holdsNoSession`, `web/list-text.js`), read by both. Ruled by the plan
+there, then has one line in the same colour above the empty cards, `The selected session shows
+here.` (12.6): its terminal, its card or its resume card, once there is one; it is no card of a
+session. Whether the list holds no session is one rule of the page's (`holdsNoSession`,
+`web/list-text.js`), read by both. Ruled by the plan
 owner: a session started in a terminal is listed from its start, before its first prompt (design
 7.2: only one that ends before its first prompt has no transcript and drops out), so the note says
-"as soon as it starts"; and the right side's line names no session to pick, since it shows only
-while there is none.
+"as soon as it starts"; and the right side's line names no session to pick (it shows only while
+there is none) and no terminal (a session started in another terminal shows its card there).
 
 The title bar shows the counts, e.g. `● 3 need you · 3 working · 2 idle`, and the window title is
 `(3) skydeck` while 3 sessions need you, so the taskbar shows it.
@@ -3081,7 +3082,7 @@ nothing; `ls` is unchanged.
   used before: no favourite is ever on without a click, and Start sends the field's text, as
   before.
 - **Nothing, while the list holds no session at all** (follow-up F22): one muted line above the
-  empty cards, `A session's terminal shows here once you start one.` (12.1), also while a session the
+  empty cards, `The selected session shows here.` (12.1), also while a session the
   list no longer shows (the last one marked done) is still selected; the New form takes the right
   side, and the line goes while it is shown. With sessions, nothing shown on the right still shows
   nothing (12.9).
