@@ -224,43 +224,49 @@ async function boxes(page: Page): Promise<Box[]> {
 }
 
 /**
- * The card of the form as an image once it has settled: the keyboard in Directory (its focus ring
- * drawn), the mouse moved away, and two shots in a row the same (a loaded machine paints late).
+ * What decides the card's pixels: its markup (the card's `outerHTML`) and its fields' values and
+ * keyboard. With `withoutCompletions` the Group field's list of completions is taken out of a
+ * copy first — its `list` attribute and its datalist, which no pixel shows at rest — so that a
+ * form of a list with groups compares with one of a list without any. Screenshots of two pages are
+ * not compared: their antialiasing differs by a level here and there on a busy machine (review 2).
  */
-async function cardImage(page: Page): Promise<Buffer> {
+async function cardMarkup(
+  page: Page,
+  withoutCompletions = false,
+): Promise<{ html: string; values: string[]; keyboard: string }> {
+  // The form gives Directory the keyboard as it opens: read it once that has happened.
   await page.waitForFunction(
     () => (document.activeElement as HTMLInputElement | null)?.name === 'directory',
   );
-  await page.mouse.move(2, 2);
-  const box = await page.evaluate(() => {
-    const r = document.querySelector('#cards .card-new')?.closest('.card')?.getBoundingClientRect();
-    return r === undefined ? null : { x: r.x, y: r.y, width: r.width, height: r.height };
-  });
-  assert.ok(box !== null, 'the card');
-  const shot = (): Promise<Buffer> =>
-    page.screenshot({ clip: box, animations: 'disabled', caret: 'hide' });
-  let last = await shot();
-  for (let i = 0; i < 20; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    const now = await shot();
-    if (now.equals(last)) return now;
-    last = now;
-  }
-  assert.fail('the card did not settle');
+  return page.evaluate((strip) => {
+    const card = document.querySelector('#cards .card-new')?.closest('.card');
+    if (!(card instanceof HTMLElement)) return { html: '', values: [], keyboard: '' };
+    const copy = card.cloneNode(true) as HTMLElement;
+    if (strip) {
+      copy.querySelector('#card-new-groups')?.remove();
+      copy.querySelector('input[name="group"]')?.removeAttribute('list');
+    }
+    return {
+      html: copy.outerHTML,
+      values: [...card.querySelectorAll('input')].map((input) => `${input.name}=${input.value}`),
+      keyboard: (document.activeElement as HTMLInputElement | null)?.name ?? '',
+    };
+  }, withoutCompletions);
 }
 
 test("the new form's group suggestion", async (t) => {
   const chromium = await browser(t);
 
   await t.test(
-    'no chip without a selection, nor for a selected session in no group; the Group field empty; the card pixel for pixel the card of a list without any group, its Group field where it was',
+    "no chip without a selection, nor for a selected session in no group; the Group field empty; the card is that of a list without any group (the same markup but for the Group field's list of completions, the same values, every box), its Group field where it was",
     async (t) => {
       const plain = await world(t, chromium, {
         rows: ROWS.map(({ id, title, dir }) => ({ id, title, dir })),
       });
       await openForm(plain.page, S3);
       const before = await boxes(plain.page);
-      const image = await cardImage(plain.page);
+      const markup = await cardMarkup(plain.page);
+      assert.equal(markup.keyboard, 'directory');
       assert.equal(await completions(plain.page), null, 'no group: no list of completions');
 
       // Nothing selected: a list with no row (the page selects the first row of a list by
@@ -277,7 +283,7 @@ test("the new form's group suggestion", async (t) => {
       assert.deepEqual(await chips(w.page), [], 'a session in no group');
       assert.equal(await groupValue(w.page), '');
       assert.deepEqual(await boxes(w.page), before, 'every box as before');
-      assert.ok((await cardImage(w.page)).equals(image), 'the card pixel for pixel');
+      assert.deepEqual(await cardMarkup(w.page, true), markup, 'the same markup and values');
       const placed = await w.page.evaluate(() => {
         const group = document.querySelector('#cards input[name="group"]');
         const label = document.querySelector('#cards input[name="label"]');
