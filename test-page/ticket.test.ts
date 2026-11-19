@@ -389,7 +389,7 @@ test("F18: a session's ticket in the header, its dialog and the filter", async (
   );
 
   await t.test(
-    "one height and line 3's places: no ticket, a ticket by a key, a GitHub issue, another address, and a ticket beside three pull requests, at 1280 and 900 px → the same four lines and heights; without a ticket the pull requests' chip starts the line and `+ PR` ends it, `+ ticket` just before it; with one the chip starts the line, whole, and the pull requests give way before it",
+    "one height and line 3's places: no ticket, a ticket by a key, a GitHub issue, another address, and a ticket beside three pull requests, at 1280, 900 and 800 px → the same four lines and heights; without a ticket the pull requests' chip starts the line and `+ PR` ends it, `+ ticket` just before it; with one the chip starts the line, whole, and the pull requests give way before it",
     async (t) => {
       const plain = running(S1, TERM_A, 1, { title: 'a title' });
       const three = running(S1, TERM_A, 1, {
@@ -407,7 +407,9 @@ test("F18: a session's ticket in the header, its dialog and the filter", async (
       ];
       let height: number | null = null;
       let lineHeights: number[] | null = null;
-      for (const width of [1280, 900]) {
+      /** The chip's width for each ticket's name: its content's, whatever the window's width. */
+      const chipWidths = new Map<string, number>();
+      for (const width of [1280, 900, 800]) {
         await s.page.setViewportSize({ width, height: 800 });
         for (const [what, shown, ticket] of variants) {
           s.set({ open: [shown], selected: { [S1]: ticket === null ? {} : { ticket } } });
@@ -457,15 +459,26 @@ test("F18: a session's ticket in the header, its dialog and the filter", async (
           } else {
             assert.equal(first.name, 'header-ticket', `${where}: the chip starts the line`);
             assert.equal(first.cut, false, `${where}: the chip is whole`);
+            const name = ticket['text'] as string;
+            const chipWidth = first.right - first.left;
+            const seen = chipWidths.get(name) ?? chipWidth;
+            chipWidths.set(name, seen);
+            assert.ok(
+              Math.abs(chipWidth - seen) < 0.5,
+              `${where}: the chip keeps its width (${chipWidth} px, ${seen} px before): it does not share the room with the pull requests`,
+            );
             const after = m.parts[1];
             assert.ok(after !== undefined && Math.abs(after.left - 8 - first.right) < 1, where);
           }
           assert.ok(!m.items.includes('cut'), `${where}: no pull request is cut (${m.items})`);
         }
         // Narrow, beside the ticket: the pull requests gave way (some left out), the chip did not.
-        if (width === 900) {
+        if (width !== 1280) {
           const m = await line3(s.page);
-          assert.ok(m.items.includes('out'), `at 900 px: a pull request left out (${m.items})`);
+          assert.ok(
+            m.items.includes('out'),
+            `at ${width} px: a pull request left out (${m.items})`,
+          );
           assert.equal((await chipOf(s.page))?.cut, false);
         }
       }
@@ -515,10 +528,24 @@ test("F18: a session's ticket in the header, its dialog and the filter", async (
       const saved = await w.act(2);
       assert.equal(saved['text'], BY_KEY.url);
       w.holdViews(true);
+      const views = w.sent.filter((m) => m['t'] === 'view').length;
       w.answer(saved, { ok: true });
       await dialogShown(page, false);
       assert.equal(await active(page), '#list', 'the keyboard back on the list');
       assert.equal(await zone(page), 'Focus: list');
+      // C1: until the list that holds the saved ticket has come, `t` and the button wait (a
+      // dialog from the old `selected` would send the old text back).
+      await eventually(
+        async () => w.sent.filter((m) => m['t'] === 'view').length > views,
+        'the page asks for the list (a view)',
+      );
+      await page.keyboard.press('t');
+      await showsText(page, '#key-message', /^the ticket is not here yet; press t again$/);
+      assert.equal((await dialog(page)).shown, false);
+      await page.locator('#cards .header-ticket-button').click();
+      await sleep(300);
+      assert.equal((await dialog(page)).shown, false, 'the button waits too');
+      assert.equal(w.acts().length, 2, 'nothing sent meanwhile');
       w.holdViews(false);
       s.set({ selected: { [S1]: { ticket: BY_KEY }, [S2]: { ticket: ISSUE, ticketKeys: true } } });
       await chipShows(page, 'ABC-123');

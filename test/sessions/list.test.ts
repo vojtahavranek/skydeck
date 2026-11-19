@@ -461,6 +461,27 @@ test('buildRows: a stored ticket that is not a link the window opens (the databa
   }
 });
 
+test('buildRows: a stored value is read as a whole link only: a bare key is never built from the ticketUrl of today, and a user name or a password is none', () => {
+  const ticketUrl = 'https://example.com/browse/{key}';
+  for (const ticket of [
+    'ABC-123',
+    'https://user:pw@example.com/x',
+    'https://example.com@evil.example/',
+  ]) {
+    assert.equal(
+      rowOf(ds({ id: S1 }), { metas: [meta(S1, { ticket })], ticketUrl }).ticket,
+      null,
+      ticket,
+    );
+  }
+  // White space and the case of the scheme and host, as readTicket reads a whole link.
+  assert.deepEqual(
+    rowOf(ds({ id: S1 }), { metas: [meta(S1, { ticket: ' HTTPS://EXAMPLE.COM/x ' })], ticketUrl })
+      .ticket,
+    { url: 'https://example.com/x', text: 'x' },
+  );
+});
+
 test('isListed: a group taken from the title is not something the user attached', () => {
   const expired = ds({
     id: S1,
