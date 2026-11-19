@@ -33,7 +33,8 @@ minutes in the window.
   times, state and pull-request links, never writes to them, and keeps no conversation text.
 - It adds two hooks to Claude Code's settings and, after your yes, one setting in `~/.claude.json`.
 - Its database, `~/.local/share/skydeck/skydeck.db`, keeps each session's launch flags with their
-  values, so a text given to `--system-prompt` or `--append-system-prompt` is in it. The prompt
+  values, so a text given to `--system-prompt` or `--append-system-prompt` is in it, and in the
+  copies of it kept beside it before an upgrade (the newest three). The prompt
   given as `claude`'s argument is not: it waits in the spool (`~/.local/state/skydeck/spool/`) only
   until skydeck reads it in, or up to seven days if that file cannot be read.
 - Its logs (`~/.local/state/skydeck/*.log`) hold no prompt.
