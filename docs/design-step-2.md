@@ -240,6 +240,7 @@ else of step 1 changes; a command not named here behaves exactly as in step 1.
 | `src/cli/commands/` | New: `window` and `serve` (5). `doctor`: the lines of 16.3. `install`: the python3 `info` line (16.1). `uninstall`: stops the server, names the profile folder, `--purge` refuses while keepers live (16.2). | A |
 | `src/cli/commands/` | `resume` and `new`: `--window`; `restore` with `"terminal": "window"` (11.4). `show`: `(in the skydeck window)` (11.4). | C |
 | the interactive list (`src/cli/tui/`) | `R` with `"terminal": "window"` sends `POST /resume` (11.4) and shows the answer's lines the way it shows a tab launch's lines today. Nothing else in the list changes. | C |
+| `src/store/`, `src/sessions/`, `src/cli/` | Follow-up F18, a session's ticket (design 7.1, 12.5): migration 3 (10.2) adds `session_meta.ticket_url`; `readTicket`, `ticketText` and `setTicket`; a list row carries the ticket, which the expiry rule (design 7.2) and the filter (design 7.4) count; the new command `skydeck ticket set` / `clear`; `show` prints the ticket as `ticket:` and in `--json`; `t` in the interactive list. | F18 |
 | `package.json`, `.prettierignore`, `tsconfig.json` | Development dependencies: `playwright`, `ws`, and the `@xterm/*` packages of 16.6 (exact versions); scripts `vendor`, `test:page`, `check` (17.5); `vendor/` added to `.prettierignore`, so that the vendored files are kept byte for byte; `web/tsconfig.json` beside the root one. | A |
 | `.github/workflows/ci.yml` | 17.5: `shellcheck` by name, the jobs `lint`, `unit (i/n)` and `page (i/n)` side by side with Node's `--test-shard`, the page suite on the newest leg only, on a runner pin of its own, the time limits. | A |
 
@@ -1493,6 +1494,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `done`, `undone` | `sessionId` | 12.5, 12.10. |
 | `pr-add`, `pr-rm` | `sessionId`, `url` | 12.5. |
 | `pr-refresh` | `sessionId` | An explicit refresh of that session's pull requests (design 7.3). |
+| `ticket` | `sessionId`, `text` (a link or a key as typed; empty removes the ticket) | 12.5 (follow-up F18): the server reads `text` by design 7.1's rule (`readTicket`) and stores the address, replacing the ticket before; a refusal's words are the result's error, nothing stored. `text` is held to the URL limit, so that a link of 2,048 characters is sent whole. Every page's `list` follows. |
 | `close-terminal` | `term` | Forgets an ended or not-started terminal's last screen (7.8). Refused for a terminal whose program runs (principle 6). |
 | `open-link` | `url` | 9.6. |
 | `dismiss-restore` | `bootId` (the earlier boot the banner offers, a lower-case UUID: the form of `/proc/sys/kernel/random/boot_id`) | 12.7. |
@@ -1500,8 +1502,8 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `favourite-remove` | `text` (a favourite's text as `list.favourites` carries it) | 12.6: the favourite with exactly that text goes; `ok` also when there is none (sent twice, or from two windows), and then nothing is written. |
 
 An unknown kind or field is refused, and so is a string over its limit (in UTF-8 bytes: paths and
-URLs 4,096, `input.data` 64 KiB, a note's `text` and `base` 64 KiB each, other text 1,024; the
-action of 9.6 then opens a URL only up to 2,048 characters), a size that is not a whole number
+URLs 4,096 — a `ticket`'s `text` too —, `input.data` 64 KiB, a note's `text` and `base` 64 KiB
+each, other text 1,024; the action of 9.6 then opens a URL only up to 2,048 characters), a size that is not a whole number
 from 1 to 65,535, a session id that does not pass the session-id rule (a lower-case UUID, 4.3) —
 in a `restore` each of its ids, which must also be distinct, at least one and at most 1,000 — or
 a `dismiss-restore` boot id that is not a lower-case UUID (stage C, plan C 2.2), or a
@@ -1525,7 +1527,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view is filtering and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address, or null), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line and folds nothing), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts`; `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view is filtering and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden`; `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in list order, each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line and folds nothing), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -1887,6 +1889,22 @@ the user looks at the session is seen after it ended, never "finished".
 
 These are skydeck's own observations, not the user's data (design principle 6); a row is written
 the first time one of them is known and never removed.
+
+**Migration 3** (follow-up F18, the ticket of a session, design 7.1 and 12.5):
+
+```sql
+ALTER TABLE session_meta ADD COLUMN ticket_url TEXT;  -- F18: the ticket the user set, its address; NULL for none
+```
+
+The first `ALTER TABLE`: it adds one nullable column and nothing else, so every row keeps its values
+(the column is NULL in each) and a reader of schema 2 still reads `session_meta` (its rows carry one
+column more). The column holds the address as `readTicket` gave it (an `http` or `https` link the
+window may open, a key already filled into `ticketUrl`), never the text as typed: a later change of
+`ticketUrl` moves no stored ticket. Like every migration it runs in one transaction with its `kv`
+update, the version read again inside the write lock. **There is no way back**: from then on an
+older skydeck refuses the database at its open ("written by a newer skydeck", exit 1), a server of an
+older checkout still running stops at its next write (10.1's guard), and nothing removes the column
+(install.md, "There is no way back to an older checkout").
 
 `kv` entries (no migration; `kv` is free text):
 
@@ -2571,10 +2589,11 @@ it), the state pill, the project directory, "opened <time> · last active <age>"
 click copies the whole id), where the title comes from, from follow-up F16 the flags the session
 was started with (below), and buttons Note and Done / Undone. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
-height from stage D on (the next paragraph): **one line for the pull requests** — the window's
-chip (12.3), then the open ones side by side as far as they fit (`repo #n · failing`; a click
-opens one, 9.6), and a button that opens the pull-request dialog (`+ PR` while none is
-attached) — and **one line for the note**: its first line (a click edits it), or a quiet hint
+height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
+F18 the session's ticket first (below), then the window's chip (12.3), then the open ones side by
+side as far as they fit (`repo #n · failing`; a click opens one, 9.6), and at the line's right end
+the ticket's button (`+ ticket`, `Ticket` while one is set) and a button that opens the
+pull-request dialog (`+ PR` while none is attached) — and **one line for the note**: its first line (a click edits it), or a quiet hint
 while there is none. Both lines are there for every session, with and without pull requests or a
 note. What does not fit lies one click away in a dialog over the page, which never changes the
 terminal's size: the pull-request dialog lists each attached pull request on a line of its own
@@ -2659,7 +2678,45 @@ host, a path or a query: the key holds no `/`, `?`, `#`, `@`, `:`, `%` or white 
 parser, not the text, decides that `{key}` stands after the host (16.4). The address reaches the
 page as a string of `list` and is shown only as text; it never becomes markup. skydeck reads nothing
 from the ticket system: no API, no login. `skydeck show` prints the address as `ticket:` after
-`group:` (its `--json` is unchanged).
+`group:` while the session has no ticket of its own (below; its `--json` holds neither).
+
+**The ticket of a session** (asked for by the owner on 2026-11-18 and 19, follow-up F18, step 1;
+the details ruled by the lead). A session has at most one ticket, which the user sets: a JIRA
+issue, a GitHub issue, a ticket of any tracker — whatever has an `http` or `https` address. It is
+set from one text (design 7.1): a whole link, taken as it is when the window may open it (9.6), at
+most 2,048 characters, with no control character and no user name or password; or a bare key
+(the key rule above), which becomes `ticketUrl` with the key filled in by the rule above — the
+address is what is stored, so a later `ticketUrl` moves no stored ticket —, refused without a
+`ticketUrl` with what to do (`a ticket key needs ticketUrl in config.json: set ticketUrl, or give
+the whole link`); an empty text removes it; anything else is refused with its reason (`a ticket
+link must start with http:// or https://`, `a ticket must be one line`, `a ticket cannot contain
+control characters`, `a ticket link is at most 2,048 characters`, `a ticket link cannot hold a user
+name or a password`, `the window does not open this link: …`, `not a ticket: give an http or https
+link, or a key like ABC-123`). Setting one replaces the one before. It is stored (10.2, migration 3).
+
+Its **chip** starts the header's third line, before the pull requests: a short name and ` ↗`, in
+the accent colour with the name underlined, as the group chip's link; the whole address is its
+tooltip, and a click on it that selected no text opens it as the group chip's link does (`act
+open-link`). The name is worked out from the address by one function on the server and sent with
+it: the key when the address is the configured `ticketUrl` with a key filled in; else `KEY` for a
+path `/browse/KEY`; else `repo #n` for `github.com/owner/repo/issues/n` or `/pull/n`; else the last
+part of the path that is not empty, decoded, at most 24 characters with `…`; else the host. It is
+only ever text (sanitised by the server and again by the page). A session without a ticket shows
+nothing there, and what the line shows today keeps its place; when the line is short of room the
+open pull requests give way, whole, before the chip loses a pixel (it takes its room first; only a
+line too narrow for it and the two buttons cuts it, with an ellipsis). The name is one part of the
+chip, so that a later status can stand beside it (not built: step 2 of the request). The button
+`+ ticket` (`Ticket` while one is set) stands just before the pull-request button, which keeps its
+place at the line's end; it and `t` in the list (12.9) open the ticket's dialog: one field holding
+the ticket's address (empty while there is none), its placeholder `a link`, and `, or a key like
+ABC-123` only while `ticketUrl` is configured (`list.selected.ticketKeys`); Enter saves, Esc and
+Cancel close, a refusal shows the server's words under the field and keeps the text, as in the
+other dialogs. The group chip and its link are unchanged: the two stand side by side, the group's
+link worked out from the group as above, the ticket the one the user set. The filter (12.8) finds a
+session by its ticket's name and address; `skydeck show` prints the ticket as `ticket:` (in place
+of the group's link) and in its `--json`; `skydeck ticket set <ref> <link-or-key>` and `skydeck
+ticket clear <ref>` set and remove it, and `t` in the interactive list (design 7.4). Nothing about
+a ticket is fetched, nothing read from a transcript, and the list's rows do not show it.
 
 ### 12.6 The right side
 
@@ -2851,8 +2908,8 @@ written without quote marks (`> restore`).
 
 ### 12.8 Search
 
-- `/` filters the list: title, group, note, pull-request repository and number, directory, short
-  id; several words must all match; while a filter is set it includes done sessions, unfolds
+- `/` filters the list: title, group, note, pull-request repository and number, the ticket (its
+  name and address, F18), directory, short id; several words must all match; while a filter is set it includes done sessions, unfolds
   every section and flattens every block (12.2: flat rows, each with its group, no card). A filter that leaves no row says so: `No session matches the filter.`
   (ruled by the plan owner, plan task 27).
 - Chips: Running, Open PR, Has note, Show done.
@@ -2866,9 +2923,9 @@ One rule matches for the filter and for the switcher:
 
 - **Words.** A search text is split at white space (spaces, tabs, line breaks, the no-break
   space) into words, each lower-cased. A row matches when every word, in any order, is found in
-  one of its fields — the title, the group, the note (sanitised line by line), the directory, and
-  of each attached pull request `owner/repo`, its number and `owner/repo#number` (design 7.4's
-  fields) — or, for a word of at least 4 characters, when the session's id starts with it (the
+  one of its fields — the title, the group, the note (sanitised line by line), the directory, of
+  each attached pull request `owner/repo`, its number and `owner/repo#number`, and the ticket's
+  name and address (F18) (design 7.4's fields) — or, for a word of at least 4 characters, when the session's id starts with it (the
   short id, and the whole id). Four characters, so that `fix 2` does not match nearly every
   session through the hex digits of its id. A word is never found across two fields. (Stage A had
   design 7.4's filter: one text, the fields of 7.4.)
@@ -3007,9 +3064,9 @@ Two focus zones; the terminal is the default. Clicking a running row focuses its
 clicking a row that is not running focuses the list (so Enter resumes). Ctrl+Shift+L toggles; Esc
 never leaves the terminal — while xterm.js has the keyboard; Esc in the page's own new form closes
 the form (12.6). In the list: as in step 1's interactive list, ↑ ↓ `j` `k` move, `/`
-filters, `l` label, `g` group, `n` note, `p` attach a pull request, `d` done, `a` show done; new in
-the window, Home, End, PgUp, PgDn, ← → (fold, unfold), F2 (label) and Esc (clear the filter, then
-back to the terminal). `/` gives the keyboard to the filter's field, where every key but Enter and
+filters, `l` label, `g` group, `n` note, `t` ticket (follow-up F18, 12.5), `p` attach a pull
+request, `d` done, `a` show done; new in the window, Home, End, PgUp, PgDn, ← → (fold, unfold), F2
+(label) and Esc (clear the filter, then back to the terminal). `/` gives the keyboard to the filter's field, where every key but Enter and
 Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also
 clears the field), so from the field the terminal is one more Esc away (ruled by the plan owner,
 plan task 27). Folding Earlier (← or a click on its header) with the selection inside it first
@@ -3041,8 +3098,8 @@ that answers the view comes, the list's keys move from where the page last drew 
 right after ←, the card still drawn open counts as its caption (ruling 2); right after →, Enter or
 the click — or a slot chord, Ctrl+Shift+J or a notification onto a closed block's FIRST session —,
 that closed caption counts as the selected line, ↑ ↓ step from it, and ← closes the block again and
-selects its caption, never folding a section (review 2 of F9). `d`, `l` and F2, `g`, `n` and `p` do
-nothing on a selected caption: no session is selected, and the key bar says `no session selected`. The pane then shows a small card of the group — its name, `3 sessions`, ` · 1 needs
+selects its caption, never folding a section (review 2 of F9). `d`, `l` and F2, `g`, `n`, `t` and
+`p` do nothing on a selected caption: no session is selected, and the key bar says `no session selected`. The pane then shows a small card of the group — its name, `3 sessions`, ` · 1 needs
 you` in the needs-you colour while any of its sessions needs you, and `→ or Enter opens the group`
 —, no terminal, and nothing on it has the keyboard; the key help's line reads `fold or unfold
 Earlier; close or open a group`. The mouse: a click on a caption line opens or closes its block
@@ -3074,7 +3131,7 @@ session without a terminal of the window shows nothing, never its card. The head
 a session takes its toast from the row, since it is in no section: `Marked done. Stays under Open
 while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
 the lead on 2026-11-15). The list keys (`l`, F2,
-`g`, `n`, `p`, `d`) act only on a row the list shows: on a hidden selection, and on a selected
+`g`, `n`, `t`, `p`, `d`) act only on a row the list shows: on a hidden selection, and on a selected
 caption, they say `no session selected` and send nothing. A named limit: when Ctrl+Tab, a slot chord or a click on its
 notification selects a session the list does not show that runs again in another terminal while an
 ended terminal of the window still names it, the right side first shows that ended terminal as
@@ -4157,6 +4214,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W34 | **Real claude**: the title bar's theme switch in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme "Auto (match terminal)" (looked at in `/theme`, never in its files), a new throwaway session started in each forced state picks the matching one, and whether one already running changes its theme at a switch is written down (not documented). At the end the switch, Windows' mode and Claude Code's theme are as they were. | F13 | 12.1, 7.2, 9.3 |
 | W35 | **Real claude**, a throwaway session started from the New form with `--model` and one more flag: the header's second line ends in those flags, in the short id's grey, after the short id, nothing else of the line moved; its tooltip says `Started with: …`; in a narrower window they are cut first; once it ended and was closed, the resume card's "Will run" has them and the header not; resumed, the header shows them again. | F16 | 12.5 |
 | W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (the header's flags, F16, and `skydeck show`); removed with ×, `Undo` puts it back at its place. It types no prompt and touches no real session. | F15 | 12.6, 10.2 |
+| W37 | A ticket on a throwaway session (follow-up F18): set by a whole link (`https://example.com/browse/TRY-1`, a host that opens nothing private), the header's third line starts with its chip `TRY-1 ↗`, its tooltip the address, a click opens it where links open (W12); set by a key only while `ticketUrl` is configured (else that step is skipped); removed with an empty text, the chip gone and `+ ticket` back; `skydeck show` prints `ticket:` while one is set. Every step checks the header's short id or the dialog's heading first; at the end the session has no ticket. | F18 | 12.5, 10.2 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

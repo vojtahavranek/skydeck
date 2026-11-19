@@ -369,6 +369,16 @@ Marks are shown next to the state.
   file (`editor exited 1; your text is in <path>`).
   `skydeck note <ref> --set <text>` sets it without an editor (and removes such a kept file), and an
   empty note is no note.
+- **Ticket** (follow-up F18). At most one per session, optional: an `http` or `https` address,
+  stored. It is set from one text: a whole link is taken as it is, when the window may open it
+  (design-step-2.md 9.6), it is at most 2,048 characters and holds no control character and no user
+  name or password; a bare key (letters, digits, `.`, `_`, `-`, starting with a letter or a digit)
+  is `ticketUrl` with the key filled in (design-step-2.md 16.4), and that address is what is stored,
+  so a later change of `ticketUrl` does not move it — without a `ticketUrl` a key is refused with
+  what to do; an empty text removes it. Setting one replaces the one before. Its short name (the
+  key when the address fits `ticketUrl`, `KEY` for a path `/browse/KEY`, `repo #n` for a GitHub
+  issue or pull request, else the last part of the path, else the host) is worked out from the
+  address, never stored. `skydeck ticket set|clear`, `t` in the interactive list, and the window.
 - **Done.** Hides the session. It never stops a process. A done session is shown again when it
   has activity after the done time: `user` input (5.6) in its transcript, or a `start` event with
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the
@@ -381,8 +391,8 @@ Marks are shown next to the state.
 
 Every session known from events or transcripts, except: sessions whose transcript has an
 `entrypoint` other than `cli`; sessions hidden by done (shown with `--all`); and sessions that
-are `expired` and have nothing the user attached: no label, no group set by the user, no note and
-no attached pull request (a group that `groupPattern` takes from the title does not count, or an
+are `expired` and have nothing the user attached: no label, no group set by the user, no note, no
+attached pull request and no ticket (a group that `groupPattern` takes from the title does not count, or an
 expired session with a ticket key in its title would stay in the list for ever). A session that is not running and
 has no transcript is never listed, not even with `--all`: there is nothing to resume, and one that
 never received a prompt has no transcript (14).
@@ -449,9 +459,10 @@ otherwise it behaves like `skydeck ls`.
   So do the label and the group, although setting them refuses such characters (7.1): the
   database can be changed by other means. A note is free multi-line text: a row only shows that there is one, and whoever prints a note sanitises it. `show` and the detail view of the list print it the same way, by one function: split at every line break (a lone carriage return too), each line sanitised on its own and indented by two spaces, empty lines at the start and end dropped. They also print a state detail the same way: in brackets after the state, and no brackets when it is empty once sanitised.
 
-Keys: arrows or `j`/`k` move; `Enter` detail; `l` label; `g` group; `n` note; `d` done or undo;
-`p` pull requests; `R` resume; `/` filter; `a` show all; `r` refresh; `q` quit. The filter
-matches title, group, note, pull-request repository and number, and project directory.
+Keys: arrows or `j`/`k` move; `Enter` detail; `l` label; `g` group; `n` note; `t` ticket (F18); `d`
+done or undo; `p` pull requests; `R` resume; `/` filter; `a` show all; `r` refresh; `q` quit. The
+filter matches title, group, note, pull-request repository and number, project directory, and the
+ticket's short name and address.
 
 The interactive list is built as two pure functions — `reduce(model, key)` and
 `render(model, size)` — with a thin terminal wrapper, so it is tested without a terminal.
@@ -462,9 +473,10 @@ The interactive list is built as two pure functions — `reduce(model, key)` and
 |---|---|
 | `skydeck` | Interactive list. |
 | `skydeck ls [--all] [--json] [--refresh]` | Print the list. `--refresh` first fetches the pull requests of the sessions it prints that are not merged or closed (7.3). |
-| `skydeck show <ref> [--json] [--refresh]` | One session: state, marks, project directory, the ticket address when `ticketUrl` gives one (design-step-2.md 12.5; not in `--json`), launch command (and the flags in it that skydeck does not know, which a resume does not pass on), links, note, whether it is done and since when, pull requests, holders. `--refresh` as for `ls`, for this session's pull requests. |
+| `skydeck show <ref> [--json] [--refresh]` | One session: state, marks, project directory, its `ticket:` — the ticket set on it (7.1), else the address `ticketUrl` gives its group (design-step-2.md 12.5; that one not in `--json`) —, launch command (and the flags in it that skydeck does not know, which a resume does not pass on), links, note, whether it is done and since when, pull requests, holders. `--refresh` as for `ls`, for this session's pull requests. |
 | `skydeck label <ref> [<text>]` / `group <ref> [<text>]` | Set; without text (or with an empty text), clear. The text is all the arguments after `<ref>`, joined by one space. |
 | `skydeck note <ref> [--set <text>]` | Edit in `$VISUAL` / `$EDITOR` (7.1), or set directly. |
+| `skydeck ticket set <ref> <link-or-key>` / `ticket clear <ref>` | Set the session's ticket from a link or a key, replacing the one before; remove it (7.1; F18). An empty text removes it too. |
 | `skydeck done <ref>` / `undone <ref>` | Hide / show. |
 | `skydeck pr add <ref> <url>` / `pr rm <ref> <url>` / `pr refresh` | Attach, detach, fetch status. |
 | `skydeck new [--label <text>] [--group <text>] [--here \| --tab \| --window] [-- <claude flags>]` | Start a new session in the current directory (7.7); `--window` in the skydeck window (design-step-2.md 11.4). |
@@ -502,6 +514,7 @@ show it sanitised, 7.4), so that it can be used as a path; the characters a term
 are written as `\uXXXX` escapes like in any other string of the JSON. Sessions are in list order. A pull request's `state`,
 `review`, `checks` and `okAt` are null until it has been fetched. `show --json` prints one
 session object with `doneAt` (the time it was marked done while it is done, else null), `note`,
+`ticket` (`{ "url", "text" }`: the ticket set on it and its short name, 7.1; else null),
 `launch` (argument list or null), `unknownFlags` (the names of the flags in `launch` that skydeck
 does not know; `[]` without a launch command), `links` and `holders` added; each holder is
 `{ "pid", "bootId", "procStart", "since", "scripted" }`, where `scripted` (`true` or `false`) says
@@ -975,6 +988,11 @@ CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 `kind` in `events` can also be `scripted` or `scripted-end` (5.3); such a row has `detail` `''`
 and no `argv` or `name`. The column is free text, so this needs no migration.
+
+Step 2 adds migration 2 (the table `attention`) and migration 3 (follow-up F18: the nullable column
+`ticket_url` of `session_meta`, the ticket of 7.1, by the first `ALTER TABLE`); their SQL is in
+design-step-2.md 10.2. A migration is never undone: a database migrated by a newer skydeck is refused
+by an older one at its open ("written by a newer skydeck"), and there is no way back (install.md).
 
 ## 10. Technology
 

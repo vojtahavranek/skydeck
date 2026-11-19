@@ -14,7 +14,8 @@ F8), at "Updating skydeck"; W33 checks install's offer to turn off Claude Code's
 (follow-up F11), at "Claude Code's ← shortcut"; W34 checks the title bar's theme switch (follow-up
 F13), at "The window's theme"; W35 checks the flags a session was started with in the header
 (follow-up F16), at "The flags a session was started with"; W36 checks the new form's favourite
-flags (follow-up F15), at "Favourite flags".
+flags (follow-up F15), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
+session's ticket".
 
 Setup:
 
@@ -2250,3 +2251,65 @@ expected; the `launch:` line of step 4; anything that differs, and where.
 
 Not tried before this check was written: all of it, in Edge. The tests run the form in headless
 Chromium against a stand-in server, and the server on test databases; they never start `claude`.
+
+## A session's ticket
+
+The check of a session's ticket (follow-up F18; design-step-2.md 12.5; [install.md](install.md),
+"The ticket of a session"): W37, in your window, on the throwaway session of "The window (step 2,
+stage A)" and nothing else. It opens only `https://example.com/browse/TRY-1`, a page of
+`example.com` (a domain kept for examples: nothing of yours is on it), sets a ticket only on the
+throwaway session and removes it at its end. It changes no file and no setting of yours. Commands
+are typed in W, a WSL terminal of your own (never a `!` command inside Claude Code).
+
+## W37. A ticket on the throwaway session
+
+Setup: skydeck updated to a commit that has follow-up F18 (`skydeck update`, W32; it upgrades the
+database once, [install.md](install.md), "There is no way back to an older checkout"); the window
+open, with the throwaway session in it. Click the throwaway session's row in the list, then look at
+the header's short id: it must be the throwaway session's (`skydeck ls` in W prints the short ids
+as the last column); write it down. **Before every key and every click below, look at it again.**
+The header's third line starts with `no pull request` (or the pull requests' chip) and ends in
+`+ ticket` and `+ PR`; when it starts with a ticket's chip instead (an earlier run left one), go on:
+step 6 removes it. **Type text only into an open dialog**: after `t` or a click on `+ ticket` /
+`Ticket`, look that a dialog is there whose heading reads `Ticket — <the throwaway session's
+title>` and whose field has the keyboard (the cursor blinks in it); when the key bar says `the
+ticket is not here yet; press t again` instead, no dialog opened: type nothing, and press `t`
+again. Typed into the list, `k` would move to a real session and `d` mark it done.
+
+1. **Set by a link.** Look that the key bar says `Focus: list` (else press Ctrl+Shift+L until it
+   does). Press `t`. Expected: the dialog `Ticket — <title>`, its field empty, its hint `a link`,
+   or `a link, or a key like ABC-123` when your `config.json` sets `ticketUrl`: write down which.
+   Only while that dialog shows, type `https://example.com/browse/TRY-1` and press Enter.
+   Expected: the dialog closes; the header's third line starts with `TRY-1 ↗` (underlined, in the
+   links' colour), the rest of the line as before, and the button before `+ PR` reads `Ticket`.
+   Point at `TRY-1 ↗`: its tooltip is `https://example.com/browse/TRY-1`.
+2. **Open it.** Click `TRY-1 ↗`. Expected: your default browser (or Edge, with `window.links`
+   `"edge"`) opens `https://example.com/browse/TRY-1`: a page of `example.com`, or one that says
+   it was not found. Write down which browser opened it. Close that page and come back to the
+   window. The group chip, when the session has a group, is as it was.
+3. **`skydeck show`.** In W, `skydeck show <short id>`. Expected: right after the `group:` line, a
+   line that starts with `ticket:` and ends with `https://example.com/browse/TRY-1`.
+4. **Set by a key**, only when the hint of step 1 read `a link, or a key like ABC-123`; otherwise
+   skip this step. Look at the header's short id, then click `Ticket`. Expected: the dialog, its
+   field holding `https://example.com/browse/TRY-1`. Only while it shows, press Ctrl+A, type
+   `TRY-2` and press Enter. Expected: the chip reads `TRY-2 ↗`, and its tooltip is your
+   `ticketUrl` with `TRY-2` in place of `{key}`. **Do not click it** (it would open your ticket
+   system). Then, only after looking that the dialog shows again (click `Ticket`), press Ctrl+A,
+   type `https://example.com/browse/TRY-1` and press Enter: the chip reads `TRY-1 ↗` again.
+5. **A refusal.** Click `Ticket` and look that the dialog shows. Press Ctrl+A, type
+   `javascript:alert(1)` and press Enter. Expected: the dialog stays, its field still holds
+   `javascript:alert(1)`, and under it the line `a ticket link must start with http:// or
+   https://`. Press Esc while the dialog shows. Expected: it closes; the chip still reads
+   `TRY-1 ↗`.
+6. **Remove it.** Click `Ticket` and look that the dialog shows. Press
+   Ctrl+A, then Delete, then Enter. Expected: the dialog closes, the chip is gone, the button
+   reads `+ ticket`, and the third line shows what it showed in the setup. In W, `skydeck show
+   <short id>` prints no `ticket:` line (but, when the session's group holds a ticket key and
+   `ticketUrl` is set, the group's link, as before this check).
+
+Write down: the hint of step 1; for each step whether it went as expected; the browser of step 2;
+anything that differs, and where. At the end the throwaway session has no ticket.
+
+Not tried before this check was written: all of it, in Edge. The tests run the header and the
+dialog in headless Chromium against a stand-in server and a test server whose links go to a stub;
+they never open a browser and never start `claude`.

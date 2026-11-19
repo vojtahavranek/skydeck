@@ -454,7 +454,7 @@ ignored.
 | `restoreStartTimeoutSeconds` | `120` | How long `restore` waits for the sessions of a batch to report their start. |
 | `claudeHome` | `null` | Claude Code's folder. `null` means `$CLAUDE_CONFIG_DIR`, else `~/.claude`. Must be an absolute path (no `~`). |
 | `claudeCommand` | `"claude"` | The program `resume`, `new` and `restore` (and `R` in the list) run. One word: a name on `PATH` or an absolute path. It is not split into arguments. The window runs it too. |
-| `ticketUrl` | `null` | A ticket's address with `{key}` where the ticket key goes, for Jira `"https://example.atlassian.net/browse/{key}"`. The group chip of the window's header then opens the session's ticket, and `skydeck show` prints its address as a `ticket:` line. `null`: no link. What it accepts, and its line when it is refused: "The ticket link", in "The window (step 2)". |
+| `ticketUrl` | `null` | A ticket's address with `{key}` where the ticket key goes, for Jira `"https://example.atlassian.net/browse/{key}"`. The group chip of the window's header then opens the session's ticket, and `skydeck show` prints its address as a `ticket:` line (while the session has no ticket of its own); a bare key then also sets a session's ticket ("The ticket of a session"). `null`: no link. What it accepts, and its line when it is refused: "The ticket link", in "The window (step 2)". |
 | `window` | see the window's section | The window's keys `window.port`, `window.edge`, `window.profileDir` and `window.keepAlive`: "The window (step 2)", "The `window` keys". |
 
 The numbers must be positive integers. An example that uses WezTerm tabs and a lower-case ticket key:
@@ -783,9 +783,9 @@ effect.
 
 #### Editing a session (stage D)
 
-The label, group, note, done mark and pull requests of the selected session are edited in the
-window, by step 1's rules: what `skydeck label`, `group`, `note`, `done` and `pr add` refuse is
-refused with the same message, and every open window shows the change within a second. Each edit
+The label, group, note, ticket, done mark and pull requests of the selected session are edited in
+the window, by step 1's rules: what `skydeck label`, `group`, `note`, `ticket set`, `done` and `pr
+add` refuse is refused with the same message, and every open window shows the change within a second. Each edit
 has a key in the list (while the list has the keyboard: `Focus: list`) and a control in the
 header:
 
@@ -794,6 +794,7 @@ header:
 | the label | `l` or F2 | a click on the title |
 | the group | `g` | ✎ beside the group chip, or `+ group` while there is none |
 | the note | `n` | `Note`, or a click on the note's line |
+| the ticket | `t` | `Ticket` (`+ ticket` while none is set), beside `Pull requests` |
 | the pull requests | `p` | `Pull requests` (`+ PR` while none is attached) |
 | done, undone | `d` | `Done` (`Undone` for a session marked done) |
 
@@ -815,18 +816,22 @@ is one line, cut with an ellipsis when it is long:
    a model you change later with `/model`. They are cut at 40 characters, all of them in their
    tooltip (`Started with: …`), they are the first thing cut when the line is short of room, and
    while the resume card shows its command ("Will run") they are left out of the header;
-3. the pull requests: the window's chip (below), the open ones side by side as far as they fit
-   (`acme/web #7 · failing`; a click opens one in your default browser), and `Pull requests`;
-   while none is attached, `no pull request` and `+ PR`;
+3. the session's ticket, when you set one ("The ticket of a session" below): its name with ` ↗`,
+   such as `ABC-123 ↗` or `repo #5 ↗`, its address as its tooltip, a click opens it; then the pull
+   requests: the window's chip (below), the open ones side by side as far as they fit
+   (`acme/web #7 · failing`; a click opens one in your default browser), and at the right end
+   `+ ticket` (`Ticket` while one is set) and `Pull requests`; while none is attached, `no pull
+   request` and `+ PR`. When the line is short of room the pull requests give way before the
+   ticket;
 4. the note's first line, with ` …` after it when there is more, or `no note`.
 
-The title, the group chip, a pull request and the note's line act on a click that selected no
-text: a drag over them selects their text to copy, as anywhere in the header. A click on a button
+The title, the group chip, the ticket, a pull request and the note's line act on a click that
+selected no text: a drag over them selects their text to copy, as anywhere in the header. A click on a button
 leaves the keyboard where it was.
 
 **The dialogs** lie over the page, which takes no click and no key while one is open. Their
-heading names the session (`Label — <title>`, `Group — …`, `Note — …`, `Pull requests — …`):
-look at it before you save.
+heading names the session (`Label — <title>`, `Group — …`, `Note — …`, `Ticket — …`, `Pull
+requests — …`): look at it before you save.
 
 - The label's field holds your label; it is empty, with the title as its hint, while you have set
   none. An empty label clears yours. The label is also the session's name for Claude
@@ -835,12 +840,16 @@ look at it before you save.
   hint, while the group comes from the title. An empty group gives the session the ticket key at
   the start of its title again.
 - The note's box holds the whole note. An empty note removes it.
+- The ticket's field holds the ticket's address, empty while there is none; its hint is `a link`,
+  and `a link, or a key like ABC-123` while `ticketUrl` is set. An empty field removes the ticket.
 - **Enter** saves (`Save`); in the note Enter is a line break and **Ctrl+Enter** saves. A refused
   save keeps the dialog open with your text and says why under the field: for a label that
   `skydeck label` refuses, the same line; for a note that another window or `skydeck note`
   changed since the dialog opened, `the note was changed elsewhere while you edited it; your text
-  is still in the box`; for a session started in the window that has not started yet, `this
-  session has not started yet; edit it once it runs`.
+  is still in the box`; for a ticket that is no link and no key, or a key without `ticketUrl`,
+  the words `skydeck ticket set` prints ("The ticket of a session" below); for a session started
+  in the window that has not started yet, `this session has not started yet; edit it once it
+  runs`.
 - **Esc** or `Cancel` closes without saving. A note whose text you changed takes Esc twice: the
   first says `Esc again discards your text`.
 - While a dialog is open, every window chord but Ctrl+Shift+H says `close the edit first (Esc)`
@@ -848,13 +857,13 @@ look at it before you save.
   you have changed nothing, and say `save or cancel the edit first` once you have. Closing the
   window, or Edge's own reload, with changed text asks first (Edge's own prompt). Ctrl+V and
   Ctrl+Shift+V paste into the field.
-- Right after this window saved a label, group or note of a session, its dialogs wait for the
-  list that holds the new text (within a second). Until it has come, whichever of the three was
+- Right after this window saved a label, group, note or ticket of a session, its dialogs wait for
+  the list that holds the new text (within a second). Until it has come, whichever of the four was
   saved, each of these on that session only says so: `l` `the label is not here yet; press l
   again`, F2 `the label is not here yet; press F2 again`, `g` `the group is not here yet; press g
-  again`, `n` `the note is not here yet; press n again`; the header's controls say the same with
-  the list's key (`press l again`, …). `p` never waits. Right after you select a session, `n`
-  can also say `the note is not here yet; press n again`. A refusal that comes after you closed
+  again`, `n` `the note is not here yet; press n again`, `t` `the ticket is not here yet; press t
+  again`; the header's controls say the same with the list's key (`press l again`, …). `p` never
+  waits. Right after you select a session, `n` and `t` can also say so. A refusal that comes after you closed
   its dialog shows in the toast as `not saved: <why>`.
 
 **Done.** `d` or `Done` marks the session done and shows a toast with `Undo` for 5 seconds:
@@ -938,12 +947,46 @@ skydeck: /home/you/.config/skydeck/config.json: "ticketUrl" must be null or an h
 
 The window's server reads the file when it starts: after you set or change `ticketUrl`, run
 `skydeck window --restart`. `skydeck show <ref>` reads it at once and prints the address after the
-group (`--json` is unchanged):
+group (`--json` does not hold it), while the session has no ticket of its own (next):
 
 ```
 group:     ABC-123
 ticket:    https://example.atlassian.net/browse/ABC-123
 ```
+
+#### The ticket of a session
+
+Beside the group chip's link, a session can have **one ticket of its own**, which you set: a Jira
+issue, a GitHub issue, any tracker's ticket with an `http` or `https` address. It stands beside the
+group chip's link and changes nothing of it: the group chip still opens the ticket of its group's
+key, and the ticket's chip, first on the header's third line, opens the one you set. Set it with
+`t` in the list or `+ ticket` in the header (`Ticket` once one is set), with `skydeck ticket set
+<ref> <link-or-key>`, or with `t` in the interactive list; one text, either
+
+- a whole link, such as `https://github.com/owner/repo/issues/5`: it is taken as it is (as the
+  window would open it: the host lower-cased, a default port dropped), when the window may open
+  it — `http` or `https`, at most 2,048 characters, no control character, no user name or
+  password —; or
+- a key, such as `ABC-123`: it needs `ticketUrl` ("The ticket link" above), which turns it into
+  its link. **The address is what is stored**: a later change of `ticketUrl` does not move it.
+  Without `ticketUrl` a key is refused with `a ticket key needs ticketUrl in config.json: set
+  ticketUrl, or give the whole link`.
+
+An empty text removes the ticket (`skydeck ticket clear <ref>` too), and setting one replaces the
+one before. Anything else is refused with the reason: `a ticket link must start with http:// or
+https://`, `a ticket must be one line`, `a ticket cannot contain control characters`, `a ticket
+link is at most 2,048 characters`, `a ticket link cannot hold a user name or a password`, `the
+window does not open this link: …`, `not a ticket: give an http or https link, or a key like
+ABC-123`.
+
+The chip shows a short name worked out from the address: the key when the address is your
+`ticketUrl` with a key filled in, `KEY` for an address ending in `/browse/KEY`, `repo #5` for a
+GitHub issue or pull request, else the last part of the address's path (at most 24 characters),
+else its host. Its tooltip is the whole address; a click that selected no text opens it in your
+default browser (`window.links`). The filter and the quick switcher find a session by its ticket's
+name and address. `skydeck show <ref>` prints it as `ticket:` (in place of the group's link) and
+in `--json` as `"ticket": { "url": …, "text": … }`. skydeck reads nothing from the ticket's system;
+the list's rows do not show it. The ticket is kept in the database (migration 3, below).
 
 #### Which sessions need you (stage B)
 
@@ -1186,8 +1229,8 @@ running server and asks it nothing; `--json` is unchanged.
 
 #### Search, the chips and blocks (stage E)
 
-**The filter** is the field at the top of the list, `Filter: title, group, note, PR, directory,
-short id   /` while it is empty. A click into it, or `/` while the list has the keyboard
+**The filter** is the field at the top of the list, `Filter: title, group, note, PR, ticket,
+directory, short id   /` while it is empty. A click into it, or `/` while the list has the keyboard
 (`Focus: list`), gives it the keyboard: its border takes the selection's colour and the caret
 blinks in it. What you type there is text, and the list follows each keystroke; but Enter ends
 the entry and gives the keyboard back to the list, Esc does the same and clears the field, Tab
@@ -1304,7 +1347,7 @@ window.
 
 **Ctrl+Shift+P**, or `Switch…` at the right of the title bar (the key bar's hint is `Ctrl+Shift+P
 switch`), opens the quick switcher over the window: a field with the keyboard in it, `Switch to a
-session…  (title, group, note, PR, directory, short id)` while it is empty, and under it every
+session…  (title, group, note, PR, ticket, directory, short id)` while it is empty, and under it every
 session the list lists with done ones shown — also those that the filter, the chips, the folded
 Earlier or a closed block leave out of the list — under those of four headings that have a
 session: `Needs you` (in Ctrl+Shift+J's order), `Open` (in Open's order, the slots first), `Not
@@ -1880,7 +1923,11 @@ and its `doctor` shows the same as a `problem` line of its report (`database …
 (the database … was written by a newer skydeck …); the checks that need it are skipped`).
 
 From the update that brings stage B's database (schema version 2) on, this is what every checkout
-from before it says. The way back is forward: its `update skydeck` is `skydeck update` in a
+from before it says. The update that brings a session's ticket (follow-up F18) upgrades it once
+more, to schema version 3: it adds one empty column for the ticket to the table of labels, groups
+and notes, and keeps every label, group, note, done mark and pull request as it was; from then on
+every checkout from before it refuses the database the same way (`schema version 3, this one knows
+2`), and nothing takes the column away again. The way back is forward: its `update skydeck` is `skydeck update` in a
 checkout that has the command (from the update that brings it on), and `git pull` in an older one
 (which prints the same `update skydeck` and has no `skydeck update`). `skydeck update` runs
 on such a database, although no other command does: it says `skydeck: the database was written by
