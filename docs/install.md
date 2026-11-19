@@ -1,9 +1,10 @@
-# Installing skydeck on another machine
+# Installing and using skydeck
 
-This guide is enough on its own. It covers the prerequisites, the install, what the install changes,
-the configuration, the window of step 2, updating and uninstalling. The design is in
-[design.md](design.md) (step 2: [design-step-2.md](design-step-2.md)); the checks to run by hand
-after an install are in [manual-checks.md](manual-checks.md).
+New to skydeck? Start with [quick-start.md](quick-start.md): from nothing to using it in about ten
+minutes. This guide is the complete reference: the prerequisites, the install, what the install
+changes, the configuration, the window, updating and uninstalling. The design is in
+[design.md](design.md) (the window: [design-step-2.md](design-step-2.md)).
+[manual-checks.md](manual-checks.md) is the maintainer's checklist, not a guide.
 
 Commands are shown as typed. Paths such as `/home/you/...` are examples: skydeck prints yours.
 
@@ -52,6 +53,8 @@ and every session started in it — also by `resume --window`, `new --window` an
 
 - **Linux, or Windows with WSL2 (Ubuntu).** skydeck reads `/proc`. Native Windows and macOS are not
   supported. On Windows, run everything below inside the WSL distribution.
+  `skydeck install` refuses on a system skydeck cannot work on (one without
+  `/proc/sys/kernel/random/boot_id`), macOS included for now, and changes nothing there.
 - **Node.js 24.12 or newer.** Check with `node --version`. If there is none, or the default `node` is
   older, see "On a fresh WSL" below, and "Install", step 2, for a newer one beside an older default.
   skydeck has no runtime dependencies.
@@ -139,7 +142,12 @@ cd ~/skydeck
 bin/skydeck --version
 ```
 
-It prints `0.1.0`. With a `node` older than 24.12 it prints one line and exits 1:
+It prints one line: the version, the commit the checkout is at and the date of that commit, such as
+`0.1.0 (f1fce49, 2026-11-19)`. `, modified` follows the date when files git tracks in the checkout
+were changed since that commit (a new file of your own does not count), and
+`0.1.0 (commit unknown)` means git could not tell (git is missing, or the folder is not a git
+checkout). Give this line when you report a problem. With a `node` older than 24.12 it prints one
+line and exits 1:
 
 ```
 skydeck needs Node.js 24.12 or newer but found 20.20.2; set SKYDECK_NODE to the path of a newer node binary.
@@ -195,7 +203,16 @@ linked /home/you/.local/bin/skydeck -> /home/you/skydeck/bin/skydeck
 linked /home/you/.local/share/skydeck/node -> /home/you/.nvm/versions/node/v24.19.0/bin/node
 added the hook entries to /home/you/.claude/settings.json; the file as it was is kept in /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
 skydeck is installed
+Open a new terminal: skydeck is found there (if not, add ~/.local/bin to your PATH).
+skydeck doctor checks the installation.
+skydeck ls lists the sessions: those Claude Code already has, and new ones as they start.
+skydeck window opens the window, from a terminal of your own, not from inside Claude Code.
+The guide: /home/you/skydeck/README.md
 ```
+
+The five lines after `skydeck is installed` say what to do next, and come last, after every other
+line, also from an install that finds everything in place (the last one names the README of your
+checkout).
 
 When there is no settings file yet (only Claude Code's folder, as can be the case on a fresh machine), the question
 is the same, no backup is made, and the line reads
@@ -204,9 +221,11 @@ that file again, as long as nobody changed it since: `removed /home/you/.claude/
 was none before skydeck install`.
 
 When Claude Code already has sessions with old transcripts, install asks one more question,
-**once** (a later install never asks again, whatever you answered):
+**once** (a later install never asks again, whatever you answered), after one line that says what
+"done" does (both on stderr):
 
 ```
+"Done" only hides a session from skydeck's list: nothing is deleted, it can still be resumed, and skydeck ls --all shows it.
 Mark 3 sessions older than 7 days as done? [y/N]
 ```
 
@@ -279,7 +298,7 @@ another user` and `it is read-only` (the shortcut is on and the file's owner wri
 mode 400 say: skydeck does not overrule that; a read-only file whose shortcut is off reads off);
 after the `y` also `leftArrowOpensAgents is in it more than once` and `skydeck cannot
 edit its text safely`. When the write fails, install says so on stderr, still ends with `skydeck is
-installed` and exits 0:
+installed` and the next steps, and exits 0:
 
 ```
 could not turn Claude Code's ← shortcut off: cannot write /home/you/.claude.json (EACCES); it was not changed; to turn it off: /config in Claude Code ("← opens agents")
@@ -328,6 +347,9 @@ skydeck doctor
 On a healthy machine every line is `ok` or `info`, and the exit code is 0:
 
 ```
+info     skydeck 0.1.0 (f1fce49, 2026-11-19)
+info     Claude Code 2.1.0
+info     system: Ubuntu 24.04.1 LTS, Linux 6.6.87.2-microsoft-standard-WSL2
 ok       hook entries present in /home/you/.claude/settings.json
 ok       /home/you/.local/share/skydeck/skydeck-hook -> /home/you/skydeck/bin/skydeck-hook
 ok       Node.js 24.19.0 (/home/you/.nvm/versions/node/v24.19.0/bin/node)
@@ -357,7 +379,9 @@ and exits 1. That happens, for example, after a clone with an SSH key and no `gh
 skydeck ls
 ```
 
-The steps to try by hand are in [manual-checks.md](manual-checks.md).
+What to do next, the window included, is in [quick-start.md](quick-start.md).
+[manual-checks.md](manual-checks.md) is the maintainer's checklist, not a guide: do not follow it to
+learn skydeck (some of its items uninstall skydeck or stop WSL).
 
 **7. Optional: check that this machine can run the tests.** `npm ci` is needed for development only:
 it installs TypeScript, Prettier, `@types/node`, `ws`, Playwright and the `@xterm/*` packages,
@@ -557,16 +581,15 @@ C)" below).
 
 ### Before you rely on it
 
-Two things only you can check decide whether the window is safe for real work:
+**Try it first with a session you can lose**, started in a throwaway folder ("A new session" in
+"Using the window" below). Once that one works in the window, resume real sessions into it.
 
-- **WSL stops 15 seconds after its last Windows client ends**, and with it every session in the
-  window. The keep-alive ("Keeping WSL running" below) is meant to prevent that, but that it does is
-  **not verified** until manual check W14 of [manual-checks.md](manual-checks.md). Until W14 has
-  passed, keep one WSL terminal of your own open while the window runs, or set
-  `instanceIdleTimeout=-1` (below).
-- **Try it first with a throwaway session** in a throwaway folder: W1 (the window opens), W20 (the
-  PC's privilege management lets Edge and `wsl.exe` start) and W4 (Claude Code in the window). Then
-  resume real sessions into it.
+**WSL stops 15 seconds after its last Windows client ends**, and with it every session in the
+window. By default, while the window's server or any of its terminals runs, skydeck keeps WSL
+running with a hidden `wsl.exe`, the keep-alive ("Keeping WSL running" below). WSL's own setting,
+`instanceIdleTimeout=-1`, is the alternative that does not depend on skydeck. `skydeck doctor` says
+which of the two is in effect, and has a `problem` line when a server or a terminal runs and neither
+is.
 
 ### What it needs
 
@@ -725,10 +748,9 @@ as the server or any terminal of the window runs, also after `skydeck window --s
 itself when nothing is left. It shows in the Task Manager as `wsl.exe`. When it ends while the
 server runs, the server starts it again after 5 seconds, 30 seconds, then every 5 minutes, and the
 window says `WSL is not kept running: <reason>; skydeck tries again` (its title bar shows `WSL is
-not kept running` meanwhile). **That a `wsl.exe` started from inside WSL keeps WSL running is not
-verified yet**: manual check W14.
+not kept running` meanwhile).
 
-The alternative does not depend on it: WSL's own setting, which skydeck never writes. In
+The alternative does not depend on skydeck: WSL's own setting, which skydeck never writes. In
 `%USERPROFILE%\.wslconfig` on Windows (`C:\Users\<you>\.wslconfig`; create the file when there is
 none):
 
@@ -744,7 +766,7 @@ nothing is running that you want to keep. With the setting in effect `window.kee
 
 ```
 ok       .wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)
-info     keep-alive wsl.exe running (pid 4242, since 2026-11-14T09:12:03.000Z); that it keeps WSL running is unverified (manual check W14)
+info     keep-alive wsl.exe running (pid 4242, since 2026-11-14T09:12:03.000Z)
 ```
 
 and a `problem` line that names the setting while a server or a terminal runs and neither is in
@@ -755,7 +777,11 @@ effect.
 - **The list**, on the left, has three sections: **Open** (running or starting, in the window or in
   another terminal; the window's terminals carry the slots 1–9), **Recent** (not running, last
   active in the last 7 days) and **Earlier** (folded; a click on its header unfolds it). Done
-  sessions are hidden: the footer's `show`, or `a`, shows them.
+  sessions are hidden: the footer's `show`, or `a`, shows them. While there is no session at all
+  (none yet, or the last one done or gone), the list says so under Open and names the two ways to
+  get one: start `claude` in any terminal (it shows in the list as soon as it starts), or start one
+  in the window with Ctrl+Shift+N (`+ New` in a browser tab); the right side then says `The
+  selected session shows here.`
 - **A session that is not running**: one click selects it and shows its resume card, with the
   exact command it will run. Enter, a double click or `Resume here` resumes it into the window.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
@@ -1605,7 +1631,8 @@ the list's keys act on none: `l`, F2, `g`, `n`, `p` and `d` say `no session sele
 terminal of the window holds the session, the right side keeps it: the terminal with its header,
 whose controls edit that session as usual (a click on the title, ✎, `Note`, `Done`, `Pull
 requests`), and once its program has ended, the ended bar with Resume and Close. A session
-without a terminal of the window shows nothing on the right then, no card. `Done` in the header
+without a terminal of the window shows nothing on the right then, no card (only the line `The
+selected session shows here.` while the list holds no session at all). `Done` in the header
 of such a session says `Marked done. Stays under Open while it runs; hidden once it
 stops.` while it runs or starts, else `Marked done: hidden from the list. It comes back on new
 activity.` The new form (Ctrl+Shift+N) starts in its directory while a terminal of the window
@@ -1623,7 +1650,6 @@ manifest names no start address).
 
 ### Known limits of stage A
 
-- **The keep-alive is not verified** (above; W14).
 - **A second window** could open when `skydeck window` started a server while an old window was
   still open: after the server died or was stopped (`--stop`), or after a WSL restart. Since stage C
   the new server expects that window back and the command waits for it ("Restore after a restart
@@ -1897,6 +1923,7 @@ installation.
 
 | Check | A `problem` means |
 |---|---|
+| skydeck, Claude Code, system | Never a problem: the first three lines say what runs, so that a report of a problem can say it too. `skydeck` is the line `skydeck --version` prints. `Claude Code` is the first line that `<claudeCommand> --version` prints, without the ` (Claude Code)` at its end (at most 60 characters), or `Claude Code: version not read (<why>)`: `not installed`, `timed out after 5 s`, `exited <n>`, `ended by a signal`, `printed no version`, `could not be started: <code>` (such as `EACCES`), or `the configuration cannot be read` (then nothing is started). `system` is the distribution's name (`PRETTY_NAME` in `/etc/os-release`) and the kernel's release (on WSL it ends in `WSL2`), `unknown` for what cannot be read. |
 | hook entries | `SessionStart` or `SessionEnd` has no entry in the settings file that is exactly what install writes for `<dataDir>/skydeck-hook`. Run `skydeck install`. |
 | the hook link | `<dataDir>/skydeck-hook` does not resolve to a file. Run `bin/skydeck install` from the checkout. |
 | Node.js | The Node.js that runs `doctor` is older than 24.12. |

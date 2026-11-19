@@ -997,11 +997,13 @@ describe('bin/skydeck with the real node', () => {
     });
   }
 
-  test('--version prints the package version and nothing on stderr', (t) => {
+  test('--version prints the version line and nothing on stderr', (t) => {
     const r = run(t, ['--version']);
 
     assert.equal(r.status, 0);
-    assert.equal(r.stdout, `${pkg.version}\n`);
+    // No git on the sandbox's PATH: this checkout's own history is never asked (the commit is
+    // test/cli/version.test.ts's, on throwaway checkouts).
+    assert.equal(r.stdout, `${pkg.version} (commit unknown)\n`);
     assert.equal(r.stderr, '');
   });
 

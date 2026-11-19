@@ -1,61 +1,53 @@
 # skydeck
 
-skydeck is one developer's tool for working with many Claude Code sessions at once. It lists the
-sessions that matter, says what each one is doing, carries a label, a group, a note and its pull
-requests, and brings a session back with one action, also after a PC restart or a WSL shutdown.
+skydeck is a window and a command line for Claude Code, made for people who run many sessions at
+once. It shows which session is about what, what each one is doing and which one needs you, each
+with your label, group, note, ticket and pull requests. A restart of the PC or of WSL ends every
+open session; skydeck offers to bring them back, each with the flags it was started with.
 
-It is a command line tool for the terminal (step 1) and, since step 2, a window: `skydeck window`
-opens an Edge app window with the session list on the left and the real terminal of the selected
-session on the right, where sessions are resumed, started and switched between. A session's label,
-group, note and done mark are edited there too, its pull requests attached and detached, and with
-`ticketUrl` in `config.json` its group chip opens the session's ticket. A session that needs you
-(it asks, its turn finished while you were not looking, or its terminal ended unexpectedly) is
-marked in the list and counted in the title bar and on the taskbar, Ctrl+Shift+J goes to the next
-one, and a desktop notification says so while no skydeck window has the focus. After a WSL or PC
-restart the window offers to restore the sessions that were open, into the window, and `skydeck
-resume --window`, `skydeck new --window` (or `"terminal": "window"` in `config.json`) start
-sessions there from any terminal. The list's filter finds a session by several words or the first
-characters of its short id, chips narrow the list to the running sessions, those with an open pull
-request or those with a note, the sessions of one group sit together as a block in every section (open until you close it), and Ctrl+Shift+P
-opens a quick switcher over every session. The window's sessions run in terminals of skydeck's own
-inside WSL, so they keep running when the window or its server is closed or restarted
-([docs/install.md](docs/install.md), "The window (step 2)"; design in
-[docs/design-step-2.md](docs/design-step-2.md)).
+![The skydeck window: sessions under Open, Recent and a folded Earlier on the left, the selected session's header and terminal on the right.](docs/img/window.png)
 
-```
-ABC-123
-  working     ABC-123 add retries    4m  4f9d7a5c
+## What you need
 
-no group
-  not-running 2026-11-12 08:45 web   15m  ended-unexpectedly,was-working,continued  2d7b5e3a
-  not-running Fix retry loop   25m  ended-unexpectedly,was-working  1pr:unfetched  0b5f3c1e
-  not-running quick check    9m  3e8c6f4b
-```
+- Windows with WSL2, and Microsoft Edge on the Windows side, for the window.
+- Inside WSL: Node.js 24.12 or newer, `git`, Claude Code (installed inside WSL and started once),
+  and python3 3.9 or newer for the window's terminals.
+- `gh`, logged in, only for the status of pull requests and of GitHub issues.
+- On plain Linux the command line works alone, without the window. macOS is not supported yet.
 
 ## Install
 
-Needs Linux or WSL2, Node.js 24.12 or newer, Claude Code, and `gh` logged in. The repository is
-private: cloning needs `gh auth login` (or an SSH key).
-
 ```sh
-gh repo clone vojtahavranek/skydeck ~/skydeck
+git clone https://github.com/vojtahavranek/skydeck.git ~/skydeck
 cd ~/skydeck
 bin/skydeck install
 ```
 
-If the default `node` is older than 24.12, put `SKYDECK_NODE=/path/to/node` in front of
-`bin/skydeck install`. The window also needs python3 3.9 or newer inside WSL and Microsoft Edge on
-the Windows side; then `skydeck window`. [docs/install.md](docs/install.md) is the complete guide: prerequisites, what
-install changes, `config.json`, WezTerm on WSL, updating, uninstalling.
+Then, in a new terminal of your own (not a `!` command inside Claude Code), run `skydeck window`.
+The [quick start](docs/quick-start.md) explains the questions install asks, and your first ten
+minutes in the window.
 
-## Is it tied to WezTerm?
+## What skydeck reads and keeps
 
-No. Recording sessions, the list, labels, groups, notes, done and pull requests work in any
-terminal, and so do `resume`, `new` and `restore`: by default they start `claude` in the terminal
-you are in. WezTerm adds one thing, new tabs (`--tab`, or `"terminal": "wezterm"` in `config.json`),
-and `restore` uses them to bring several sessions back at once. Without WezTerm, `--tab` prints the
-command to run by hand, and `restore` resumes the first session in this terminal and prints a
-`skydeck resume <id> --here` line for each of the others. Details are at the top of [docs/install.md](docs/install.md).
+- It reads Claude Code's transcripts and live-session files for each session's folder, title,
+  times, state and pull-request links, never writes to them, and keeps no conversation text.
+- It adds two hooks to Claude Code's settings and, after your yes, one setting in `~/.claude.json`.
+- Its database, `~/.local/share/skydeck/skydeck.db`, keeps each session's launch flags with their
+  values, so a text given to `--system-prompt` or `--append-system-prompt` is in it. The prompt
+  given as `claude`'s argument is not: it waits in the spool (`~/.local/state/skydeck/spool/`) only
+  until skydeck reads it in, or up to seven days if that file cannot be read.
+- Its logs (`~/.local/state/skydeck/*.log`) hold no prompt.
+- Network: only `gh`, `skydeck update`'s `git fetch` and your ticket-status programs. No telemetry.
+- The window is a local page (127.0.0.1) served from WSL; it types into your sessions as a terminal.
+
+## Documents
+
+- [docs/quick-start.md](docs/quick-start.md): from nothing to using skydeck, in about ten minutes.
+- [docs/install.md](docs/install.md): the complete guide and reference.
+- [docs/design.md](docs/design.md) and [docs/design-step-2.md](docs/design-step-2.md): the design
+  of the commands and of the window.
+- [docs/manual-checks.md](docs/manual-checks.md): the maintainer's checklist, run by hand after
+  changes; not a guide.
 
 ## Commands
 
@@ -91,19 +83,16 @@ had succeeded; 127 when the launcher finds no `node`; and once `resume`, `new` o
 is `claude`'s own.
 
 In the interactive list: `j`/`k` or the arrows move, `Enter` shows the detail, `l` label, `g` group,
-`n` note, `d` done or undo, `p` pull requests, `R` resume, `/` filter, `a` show all, `r` refresh,
-`q` quit. The list refreshes itself every 5 seconds without reordering the rows (the cursor
+`n` note, `t` ticket, `d` done or undo, `p` pull requests, `R` resume, `/` filter, `a` show all,
+`r` refresh, `q` quit. The list refreshes itself every 5 seconds without reordering the rows (the cursor
 moves only when its own session leaves the list, and the last line says so); the title line counts the sessions per state; `r` refreshes at once, reorders, and reads the
 pull requests again.
 
-## Documents
+## Is it tied to WezTerm?
 
-- [docs/install.md](docs/install.md): setting skydeck up on another machine.
-- [docs/design.md](docs/design.md): the design, the source of truth for the behaviour.
-- [docs/design-step-2.md](docs/design-step-2.md): the design of step 2, the window.
-- [docs/manual-checks.md](docs/manual-checks.md): the checks that need a real Claude Code session
-  or the Windows desktop, run by hand; [docs/check-kit/](docs/check-kit/) holds what some of them
-  use.
+No. The commands work in any terminal, and the window has terminals of its own. WezTerm adds one
+thing: new tabs (`--tab`, or `"terminal": "wezterm"` in `config.json`), which `restore` uses to
+bring several sessions back at once. Details are at the top of [docs/install.md](docs/install.md).
 
 ## Development
 
@@ -135,3 +124,8 @@ A command is one file, `src/cli/commands/<name>.ts`, that exports `command` (see
 and `SKYDECK_HOME`.
 
 The design is in [docs/design.md](docs/design.md).
+
+## Licence
+
+skydeck is MIT-licensed ([LICENSE](LICENSE)); the vendored xterm.js files keep their own licences,
+and [vendor/xterm/THIRD-PARTY-NOTICES](vendor/xterm/THIRD-PARTY-NOTICES) names the code they bundle.

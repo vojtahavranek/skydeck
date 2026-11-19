@@ -805,7 +805,11 @@ could not be resumed; see above`).
   backup. Every check that can stop install runs before it creates anything, and the question is
   asked before anything is created too, so a refusal or a no leaves no directory, database or link
   behind (apart from the compile cache under `~/.cache/skydeck` that every run of the launcher
-  creates, 10): a link is created or re-pointed only where there is nothing or a symbolic link;
+  creates, 10). First of all, before config.json is read, a system without a boot id (5.5; macOS,
+  for now) stops it with one line, exit 1: skydeck works on Linux and on Windows with WSL2 only,
+  and nothing was changed; a boot id that cannot be read for another reason stops it naming the
+  cause (follow-up F23; decided by the boot id, not by the system's name). Then: a link is created
+  or re-pointed only where there is nothing or a symbolic link;
   a settings file that cannot be read or is not JSON stops it; so does a settings path that is a symbolic link
   to nothing (install names the link and its target and never replaces it with a file), and a
   missing Claude Code directory (never created for it). After the yes, install reads the settings
@@ -882,6 +886,28 @@ could not be resumed; see above`).
   present and logged in; the terminal adapter. It does not refresh and creates nothing. A check that fails unexpectedly is one problem line, not the end
   of the report; so is a configuration file that cannot be read or a database that is missing or
   cannot be opened, and the checks that do not need it still run.
+
+  Before every other line, three `info` lines say what runs (follow-up F20); none is ever a
+  problem, none changes the exit code, and none names a path. (1) `skydeck <version line>`, the
+  line `skydeck --version` prints: `<package version> (<short commit>, <commit date>)` of the
+  checkout the running code is in, wherever it is run from, with `, modified` after the date when
+  tracked files differ from that commit, and `<package version> (commit unknown)` when git is
+  missing, the app root is not a git checkout (git's search stops there), or an answer is not a
+  commit or does not come within 2 seconds. Two git calls side by side, `log -1` and `status
+  --porcelain --untracked-files=no`, never through a shell, without the variables that point git at
+  another repository (`GIT_DIR` and its kin, as for `skydeck update`) and with no optional lock, so
+  that nothing is written in the checkout; `--version` never fails and prints nothing on stderr.
+  (2) `Claude Code <version>`: the first line `<claudeCommand> --version` prints (no shell, stdin
+  closed, doctor's environment without the launcher's own variables as in design-step-2.md 5.2,
+  5 seconds, at most 4 KiB read, control characters dropped, at most 60 characters kept),
+  compared with nothing; a ` (Claude Code)` at its very end, as Claude Code prints it, is dropped
+  (ruled by the plan owner), any other line is shown as it is; or `Claude Code: version not read (<why>)` (`not installed`, `timed out
+  after 5 s`, `exited <n>`, `ended by a signal`, `printed no version`, `could not be started:
+  <code>`, or `the configuration cannot be read`, when nothing is started: the configuration's
+  problem line follows the three). (3) `system: <PRETTY_NAME of /etc/os-release>, Linux <kernel
+  release>` (`Proc.kernelRelease`, `/proc/sys/kernel/osrelease`), each part `unknown` when it
+  cannot be read. The time limits end the program skydeck started, not what that program started
+  (the inner program of a wrapper script runs on).
 
 `docs/install.md` is the guide for setting skydeck up on another machine.
 
@@ -1114,7 +1140,7 @@ Specified in [design-step-2.md](design-step-2.md), which also says how step 2 am
   terminal owns the pty, and one Node.js server keeps each terminal's screen state, so that
   restarting or updating the server never ends a session and a reconnect shows the exact screen.
 - **WSL lifetime.** While the window has terminals, skydeck tries to keep WSL from stopping by
-  itself by holding a `wsl.exe` (that this works is not verified yet), or the user's `.wslconfig`
+  itself by holding a `wsl.exe`, or the user's `.wslconfig`
   keeps it; `doctor` says which protection is in effect, and the page notices when WSL has stopped
   anyway and offers restore.
 - **Keys follow the developer's terminal:** Ctrl+V pastes text, Ctrl+Shift+V sends the raw key

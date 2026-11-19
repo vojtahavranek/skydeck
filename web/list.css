@@ -42,6 +42,17 @@
   color: var(--faint);
   text-align: center;
 }
+/* Follow-up F22: the note while the list holds no session at all, under the Open band. Muted in
+   --dim (readable in both schemes, at least 4.5 : 1 on --panel; --faint is not), in the list's own
+   type, wrapped inside the list's width. */
+.list-none {
+  padding: 12px 14px;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.none-line + .none-line {
+  margin-top: 4px;
+}
 
 /* Section headers: Open, Recent (key `week`), Earlier (folded by default: its count and span).
    Each is a band (S2 12.1, follow-up F17): across the whole list column, edge to edge and square,

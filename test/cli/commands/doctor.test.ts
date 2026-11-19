@@ -106,11 +106,15 @@ describe('doctor on a complete installation', () => {
 
     const r = await doctor(d);
 
+    const commands = r.runner.calls.map((call) => [call.command, ...call.args].join(' '));
     assert.deepEqual(
-      r.runner.calls.map((call) => [call.command, ...call.args].join(' ')),
-      // S2 16.3 adds python3 --version (ruled by the plan owner, task 24); nothing else.
-      ['gh --version', 'gh auth status', 'python3 --version'],
+      commands.filter((command) => !command.startsWith('git ')),
+      // Follow-up F20 adds Claude Code's --version (and the version line's two git calls, of
+      // test/cli/version.test.ts); S2 16.3 adds python3 --version (ruled by the plan owner, task
+      // 24); nothing else.
+      ['claude --version', 'gh --version', 'gh auth status', 'python3 --version'],
     );
+    assert.equal(commands.filter((command) => command.startsWith('git ')).length, 2);
   });
 
   test('it reads nothing in: a spool file stays where it is, and is counted', async (t) => {

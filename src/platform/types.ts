@@ -121,6 +121,11 @@ export interface Proc {
    * when neither can be read (A30). False for a number that is not a port (1–65535).
    */
   tcpListening(port: number): boolean | null;
+  /**
+   * /proc/sys/kernel/osrelease without the trailing newline, the kernel's release
+   * (`6.6.87.2-microsoft-standard-WSL2`); null when it cannot be read or is empty (follow-up F20).
+   */
+  kernelRelease(): string | null;
 }
 
 export interface RunOptions {

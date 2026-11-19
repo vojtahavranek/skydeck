@@ -452,6 +452,41 @@ export function footerText(doneHidden, showDone) {
   return doneHidden > 0 ? { text: `${doneHidden} done hidden`, action: 'show' } : null;
 }
 
+/**
+ * Follow-up F22: whether `list` holds no session at all — no session in any section (a folded
+ * Earlier counts its own; done sessions hidden count for none) and no filter or chip set: a filter
+ * that hides every session keeps its own line, "No session matches the filter.". Whether the view
+ * filters is the server's (`list.filtering`, E5); a list without it, stage A's rule, the field's
+ * text. False before the first list (nothing is known yet). The list's note and the right side's
+ * line both follow it.
+ * @param {ListMessage | null} list
+ * @param {string} filter the filter field's text
+ * @returns {boolean}
+ */
+export function holdsNoSession(list, filter) {
+  if (list === null) {
+    return false;
+  }
+  const filtering = typeof list.filtering === 'boolean' ? list.filtering : filter !== '';
+  return !filtering && list.sections.every((section) => section.count === 0);
+}
+
+/**
+ * Follow-up F22: the list's note while it holds no session at all, line by line. `here` names the
+ * page's own way to start a session: Ctrl+Shift+N in the app window, `+ New` in a browser tab,
+ * where the browser keeps Ctrl+Shift+N (web/list.js shows the one that fits, by style.css's
+ * app-only and tab-only rule).
+ */
+export const NO_SESSION = {
+  head: 'No session here yet.',
+  terminal: 'Start claude in any terminal: it shows here as soon as it starts.',
+  here: {
+    app: 'Or start one here with Ctrl+Shift+N.',
+    tab: 'Or start one here with + New in the key bar.',
+  },
+  keys: 'Ctrl+Shift+H shows every key.',
+};
+
 /** The title bar's states in the order shown, and their words (S2 12.1, 19 stage A). */
 const COUNTS = /** @type {const} */ ([
   ['working', 'working', 'working'],

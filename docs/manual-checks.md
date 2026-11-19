@@ -1,5 +1,9 @@
 # Manual checks
 
+> **This is the maintainer's checklist, run by hand after changes. It is not a guide.** Some of
+> its items uninstall skydeck or stop WSL, so nobody, and no AI agent, should follow it to install
+> skydeck or to learn it: [quick-start.md](quick-start.md) and [install.md](install.md) are for that.
+
 The short checklist to run by hand after installing skydeck on a machine, and before trusting a new
 Claude Code version. It covers what the tests cannot: they never start `claude`, never open a
 terminal tab, never restart WSL and never start a Windows program. Each item gives the command and
@@ -64,7 +68,9 @@ Expected:
   formatting; the file as it is now is kept in <backup path>`.
 - Three `linked ...` lines (fewer when links already exist), then
   `added the hook entries to ...; the file as it was is kept in ...settings.json.skydeck-backup-<UTC time>`,
-  then the question about old sessions if it is asked, then `skydeck is installed`.
+  then the question about old sessions if it is asked (after the line `"Done" only hides a
+  session from skydeck's list: …`), then `skydeck is installed` and five lines on what to do next,
+  the last naming the README of your checkout.
 - The backup exists, is readable by you only (`ls -l` shows `-rw-------`) and is the file you copied:
   `cmp /tmp/settings.before.json ~/.claude/settings.json.skydeck-backup-*` prints nothing (with
   more than one backup, name the one that was printed).
@@ -700,7 +706,7 @@ Do it while only throwaway sessions run: if the keep-alive does not hold, WSL st
 session in it ends (they can be resumed afterwards, as after any WSL restart).
 
 1. In W, `skydeck doctor`: the keep-alive line reads `keep-alive wsl.exe running (pid <n>, since
-   <time>); …`. Write the pid down.
+   <time>)`. Write the pid down.
 2. A throwaway session in the window, with one prompt sent.
 3. Close every WSL terminal: every terminal window or tab that runs WSL (Windows Terminal, WezTerm,
    VS Code's WSL terminals and its WSL window too, which is a client of WSL as well). Keep the
@@ -1935,7 +1941,7 @@ install would leave).
    skydeck is installed
    ```
 
-   and `echo $?` prints `0`. Any other line about the shortcut (`… kept changing while skydeck
+   then the five lines on what to do next, and `echo $?` prints `0`. Any other line about the shortcut (`… kept changing while skydeck
    wrote it …`, `could not turn Claude Code's ← shortcut off: …`, `… left … alone (…)`): write it
    down. The file is then as it was; leave out the rest of the check, and turn the shortcut off
    with `/config` in Claude Code ("← opens agents") if you want it off.
