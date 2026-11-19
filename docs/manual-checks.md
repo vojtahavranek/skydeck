@@ -699,7 +699,7 @@ Do it while only throwaway sessions run: if the keep-alive does not hold, WSL st
 session in it ends (they can be resumed afterwards, as after any WSL restart).
 
 1. In W, `skydeck doctor`: the keep-alive line reads `keep-alive wsl.exe running (pid <n>, since
-   <time>); …`. Write the pid down.
+   <time>)`. Write the pid down.
 2. A throwaway session in the window, with one prompt sent.
 3. Close every WSL terminal: every terminal window or tab that runs WSL (Windows Terminal, WezTerm,
    VS Code's WSL terminals and its WSL window too, which is a client of WSL as well). Keep the
