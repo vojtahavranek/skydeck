@@ -1011,6 +1011,41 @@ describe('stand-in: refusing to run outside a sandbox (A33)', () => {
   }
 });
 
+describe('stand-in: --version (follow-up F20)', () => {
+  // What `skydeck doctor` asks the program it starts sessions with: one line, as Claude Code
+  // prints its version, and nothing else is done.
+  test('--version alone: one line on stdout, exit 0, nothing on stderr, nothing written', (t) => {
+    const s = sandbox(t);
+    const ran = spawnSync(standinCommand(s), ['--version'], {
+      cwd: s.root,
+      env: s.env({ STANDIN_RECORD: join(s.root, 'standin.jsonl') }),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+
+    assert.equal(ran.status, 0, ran.stderr);
+    assert.equal(ran.stdout, '0.0.0-standin (Claude Code)\n');
+    assert.equal(ran.stderr, '');
+    assertNothingWritten(s);
+  });
+
+  test('outside a sandbox --version is refused as everything else is', (t) => {
+    const s = sandbox(t);
+    const ran = spawnSync(standinCommand(s), ['--version'], {
+      cwd: s.root,
+      env: s.env(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      timeout: 10_000,
+    });
+
+    assert.equal(ran.status, 2, ran.stderr);
+    assert.equal(ran.stdout, '');
+    assert.match(ran.stderr, /STANDIN_RECORD/);
+  });
+});
+
 describe('stand-in: ending itself (A33)', () => {
   for (const [what, act] of [
     ['a hangup', (pty: Pty) => pty.control('signal 1')],

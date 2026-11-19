@@ -21,7 +21,7 @@ import { main } from '../../../src/cli/main.ts';
 import { NS_PER_DAY } from '../../../src/platform/time.ts';
 import type { Files, Platform } from '../../../src/platform/types.ts';
 import { capture } from '../../helpers/capture.ts';
-import { run, settingsFile, transcript } from '../../helpers/install.ts';
+import { installedTail, run, settingsFile, transcript } from '../../helpers/install.ts';
 import type { Run } from '../../helpers/install.ts';
 import { S1, T0, testPlatform } from '../../helpers/platform.ts';
 import type { TestPlatform } from '../../helpers/platform.ts';
@@ -72,8 +72,6 @@ function leftovers(path: string): string[] {
   );
 }
 
-const linesOf = (text: string): string[] => text.split('\n').filter((line) => line !== '');
-
 function noCanary(r: Run): void {
   for (const text of [r.stdout, r.stderr, ...r.prompts]) {
     assert.ok(!text.includes(CANARY), `a value of the file reached the output:\n${text}`);
@@ -112,7 +110,7 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
       r.stdout.endsWith(
         `turned Claude Code's ← shortcut off in ${path}; the file as it was is kept in ${backupOf(path)}\n` +
           `${FROM_NOW_ON}\n` +
-          'skydeck is installed\n',
+          installedTail(d.platform),
       ),
       r.stdout,
     );
@@ -144,7 +142,7 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
 
       assert.equal(r.code, 0, r.stderr);
       assert.deepEqual(r.prompts, ['Add them? [y/N] ', QUESTION]);
-      assert.ok(r.stdout.endsWith(`${LATER}\nskydeck is installed\n`), r.stdout);
+      assert.ok(r.stdout.endsWith(`${LATER}\n${installedTail(d.platform)}`), r.stdout);
       assert.equal(readFileSync(path, 'utf8'), before);
       assert.equal(statSync(path).ino, inode);
       assert.deepEqual(leftovers(path), []);
@@ -161,7 +159,7 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
 
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.prompts, []);
-    assert.ok(r.stdout.endsWith(`${OFF}\nskydeck is installed\n`), r.stdout);
+    assert.ok(r.stdout.endsWith(`${OFF}\n${installedTail(d.platform)}`), r.stdout);
     assert.equal(readFileSync(path, 'utf8'), after);
     assert.deepEqual(leftovers(path), [basename(backupOf(path))], 'no second backup');
   });
@@ -178,7 +176,7 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
       'Mark 1 session older than 7 days as done? [y/N] ',
       QUESTION,
     ]);
-    assert.equal(linesOf(r.stdout).at(-1), 'skydeck is installed');
+    assert.ok(r.stdout.endsWith(installedTail(d.platform)), r.stdout);
   });
 
   test('the file changed while skydeck wrote it, three times: the line naming /config; exit 0; the file as the other writer left it', async (t) => {
@@ -201,7 +199,7 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
     assert.ok(
       r.stdout.endsWith(
         `${path} kept changing while skydeck wrote it, so skydeck left it as it is; ` +
-          `to turn the ← shortcut off: ${HOW}\nskydeck is installed\n`,
+          `to turn the ← shortcut off: ${HOW}\n${installedTail(d.platform)}`,
       ),
       r.stdout,
     );
@@ -221,7 +219,7 @@ describe('install: the ← shortcut, when it is off or cannot be told (L2)', () 
 
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.prompts, ['Add them? [y/N] ']);
-    assert.ok(r.stdout.endsWith(`${OFF}\nskydeck is installed\n`), r.stdout);
+    assert.ok(r.stdout.endsWith(`${OFF}\n${installedTail(d.platform)}`), r.stdout);
     assert.equal(readFileSync(path, 'utf8'), before);
     assert.equal(statSync(path).ino, inode);
     assert.deepEqual(leftovers(path), []);
@@ -235,7 +233,7 @@ describe('install: the ← shortcut, when it is off or cannot be told (L2)', () 
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.prompts, ['Add them? [y/N] ']);
     assert.ok(
-      r.stdout.endsWith(`${unknownLine(path, 'it does not exist')}\nskydeck is installed\n`),
+      r.stdout.endsWith(`${unknownLine(path, 'it does not exist')}\n${installedTail(d.platform)}`),
       r.stdout,
     );
     assert.throws(() => lstatSync(path), { code: 'ENOENT' });
@@ -259,7 +257,7 @@ describe('install: the ← shortcut, when it is off or cannot be told (L2)', () 
       assert.equal(r.code, 0, r.stderr);
       assert.deepEqual(r.prompts, ['Add them? [y/N] ']);
       assert.ok(
-        r.stdout.endsWith(`${unknownLine(path, reason)}\nskydeck is installed\n`),
+        r.stdout.endsWith(`${unknownLine(path, reason)}\n${installedTail(d.platform)}`),
         r.stdout,
       );
       assert.equal(readFileSync(path, 'utf8'), text);
@@ -280,7 +278,9 @@ describe('install: the ← shortcut, when it is off or cannot be told (L2)', () 
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.prompts, ['Add them? [y/N] ']);
     assert.ok(
-      r.stdout.endsWith(`${unknownLine(path, 'it is a symbolic link')}\nskydeck is installed\n`),
+      r.stdout.endsWith(
+        `${unknownLine(path, 'it is a symbolic link')}\n${installedTail(d.platform)}`,
+      ),
       r.stdout,
     );
     assert.equal(lstatSync(path).isSymbolicLink(), true);
@@ -341,7 +341,7 @@ describe('install: the ← step never changes what install did (L2)', () => {
       ),
       r.stderr,
     );
-    assert.ok(r.stdout.endsWith('skydeck is installed\n'), r.stdout);
+    assert.ok(r.stdout.endsWith(installedTail(d.platform)), r.stdout);
     assert.ok(lstatSync(settingsFile(d.places)).isFile(), 'the hook entries were written');
     assert.equal(readFileSync(path, 'utf8'), before);
     assert.deepEqual(leftovers(path), []);
@@ -369,7 +369,7 @@ describe('install: the ← step never changes what install did (L2)', () => {
       ),
       r.stderr,
     );
-    assert.ok(r.stdout.endsWith('skydeck is installed\n'), r.stdout);
+    assert.ok(r.stdout.endsWith(installedTail(d.platform)), r.stdout);
     assert.equal(readFileSync(path, 'utf8'), before);
     noCanary(r);
   });
@@ -443,7 +443,7 @@ describe('install: an error of the ← step that is no write (review 2, C6)', ()
         ),
       captured.stderr(),
     );
-    assert.ok(captured.stdout().endsWith('skydeck is installed\n'), captured.stdout());
+    assert.ok(captured.stdout().endsWith(installedTail(d.platform)), captured.stdout());
     assert.equal(readFileSync(path, 'utf8'), before);
     assert.ok(!(captured.stdout() + captured.stderr()).includes(CANARY));
   });

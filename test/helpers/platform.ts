@@ -164,9 +164,12 @@ export function fakeProc(
     memAvailableMb?: number | null;
     /** Default []: nothing listens. */
     tcpListening?: readonly number[] | null;
+    /** What kernelRelease answers; default '6.6.0-test' (follow-up F20). */
+    kernelRelease?: string | null;
   } = {},
 ): FakeProc {
   let bootId = init.bootId ?? null;
+  const kernelRelease = init.kernelRelease === undefined ? '6.6.0-test' : init.kernelRelease;
   let memAvailableMb = init.memAvailableMb ?? null;
   let listening = init.tcpListening === undefined ? [] : init.tcpListening;
   const fdTargets = new Map<string, string>();
@@ -195,6 +198,7 @@ export function fakeProc(
         : new TextEncoder().encode(p.cmdline.map((a) => `${a}\0`).join(''));
     },
     memAvailableMb: () => memAvailableMb,
+    kernelRelease: () => kernelRelease,
     setBootId: (id) => {
       bootId = id;
     },

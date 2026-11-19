@@ -1,7 +1,8 @@
 /**
  * The stand-in for Claude Code in tests (plan 2.4, S2 17.1): a terminal program that sends the
  * queries Claude Code sends, draws, reacts to resizes and input, and a session that writes a
- * live-session file and runs the real hook, all under the control of typed commands. Nothing else.
+ * live-session file and runs the real hook, all under the control of typed commands; and, given
+ * `--version` alone, one line naming its version (follow-up F20). Nothing else.
  *
  * It refuses to run outside a sandbox: STANDIN_RECORD, SKYDECK_HOME and CLAUDE_CONFIG_DIR must be
  * absolute paths (A33). It writes nothing but its record file, `<CLAUDE_CONFIG_DIR>/sessions/` and
@@ -44,6 +45,14 @@ const problems = [
 if (problems.length > 0) {
   process.stderr.write(`standin: ${problems.join('; ')}; refusing to run\n`);
   process.exit(2);
+}
+
+// `--version` alone (follow-up F20: what `skydeck doctor` asks the program it starts sessions
+// with): one line in the form Claude Code prints its version, and nothing else is done or written.
+// A write to a pipe or a file is synchronous on Linux, so the line is out before the exit.
+if (process.argv.length === 3 && process.argv[2] === '--version') {
+  process.stdout.write('0.0.0-standin (Claude Code)\n');
+  process.exit(0);
 }
 
 const RECORD = process.env['STANDIN_RECORD'] as string;

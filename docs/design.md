@@ -805,7 +805,11 @@ could not be resumed; see above`).
   backup. Every check that can stop install runs before it creates anything, and the question is
   asked before anything is created too, so a refusal or a no leaves no directory, database or link
   behind (apart from the compile cache under `~/.cache/skydeck` that every run of the launcher
-  creates, 10): a link is created or re-pointed only where there is nothing or a symbolic link;
+  creates, 10). First of all, before config.json is read, a system without a boot id (5.5; macOS,
+  for now) stops it with one line, exit 1: skydeck works on Linux and on Windows with WSL2 only,
+  and nothing was changed; a boot id that cannot be read for another reason stops it naming the
+  cause (follow-up F23; decided by the boot id, not by the system's name). Then: a link is created
+  or re-pointed only where there is nothing or a symbolic link;
   a settings file that cannot be read or is not JSON stops it; so does a settings path that is a symbolic link
   to nothing (install names the link and its target and never replaces it with a file), and a
   missing Claude Code directory (never created for it). After the yes, install reads the settings
@@ -885,6 +889,28 @@ could not be resumed; see above`).
   of the report; so is a configuration file that cannot be read or a database that is missing or
   cannot be opened, and the checks that do not need it still run.
 
+  Before every other line, three `info` lines say what runs (follow-up F20); none is ever a
+  problem, none changes the exit code, and none names a path. (1) `skydeck <version line>`, the
+  line `skydeck --version` prints: `<package version> (<short commit>, <commit date>)` of the
+  checkout the running code is in, wherever it is run from, with `, modified` after the date when
+  tracked files differ from that commit, and `<package version> (commit unknown)` when git is
+  missing, the app root is not a git checkout (git's search stops there), or an answer is not a
+  commit or does not come within 2 seconds. Two git calls side by side, `log -1` and `status
+  --porcelain --untracked-files=no`, never through a shell, without the variables that point git at
+  another repository (`GIT_DIR` and its kin, as for `skydeck update`) and with no optional lock, so
+  that nothing is written in the checkout; `--version` never fails and prints nothing on stderr.
+  (2) `Claude Code <version>`: the first line `<claudeCommand> --version` prints (no shell, stdin
+  closed, doctor's environment without the launcher's own variables as in design-step-2.md 5.2,
+  5 seconds, at most 4 KiB read, control characters dropped, at most 60 characters kept),
+  compared with nothing; a ` (Claude Code)` at its very end, as Claude Code prints it, is dropped
+  (ruled by the plan owner), any other line is shown as it is; or `Claude Code: version not read (<why>)` (`not installed`, `timed out
+  after 5 s`, `exited <n>`, `ended by a signal`, `printed no version`, `could not be started:
+  <code>`, or `the configuration cannot be read`, when nothing is started: the configuration's
+  problem line follows the three). (3) `system: <PRETTY_NAME of /etc/os-release>, Linux <kernel
+  release>` (`Proc.kernelRelease`, `/proc/sys/kernel/osrelease`), each part `unknown` when it
+  cannot be read. The time limits end the program skydeck started, not what that program started
+  (the inner program of a wrapper script runs on).
+
 `docs/install.md` is the guide for setting skydeck up on another machine.
 
 ## 9. Data
@@ -916,8 +942,8 @@ relative (8).
 Configuration keys, all optional: `terminal` (`here` or `wezterm`, and since step 2 `window`,
 design-step-2.md 16.4; default `here`), `wezterm.domain`, `groupPattern`, `firstRunDoneAfterDays`,
 `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`,
-`claudeHome`, `claudeCommand`, `ticketUrl` (design-step-2.md 16.4; asked for by the user on
-2026-11-15), `ticketStatus` and `ticketRefreshMinutes` (follow-up F19, 7.3; design-step-2.md 16.4).
+`claudeHome`, `claudeCommand`, `ticketUrl` (design-step-2.md 16.4), `ticketStatus` and
+`ticketRefreshMinutes` (follow-up F19, 7.3; design-step-2.md 16.4).
 Unknown keys are an error.
 
 ### 9.2 Database
@@ -1059,7 +1085,7 @@ a copy back. No migration, setting or command comes with it.
 - `bin/skydeck` is a `sh` launcher. It picks the Node.js binary — `$SKYDECK_NODE`, else
   `<dataDir>/node`, else `node` on `PATH` — and a small plain-JavaScript bootstrap refuses
   versions older than 24.12 with a clear message.
-- `bin/skydeck-hook` is `sh` only (5.1). Measured on the target machine: about 8 ms per event,
+- `bin/skydeck-hook` is `sh` only (5.1). Measured on one machine: about 8 ms per event,
   against about 110 ms for a Node.js hook that opens the database.
 - `node:sqlite` is a release candidate in Node.js 24 and renames its classes in Node.js 26;
   keeping it inside `src/store/` limits that change to one module.
@@ -1137,7 +1163,7 @@ Specified in [design-step-2.md](design-step-2.md), which also says how step 2 am
   terminal owns the pty, and one Node.js server keeps each terminal's screen state, so that
   restarting or updating the server never ends a session and a reconnect shows the exact screen.
 - **WSL lifetime.** While the window has terminals, skydeck tries to keep WSL from stopping by
-  itself by holding a `wsl.exe` (that this works is not verified yet), or the user's `.wslconfig`
+  itself by holding a `wsl.exe`, or the user's `.wslconfig`
   keeps it; `doctor` says which protection is in effect, and the page notices when WSL has stopped
   anyway and offers restore.
 - **Keys follow the developer's terminal:** Ctrl+V pastes text, Ctrl+Shift+V sends the raw key
@@ -1174,7 +1200,7 @@ inspecting local files, unless marked otherwise.
 | `--session-id <uuid>` starts a session with a chosen id. | documentation |
 | `-n <name>` together with `--resume <id>` keeps the session id and gives the session that name; a later `-n` wins over a stored name, and a resume without `-n` keeps the stored name. | observed |
 | Closing the terminal (SIGHUP, or the terminal side of the pty closing) fires `SessionEnd` with reason `other` and removes the live-session file, also in the middle of a turn. SIGKILL fires nothing and leaves the file with its last `status`. | observed |
-| `claude -p` and SDK runs write no live-session file that is left behind: on 2026-11-13 all 178 files in `<claudeHome>/sessions/` on the development machine (left-over ones of killed processes included) had `entrypoint` `cli` and `kind` `interactive`, although `claude -p` runs on that machine every day. So the hook, not a live-session file, is what shows that a scripted run holds a session (5.3). A `claude -p` prompt is written to the transcript with `turnOrigin` `sdk`, so it is not user input (5.6). | observed (local files) |
+| `claude -p` and SDK runs write no live-session file that is left behind: all the files in `<claudeHome>/sessions/` on one machine where `claude -p` runs too (left-over ones of killed processes included) had `entrypoint` `cli` and `kind` `interactive`. So the hook, not a live-session file, is what shows that a scripted run holds a session (5.3). A `claude -p` prompt is written to the transcript with `turnOrigin` `sdk`, so it is not user input (5.6). | observed (local files) |
 | In a hook's environment `$CLAUDE_CODE_ENTRYPOINT` is `cli` for an interactive session and `sdk-cli` for `claude -p`. Hooks fire for `-p` runs, and their command line contains `-p`. After `/clear`, the environment and the hook input both carry the new session id. | observed |
 | A session that never received a prompt has no transcript. | observed |
 | `←` on the empty prompt of a session started in a terminal moves its conversation into a background session with a new id and opens agent view in that terminal; what is typed there then goes to the background session. Its program runs under a `claude bg-pty-host` process whose parent is init, outside the terminal's process tree. The live-session file of the background session has `kind` `bg` and a `jobId` (in the one case seen, the first eight hex digits of the new session's id); the live-session file of the terminal's own program gets `parkedJobId` with the same value. skydeck reads none of these three fields. | observed (Claude Code 2.1.311, 2026-11-16, follow-up F11); `kind` `bg`, `jobId`, `parkedJobId` not documented |

@@ -715,7 +715,7 @@ and Done; and fill the pull-request dialog with every attached pull request.
 **Behaviour.** The four lines of D12, each one line of a fixed height whatever it holds, so that
 nothing skydeck knows about a session resizes a shown terminal (ruled). Line 1: the title (a click
 that selected no text opens the label dialog through `deps.edit`); the group chip as D14 (with
-`selected.ticketUrl`: `DE-123 ↗`, underlined, tooltip the address, a click that selected no text
+`selected.ticketUrl`: `ABC-123 ↗`, underlined, tooltip the address, a click that selected no text
 sends `act open-link` with it; else plain text, tooltip `group (from the title)` when it is), the ✎
 (the group dialog), or the dashed `+ group` while there is no group; the state pill as stage A's;
 the buttons Note (the note dialog) and Done / Undone (`deps.done`). When the line is short of room
@@ -925,7 +925,7 @@ stages B and C.
 When task 39 is merged. In a WSL terminal of your own (not a `!` command inside Claude Code):
 
 ```sh
-cd ~/projects/mine/skydeck
+cd ~/skydeck
 git pull
 skydeck window          # restarts the window's server for the new build; your sessions keep
                         # running, the window reloads itself
@@ -969,8 +969,8 @@ findings, all taken), and the plan above follows the rulings.
 Also ruled from review A: the `ticketUrl` check is the URL parser's (S2 16.4, task 35, D18); the
 dialogs move the keyboard nowhere (D2); one explicit fetch at a time (D8); a save sent twice is
 `ok` (D9); the safety tests of task 36; `d` and Done act once (D15); × has an Undo (D13); only
-buttons cancel their mousedown (D17); the design says "asked for by the user on 2026-11-15; the
-details ruled by the lead that day"; task 39 runs no command outside the suite; W27–W29 check the
+buttons cancel their mousedown (D17); the design says "the details
+ruled by the lead"; task 39 runs no command outside the suite; W27–W29 check the
 short id first and Undo after `d`.
 
 Ruled from review B (01:11Z, all taken): `header(row, selected, term, now)` with `selected` for

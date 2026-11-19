@@ -48,8 +48,8 @@ export function definedEnv(env: Env): Record<string, string> {
   );
 }
 
-/** git's environment: the command's own without REPOSITORY_VARIABLES. */
-function gitEnv(env: Env): Record<string, string> {
+/** git's environment: the command's own without REPOSITORY_VARIABLES (also the version line's, F20). */
+export function gitEnv(env: Env): Record<string, string> {
   return Object.fromEntries(
     Object.entries(definedEnv(env)).filter(([name]) => !REPOSITORY_VARIABLES.includes(name)),
   );
