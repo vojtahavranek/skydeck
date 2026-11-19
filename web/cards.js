@@ -409,9 +409,9 @@ export function createCards(root, deps) {
   // Line 3: (F18) the ticket's chip — its name and ` ↗`, the address as its tooltip; a click that
   // selected no text opens it, as the group chip's link —, the window's chip (S2 12.3), the open
   // pull requests side by side as far as they fit (a click opens one; they give way before the
-  // ticket's chip does), and the buttons of the ticket's and the pull-request dialogs, never cut;
-  // while none is attached, the hint `no pull request` and `+ PR`. Without a ticket its chip is
-  // not there and the rest keeps its place.
+  // ticket's chip does), and the buttons of the ticket's and the pull-request dialogs, whole while
+  // the window has room for them (cards.css); while none is attached, the hint `no pull request`
+  // and `+ PR`. Without a ticket its chip is not there and the rest keeps its place.
   const ticketItem = element('span', 'header-ticket');
   const ticketText = element('span', 'header-ticket-text');
   const ticketArrow = element('span', 'header-ticket-arrow', ' ↗');

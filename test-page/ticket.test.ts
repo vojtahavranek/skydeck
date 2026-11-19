@@ -506,7 +506,7 @@ test("F18: a session's ticket in the header, its dialog and the filter", async (
       assert.equal(shown.inField, true);
       assert.equal(
         shown.help,
-        'An http or https link, kept as it is (a key needs ticketUrl in config.json). Empty removes it.',
+        'An http or https link, stored as the window opens it (a key needs ticketUrl in config.json). Empty removes it.',
       );
       await page.keyboard.type('ABC-123');
       await page.keyboard.press('Enter');

@@ -2684,7 +2684,8 @@ link).
 **The ticket of a session** (asked for by the owner on 2026-11-18 and 19, follow-up F18, step 1;
 the details ruled by the lead). A session has at most one ticket, which the user sets: a JIRA
 issue, a GitHub issue, a ticket of any tracker — whatever has an `http` or `https` address. It is
-set from one text (design 7.1): a whole link, taken as it is when the window may open it (9.6), at
+set from one text (design 7.1): a whole link, taken as the window opens it (linkToOpen's form, 9.6:
+the host in lower case, a default port dropped, a space encoded) when the window may open it, at
 most 2,048 characters, with no control character and no user name or password; or a bare key
 (the key rule above), which becomes `ticketUrl` with the key filled in by the rule above — the
 address is what is stored, so a later `ticketUrl` moves no stored ticket —, refused without a
@@ -2692,8 +2693,9 @@ address is what is stored, so a later `ticketUrl` moves no stored ticket —, re
 the whole link`); an empty text removes it; anything else is refused with its reason (`a ticket
 link must start with http:// or https://`, `a ticket must be one line`, `a ticket cannot contain
 control characters`, `a ticket link is at most 2,048 characters`, `a ticket link cannot hold a user
-name or a password`, `the window does not open this link: …`, `not a ticket: give an http or https
-link, or a key like ABC-123`). Setting one replaces the one before. It is stored (10.2, migration 3).
+name or a password`, `the window does not open this link: …`, `ticketUrl makes no link the window
+may open from this key; give the whole link`, `not a ticket: give an http or https link, or a key
+like ABC-123`). Setting one replaces the one before. It is stored (10.2, migration 3).
 
 Its **chip** starts the header's third line, before the pull requests: a short name and ` ↗`, in
 the accent colour with the name underlined, as the group chip's link; the whole address is its
@@ -2704,8 +2706,15 @@ path `/browse/KEY`; else `repo #n` for `github.com/owner/repo/issues/n` or `/pul
 part of the path that is not empty, decoded, at most 24 characters with `…`; else the host. It is
 only ever text (sanitised by the server and again by the page). A session without a ticket shows
 nothing there, and what the line shows today keeps its place; when the line is short of room the
-open pull requests give way, whole, before the chip loses a pixel (it takes its room first; only a
-line too narrow for it and the two buttons cuts it, with an ellipsis). The name is one part of the
+open pull requests give way, whole, before the chip loses a pixel (it takes its room first). Below
+that it is the room of the chip, the pull requests' chip and the two buttons that counts, measured
+in the page suite's Chromium with the list 400 px wide and three open pull requests: the ticket's
+chip is whole down to a window of about 760 px, then cut with an ellipsis (at 720 px its arrow
+alone, at 700 px an empty pill); `Pull requests` is whole down to about 700 px with a ticket and
+about 690 px without one (on `main` before F18, about 620 px: the new button takes about 70 px of
+every session's line), and narrower the line is clipped at its end. The header's four lines and
+their heights never change, at any width (ruled by the lead: no layout change in F18; a narrower
+button or another place for it is the owner's later choice). The name is one part of the
 chip, so that a later status can stand beside it (not built: step 2 of the request). The button
 `+ ticket` (`Ticket` while one is set) stands just before the pull-request button, which keeps its
 place at the line's end; it and `t` in the list (12.9) open the ticket's dialog: one field holding

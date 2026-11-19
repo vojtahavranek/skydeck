@@ -962,8 +962,8 @@ the one you set. Set it with `t` in the list or `+ ticket` in the header (`Ticke
 set), with `skydeck ticket set <ref> <link-or-key>`, or with `t` in the interactive list; one
 text, either
 
-- a whole link, such as `https://github.com/owner/repo/issues/5`: it is taken as it is (as the
-  window would open it: the host lower-cased, a default port dropped), when the window may open
+- a whole link, such as `https://github.com/owner/repo/issues/5`: it is stored as the window
+  would open it (the host lower-cased, a default port dropped, a space encoded), when the window may open
   it — `http` or `https`, at most 2,048 characters, no control character, no user name or
   password —; or
 - a key, such as `ABC-123`: it needs `ticketUrl` (above), which turns it into
@@ -975,8 +975,10 @@ An empty text removes the ticket (`skydeck ticket clear <ref>` too), and setting
 one before. Anything else is refused with the reason: `a ticket link must start with http:// or
 https://`, `a ticket must be one line`, `a ticket cannot contain control characters`, `a ticket
 link is at most 2,048 characters`, `a ticket link cannot hold a user name or a password`, `the
-window does not open this link: …`, `not a ticket: give an http or https link, or a key like
-ABC-123`.
+window does not open this link: …`, `ticketUrl makes no link the window may open from this key;
+give the whole link`, `not a ticket: give an http or https link, or a key like ABC-123`. In a
+shell, quote a link that holds `?`, `&` or `#`: `skydeck ticket set <ref>
+'https://example.com/issue?id=7&tab=1'` (unquoted, the shell cuts it at `&`).
 
 The chip shows a short name worked out from the address: the key when the address is your
 `ticketUrl` with a key filled in, `KEY` for an address ending in `/browse/KEY`, `repo #5` for a

@@ -2269,19 +2269,23 @@ open, with the throwaway session in it. Click the throwaway session's row in the
 the header's short id: it must be the throwaway session's (`skydeck ls` in W prints the short ids
 as the last column); write it down. **Before every key and every click below, look at it again.**
 The header's third line starts with `no pull request` (or the pull requests' chip) and ends in
-`+ ticket` and `+ PR`; when it starts with a ticket's chip instead (an earlier run left one), go on:
+`+ ticket` and `+ PR` (`Pull requests` when the session has one); when it starts with a ticket's chip instead (an earlier run left one), go on:
 step 6 removes it. **Type text only into an open dialog**: after `t` or a click on `+ ticket` /
 `Ticket`, look that a dialog is there whose heading reads `Ticket — <the throwaway session's
 title>` and whose field has the keyboard (the cursor blinks in it); when the key bar says `the
-ticket is not here yet; press t again` instead, no dialog opened: type nothing, and press `t`
-again. Typed into the list, `k` would move to a real session and `d` mark it done.
+ticket is not here yet; press t again` instead, or nothing shows, no dialog opened: type nothing,
+and click the header's `Ticket` (or `+ ticket`) again — or press `t` again only once the key bar
+says `Focus: list` (else first click the throwaway session's row). Typed into the list, `k` would
+move to a real session and `d` mark it done; typed while the terminal has the keyboard, it goes
+to the throwaway session's prompt.
 
 1. **Set by a link.** Look that the key bar says `Focus: list` (else press Ctrl+Shift+L until it
    does). Press `t`. Expected: the dialog `Ticket — <title>`, its field empty, its hint `a link`,
    or `a link, or a key like ABC-123` when your `config.json` sets `ticketUrl`: write down which.
    Only while that dialog shows, type `https://example.com/browse/TRY-1` and press Enter.
    Expected: the dialog closes; the header's third line starts with `TRY-1 ↗` (underlined, in the
-   links' colour), the rest of the line as before, and the button before `+ PR` reads `Ticket`.
+   links' colour), the rest of the line as before, and the button before `+ PR` (`Pull requests`)
+   reads `Ticket`.
    Point at `TRY-1 ↗`: its tooltip is `https://example.com/browse/TRY-1`.
 2. **Open it.** Click `TRY-1 ↗`. Expected: your default browser (or Edge, with `window.links`
    `"edge"`) opens `https://example.com/browse/TRY-1`: a page of `example.com`, or one that says

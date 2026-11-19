@@ -15,10 +15,11 @@ const SPEC: ArgSpec = {
   usage: `skydeck ticket set <ref> <link-or-key> | ticket clear <ref>
 
   ticket set <ref> <link-or-key>   set the session's ticket, replacing the one before: an http or
-                                   https link as it is, or a key like ABC-123, which ticketUrl in
-                                   config.json turns into its link (a key needs ticketUrl); the
-                                   address is what is stored, so a later ticketUrl does not move it.
-                                   An empty text removes the ticket.
+                                   https link (stored as the window opens it; quote one that holds
+                                   ? & or #), or a key like ABC-123, which ticketUrl in config.json
+                                   turns into its link (a key needs ticketUrl); the address is what
+                                   is stored, so a later ticketUrl does not move it. An empty text
+                                   removes the ticket.
   ticket clear <ref>               remove the session's ticket
 `,
   flags: {},

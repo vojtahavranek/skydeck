@@ -359,7 +359,7 @@ export function ticketField(selected) {
     value,
     placeholder: keys ? 'a link, or a key like ABC-123' : 'a link',
     help: keys
-      ? "A link is kept as it is; a key becomes ticketUrl's link. The address is stored. Empty removes it."
-      : 'An http or https link, kept as it is (a key needs ticketUrl in config.json). Empty removes it.',
+      ? "A link is stored as the window opens it; a key becomes ticketUrl's link. Empty removes it."
+      : 'An http or https link, stored as the window opens it (a key needs ticketUrl in config.json). Empty removes it.',
   };
 }

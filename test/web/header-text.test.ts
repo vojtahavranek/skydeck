@@ -635,12 +635,12 @@ describe('F18: the ticket chip and the ticket field', () => {
     assert.deepEqual(ticketField({ ...selected(null), ticket, ticketKeys: true }), {
       value: 'https://example.com/browse/ABC-123',
       placeholder: 'a link, or a key like ABC-123',
-      help: "A link is kept as it is; a key becomes ticketUrl's link. The address is stored. Empty removes it.",
+      help: "A link is stored as the window opens it; a key becomes ticketUrl's link. Empty removes it.",
     });
     assert.deepEqual(ticketField({ ...selected(null), ticketKeys: false }), {
       value: '',
       placeholder: 'a link',
-      help: 'An http or https link, kept as it is (a key needs ticketUrl in config.json). Empty removes it.',
+      help: 'An http or https link, stored as the window opens it (a key needs ticketUrl in config.json). Empty removes it.',
     });
     assert.equal(ticketField(null).placeholder, 'a link');
     assert.equal(ticketField(null).value, '');

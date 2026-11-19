@@ -17,9 +17,9 @@ const SPEC: ArgSpec = {
   usage: `skydeck show <ref> [--json] [--refresh]
 
 Prints one session: its state and marks, label and group, its ticket (the one set with skydeck
-ticket, else the address ticketUrl gives for its group), project directory, launch command (and the flags in it that skydeck does not know, which a
-resume does not pass on), the sessions it continues, the processes that hold it, its pull requests
-and its note.
+ticket, else the address ticketUrl gives for its group), project directory, launch command (and
+the flags in it that skydeck does not know, which a resume does not pass on), the sessions it
+continues, the processes that hold it, its pull requests and its note.
 
   --json      print it as JSON instead of text
   --refresh   first read the status of this session's pull requests that are not merged or closed

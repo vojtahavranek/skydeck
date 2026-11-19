@@ -18,7 +18,10 @@
 /* Four lines of one line each and of a fixed height whatever they hold (D12, ruled): nothing
    skydeck knows about a session changes the header's height, so the terminal under it is never
    resized for it. What does not fit is cut (an ellipsis on a text) or left out (the pull requests
-   that do not fit on their line); the short id and the buttons are never cut. */
+   that do not fit on their line); the short id and the buttons are not cut while the window has
+   room for them (line 3's two buttons, F18: down to a window of about 690 px without a ticket and
+   about 700 px with one, the list 400 px wide and three open pull requests; narrower, the line is
+   clipped at its end). The heights never change. */
 .header-top,
 .header-sub,
 .header-prs,

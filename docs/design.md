@@ -370,8 +370,8 @@ Marks are shown next to the state.
   `skydeck note <ref> --set <text>` sets it without an editor (and removes such a kept file), and an
   empty note is no note.
 - **Ticket** (follow-up F18). At most one per session, optional: an `http` or `https` address,
-  stored. It is set from one text: a whole link is taken as it is, when the window may open it
-  (design-step-2.md 9.6), it is at most 2,048 characters and holds no control character and no user
+  stored. It is set from one text: a whole link is taken as the window opens it (the host in lower
+  case, a default port dropped), when the window may open it (design-step-2.md 9.6), it is at most 2,048 characters and holds no control character and no user
   name or password; a bare key (letters, digits, `.`, `_`, `-`, starting with a letter or a digit)
   is `ticketUrl` with the key filled in (design-step-2.md 16.4), and that address is what is stored,
   so a later change of `ticketUrl` does not move it — without a `ticketUrl` a key is refused with
