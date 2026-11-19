@@ -44,7 +44,8 @@ shortcut stays as you set it.
 ## Check the install
 
 Open a new terminal, so that `skydeck` is found (the install links it into `~/.local/bin`; when a
-new terminal does not find it, add `export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc`), and run:
+new terminal does not find it, add `export PATH="$HOME/.local/bin:$PATH"` to `~/.bashrc` and open
+one more), and run:
 
 ```sh
 skydeck doctor
@@ -64,8 +65,10 @@ In a WSL terminal of your own (not with `!` inside Claude Code, where it refuses
 skydeck window
 ```
 
-It starts skydeck's server in the background and opens an Edge window. You can close the terminal:
-the server runs on its own. Closing the window ends nothing either: the sessions keep running, and
+It starts skydeck's server in the background and opens an Edge window. Run it from a plain shell:
+every session in the window gets the environment of the shell that started the server (a Python
+virtual environment, `direnv` or an `AWS_PROFILE` included). You can close the terminal: the
+server runs on its own. Closing the window ends nothing either: the sessions keep running, and
 `skydeck window` opens it again. Try it first with a new session in a scratch folder, before you
 resume real work into it.
 
@@ -88,10 +91,11 @@ The list has three sections:
 
 A running session's second line says what it does: `working` (Claude Code is busy), `waiting` (it
 waits for you, at its prompt or on a question such as a permission) or `running` (it runs and
-reports nothing more). A hollow ring marks a session that does not run; a red diamond and the mark
-`crashed` (or `crashed mid-turn`), one that ended unexpectedly. Point at a mark to read what it
-means. Two or more sessions of one group sit together in a block: click the group's name to close
-or open it. The title bar counts the sessions in each state.
+reports nothing more); one that runs in another terminal says `running in another terminal`. A
+hollow ring marks a session that does not run; a red diamond and the mark `crashed` (or `crashed
+mid-turn`), one that ended unexpectedly. Point at a mark to read what it means. Two or more
+sessions of one group sit together in a block: click the group's name to close or open it. The
+title bar counts the sessions in each state.
 
 ### Open a session's terminal
 
@@ -185,9 +189,9 @@ WezTerm tab for each).
 ## Keeping WSL running
 
 WSL stops by itself 15 seconds after its last terminal (or other `wsl.exe`) has ended, and every
-session in the window ends with it. While the window's sessions run, skydeck keeps WSL running with
-a hidden `wsl.exe`, and `skydeck doctor` says whether it runs. WSL's own setting
-`instanceIdleTimeout=-1` does the same without skydeck: see the guide's
+session in the window ends with it. While the window's server or a session in it runs, skydeck
+keeps WSL running with a hidden `wsl.exe`, and `skydeck doctor` says whether it runs. WSL's own
+setting `instanceIdleTimeout=-1` does the same without skydeck: see the guide's
 [Keeping WSL running](install.md#keeping-wsl-running).
 
 ## Updating
@@ -214,7 +218,7 @@ there).
 
 ## When something looks wrong
 
-1. Run `skydeck doctor` in a WSL terminal. Each `problem` line says what to do.
+1. Run `skydeck doctor` in a WSL terminal. Most `problem` lines say what to do.
 2. Look at skydeck's logs in `~/.local/state/skydeck/`: `hook.log` (the hook's errors),
    `server.log` and `keepers.log` (the window's). They hold no conversation content.
 3. The guide's last section, [If something goes wrong](install.md#if-something-goes-wrong), lists

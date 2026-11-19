@@ -32,9 +32,10 @@ minutes in the window.
 - It reads Claude Code's transcripts and live-session files for each session's folder, title,
   times, state and pull-request links, and never writes to them.
 - It adds two hooks to Claude Code's settings and, after your yes, one setting in `~/.claude.json`.
-- Its database (`~/.local/share/skydeck/skydeck.db`) and its logs (`hook.log`, `server.log`,
-  `keepers.log` in `~/.local/state/skydeck/`) hold no prompt or answer. A prompt given on `claude`'s
-  command line waits in the spool beside them until skydeck reads it in, and is dropped then.
+- Its database, `~/.local/share/skydeck/skydeck.db`, holds no message of a conversation, but it
+  keeps each session's launch flags with their values (an `--append-system-prompt` text too).
+- Its logs (`~/.local/state/skydeck/*.log`) hold no prompt. One given on `claude`'s command line
+  waits in the spool beside them until it is read in (up to seven days, if it cannot be read).
 - Network: only `gh`, `skydeck update`'s `git fetch` and your ticket-status programs. No telemetry.
 - The window is a local page (127.0.0.1) served from WSL; it types into your sessions as a terminal.
 
