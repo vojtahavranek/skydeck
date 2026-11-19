@@ -156,7 +156,7 @@ describe('readTicket (K1): empty text and control characters', () => {
   });
 
   test('a line break inside', () => {
-    for (const text of ['https://example.com/a\nb', 'ABC-1\r\nx', 'https://example.com/a b']) {
+    for (const text of ['https://example.com/a\nb', 'ABC-1\r\nx', 'https://example.com/a\u2028b']) {
       assert.equal(refusal(text), TICKET_REFUSALS.lineBreak, JSON.stringify(text));
     }
     assert.equal(TICKET_REFUSALS.lineBreak, 'a ticket must be one line');
@@ -169,7 +169,7 @@ describe('readTicket (K1): empty text and control characters', () => {
       'https://example.com/\u001b[31mred',
       'https://example.com/a\u007fb',
       'https://example.com/a\u009bb',
-      'https://example.com/‮ab',
+      'https://example.com/\u202eab',
       'ABC-1\u0007',
     ]) {
       assert.equal(refusal(text), TICKET_REFUSALS.control, JSON.stringify(text));
