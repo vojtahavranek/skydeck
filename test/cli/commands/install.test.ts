@@ -24,6 +24,7 @@ import { capture } from '../../helpers/capture.ts';
 import {
   backupAtT0,
   backups,
+  installedTail,
   run,
   settingsFile,
   transcript,
@@ -830,6 +831,6 @@ describe('install: python3 that cannot be started (review 2)', () => {
       r.stdout,
       /^the window \(skydeck window\) needs python3 3\.9 or newer; the commands do not$/m,
     );
-    assert.match(r.stdout, /skydeck is installed\n$/);
+    assert.ok(r.stdout.endsWith(installedTail(d.platform)), r.stdout);
   });
 });

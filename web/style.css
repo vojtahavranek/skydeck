@@ -343,6 +343,13 @@ kbd {
 .cards {
   flex: none;
 }
+/* Follow-up F22: the right side's one line while the list holds no session at all, where the
+   right side was blank; muted as the list's note is. */
+.right-none {
+  flex: none;
+  padding: 12px 16px;
+  color: var(--dim);
+}
 .right-zone:not([data-pane='terminal']) .cards {
   flex: 1;
   overflow: auto;

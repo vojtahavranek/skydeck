@@ -1,6 +1,7 @@
 // The python3 the window's keepers run (S2 2, 7.1): the one found on PATH, asked for its version
-// with `python3 --version` — the only program install starts, and the one doctor starts besides
-// gh and wezterm (S2 16.1, 16.3). 3.9 is the oldest the keeper's code allows.
+// with `python3 --version` — the only program install starts, and one doctor starts besides gh,
+// wezterm, and for its first lines git and `<claudeCommand> --version` (S2 16.1, 16.3; follow-up
+// F20). 3.9 is the oldest the keeper's code allows.
 import type { Env, Platform } from '../platform/types.ts';
 import { describeError } from '../sessions/problems.ts';
 

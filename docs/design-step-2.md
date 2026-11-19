@@ -667,10 +667,10 @@ of the distribution alive while the window has anything to keep:
   orphan whose line is unknown, or whose command line does not match, gets no SIGTERM (its line
   no longer counts, and a new keep-alive is started beside it). That the socket of a `wsl.exe`
   session goes when that `wsl.exe` ends on the Windows side, and that the Linux side of a
-  `wsl.exe` ends only with it, is **UNVERIFIED** (check W14).
+  `wsl.exe` ends only with it: the maintainer's check W14 is the check for both.
 
-That a `wsl.exe` started from inside WSL counts as a Windows client is **UNVERIFIED** (section 21;
-check W14). The design does not depend on it:
+That a `wsl.exe` started from inside WSL counts as a Windows client is what the keep-alive rests
+on; the maintainer's check W14 is the check for it (section 21). The design does not depend on it:
 
 - the documented alternative is the user's own setting: `instanceIdleTimeout=-1` under `[general]`
   in `%USERPROFILE%\.wslconfig` (or "keep WSL running" in the WSL Settings app, which writes it).
@@ -2298,6 +2298,28 @@ schemes (`test/web/section-band.test.ts`).
 Done sessions are hidden (design 7.1), with a footer "17 done hidden · show". Filtering and the
 switcher search done ones too (12.8).
 
+**No session at all** (follow-up F22, for a new user's first window). While the list holds no
+session at all — none in any section (a folded Earlier counts its own; done sessions hidden count
+for none) and no filter or chip set — it says so under the Open band, in a short note muted in
+`--dim` (at least 4.5 : 1 on the list, in each scheme; `--faint` is not) and in the list's own
+type, line by line: `No session here yet.`, `Start claude in any terminal: it shows here as soon as
+it starts.`, `Or start one here with Ctrl+Shift+N.` (in a browser tab, where the browser keeps that
+key, `Or start one here with + New in the key bar.`: the page's app-only and tab-only rule picks
+the line) and `Ctrl+Shift+H shows every key.`. It is a note (`role="note"`), no control and not in
+the tab order, and it wraps inside the list's width. A filter or a chip that hides every session
+keeps its own line, `No session matches the filter.` (12.8). It comes and goes with the lists, with
+no reload: it goes when the first session is listed and comes back when the last one is done or
+gone (the footer then says how many are done). With sessions it is not in the list at all, so
+nothing of a list with sessions moves. The right side, blank before while nothing is selected
+there, then has one line in the same colour above the empty cards, `The selected session shows
+here.` (12.6): its terminal, its card or its resume card, once there is one; it is no card of a
+session. Whether the list holds no session is one rule of the page's (`holdsNoSession`,
+`web/list-text.js`), read by both. Ruled by the plan
+owner: a session started in a terminal is listed from its start, before its first prompt (design
+7.2: only one that ends before its first prompt has no transcript and drops out), so the note says
+"as soon as it starts"; and the right side's line names no session to pick (it shows only while
+there is none) and no terminal (a session started in another terminal shows its card there).
+
 The title bar shows the counts, e.g. `● 3 need you · 3 working · 2 idle`, and the window title is
 `(3) skydeck` while 3 sessions need you, so the taskbar shows it.
 
@@ -3059,6 +3081,11 @@ nothing; `ls` is unchanged.
   or Undo takes no keyboard. The form opens with the flags field empty and every chip off, whatever was
   used before: no favourite is ever on without a click, and Start sends the field's text, as
   before.
+- **Nothing, while the list holds no session at all** (follow-up F22): one muted line above the
+  empty cards, `The selected session shows here.` (12.1), also while a session the
+  list no longer shows (the last one marked done) is still selected; the New form takes the right
+  side, and the line goes while it is shown. With sessions, nothing shown on the right still shows
+  nothing (12.9).
 
 ### 12.7 The restore banner
 
@@ -3345,12 +3372,14 @@ the terminal). They are buttons: Tab from the filter field reaches them, Enter o
 one, and while one has the keyboard no list key acts, as on any button of the list zone. The selection is never on a row the
 list does not show: when the selected row stops being shown otherwise (a filter, done sessions
 hidden again, the row gone from the list), no row is selected — the right side shows a terminal
-of the window that holds the session, else nothing —, Enter does nothing, and ↑ ↓ start from the
+of the window that holds the session, else nothing (but 12.1's line while the list holds no
+session at all) —, Enter does nothing, and ↑ ↓ start from the
 first row shown (ruled by the plan owner, plan task 27); when the list shows the row again, it is
 selected again. From stage E the right side takes such a session's row from the list's
 `selectedRow` (8.2.3): its terminal is shown with its header (stage D's, so that the header's
 controls and their dialogs edit that session) and its ended bar with Resume and Close (12.6); a
-session without a terminal of the window shows nothing, never its card. The header's Done on such
+session without a terminal of the window shows nothing (but 12.1's line while the list holds no
+session at all), never its card. The header's Done on such
 a session takes its toast from the row, since it is in no section: `Marked done. Stays under Open
 while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
 the lead on 2026-11-15). The list keys (`l`, F2,
@@ -3897,7 +3926,8 @@ holds is `RUNTIME_DIR` in `src/cli/purge.ts`.
 ### 16.3 Doctor
 
 New lines, with `ok`, `info` or `problem` as in design 8. It still starts no program but those it
-already runs (`gh`, `wezterm`) and `python3 --version`; it starts nothing on Windows, signals
+already runs (`gh`, `wezterm`, and for its first three lines git and `<claudeCommand> --version`,
+design 8, follow-up F20) and `python3 --version`; it starts nothing on Windows, signals
 nothing and creates nothing. While the window has never been used — no `window_secret`, or no
 database to read it from — every line below that would be a `problem` is `info`, so that `doctor`
 judges an installation that uses only the commands as step 1's did; once the window was used they
@@ -3909,7 +3939,7 @@ are problems.
 | server | never: `info` says whether a server runs (`GET /status` on `server.sock`), its pid, checkout, build, uptime, pages and terminals, and where its environment came from (5.2), or, while its `GET /status` says `starting`, `the window's server (pid <n>) is starting, from <checkout>, build <build>; run skydeck doctor again once it has started` (ruled by the plan owner, follow-up "server-findable"); `problem` when it runs another build of this checkout (`run skydeck window --restart`), runs from another checkout, is alive but does not answer, answers `GET /ping` but not `GET /status`, or is starting and did not finish within the 5 seconds of the ping wait — it has not written `server.json`, or wrote it late in the wait and has not answered in what was left (5.2: its `window_server` lock names it; `the window's server (pid <n>) is starting and did not finish within 5 s (it holds the window_server lock and has not answered yet); see <stateDir>/server.log; skydeck window --restart stops it`; ruled by the plan owner, follow-up "server-findable"). |
 | port | something that is not this installation's server answers on `127.0.0.1:<window.port>`: `/proc/net/tcp` or `tcp6` lists a listener on that port and no server of this installation is alive: one that answers `GET /ping` holds it, and while one is alive but does not answer, or cannot be judged, the port is most likely its own (`info`; the server's own line is the problem). `doctor` never binds the port, not even for an instant (a server starting at that moment would exit 10), and sends nothing to a foreign program. |
 | launch alarm | `window_alarm` is set: a launch token was presented twice at <time>, so another program may have skydeck's key (8.2.2); `run skydeck window --new-secret`. |
-| keep-alive | a server or a keeper runs and neither protection is in effect — while the server's `GET /status` says `starting` and its keep-alive is still starting by the server's own word (`keepAlive.state` is `starting`), the line is `info` (`keep-alive: not confirmed yet: the window's server is starting, and its first check starts the keep-alive or takes over one that still runs`; ruled by the plan owner, follow-up "server-findable", review 2). A keep-alive that is `off`, or has `failed` (it cannot start: no `WSL_DISTRO_NAME`, …), stays the problem while the server starts too. The line names the one in effect: `.wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)`, or `keep-alive wsl.exe running (pid <n>, since <time>); that it keeps WSL running is unverified (manual check W14)`. `.wslconfig` is read from the Windows profile folder found as in 5.4. Whether the keep-alive runs is the server's word when it answers; otherwise `doctor` judges it as the server judges one it did not start (6.1): its `keepalive.pid` line (one that cannot be read or judged is "cannot be told", never "not running"), and one connection, sending nothing, to the socket `keepalive.interop` names (refused or gone: its `wsl.exe` is gone; never a socket inside the runtime directory). The problem line names the setting and that it takes effect at the next WSL restart; it names `wsl --shutdown` only with what it does (6.1). |
+| keep-alive | a server or a keeper runs and neither protection is in effect — while the server's `GET /status` says `starting` and its keep-alive is still starting by the server's own word (`keepAlive.state` is `starting`), the line is `info` (`keep-alive: not confirmed yet: the window's server is starting, and its first check starts the keep-alive or takes over one that still runs`; ruled by the plan owner, follow-up "server-findable", review 2). A keep-alive that is `off`, or has `failed` (it cannot start: no `WSL_DISTRO_NAME`, …), stays the problem while the server starts too. The line names the one in effect: `.wslconfig has instanceIdleTimeout=-1 (WSL does not stop by itself)`, or `keep-alive wsl.exe running (pid <n>, since <time>)`. `.wslconfig` is read from the Windows profile folder found as in 5.4. Whether the keep-alive runs is the server's word when it answers; otherwise `doctor` judges it as the server judges one it did not start (6.1): its `keepalive.pid` line (one that cannot be read or judged is "cannot be told", never "not running"), and one connection, sending nothing, to the socket `keepalive.interop` names (refused or gone: its `wsl.exe` is gone; never a socket inside the runtime directory). The problem line names the setting and that it takes effect at the next WSL restart; it names `wsl --shutdown` only with what it does (6.1). |
 | interop | `WSL_INTEROP` is not set or `<runtimeDir>/interop` points at nothing that answers. While the server's `GET /status` says `starting` the link is pointed later in that start, so a link that is missing or points at nothing that answers is `info` then (ruled by the plan owner, follow-up "server-findable"). |
 | C: drive | the C: drive is not mounted at `/mnt/c`, where all of the window expects it (Edge's working directory, the keep-alive's `wsl.exe`, the users' folders of 5.4). |
 | Edge | `window.edge` does not exist or is not a file (`info` when the window has never been used). |

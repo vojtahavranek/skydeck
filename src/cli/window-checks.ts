@@ -350,10 +350,7 @@ async function checkKeepAlive(view: WindowView, report: Report): Promise<void> {
   const keepAlive = await keepAliveState(view, server);
   switch (keepAlive.kind) {
     case 'running':
-      report(
-        'info',
-        `keep-alive wsl.exe running (pid ${keepAlive.pid}, since ${keepAlive.since}); that it keeps WSL running is unverified (manual check W14)`,
-      );
+      report('info', `keep-alive wsl.exe running (pid ${keepAlive.pid}, since ${keepAlive.since})`);
       return;
     case 'unknown':
       report(

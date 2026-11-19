@@ -5,6 +5,10 @@
 // owner): a configuration that cannot be read, or a database that is missing or cannot be opened,
 // is one problem line, and the checks that do not need it still run.
 //
+// Before every other line, three `info` lines that say what runs (follow-up F20): skydeck's
+// version line (src/cli/version.ts), the version Claude Code gives, and the system. None is ever a
+// problem, none changes the exit code, and none names a path (a path can hold the user's name).
+//
 // Then the window's lines (S2 16.3, src/cli/window-checks.ts). Ruled by the plan owner (task 24):
 // while the window has never been used — no window_secret, or no database to read it from — every
 // one of them that would be a problem is `info`, so that doctor exits for the commands as step 1's
@@ -15,6 +19,7 @@ import { checkNodeVersion } from '../../../bin/node-version.mjs';
 import { lookAtClaudeFolders } from '../../claude/folders.ts';
 import { LEFT_ARROW_LABEL, readLeftArrow } from '../../claude/global-config.ts';
 import { HOOK_EVENTS, hookStatus, settingsPath } from '../../claude/settings.ts';
+import { readClaudeVersion } from '../../claude/version.ts';
 import type { Config } from '../../platform/config.ts';
 import { SkydeckError } from '../../platform/errors.ts';
 import { resolvePlaces } from '../../platform/paths.ts';
@@ -26,10 +31,12 @@ import { openStore } from '../../store/store.ts';
 import type { Store } from '../../store/store.ts';
 import { formatAge } from '../../text/age.ts';
 import { sanitize } from '../../text/sanitize.ts';
+import { withoutLauncherVariables } from '../../window/env.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
 import { EXIT } from '../exit.ts';
+import { versionLine } from '../version.ts';
 import { WINDOW_CHECKS, windowView } from '../window-checks.ts';
 import type { WindowCheck, WindowView } from '../window-checks.ts';
 
@@ -37,7 +44,8 @@ const SPEC: ArgSpec = {
   usage:
     'skydeck doctor\n' +
     '\n' +
-    'Checks the configuration, the hook entries and links, Node.js, the database, the spool,\n' +
+    'Shows the versions of skydeck and Claude Code and the system, then checks the\n' +
+    'configuration, the hook entries and links, Node.js, the database, the spool,\n' +
     "hook.log, what the last refresh skipped, Claude Code's folders and its ← shortcut, gh and\n" +
     'the terminal, then what the window needs (python3, its server, the port, the keep-alive,\n' +
     'Edge, the runtime directory, the vendored files) and its terminals. One line per check;\n' +
@@ -75,6 +83,8 @@ const SPOOL_LIMIT = 1000;
 const LOG_TAIL_BYTES = 16 * 1024;
 const LOG_LINES = 5;
 const PROGRAM_TIMEOUT_MS = 10_000;
+/** Where the system line reads the distribution's name (the kernel's release is Proc's). */
+const OS_RELEASE = '/etc/os-release';
 
 export const command: Command = {
   name: 'doctor',
@@ -94,7 +104,11 @@ export const command: Command = {
       ctx.io.stdout(`${kind.padEnd(9)}${sanitize(text)}\n`);
     };
     const { platform } = ctx;
-    const { places, config } = readConfiguration(platform, report);
+    const { places, config, problem } = readConfiguration(platform);
+    await reportVersions(platform, config, report);
+    if (problem !== null) {
+      report('problem', problem);
+    }
     const store = openDatabase(platform, places, report);
     try {
       for (const check of CHECKS) {
@@ -130,18 +144,112 @@ export const command: Command = {
 };
 
 /**
- * config.json, read as every command reads it. When it cannot be, that is a problem, and the places
- * that do not depend on it (all but claudeHome) come from the environment alone.
+ * config.json, read as every command reads it. When it cannot be, that is a problem (reported after
+ * the version lines), and the places that do not depend on it (all but claudeHome) come from the
+ * environment alone.
  */
-function readConfiguration(
-  platform: Platform,
-  report: Report,
-): { places: Places; config: Config | null } {
+function readConfiguration(platform: Platform): {
+  places: Places;
+  config: Config | null;
+  problem: string | null;
+} {
   try {
-    return resolveDeckPlaces(platform);
+    return { ...resolveDeckPlaces(platform), problem: null };
   } catch (error) {
-    report('problem', `configuration: ${messageOf(error)}; the checks that need it are skipped`);
-    return { places: resolvePlaces(platform.env, platform.homeDir, null), config: null };
+    return {
+      places: resolvePlaces(platform.env, platform.homeDir, null),
+      config: null,
+      problem: `configuration: ${messageOf(error)}; the checks that need it are skipped`,
+    };
+  }
+}
+
+/**
+ * Follow-up F20: what runs, before anything is judged. Each line is `info` whatever it says, and
+ * none of them can end the report.
+ */
+async function reportVersions(
+  platform: Platform,
+  config: Config | null,
+  report: Report,
+): Promise<void> {
+  report('info', `skydeck ${await versionLine(platform)}`);
+  report('info', await claudeCodeLine(platform, config));
+  report('info', systemLine(platform));
+}
+
+/**
+ * The first line `<claudeCommand> --version` prints (src/claude/version.ts), or why there is none.
+ * Without a configuration nothing is started: its claudeCommand is not known.
+ */
+async function claudeCodeLine(platform: Platform, config: Config | null): Promise<string> {
+  const notRead = (why: string): string => `Claude Code: version not read (${why})`;
+  if (config === null) {
+    return notRead('the configuration cannot be read');
+  }
+  try {
+    // Without the launcher's own variables, as every Claude Code program skydeck starts (S2 5.2,
+    // 7.4): its handoff file, and the compile cache it chose for skydeck's Node.js alone.
+    const read = await readClaudeVersion(
+      platform.runner,
+      config.claudeCommand,
+      withoutLauncherVariables(platform.env),
+    );
+    return 'version' in read ? `Claude Code ${read.version}` : notRead(read.why);
+  } catch (error) {
+    // Only the error's code or name: its message can name the program's path.
+    const code = (error as { code?: unknown } | null)?.code;
+    const what =
+      typeof code === 'string' && /^E[A-Z0-9]+$/.test(code)
+        ? code
+        : error instanceof Error
+          ? error.name
+          : 'unknown error';
+    return notRead(`could not be started: ${what}`);
+  }
+}
+
+/** `system: <PRETTY_NAME of /etc/os-release>, Linux <kernel release>`, `unknown` for what cannot be read. */
+function systemLine({ files, proc }: Platform): string {
+  const name = printable(prettyName(orNull(() => files.readText(OS_RELEASE))));
+  const release = printable(orNull(() => proc.kernelRelease()));
+  return `system: ${name ?? 'unknown'}, Linux ${release ?? 'unknown'}`;
+}
+
+/**
+ * PRETTY_NAME as os-release(5) writes it: a shell assignment, its value in double quotes (where
+ * a backslash escapes `\`, `$`, `"` and a backtick), in single quotes, or bare. The last one counts.
+ */
+function prettyName(text: string | null): string | null {
+  let name: string | null = null;
+  for (const line of text?.split('\n') ?? []) {
+    const value = /^PRETTY_NAME=(.*)$/.exec(line)?.[1]?.trim();
+    if (value === undefined) {
+      continue;
+    }
+    if (/^".*"$/s.test(value)) {
+      name = value.slice(1, -1).replace(/\\([\\$"`])/g, '$1');
+    } else if (/^'.*'$/s.test(value)) {
+      name = value.slice(1, -1);
+    } else {
+      name = value;
+    }
+  }
+  return name;
+}
+
+/** Without escape sequences, control characters and the spaces around it; null when nothing is left. */
+function printable(text: string | null): string | null {
+  const kept = text === null ? '' : sanitize(text).trim();
+  return kept === '' ? null : kept;
+}
+
+/** What `read` gives; null when it throws (a file that cannot be read). */
+function orNull(read: () => string | null): string | null {
+  try {
+    return read();
+  } catch {
+    return null;
   }
 }
 
