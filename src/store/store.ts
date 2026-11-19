@@ -14,7 +14,8 @@ import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue, SQLOutputValue, StatementSync } from 'node:sqlite';
 
 import { SkydeckError } from '../platform/errors.ts';
-import { isoFromNs, nsFromMs } from '../platform/time.ts';
+import { realClock } from '../platform/real.ts';
+import { isoFromNs } from '../platform/time.ts';
 import type { Clock, Ns } from '../platform/types.ts';
 import { MIGRATIONS, SCHEMA_VERSION } from './migrations.ts';
 import type {
@@ -698,7 +699,7 @@ export function migratedLine(migrated: Migrated): string {
  *
  * Follow-up F21: before it migrates a database that holds a schema already, it writes a copy of the
  * database as it is beside it (`<path>.schema<V>-<yyyymmddThhmmssZ>`, the UTC time of `clock`, the
- * real one by default) and keeps the newest three; `migrated` says what it did. When the copy cannot
+ * platform's real clock by default: design 11) and keeps the newest three; `migrated` says what it did. When the copy cannot
  * be written the migration does not run, and the open fails with a SkydeckError naming the database,
  * the copy and the reason (`the database <path> was not upgraded: its copy <copy> could not be
  * written (<reason>)`). A new database and one at SCHEMA_VERSION are never copied.
@@ -724,7 +725,7 @@ export function openStore(
     db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA synchronous = FULL');
     db.exec('PRAGMA foreign_keys = ON');
-    migrated = migrate(db, path, options.clock ?? REAL_CLOCK);
+    migrated = migrate(db, path, options.clock ?? realClock());
     if (busyTimeoutMs !== undefined) {
       // After the migrations, which wait the full 5 s for a command that holds the lock.
       db.exec(`PRAGMA busy_timeout = ${busyTimeoutMs}`);
@@ -741,9 +742,6 @@ export function openStore(
   }
   return new SqliteStore(db, path, options.guardSchema === true, migrated);
 }
-
-/** The time of a copy's name when openStore is given no clock. */
-const REAL_CLOCK: Pick<Clock, 'nowNs'> = { nowNs: () => nsFromMs(Date.now()) };
 
 /**
  * The primary result codes of a failure of the database as a whole, never of one row: BUSY,

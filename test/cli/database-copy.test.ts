@@ -80,12 +80,9 @@ describe('the command that migrated says so (C3)', () => {
 
     const r = await run(d.platform, ['doctor']);
 
-    // doctor's own open names its copy by the real clock, not the test platform's.
-    const [copy, ...more] = copies(d);
-    assert.match(copy ?? '', /^skydeck\.db\.schema3-[0-9]{8}T[0-9]{6}Z$/);
-    assert.deepEqual(more, []);
-    assert.equal(r.stderr, said(join(d.places.dataDir, copy ?? '')));
+    assert.equal(r.stderr, said(d.copy));
     assert.doesNotMatch(r.stdout, /brought to schema version/);
+    assert.deepEqual(copies(d), [`skydeck.db.schema3-${STAMP}`]);
   });
 
   test('uninstall, which opens the database itself, says the line on stderr', async (t) => {

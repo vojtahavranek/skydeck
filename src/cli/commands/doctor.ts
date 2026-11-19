@@ -156,7 +156,7 @@ function openDatabase(platform: Platform, places: Places, report: Report): Store
       report('problem', `database ${dbPath} does not exist; run skydeck install`);
       return null;
     }
-    return openStore(dbPath);
+    return openStore(dbPath, { clock: platform.clock });
   } catch (error) {
     report(
       'problem',
