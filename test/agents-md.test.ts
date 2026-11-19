@@ -136,10 +136,14 @@ describe("AGENTS.md's preview: bin/skydeck install </dev/null", () => {
 
     assert.equal(r.status, 1, r.stderr);
     assert.equal(r.stdout, '');
-    // Some Node.js 24 versions warn that node:sqlite is experimental; AGENTS.md says so.
+    // Some Node.js 24 versions (24.12) warn that node:sqlite is experimental, in two lines that come
+    // wherever the warning's turn falls (here, after the prompt); AGENTS.md says they are harmless.
     const lines = r.stderr
-      .split('\n')
-      .filter((line) => !/ExperimentalWarning|--trace-warnings/.test(line));
+      .replaceAll(
+        /\(node:\d+\) ExperimentalWarning: [^\n]*\n|\(Use `node --trace-warnings[^\n]*\n/g,
+        '',
+      )
+      .split('\n');
     const header = `skydeck will add these hook entries to ${settings}:`;
     assert.equal(lines[0], header, r.stderr);
     assert.equal(lines.at(-2), 'Add them? [y/N] settings not changed', r.stderr);

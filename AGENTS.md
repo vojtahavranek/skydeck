@@ -68,8 +68,9 @@ Add them? [y/N] settings not changed
 ```
 
 A line `the rest of the file will be rewritten …` means install would also reformat the file, and
-names its backup; `ExperimentalWarning: SQLite …` (some Node.js 24 versions) is harmless. Show the
-human the whole output. Anything else (a refusal, `hook entries already present`): STOP, show it.
+names its backup. `ExperimentalWarning: SQLite …` and the line after it, anywhere in the output
+(some Node.js 24 versions), are harmless. Show the human the whole output. Anything else (a
+refusal, `hook entries already present`): STOP, show it.
 
 **4. The human installs.** In a terminal of their own, where they read the questions and type the
 answers, they run `cd ~/skydeck && bin/skydeck install` (with `SKYDECK_NODE=...` in front when
