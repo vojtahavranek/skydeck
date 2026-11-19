@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { Command } from './command.ts';
 import type { Context } from './context.ts';
 import { EXIT } from './exit.ts';
-import pkg from '../../package.json' with { type: 'json' };
+import { versionLine } from './version.ts';
 import { RefError, SkydeckError } from '../platform/errors.ts';
 import { sanitize } from '../text/sanitize.ts';
 
@@ -32,7 +32,8 @@ export async function dispatch(argv: string[], ctx: Context, commandsDir: URL): 
     return EXIT.ok;
   }
   if ((first === '--version' || first === '-V') && rest.length === 0) {
-    ctx.io.stdout(`${pkg.version}\n`);
+    // Follow-up F20: the checkout's commit beside the package version; it never fails.
+    ctx.io.stdout(`${await versionLine(ctx.platform)}\n`);
     return EXIT.ok;
   }
   if (COMMAND_NAME.test(first)) {

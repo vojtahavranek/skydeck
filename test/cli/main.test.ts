@@ -11,13 +11,14 @@ const missingDir = new URL('../fixtures/no-such-directory/', import.meta.url);
 
 describe('main', () => {
   for (const flag of ['--version', '-V']) {
-    test(`${flag} prints the package version and exits 0`, async () => {
+    // The commit beside it is test/cli/version.test.ts's; here the platform has no git to ask.
+    test(`${flag} prints the version line and exits 0`, async () => {
       const c = testContext();
 
       const code = await main([flag], c.ctx);
 
       assert.equal(code, 0);
-      assert.equal(c.stdout(), `${pkg.version}\n`);
+      assert.equal(c.stdout(), `${pkg.version} (commit unknown)\n`);
       assert.equal(c.stderr(), '');
     });
   }
