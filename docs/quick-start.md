@@ -12,7 +12,7 @@ below runs inside WSL. The complete guide is [install.md](install.md).
   only the sessions of the Claude Code inside WSL.
 - `gh`, logged in (`gh auth status`), only for the status of pull requests and GitHub issues.
 
-Missing one? The guide's "On a fresh WSL" has the commands.
+Missing one? [On a fresh WSL](install.md#on-a-fresh-wsl), in the guide, has the commands.
 
 ## Install
 
@@ -27,18 +27,15 @@ Node.js, put the path of a newer `node` in front: `SKYDECK_NODE=/path/to/node bi
 
 The install adds two hooks to Claude Code's settings file, `~/.claude/settings.json`, which tell
 skydeck when a session starts and when it ends. It shows you the exact entries first, and keeps a
-copy of the file as it was. It asks up to three questions; Enter alone answers no.
+copy of the file as it was. It asks up to three questions; Enter alone answers no, and a no to the
+first one ends the install with nothing changed.
 
-1. **Add them?** Yes adds the hooks, and skydeck records every session that starts from then on
-   (the sessions Claude Code already has are read from its transcripts). No changes nothing, and
-   the install stops there.
-2. **Mark … sessions older than 7 days as done?** Asked once, and only when Claude Code has such
-   sessions. Yes hides them from the list. Nothing is stopped or deleted, and they are easy to
-   show again (see "Mark it done, and find it again" below).
-3. **Turn the shortcut off?** Asked while Claude Code's ← shortcut is on. In Claude Code, ← on an
-   empty prompt sends the session to the background; in skydeck's list ← closes a group, so a ←
-   typed in the wrong place can send a session away. Yes turns off only that shortcut, in
-   `~/.claude.json`, after a copy of the file.
+1. **Add them?** Yes adds the two hooks, so that skydeck records every session that starts.
+2. **Mark … sessions older than 7 days as done?** (asked once, when there are such sessions) Yes
+   hides them from the list, without stopping or deleting anything.
+3. **Turn the shortcut off?** (asked while it is on) Yes turns off, in `~/.claude.json`, Claude
+   Code's ← shortcut (← on an empty prompt sends the session to the background), so that a ← meant
+   for skydeck's list cannot send a session away.
 
 To undo the install, run `skydeck uninstall`: it takes the two hooks out again, removes its links
 and stops the window's server. Your database stays, sessions that run keep running, and the ←
@@ -56,7 +53,8 @@ skydeck doctor
 It prints one line per check, each starting with `ok`, `info` or `problem`, and most `problem`
 lines say what to do. Two things are normal on a new machine: `doctor` has seen no events yet (that
 changes once a session starts), and without `gh` logged in, its `gh` line is a `problem`.
-`skydeck ls` prints your sessions; one that never had a prompt shows only while it runs.
+`skydeck ls` prints your sessions, also those Claude Code had before the install; one that never
+had a prompt shows only while it runs.
 
 ## Open the window
 
@@ -89,9 +87,9 @@ The list has three sections:
 - **Earlier**: the older ones, folded. Click its band to unfold it.
 
 A running session's second line says what it does: `working` (Claude Code is busy), `waiting` (it
-waits for you at its prompt) or `running` (it runs and reports nothing more). A hollow ring marks a
-session that does not run, a red diamond with the word `crashed` one that ended unexpectedly; point
-at a mark to read what it means. Two or more sessions of one group sit together in a block: click
+waits for you) or `running` (it runs and reports nothing more). A hollow ring marks a session that
+does not run, a red diamond with the word `crashed` one that ended unexpectedly; point at a mark to
+read what it means. Two or more sessions of one group sit together in a block: click
 the group's name to close or open it. The title bar counts the sessions in each state.
 
 ### Open a session's terminal
@@ -145,7 +143,8 @@ For the ticket, press `t` (or **+ ticket** in the header) and paste its link. A 
 `ABC-123`, works once `~/.config/skydeck/config.json` says how a key becomes a link, for example
 `{ "ticketUrl": "https://tickets.example.com/browse/{key}" }`, and you have run
 `skydeck window --restart`. The ticket's status shows as a chip when the ticket is a GitHub issue,
-or when you name a program that reads it (the guide's "A ticket's status").
+or when you name a program that reads it (the guide's
+[A ticket's status](install.md#a-tickets-status)).
 
 ### Find a session
 
@@ -187,7 +186,8 @@ WezTerm tab for each).
 WSL stops by itself 15 seconds after its last terminal (or other `wsl.exe`) has ended, and every
 session in the window ends with it. While the window's sessions run, skydeck keeps WSL running with
 a hidden `wsl.exe`, and `skydeck doctor` says whether it runs. WSL's own setting
-`instanceIdleTimeout=-1` does the same without skydeck: see the guide's "Keeping WSL running".
+`instanceIdleTimeout=-1` does the same without skydeck: see the guide's
+[Keeping WSL running](install.md#keeping-wsl-running).
 
 ## Updating
 
@@ -216,4 +216,5 @@ there).
 1. Run `skydeck doctor` in a WSL terminal. Each `problem` line says what to do.
 2. Look at skydeck's logs in `~/.local/state/skydeck/`: `hook.log` (the hook's errors),
    `server.log` and `keepers.log` (the window's). They hold no conversation content.
-3. The guide's last section, "If something goes wrong", lists messages and what to do about each.
+3. The guide's last section, [If something goes wrong](install.md#if-something-goes-wrong), lists
+   messages and what to do about each.

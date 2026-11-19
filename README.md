@@ -32,8 +32,8 @@ minutes in the window.
 - It reads Claude Code's transcripts and live-session files for each session's folder, title,
   times, state and pull-request links, and never writes to them.
 - It adds two hooks to Claude Code's settings and, after your yes, one setting in `~/.claude.json`.
-- Its database (`~/.local/share/skydeck/skydeck.db`) and its logs (`~/.local/state/skydeck/`) hold
-  no prompt and no answer.
+- Its database is `~/.local/share/skydeck/skydeck.db`, its logs the `.log` files in
+  `~/.local/state/skydeck/`; neither holds a prompt or an answer.
 - It uses the network through `gh` (pull requests, GitHub issues), `git fetch` in `skydeck update`
   and the ticket-status programs you configure, nothing else. No account, no telemetry.
 - The window is a local page (127.0.0.1) served from WSL; it types into your sessions as a terminal.
@@ -45,7 +45,7 @@ minutes in the window.
 - [docs/design.md](docs/design.md) and [docs/design-step-2.md](docs/design-step-2.md): the design
   of the commands and of the window.
 - [docs/manual-checks.md](docs/manual-checks.md): the maintainer's checklist, run by hand after
-  changes; not a guide. [docs/check-kit/](docs/check-kit/) holds what some of its items use.
+  changes; not a guide.
 
 ## Commands
 
