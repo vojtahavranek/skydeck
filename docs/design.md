@@ -894,14 +894,16 @@ could not be resumed; see above`).
   another repository (`GIT_DIR` and its kin, as for `skydeck update`) and with no optional lock, so
   that nothing is written in the checkout; `--version` never fails and prints nothing on stderr.
   (2) `Claude Code <version>`: the first line `<claudeCommand> --version` prints (no shell, stdin
-  closed, 5 seconds, at most 4 KiB read, control characters dropped, at most 60 characters kept),
+  closed, doctor's environment without the launcher's own variables as in design-step-2.md 5.2,
+  5 seconds, at most 4 KiB read, control characters dropped, at most 60 characters kept),
   compared with nothing; a ` (Claude Code)` at its very end, as Claude Code prints it, is dropped
   (ruled by the plan owner), any other line is shown as it is; or `Claude Code: version not read (<why>)` (`not installed`, `timed out
   after 5 s`, `exited <n>`, `ended by a signal`, `printed no version`, `could not be started:
   <code>`, or `the configuration cannot be read`, when nothing is started: the configuration's
   problem line follows the three). (3) `system: <PRETTY_NAME of /etc/os-release>, Linux <kernel
   release>` (`Proc.kernelRelease`, `/proc/sys/kernel/osrelease`), each part `unknown` when it
-  cannot be read.
+  cannot be read. The time limits end the program skydeck started, not what that program started
+  (the inner program of a wrapper script runs on).
 
 `docs/install.md` is the guide for setting skydeck up on another machine.
 

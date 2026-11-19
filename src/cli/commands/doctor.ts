@@ -31,6 +31,7 @@ import { openStore } from '../../store/store.ts';
 import type { Store } from '../../store/store.ts';
 import { formatAge } from '../../text/age.ts';
 import { sanitize } from '../../text/sanitize.ts';
+import { withoutLauncherVariables } from '../../window/env.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
@@ -187,10 +188,12 @@ async function claudeCodeLine(platform: Platform, config: Config | null): Promis
     return notRead('the configuration cannot be read');
   }
   try {
+    // Without the launcher's own variables, as every Claude Code program skydeck starts (S2 5.2,
+    // 7.4): its handoff file, and the compile cache it chose for skydeck's Node.js alone.
     const read = await readClaudeVersion(
       platform.runner,
       config.claudeCommand,
-      definedEnv(platform.env),
+      withoutLauncherVariables(platform.env),
     );
     return 'version' in read ? `Claude Code ${read.version}` : notRead(read.why);
   } catch (error) {

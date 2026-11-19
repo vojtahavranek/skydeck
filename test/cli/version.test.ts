@@ -323,6 +323,28 @@ describe('the version line: which repository git looks at', () => {
     }
   });
 
+  test('the two calls run side by side: both are started before either has answered', async (t) => {
+    const d = testPlatform(t);
+    const appRoot = join(d.sandbox.root, 'checkout');
+    const id = 'f1fce49' + '0'.repeat(33);
+    const answers: (() => void)[] = [];
+    const runner = fakeRunner(
+      (call) =>
+        new Promise((resolve) => {
+          answers.push(() => {
+            resolve(runResult(call.args.includes('log') ? { stdout: `${id} 2026-11-19\n` } : {}));
+          });
+        }),
+    );
+
+    const line = versionLine({ ...d.platform, appRoot, runner });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(runner.calls.length, 2, 'both calls before any answer');
+    for (const answer of answers) answer();
+    assert.equal(await line, `${pkg.version} (f1fce49, 2026-11-19)`);
+  });
+
   test('a tracked file changed (git status lists it): ", modified"', async (t) => {
     const d = testPlatform(t);
     const appRoot = join(d.sandbox.root, 'checkout');

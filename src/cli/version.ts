@@ -41,7 +41,9 @@ async function checkoutCommit(platform: Platform): Promise<string | null> {
   const env = {
     ...gitEnv(platform.env),
     // The app root itself, never a folder above it: a copy of skydeck that is not a checkout but
-    // lies inside one would otherwise report that other repository's commit.
+    // lies inside one would otherwise report that other repository's commit. The variable is a
+    // list split at colons, so a colon in the path above the app root makes it name no ceiling: such
+    // a copy then reports the outer commit (a checkout with a colon in its path is read rightly).
     GIT_CEILING_DIRECTORIES: dirname(root),
     GIT_OPTIONAL_LOCKS: '0',
   };

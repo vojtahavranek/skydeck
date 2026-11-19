@@ -201,6 +201,33 @@ describe('doctor: the three lines at the top (follow-up F20)', () => {
 });
 
 describe('doctor: the Claude Code line (follow-up F20)', () => {
+  test("its environment is doctor's without the launcher's own variables (S2 5.2, 7.4); a compile cache of the user's stays", async (t) => {
+    for (const [cache, kept] of [
+      ['/sandbox-cache/skydeck', undefined],
+      ['/my/own/cache', '/my/own/cache'],
+    ] as const) {
+      const d = testPlatform(t, {
+        env: {
+          SKYDECK_HANDOFF: '/tmp/skydeck-handoff.x',
+          SKYDECK_LAUNCHER_CACHE: '/sandbox-cache/skydeck',
+          NODE_COMPILE_CACHE: cache,
+          KEPT_VARIABLE: 'kept',
+        },
+      });
+      claudeFolders(d.places);
+      assert.equal((await run(d.platform, ['install'], { lines: ['y'] })).code, 0);
+
+      const r = await doctor(t, d, { answers: { 'claude --version': { stdout: '2.1.0\n' } } });
+
+      const env = r.runner.calls.find((call) => call.command === 'claude')?.options?.env ?? {};
+      assert.equal(env['SKYDECK_HANDOFF'], undefined, cache);
+      assert.equal(env['SKYDECK_LAUNCHER_CACHE'], undefined, cache);
+      assert.equal(env['NODE_COMPILE_CACHE'], kept, cache);
+      assert.equal(env['KEPT_VARIABLE'], 'kept', cache);
+      assert.equal(env['HOME'], d.sandbox.home, cache);
+    }
+  });
+
   /** doctor on an installed machine whose claudeCommand is `command`; the line, and exit 0. */
   async function claudeLine(
     t: TestContext,
@@ -295,11 +322,14 @@ describe('doctor: the Claude Code line (follow-up F20)', () => {
   // says whose version it is.
   test('a first line that ends with exactly " (Claude Code)": that part is dropped, after the cleaning, before the cut', async (t) => {
     const nines = '9'.repeat(70);
+    const fifty = `2.1.5-${'a'.repeat(44)}`;
     for (const [body, shown] of [
       [`printf '  2.1.5 (Claude Code)  \\r\\n'`, '2.1.5'],
       [`printf '2.1.5\\t(Claude Code)\\n'`, '2.1.5'],
       [`printf '\\033[1m2.1.5 (Claude Code)\\033[0m\\n'`, '2.1.5'],
       [`printf '${nines} (Claude Code)\\n'`, '9'.repeat(60)],
+      // 64 characters with the name: dropped before the cut, so all 50 are shown.
+      [`printf '${fifty} (Claude Code)\\n'`, fifty],
     ] as const) {
       const { line } = await claudeLine(t, (d) => program(d, 'claude', body));
       assert.equal(line, `info     Claude Code ${shown}`, body);
