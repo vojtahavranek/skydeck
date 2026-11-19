@@ -772,7 +772,10 @@ effect.
   adds its flags to the field, a second click takes them out, and its × (on hover) removes it, with
   `Undo` in the form's line next to Start. skydeck keeps them in its database, so every window and
   every restart sees the same ones (at most 12, each at most 200 characters); the field always
-  starts empty.
+  starts empty. When the selected session is in a group, a chip with that group's name stands
+  right after the Group field: a click on it (or Tab to it, then Enter) puts the name into the
+  field, so that the new session joins that group. Without the click the field stays empty. The
+  Group field also offers the groups of your list as you type.
 - **A session that ended** keeps its last screen, dimmed, under a bar with Resume and Close.
 - **Keys**: **Ctrl+Shift+H shows every key of the window**. The window takes only Ctrl+Shift
   chords with a letter or a digit, and Ctrl+Tab, besides the list's own keys while the list has the

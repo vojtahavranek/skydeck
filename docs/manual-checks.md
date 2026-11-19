@@ -14,7 +14,7 @@ F8), at "Updating skydeck"; W33 checks install's offer to turn off Claude Code's
 (follow-up F11), at "Claude Code's ← shortcut"; W34 checks the title bar's theme switch (follow-up
 F13), at "The window's theme"; W35 checks the flags a session was started with in the header
 (follow-up F16), at "The flags a session was started with"; W36 checks the new form's favourite
-flags (follow-up F15), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
+flags (follow-up F15) and its group chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
 session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status".
 
 Setup:
@@ -2190,9 +2190,10 @@ The check of the new form's favourite flags (follow-up F15; design-step-2.md 12.
 [install.md](install.md), "A new session"): W36, in the window, with the throwaway folder
 `~/skydeck-try` and one new throwaway session that gets no prompt at all. It saves one favourite of
 its own, `--verbose --model sonnet`, and removes it at its end; a favourite you saved yourself stays
-as it is: the check never clicks the × of a chip whose text is not the check's own. Steps that
-type a command are typed in W, a WSL terminal of your own (never a `!` command inside Claude
-Code).
+as it is: the check never clicks the × of a chip whose text is not the check's own. Its step 7
+selects a session of yours only to look at the form's group chip: it starts nothing in that
+group. Steps that type a command are typed in W, a WSL terminal of your own (never a `!` command
+inside Claude Code).
 
 ## W36. Favourite flags in the new form (real claude)
 
@@ -2238,7 +2239,17 @@ form, while in a session's terminal it reaches Claude Code.
 6. **After a restart.** In W, `skydeck window --restart`. The window says for a few seconds that
    the server is not answering, then shows every session again. Press Ctrl+Shift+N. Expected: the
    same chips in the same order as in step 2, every one off. Press Esc (the form shows).
-7. **The end.** End the throwaway session: click its row in the list (the folder `skydeck-try`,
+7. **The group chip** (follow-up F28). Click the row of a session of yours that is in a group
+   (inside a group's card, or with the group's name on its row; a click only shows it, it resumes
+   nothing), then press Ctrl+Shift+N, and look that the right side shows `New session`. Expected:
+   right after the Group field a chip with that group's name (a name longer than 28 characters
+   ends in `…`), and the Group field itself empty. Point at the chip: its title reads `Use the
+   group <name>`, with the whole name. Click it. Expected: the Group field holds exactly the
+   name, and the caret is still in Directory. Press Esc (the form shows): the form closes, and
+   nothing was started. Then click the row of a session in no group, press Ctrl+Shift+N:
+   no chip. Press Esc (the form shows). With no session of yours in a group, leave this step out
+   and write that down.
+8. **The end.** End the throwaway session: click its row in the list (the folder `skydeck-try`,
    the short id of step 3) and look at the header's short id; look that its terminal has the
    keyboard (the key bar says `Focus: terminal`; else Ctrl+Shift+L until it does); type `/exit`
    and Enter, then `Close` on its ended bar. Then remove the check's favourite: Ctrl+Shift+N, look
@@ -2247,7 +2258,8 @@ form, while in a session's terminal it reaches Claude Code.
    The chips are then those of the setup.
 
 Write down: the favourites of the setup (how many, their texts); for each step whether it went as
-expected; the `launch:` line of step 4; anything that differs, and where.
+expected; the `launch:` line of step 4; the chip's text and title of step 7; anything that
+differs, and where.
 
 Not tried before this check was written: all of it, in Edge. The tests run the form in headless
 Chromium against a stand-in server, and the server on test databases; they never start `claude`.
