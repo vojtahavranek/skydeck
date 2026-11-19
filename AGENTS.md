@@ -34,16 +34,17 @@ grep -c skydeck-hook "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
 ```
 
 - A path under `/mnt/` is a Windows program seen from WSL: count it as missing.
-- If `node` is older than 24.12 or missing, put `SKYDECK_NODE=<any node 24.12 or newer>` before
-  every `bin/skydeck` below (nvm's, which your shell may not load, are
-  `~/.nvm/versions/node/v24.x.y/bin/node`: take the newest). None: the human installs one.
-- `git` missing: the human installs it. `claude` missing: STOP; Claude Code must be installed on
-  this side and started once (no folder in the `ls`: they start it once). Any version will do.
+- If `node` is older than 24.12 or missing, put `SKYDECK_NODE=<a node 24.12 or newer>` before every
+  `bin/skydeck` below. nvm keeps them in `~/.nvm/versions/node/` (your shell may not load nvm): take
+  the highest version, not the `ls`'s last (v24.9 sorts after v24.19). None: the human installs one.
+  Without nvm, its `ls` fails: that is fine.
+- `git` missing: the human installs it. `claude` missing: STOP; it must be installed on this side
+  and started once (no folder in the `ls`: the human starts `claude` once). Any version will do.
 - `python3` 3.9 or newer (only for the window's terminals) and `gh` (only for the status of pull
   requests and GitHub issues) are optional: tell the human what is missing, and go on.
 - A machine without skydeck shows `skydeck: missing`, `No such file or directory` for the three
   skydeck paths and a count of 0 (or no settings file). Anything else: skydeck is, or was,
-  installed or cloned here. STOP and tell the human what you found.
+  installed or cloned here. STOP, tell the human what you found, and go on only at their word.
 - Anything that needs `sudo`, a script from the internet or a login (`gh auth login`): PRINT it
   for the human (the guide's "On a fresh WSL" has them all); never run it yourself.
 
@@ -83,23 +84,21 @@ yes does (each question comes only when it applies):
 - `Turn the shortcut off? [y/N]` (while it is on): turns off Claude Code's ← shortcut in
   `~/.claude.json` (after a backup), so a ← meant for skydeck's list cannot send a session away.
 
-**5. Check it.** Ask them to open a new terminal: `skydeck` is found there (if not, give them
-`export PATH="$HOME/.local/bin:$PATH"` for their shell's startup file, `~/.bashrc` or `~/.zshrc`;
-never edit it yourself). You may run `~/.local/bin/skydeck doctor` and `~/.local/bin/skydeck ls`
-here and read them out. `doctor` prints a line per check, `ok`, `info` or `problem` (exit 1 on any
-problem), the first three `info`: skydeck's and Claude Code's versions, the system. Normal on a new
-install: `info     no events yet`; a `problem` for a missing or logged-out `gh` (fine without
-pull-request status); `info` for the window's lines, Edge's too, until it is used. Other problems
-say what to do; the fixes are the human's. `skydeck ls` lists the sessions, old and new.
+**5. Check it.** When they say it is done, ask them to open a new terminal: `skydeck` is found there
+(if not, give them `export PATH="$HOME/.local/bin:$PATH"` for their shell's startup file,
+`~/.bashrc` or `~/.zshrc`; never edit it yourself). You may run `~/.local/bin/skydeck doctor` and
+`~/.local/bin/skydeck ls` here and read them out. `doctor` prints a line per check, `ok`, `info` or
+`problem` (exit 1 on any problem), the first three `info`: skydeck's and Claude Code's versions, the
+system. Normal on a new install: `info     no events yet`; a `problem` for a missing or logged-out
+`gh` (fine without pull-request status); `info` for the window's lines, Edge's too, until it is
+used. Other problems say what to do; the fixes are the human's. `skydeck ls` lists the sessions.
 
-**6. Tell the human, at the end:**
-
-- What changed (above). `skydeck uninstall` undoes it: it takes the hook entries out, removes the
-  links and stops the window's server; the database, the backups and the ← setting stay.
-- The window is theirs: `skydeck window` in a terminal of their own, first with a new session in a
-  scratch folder, one they can lose (without Edge, `skydeck window --print-url` gives an address for
-  any browser).
-- [docs/quick-start.md](docs/quick-start.md) takes them through their first ten minutes.
+**6. Tell the human, at the end:** what changed (above), and that `skydeck uninstall` undoes it (it
+takes the hook entries out, removes the links and stops the window's server; the database, the
+backups and the ← setting stay); that the window is theirs: `skydeck window` in a terminal of their
+own, first with a new session in a scratch folder, one they can lose (without Edge,
+`skydeck window --print-url` gives an address for any browser); and that
+[docs/quick-start.md](docs/quick-start.md) takes them through their first ten minutes.
 
 **Never:**
 
