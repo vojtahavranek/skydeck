@@ -54,12 +54,14 @@ type Message = Record<string, unknown>;
 const LIGHT_COLOURS = { fg: '#24292f', bg: '#fbfbf9' };
 const DARK_COLOURS = { fg: '#d6d9de', bg: '#121417' };
 
-/** Sixteen cells, one in each ANSI colour (the cell's text is the colour's number in hex). */
+/** Sixteen cells, one in each ANSI colour (the cell's text is the colour's number in hex), and a
+ *  `Y` in the 256 colours' fixed yellow (226, #ffff00), a colour meant for a dark background. */
 const PALETTE =
   '\x1b[H' +
   Array.from({ length: 16 }, (_, n) => `\x1b[${n < 8 ? 30 + n : 82 + n}m${n.toString(16)}`).join(
     '',
   ) +
+  '\x1b[38;5;226mY' +
   '\x1b[0m plain text to select';
 
 /** A stand-in server for the cases on a stand-in: S1 running in TERM_A, S2 in TERM_B. */
@@ -277,6 +279,40 @@ async function termColours(page: Page, term: string): Promise<TermColours> {
   );
 }
 
+/** The colour the `Y` of PALETTE is drawn in, and the terminal's background, each as [r, g, b]. */
+async function yellowOn(page: Page, term: string): Promise<{ text: number[]; ground: number[] }> {
+  const found = await readPage(
+    page,
+    (term) => {
+      const box = document.querySelector(`#terminal .tv-term[data-term="${term}"]`);
+      const span = [...(box?.querySelectorAll('.xterm-rows span') ?? [])].find(
+        (one) => one.textContent === 'Y',
+      );
+      const ground = box?.querySelector('.xterm-scrollable-element');
+      return {
+        text: span === undefined ? '' : getComputedStyle(span).color,
+        ground: ground instanceof Element ? getComputedStyle(ground).backgroundColor : '',
+      };
+    },
+    term,
+  );
+  const channels = (css: string): number[] => (css.match(/\d+/g) ?? []).slice(0, 3).map(Number);
+  return { text: channels(found.text), ground: channels(found.ground) };
+}
+
+/** WCAG 2's contrast ratio of two colours given as [r, g, b]. */
+function contrastOf(a: number[], b: number[]): number {
+  const luminance = (rgb: number[]): number => {
+    const [r, g, bl] = rgb.map((channel) => {
+      const c = channel / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    }) as [number, number, number];
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
 /** Waits until the shown terminal is `term` and has drawn its sixteen colours. */
 async function untilShown(page: Page, term: string): Promise<void> {
   await until(async () => (await shownTerm(page)) === term, `${term} shown`);
@@ -467,6 +503,38 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       await clickRow(page, S2);
       await untilShown(page, TERM_B);
       assert.deepEqual(await termColours(page, TERM_B), light, 'B, hidden at the click, is light');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'every terminal draws its text at least 4.5 : 1 against its background (xterm.js’s minimumContrastRatio): the fixed yellow meant for a dark background is darkened on the light scheme and left as it is on the dark one',
+    async (t) => {
+      const { page, problems } = await opened(t, chromium);
+      await clickRow(page, S1);
+      await untilShown(page, TERM_A);
+      const YELLOW = [255, 255, 0].join();
+      for (const scheme of ['light', 'dark'] as const) {
+        await systemScheme(page, scheme);
+        const hex = (scheme === 'light' ? LIGHT_COLOURS : DARK_COLOURS).bg;
+        const background = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).join();
+        // The scheme's own end state: the background can change a frame before the text is
+        // drawn again, and the other scheme's text on it is no answer.
+        let last = { text: [] as number[], ground: [] as number[] };
+        await until(
+          async () => {
+            last = await yellowOn(page, TERM_A);
+            const { text, ground } = last;
+            if (ground.join() !== background || text.length !== 3) return false;
+            return scheme === 'dark'
+              ? text.join() === YELLOW
+              : text.join() !== YELLOW && contrastOf(text, ground) >= 4.5;
+          },
+          `${scheme}: the yellow is ${scheme === 'dark' ? 'left as it is' : 'darkened to 4.5 : 1'}`,
+        ).catch((error: unknown) => {
+          throw new Error(`${String(error)}; last drawn ${JSON.stringify(last)}`);
+        });
+      }
       assert.deepEqual(problems, []);
     },
   );

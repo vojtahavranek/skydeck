@@ -186,6 +186,11 @@ export function createTerminalView(root, deps) {
       fontFamily: FONT,
       fontSize: fontSize(),
       theme: theme(),
+      // Text at least 4.5 : 1 against its background, as VS Code's terminal draws it (dim text at
+      // half that, xterm.js's rule; S2 12.6): a colour meant for the other background — a program
+      // that assumes the other scheme, such as Claude Code in a theme of its own for it, or a fixed
+      // 256-colour or 24-bit colour — is made lighter or darker until it can be read.
+      minimumContrastRatio: 4.5,
       // The width addon uses the unicode API, which xterm.js 6.0.0 still marks as proposed.
       allowProposedApi: true,
       // xterm.js's own log quotes the program's output (ruled, task 33): nothing in the console.

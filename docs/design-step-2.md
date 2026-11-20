@@ -3052,6 +3052,13 @@ nothing; `ls` is unchanged.
   before it, the text touched the list and the header, and xterm.js's
   own style painted the 4 px and 2 px it had there black, which read as a hard border, above all
   in the light scheme.
+  The terminal's text is drawn at least 4.5 : 1 against the cell's background — xterm.js's
+  `minimumContrastRatio`, at the default of VS Code's terminal; dim text at half that, by xterm.js's
+  rule —, so that a colour meant for the other background is made lighter or darker until it can be
+  read: a program that assumes the other colour scheme (Claude Code in a theme of its own for it,
+  which a running Claude Code keeps when the page's scheme changes), or a fixed 256-colour or 24-bit
+  colour chosen for a dark background. A colour that can be read already is drawn as it is
+  (2026-11-20).
   What the server says about a terminal is shown over that terminal, as the page's own text and
   never written into it (so that the page's screen stays the screen side's): the reconnecting bar
   (7.8) and "sized by another window" (8.2.6) while they hold; a gap or a newer keeper, which the
