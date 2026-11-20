@@ -9,8 +9,8 @@ PROTOCOL = 1
 # Only G from the connection that claimed it (C), before the spec's startBy, starts the program in
 # a new pty; N, or the deadline, ends the terminal as not started. It keeps every chunk the program
 # writes and every resize as a numbered record, the snapshot a server parked, and the records since;
-# it never interprets them. E (version 3) sends SIGHUP to the program it started, as a terminal's
-# closed window would, and changes nothing else. It writes only its own errors to stderr, one line each,
+# it never interprets them. E (version 3) sends SIGHUP and SIGCONT to the program it started, as a
+# terminal's closed window would, and changes nothing else. It writes only its own errors to stderr, one line each,
 # "keeper <id>: <kind>": never output, input, or a message that could quote them (S2 2).
 #
 # Standard library only, nothing newer than python3 3.9. For tests only (plan A31):
@@ -707,14 +707,16 @@ class Keeper:
             self.hang_up()
 
     def hang_up(self):
-        """E: SIGHUP to the program, what a terminal's closed window sends it; only while this keeper
-        is its parent and has not reaped it (its pid cannot belong to another process then), never
-        to a pid it was told. Its payload is never read. The keeper goes on as before: it reads the
-        output, reaps the program and sends X as for any end."""
+        """E: SIGHUP and then SIGCONT to the program, what the kernel sends the leader of a session
+        whose terminal's other end was closed (a stopped program goes on and gets its SIGHUP); only
+        while this keeper is its parent and has not reaped it (its pid cannot belong to another
+        process then), never to a pid it was told. Its payload is never read. The keeper goes on as
+        before: it reads the output, reaps the program and sends X as for any end."""
         if self.pid is None or self.status is not None or self.exit is not None:
             return
         try:
             os.kill(self.pid, signal.SIGHUP)
+            os.kill(self.pid, signal.SIGCONT)
         except OSError:
             log("hang-up-failed")
 

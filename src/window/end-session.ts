@@ -2,8 +2,8 @@
  * Follow-up F30: "End session and mark done", the page's dialog for a session that runs in a
  * terminal of the window (S2 12.5's Done; design principle 6 as reworded: skydeck ends a session's
  * program only when the user asks for it there, each time). The one place the server ends a
- * program, and only through the registry's `end` (the keeper's `E`: SIGHUP to the program it
- * started, as a terminal's closed window would).
+ * program, and only through the registry's `end` (the keeper's `E`: SIGHUP and SIGCONT to the
+ * program it started, as a terminal's closed window would).
  *
  * A request names the terminal and the session. It is refused, with nothing done, unless that
  * terminal of the window shows the session, its program runs and its keeper can be ended now
@@ -12,7 +12,11 @@
  * a second one is refused (no second signal). Then the session is marked done (as `act done`),
  * the lists are told, and the keeper is told to hang the program up. The answer comes when the
  * program has ended — its keeper's exit, `ended` true —, or after END_WAIT_MS — `ended` false: the
- * session stays marked done and running, as after `Keep it running`.
+ * session stays marked done and running. The end is followed on after that answer until the
+ * program exits (ruled at review): a later end is recorded and closed as one within the wait; a
+ * terminal lost or forgotten meanwhile is followed no more. What is followed is held in memory
+ * only: a server restarted while a program ends does not know that the user ended it (a known
+ * limit, S2 12.10).
  *
  * Once the program has ended the server records, for each holder of the session the request found
  * in the terminal, an `end` event of detail `exit` and raw detail ENDED_IN_WINDOW (no spool file;
@@ -74,11 +78,17 @@ function testNumber(
   return text !== undefined && /^[1-9][0-9]{0,9}$/.test(text) ? Number(text) : fallback;
 }
 
+/**
+ * One request's terminal, from the hang-up until its program's exit (ruled at review: also after
+ * the answer, so that an end that comes later is recorded and closed as one inside the wait).
+ */
 interface Ending {
   sessionId: string;
   holders: Holder[];
-  /** Answers the request (once) and logs `why`. */
-  settle(ended: boolean, why: string): void;
+  /** Answers the request with `ended`; null once it has been answered. */
+  answer: ((ended: boolean) => void) | null;
+  /** Stops the wait's timer. */
+  cancel(): void;
 }
 
 export function createEndings(deps: EndingDeps): Endings {
@@ -148,24 +158,49 @@ export function createEndings(deps: EndingDeps): Endings {
   }
 
   /**
-   * At every change of the terminals while a request waits (subscribed with the first, dropped
-   * with the last): a program that ended is recorded and its terminal closed.
+   * At every change of the terminals while an end is followed (subscribed with the first, dropped
+   * with the last): a program that ended is recorded and its terminal closed, inside the wait or
+   * after it; a terminal lost or forgotten meanwhile is followed no more, nothing recorded.
    */
   let unwatch: (() => void) | null = null;
   const watch = (): void => {
     unwatch ??= hub.onChange(changedTerminals);
   };
+
+  /** Follows the terminal no more; answers `ended` when it has not been answered yet. */
+  function finish(termId: string, entry: Ending, ended: boolean, why: string): void {
+    if (ending.get(termId) !== entry) return;
+    ending.delete(termId);
+    entry.cancel();
+    if (ending.size === 0) {
+      unwatch?.();
+      unwatch = null;
+    }
+    log(`terminal ${termId}: ${why}`);
+    const answer = entry.answer;
+    entry.answer = null;
+    answer?.(ended);
+  }
+
   function changedTerminals(): void {
     if (ending.size === 0) return;
     const terminals = new Map(hub.list().map((term) => [term.id, term]));
     for (const [termId, entry] of [...ending]) {
       const term = terminals.get(termId);
       if (term === undefined) {
-        entry.settle(false, 'the terminal was forgotten'); // nothing known of its end
+        finish(termId, entry, false, 'the terminal was forgotten'); // nothing known of its end
+      } else if (term.state === 'lost') {
+        finish(termId, entry, false, 'its keeper was lost'); // its exit is made up, not the end
       } else if (term.state === 'ended' && term.exit !== null && term.exit.notStarted === null) {
-        // The keeper reaped the program and sent its exit (a lost keeper's is made up: not this).
+        // The keeper reaped the program and sent its exit.
+        const late = entry.answer === null;
         record(termId, entry);
-        entry.settle(true, 'its program ended as the user asked');
+        finish(
+          termId,
+          entry,
+          true,
+          `its program ended as the user asked${late ? ', after the wait' : ''}`,
+        );
         // After the registry's own steps for the exit (its A to the keeper, the exited event),
         // which come after this announcement.
         queueMicrotask(() => {
@@ -181,7 +216,9 @@ export function createEndings(deps: EndingDeps): Endings {
 
   return {
     end(termId, sessionId) {
-      if (ending.has(termId)) return refuse(ENDING);
+      // While a request waits for its answer, no second one (no second signal); once answered, a
+      // new request (the session undone and asked again) replaces the end that is followed.
+      if (ending.get(termId)?.answer != null) return refuse(ENDING);
       if (hub.end === undefined) return refuse(NOT_AN_ACTION);
       const term = hub.list().find((candidate) => candidate.id === termId);
       if (term === undefined) return refuse(NO_TERMINAL);
@@ -199,27 +236,29 @@ export function createEndings(deps: EndingDeps): Endings {
       // Done first (a busy store throws here, before anything is sent), then the hang-up.
       markDone(deck, sessionId);
       tell();
+      const before = ending.get(termId);
+      if (before !== undefined) finish(termId, before, false, 'asked again');
       return new Promise<EndOutcome>((resolve) => {
-        let cancel = (): void => {};
         const entry: Ending = {
           sessionId,
           holders,
-          settle(ended, why) {
-            if (ending.get(termId) !== entry) return;
-            ending.delete(termId);
-            cancel();
-            if (ending.size === 0) {
-              unwatch?.();
-              unwatch = null;
-            }
-            log(`terminal ${termId}: ${why}`);
-            resolve({ ok: true, ended });
-          },
+          answer: (ended) => resolve({ ok: true, ended }),
+          cancel: () => {},
         };
         ending.set(termId, entry);
         watch();
-        cancel = clock.after(waitMs, () => entry.settle(false, 'its program did not end in time'));
-        if (hub.end?.(termId) !== 'ok') entry.settle(false, 'the hang-up could not be sent');
+        // The answer after the wait; the end is followed on until the program exits.
+        entry.cancel = clock.after(waitMs, () => {
+          const answer = entry.answer;
+          entry.answer = null;
+          if (answer !== null && ending.get(termId) === entry) {
+            log(`terminal ${termId}: its program has not ended within the wait`);
+            answer(false);
+          }
+        });
+        if (hub.end?.(termId) !== 'ok') {
+          finish(termId, entry, false, 'the hang-up could not be sent');
+        }
       });
     },
   };

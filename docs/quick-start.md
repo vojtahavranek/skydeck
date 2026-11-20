@@ -136,7 +136,8 @@ next start. The group is, by default, the ticket key at the start of the title, 
 Press `d`, or **Done** in the header. The session leaves the list (a running one stays under Open
 until it ends), and a message with **Undo** shows for 5 seconds. Done deletes nothing. For a
 session running in the window it asks first: **End session and mark done** ends that `claude` as
-closing its terminal would, **Keep it running** only marks it done. The list's footer counts the hidden ones (`2 done hidden · show`): **show**, `a` or the
+closing its terminal would, **Mark done, keep it running** (where the keyboard starts) only
+marks it done. The list's footer counts the hidden ones (`2 done hidden · show`): **show**, `a` or the
 chip **Show done** lists them again, and `d` (or **Undone** in the header) on one of them takes
 the mark away. A done session that gets new activity comes back by itself.
 

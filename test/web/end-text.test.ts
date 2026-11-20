@@ -184,11 +184,11 @@ test('the words of the dialog and its toasts', () => {
     running: 'This session is still running.',
     working: 'It is working: ending it now stops the current turn.',
     end: 'End session and mark done',
-    keep: 'Keep it running',
+    keep: 'Mark done, keep it running',
     cancel: 'Cancel',
     ending: 'Ending the session…',
     ended: 'Ended and marked done: hidden from the list.',
-    notEnded: 'Marked done. It did not end: end it inside claude.',
+    notEnded: 'Marked done. It has not ended yet: end it inside claude if it stays open.',
     cannotEnd:
       'Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.',
     stopped: 'It stopped by itself: nothing was marked done.',

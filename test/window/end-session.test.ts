@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { loadRows } from '../../src/sessions/load.ts';
-import { markDone } from '../../src/sessions/meta.ts';
+import { markDone, markUndone } from '../../src/sessions/meta.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
 import { ENDED_IN_WINDOW } from '../../src/store/types.ts';
 import { createActions } from '../../src/window/actions.ts';
@@ -358,7 +358,7 @@ describe('act end-session: done, then the hang-up', () => {
     assert.equal(row?.session.lastHolding?.endDetail, 'exit');
   });
 
-  test('a program that does not end within the wait: `ended` false, still marked done and running, nothing closed', async (t) => {
+  test('a program that ends only after the wait: `ended` false at 10 s, still marked done and running; its later end recorded and closed as one within the wait', async (t) => {
     const d = running(t);
     const h = harness(d);
     const answer = h.act(endSession());
@@ -377,11 +377,69 @@ describe('act end-session: done, then the hang-up', () => {
     assert.deepEqual(h.hub.asked, [`end ${TERM}`], 'one hang-up, no close');
     assert.equal(h.hub.terminals.length, 1);
     assert.deepEqual(windowEnds(d), []);
-    // An exit after the wait is the program's own business, as after Keep it running.
+    // Its exit after the wait is still the user's end (ruled at review): recorded, then closed.
+    d.clock.advanceMs(60_000);
     h.hub.exitNow();
     await Promise.resolve();
-    assert.deepEqual(h.hub.asked, [`end ${TERM}`]);
-    assert.deepEqual(windowEnds(d), []);
+    assert.deepEqual(h.hub.asked, [`end ${TERM}`, `close ${TERM}`]);
+    assert.equal(windowEnds(d).length, 1);
+    assert.equal(h.hub.listeners(), 0, 'followed no more');
+    d.proc.setProcess(PID, null);
+    const row = loadRows(d.deck).find((one) => one.id === S1);
+    assert.deepEqual(
+      [row?.done, row?.marks, row?.session.lastHolding?.endDetail],
+      [true, [], 'exit'],
+    );
+  });
+
+  test('after the wait, a terminal lost or forgotten is followed no more: nothing recorded, nothing closed', async (t) => {
+    for (const how of ['lost', 'forgotten'] as const) {
+      const d = running(t);
+      const h = harness(d);
+      const answer = h.act(endSession());
+      await Promise.resolve();
+      d.clock.advanceMs(10_000);
+      assert.equal((await answer).ended, false);
+      if (how === 'lost') {
+        h.hub.exitNow({
+          state: 'lost',
+          exit: { code: null, signal: 1, atNs: '1', notStarted: null },
+        });
+      } else {
+        h.hub.terminals.splice(0, 1);
+        h.hub.changed();
+      }
+      assert.equal(h.hub.listeners(), 0, how);
+      // A keeper's exit coming later (the same terminal found again) is not taken for the end.
+      h.hub.terminals.splice(0, h.hub.terminals.length, info());
+      h.hub.exitNow();
+      await Promise.resolve();
+      assert.deepEqual(windowEnds(d), [], how);
+      assert.deepEqual(h.hub.asked, [`end ${TERM}`], how);
+    }
+  });
+
+  test('undone and asked again while the first end is still followed: a second hang-up, one end recorded', async (t) => {
+    const d = running(t);
+    const h = harness(d);
+    const first = h.act(endSession(9));
+    await Promise.resolve();
+    d.clock.advanceMs(10_000);
+    assert.equal((await first).ended, false);
+    assert.deepEqual(
+      await h.act(endSession(10)),
+      refused(10, 'it was marked done meanwhile'),
+      'done: no second end without Undo',
+    );
+    markUndone(d.deck, S1);
+    const second = h.act(endSession(11));
+    await Promise.resolve();
+    assert.deepEqual(h.hub.asked, [`end ${TERM}`, `end ${TERM}`]);
+    h.hub.exitNow();
+    assert.equal((await second).ended, true);
+    await Promise.resolve();
+    assert.equal(windowEnds(d).length, 1);
+    assert.equal(h.hub.listeners(), 0);
   });
 
   test('a hang-up that cannot be sent: marked done, `ended` false at once', async (t) => {
@@ -411,14 +469,14 @@ describe('act end-session: done, then the hang-up', () => {
     );
   });
 
-  test('a lost keeper (its exit made up) is not taken for the end: the wait decides', async (t) => {
+  test('a lost keeper (its exit made up) is not taken for the end: answered `ended` false at once, followed no more', async (t) => {
     const d = running(t);
     const h = harness(d);
     const answer = h.act(endSession());
     await Promise.resolve();
     h.hub.exitNow({ state: 'lost', exit: { code: null, signal: 1, atNs: '1', notStarted: null } });
-    d.clock.advanceMs(10_000);
     assert.equal((await answer).ended, false);
+    assert.equal(h.hub.listeners(), 0);
     assert.deepEqual(windowEnds(d), []);
     assert.deepEqual(h.hub.asked, [`end ${TERM}`]);
   });

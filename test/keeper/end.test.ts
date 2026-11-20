@@ -4,7 +4,7 @@
 // shell line as the program, in a sandbox (realTestPlatform). No test signals a process itself:
 // every SIGHUP here is the keeper's.
 import assert from 'node:assert/strict';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
@@ -32,6 +32,29 @@ async function startShell(
   client.send('G');
   const { pid, procStart } = started(await client.next('T'));
   return { client, pid, procStart };
+}
+
+/** `text` as one word of sh. */
+function word(text: string): string {
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * A wait of a shell line that can never outlive its test: at most 30 s, and not past the
+ * sandbox's root (a failed case leaves no process; the suite's other shell programs do the same).
+ */
+function bounded(root: string, more = 'true'): string {
+  return `i=0; while ${more} && [ -d ${word(root)} ] && [ "$i" -lt 300 ]; do sleep 0.1; i=$((i+1)); done`;
+}
+
+/** The state letter of /proc/<pid>/stat (`T` when stopped), '' when it cannot be read. */
+function procState(pid: number): string {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+  } catch {
+    return '';
+  }
 }
 
 async function gone(k: Keeper): Promise<void> {
@@ -85,11 +108,10 @@ describe('keeper: the hang-up (E)', { concurrency: true }, () => {
     assert.deepEqual(box.logLines(), []);
   });
 
-  test('E twice: one SIGHUP for each while the program runs, one exit', async (t) => {
+  test('E twice: one hang-up for each while the program runs, one exit', async (t) => {
     const box = keeperSandbox(t);
     // It counts the hang-ups it gets and ends at the second, with 7.
-    const program =
-      'n=0; trap \'n=$((n+1)); echo "hup $n"; [ "$n" -ge 2 ] && exit 7\' HUP; echo ready; while :; do sleep 0.1; done';
+    const program = `n=0; trap 'n=$((n+1)); echo "hup $n"; [ "$n" -ge 2 ] && exit 7' HUP; echo ready; ${bounded(box.s.root)}; exit 9`;
     const k = await box.start({ spec: { argv: ['sh', '-c', program] } });
     const { client } = await startShell(k);
     await client.waitForOutput('ready');
@@ -170,7 +192,7 @@ describe('keeper: the hang-up (E)', { concurrency: true }, () => {
     const stop = join(box.s.home, 'stop-the-child');
     // The child is in the program's process group (no job control); the program ignores SIGHUP
     // after it started the child, so only a signal sent to the group would reach the child.
-    const program = `(trap 'echo child-hup' HUP; echo child-ready; while [ ! -e '${stop}' ]; do sleep 0.1; done) & trap '' HUP; echo ready; wait`;
+    const program = `(trap 'echo child-hup' HUP; echo child-ready; ${bounded(box.s.root, `[ ! -e ${word(stop)} ]`)}) & trap '' HUP; echo ready; wait`;
     const k = await box.start({ spec: { argv: ['sh', '-c', program] } });
     const { client, pid, procStart } = await startShell(k);
     await client.waitForOutput('child-ready');
@@ -183,6 +205,21 @@ describe('keeper: the hang-up (E)', { concurrency: true }, () => {
     const x = exit(await client.next('X'));
     assert.deepEqual([x.code, x.signal], [0, null]);
     assert.doesNotMatch(client.output(), /child-hup/);
+  });
+
+  test('E continues a stopped program, as a closed terminal does: SIGHUP, then SIGCONT', async (t) => {
+    const box = keeperSandbox(t);
+    // It stops itself; continued, its pending hang-up's trap ends it with 5 (6: continued without).
+    const program = `trap 'echo hup; exit 5' HUP; echo ready; kill -STOP $$; echo continued-without-hup; exit 6`;
+    const k = await box.start({ spec: { argv: ['sh', '-c', program] } });
+    const { client, pid } = await startShell(k);
+    await client.waitForOutput('ready');
+    await until(() => procState(pid) === 'T', 'the program stopped');
+    client.send('E');
+    const x = exit(await client.next('X'));
+    assert.deepEqual([x.code, x.signal], [5, null]);
+    assert.match(client.output(), /hup/);
+    assert.doesNotMatch(client.output(), /continued-without-hup/);
   });
 
   test('a hello after E names the program as before (a server that claims it again)', async (t) => {

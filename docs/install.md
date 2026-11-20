@@ -902,28 +902,32 @@ requests — …`): look at it before you save.
 **Done.** `d` or `Done` marks the session done and shows a toast with `Undo` for 5 seconds:
 `Marked done: hidden from the list. It comes back on new activity.`, or for a session that runs
 in another terminal, or in a terminal of the window that skydeck cannot end (one started before
-skydeck was updated to a version that can end sessions, or one whose terminal is not connected), `Marked done. skydeck cannot end this
-one: end it in its terminal. Hidden once it stops.` — such a row stays under Open with a `done` mark
-until the session stops. `Undo` marks it undone again: a click presses it, or Tab until it has the
-keyboard and then Enter.
+skydeck was updated to a version that can end sessions, or one whose terminal is not connected),
+`Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.` — such a
+row stays under Open with a `done` mark until the session stops. `Undo` marks it undone again: a
+click presses it, or Tab until it has the keyboard and then Enter.
 
 For a session that runs in a terminal of the window, `d` or `Done` first asks, in a dialog over the
 window: `Mark done: <its title>` and `This session is still running.`, with `End session and mark
-done`, `Keep it running` and `Cancel`; while it is working the dialog also says `It is working:
-ending it now stops the current turn.`, and the keyboard is then on `Keep it running` (else on `End
-session and mark done`; it moves off that button when the session starts working). Esc is Cancel;
-Tab and Shift+Tab move among the three buttons; Enter or Space press the one with the keyboard (a
-held key presses nothing). `Keep it running` marks it done as above (`Marked done. Stays under Open
-while it runs; hidden once it stops.`). `End session and mark done` marks it done and ends its
-`claude` as closing its terminal would; the toast says `Ending the session…`, then `Ended and marked
-done: hidden from the list.` with `Undo` (it then shows under Recent and can be resumed; Undo does
-not bring the program back), or after 10 seconds `Marked done. It did not end: end it inside
-claude.` with `Undo`; when skydeck refuses (the session stopped or was marked done meanwhile,
-its terminal is no longer connected, …), `End session: <why>`, and nothing was done. Such a
-session counts as ended the normal way: it is not shown as ended
-unexpectedly, and restore never offers it. When the session stops by itself, is marked done in
-another window or leaves the list while the dialog is open, the dialog closes and the toast says so;
-nothing is marked or ended.
+done`, `Mark done, keep it running` and `Cancel`; while it is working the dialog also says `It is
+working: ending it now stops the current turn.` The keyboard is always on `Mark done, keep it
+running` when it opens, so that a `d` and an Enter typed by mistake never end a session; it comes
+to `End session and mark done` only when you move it there, and moves off it again when the session
+starts working. Esc is Cancel; Tab and → move to the next button, Shift+Tab and ← to the one
+before, staying among the three; Enter or Space press the one with the keyboard (a held key
+presses nothing). So `d`, ←, Enter ends the selected session. `Mark done, keep it running` marks
+it done as above (`Marked done. Stays under Open while it runs; hidden once it stops.`). `End
+session and mark done` marks it done and ends its `claude` as closing its terminal would; the toast
+says `Ending the session…`, then `Ended and marked done: hidden from the list.` with `Undo` (it then
+shows under Recent and can be resumed; Undo does not bring the program back), or after 10 seconds
+`Marked done. It has not ended yet: end it inside claude if it stays open.` with `Undo` (when it
+ends later, it is hidden then); when skydeck refuses (the session stopped or was marked done
+meanwhile, its terminal is no longer connected, …), `End session: <why>`, and nothing was done.
+Such a session counts as ended the normal way: it is not shown as ended unexpectedly, and restore
+never offers it (unless skydeck's server was restarted while it was ending). When the session stops
+by itself, is marked done in another window or leaves the list while the dialog is open, the dialog
+closes and the toast says so; nothing is marked or ended. The key help (Ctrl+Shift+H) is not shown
+over this dialog.
 After `d` in the list, once the row is gone, the row after it in the same section is selected,
 else the one before it, else none; never a row of Open. That row is another session, and the
 next key acts on it: to take the `d` back, click `Undo` first. `Undo` selects the session again,

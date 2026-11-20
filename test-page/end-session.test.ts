@@ -36,7 +36,7 @@ const DONE_RUNNING_WORDS = 'Marked done. Stays under Open while it runs; hidden 
 const CANNOT_WORDS =
   'Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.';
 const END = 'End session and mark done';
-const KEEP = 'Keep it running';
+const KEEP = 'Mark done, keep it running';
 const CANCEL = 'Cancel';
 const WORKING = 'It is working: ending it now stops the current turn.';
 
@@ -263,7 +263,7 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
           ['dialog', 'true', true, [END, KEEP, CANCEL], 'This session is still running.'],
         );
         assert.equal(state.warning, working ? WORKING : null);
-        assert.equal(state.focus, working ? KEEP : END);
+        assert.equal(state.focus, KEEP, 'the keyboard starts on the second button, always');
         assert.deepEqual(w.acts(), [], 'nothing marked yet');
         await page.keyboard.press('Escape');
         await shown(page, false);
@@ -297,11 +297,13 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
   );
 
   await t.test(
-    'End: one `end-session` for its session and terminal; `Ending the session…` stays until the answer; ended, with Undo',
+    'End (d, ←, Enter): one `end-session` for its session and terminal; `Ending the session…` stays until the answer; ended, with Undo',
     async (t) => {
       const { page, w } = await one(t, chromium);
       await dFrom(page, S1);
       await shown(page, true);
+      await page.keyboard.press('ArrowLeft');
+      assert.equal((await ender(page)).focus, END);
       await page.keyboard.press('Enter');
       const end = await w.act(1);
       assert.deepEqual(actsAfter(w), [{ kind: 'end-session', term: TERM_A, sessionId: S1 }]);
@@ -323,11 +325,17 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
       const { page, w } = await one(t, chromium);
       await dFrom(page, S1);
       await shown(page, true);
+      await page.keyboard.press('ArrowLeft');
       await page.keyboard.press('Enter');
       w.answer(await w.act(1), { ok: true, ended: false });
-      await toastIs(page, 'Marked done. It did not end: end it inside claude.', true);
+      await toastIs(
+        page,
+        'Marked done. It has not ended yet: end it inside claude if it stays open.',
+        true,
+      );
       await dFrom(page, S1);
       await shown(page, true);
+      await page.keyboard.press('Shift+Tab');
       await page.keyboard.press('Enter');
       w.answer(await w.act(2), { ok: false, error: 'it was marked done meanwhile' });
       await toastIs(page, 'End session: it was marked done meanwhile', false);
@@ -335,25 +343,24 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
   );
 
   await t.test(
-    'Keep it running: D15’s `d` on a running session, its words and Undo; Cancel and Esc: nothing, the keyboard back on the list',
+    'Mark done, keep it running: D15’s `d` on a running session, its words and Undo; Cancel and Esc: nothing, the keyboard back on the list',
     async (t) => {
       const { page, w } = await one(t, chromium);
       await dFrom(page, S1);
       await shown(page, true);
-      await page.keyboard.press('Tab');
       assert.equal((await ender(page)).focus, KEEP);
       await page.keyboard.press(' ');
       const done = await w.act(1);
       assert.deepEqual(actsAfter(w), [{ kind: 'done', sessionId: S1 }]);
       w.answer(done, { ok: true });
       await toastIs(page, DONE_RUNNING_WORDS, true);
-      // Cancel (Shift+Tab from End wraps to it), by Space; then Esc; then a click.
+      // Cancel (Tab from the second button; → too), by Space; then Esc; then a click.
       await page.waitForSelector('#toast[hidden]', { state: 'attached', timeout: 15_000 });
       for (const how of ['space', 'escape', 'click'] as const) {
         await dFrom(page, S1);
         await shown(page, true);
         if (how === 'space') {
-          await page.keyboard.press('Shift+Tab');
+          await page.keyboard.press('ArrowRight');
           assert.equal((await ender(page)).focus, CANCEL);
           await page.keyboard.press(' ');
         } else if (how === 'escape') {
@@ -371,28 +378,30 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
   );
 
   await t.test(
-    'Tab and Shift+Tab walk the three buttons and stay inside; a click acts at once',
+    'Tab and Shift+Tab, → and ←, walk the three buttons and stay inside; a click acts at once',
     async (t) => {
       const { page, w } = await one(t, chromium);
       await dFrom(page, S1);
       await shown(page, true);
-      const seen: string[] = [(await ender(page)).focus];
-      for (let i = 0; i < 4; i++) {
-        await page.keyboard.press('Tab');
-        seen.push((await ender(page)).focus);
-      }
-      assert.deepEqual(seen, [END, KEEP, CANCEL, END, KEEP]);
-      const back: string[] = [];
-      for (let i = 0; i < 4; i++) {
-        await page.keyboard.press('Shift+Tab');
-        back.push((await ender(page)).focus);
-      }
-      assert.deepEqual(back, [END, CANCEL, KEEP, END]);
+      const walk = async (key: string): Promise<string[]> => {
+        const seen: string[] = [];
+        for (let i = 0; i < 4; i++) {
+          await page.keyboard.press(key);
+          seen.push((await ender(page)).focus);
+        }
+        return seen;
+      };
+      assert.equal((await ender(page)).focus, KEEP);
+      assert.deepEqual(await walk('Tab'), [CANCEL, END, KEEP, CANCEL]);
+      assert.deepEqual(await walk('Shift+Tab'), [KEEP, END, CANCEL, KEEP]);
+      assert.deepEqual(await walk('ArrowRight'), [CANCEL, END, KEEP, CANCEL]);
+      assert.deepEqual(await walk('ArrowLeft'), [KEEP, END, CANCEL, KEEP]);
+      assert.deepEqual(w.acts(), [], 'walking presses nothing');
       // A window chord says so and does nothing; a list key does nothing.
       await page.keyboard.press('Control+Shift+L');
       assert.equal(await keyMessage(page), 'close the dialog first (Esc)');
       await page.keyboard.press('j');
-      assert.equal((await ender(page)).focus, END);
+      assert.equal((await ender(page)).focus, KEEP);
       await page.click('#end-dialog .end-keep');
       await w.act(1);
       assert.deepEqual(actsAfter(w), [{ kind: 'done', sessionId: S1 }]);
@@ -400,13 +409,15 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
   );
 
   await t.test(
-    'the keyboard: on Keep while it works; moved off End when it turns working; never back towards End by itself',
+    'the keyboard: on the second button, idle or working; moved off End when it turns working; never back towards End by itself',
     async (t) => {
       const d = await one(t, chromium);
       const { page, w } = d;
       await dFrom(page, S1);
       await shown(page, true);
-      assert.deepEqual([(await ender(page)).focus, (await ender(page)).warning], [END, null]);
+      assert.deepEqual([(await ender(page)).focus, (await ender(page)).warning], [KEEP, null]);
+      await page.keyboard.press('ArrowLeft'); // the user's own move to End
+      assert.equal((await ender(page)).focus, END);
       d.set({ sections: { open: [endable(S1, TERM_A, 1, { state: 'working' })] } });
       await eventually(async () => (await ender(page)).warning === WORKING, 'the warning');
       assert.equal((await ender(page)).focus, KEEP, 'moved off End');
@@ -439,6 +450,8 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
       await page.keyboard.up('d');
       await sleep(300);
       assert.deepEqual(w.acts(), [], 'the held d marked nothing');
+      assert.equal((await ender(page)).focus, KEEP);
+      await page.keyboard.press('ArrowLeft'); // on End: the auto-repeats below must press nothing
       assert.equal((await ender(page)).focus, END);
       // Auto-repeats that come without a press in the dialog (a key held since before it opened).
       const cdp = await page.context().newCDPSession(page);
@@ -490,7 +503,7 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
       await page.keyboard.up('Enter');
       await sleep(300);
       assert.deepEqual(w.acts(), []);
-      assert.equal((await ender(page)).focus, END);
+      assert.equal((await ender(page)).focus, KEEP);
       await page.keyboard.press('Escape');
       await shown(page, false);
       assert.equal(await active(page), 'BUTTON', 'Cancel: the keyboard back on Done');
@@ -573,9 +586,58 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
       });
       await sleep(500);
       assert.equal((await ender(page)).shown, true);
+      await page.keyboard.press('ArrowLeft');
       await page.keyboard.press('Enter');
       await w.act(1);
       assert.deepEqual(actsAfter(w), [{ kind: 'end-session', term: TERM_A, sessionId: S1 }]);
+    },
+  );
+
+  await t.test(
+    'words typed into the list by mistake never end a session: each `d` then Enter or Space marks it done and keeps it running, as `d` did; d, ←, Enter ends it',
+    async (t) => {
+      const d = await deck(t, chromium, {
+        sections: { open: [endable(S1, TERM_A, 1)] },
+        terminals: [terminal(TERM_A, S1, 1)],
+      });
+      const { page, w } = d;
+      await clickRow(page, S1);
+      await toZone(page, 'list');
+      let n = 0;
+      for (const typed of ['do not touch the tests', 'done\n', 'd ', 'worked\n', 'fixed\n']) {
+        await page.waitForSelector('#toast[hidden]', { state: 'attached', timeout: 15_000 });
+        await toZone(page, 'list');
+        for (const character of typed) {
+          await page.keyboard.press(
+            character === '\n' ? 'Enter' : character === ' ' ? 'Space' : character,
+          );
+        }
+        n += 1;
+        const act = await w.act(n);
+        assert.deepEqual(
+          actsAfter(w, n - 1),
+          [{ kind: 'done', sessionId: S1 }],
+          `${JSON.stringify(typed)}: marked done, nothing ended`,
+        );
+        w.answer(act, { ok: true });
+        await toastIs(page, DONE_RUNNING_WORDS, true);
+        assert.equal((await ender(page)).shown, false, JSON.stringify(typed));
+        await sleep(300);
+        assert.equal(
+          w.acts().some((one) => one['kind'] === 'end-session'),
+          false,
+          `${JSON.stringify(typed)}: no end-session`,
+        );
+      }
+      // On purpose: d, ←, Enter.
+      await page.waitForSelector('#toast[hidden]', { state: 'attached', timeout: 15_000 });
+      await toZone(page, 'list');
+      await page.keyboard.press('d');
+      await shown(page, true);
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('Enter');
+      await w.act(n + 1);
+      assert.deepEqual(actsAfter(w, n), [{ kind: 'end-session', term: TERM_A, sessionId: S1 }]);
     },
   );
 

@@ -14,14 +14,15 @@ export const END_TEXTS = {
   running: 'This session is still running.',
   working: 'It is working: ending it now stops the current turn.',
   end: 'End session and mark done',
-  keep: 'Keep it running',
+  keep: 'Mark done, keep it running',
   cancel: 'Cancel',
   /** The toast while the request waits for its answer. */
   ending: 'Ending the session…',
   /** The toast once the program ended (with Undo). */
   ended: 'Ended and marked done: hidden from the list.',
-  /** The toast once the wait is over and the program still runs (with Undo). */
-  notEnded: 'Marked done. It did not end: end it inside claude.',
+  /** The toast once the wait is over and the program still runs (with Undo); the server still
+   *  records its end and closes its terminal when it ends later. */
+  notEnded: 'Marked done. It has not ended yet: end it inside claude if it stays open.',
   /** The toast of `d` on a session that runs and cannot be ended from the window (E4). */
   cannotEnd:
     'Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.',

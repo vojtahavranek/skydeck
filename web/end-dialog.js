@@ -3,17 +3,19 @@
 // manner of stage D's dialogs (web/edit.js, edit.css): a scrim over the window, the dialog above it,
 // modal (app.js makes the page inert under it, D2). Its heading names the session, cut with `…`,
 // whole in its tooltip; a line says it still runs, and while it is working a warning says that
-// ending it stops the turn. Three buttons: `End session and mark done` (the primary one), `Keep it
-// running`, `Cancel`.
+// ending it stops the turn. Three buttons: `End session and mark done` (the primary one), `Mark
+// done, keep it running`, `Cancel`.
 //
 // It decides nothing about the session: a press tells app.js which (`deps.chose`), with the session
 // and the terminal it was opened for — never the selection's, which may move behind it. Keys come
-// from app.js's capture phase (`key`): Esc is Cancel; Tab and Shift+Tab walk the three buttons and
-// stay inside; Enter or Space press the button that has the keyboard, at a fresh press only — an
-// auto-repeated one presses nothing (and neither does a key held since before it opened). The
-// keyboard starts on `End session and mark done`, or on `Keep it running` while the session is
-// working; when it turns working while the dialog is shown, a keyboard still on the End button
-// moves to `Keep it running`; nothing moves it by itself towards the End button. At every list
+// from app.js's capture phase (`key`): Esc is Cancel; Tab and Shift+Tab, and Right and Left, walk
+// the three buttons and stay inside; Enter or Space press the button that has the keyboard, at a
+// fresh press only — an auto-repeated one presses nothing (and neither does a key held since before
+// it opened). The keyboard always starts on `Mark done, keep it running` (ruled: a word typed into
+// the list by mistake, a `d` and then Enter or Space, must never end a session); it comes to the End
+// button only by the user's own Tab, Shift+Tab, arrow or click. When the session turns working while
+// the dialog is shown, a keyboard on the End button moves back to the second button; nothing moves
+// it by itself towards the End button. At every list
 // (`update`) the dialog follows its own session: one that stopped, was marked done in another
 // window or left the list closes it, nothing done, and `deps.gone` gets the toast's words. Every
 // text reaches the DOM as text.
@@ -195,7 +197,7 @@ export function createEndDialog(root, deps) {
       setTitle(row);
       warning.hidden = !working;
       root.hidden = false;
-      (working ? keepButton : endButton).focus();
+      keepButton.focus(); // never on End by itself (ruled)
     },
     /**
      * Every list while it is shown: closes it when its session stopped, was marked done or left
@@ -217,7 +219,7 @@ export function createEndDialog(root, deps) {
     },
     /**
      * A keydown while the dialog is shown, from app.js's capture phase: true when the dialog took
-     * it (Esc, Tab, Enter, Space without Ctrl, Alt or Meta), and then nothing else acts on it.
+     * it (Esc, Tab, ← →, Enter, Space without Ctrl, Alt or Meta), and then nothing else acts on it.
      * @param {KeyboardEvent} event
      * @returns {boolean}
      */
@@ -230,8 +232,9 @@ export function createEndDialog(root, deps) {
       }
       const isEscape = event.key === 'Escape' && !event.shiftKey;
       const isTab = event.key === 'Tab';
+      const isArrow = (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.shiftKey;
       const isPress = PRESS_KEYS.has(event.key) && !event.shiftKey;
-      if (!isEscape && !isTab && !isPress) {
+      if (!isEscape && !isTab && !isArrow && !isPress) {
         return false;
       }
       event.preventDefault();
@@ -250,8 +253,10 @@ export function createEndDialog(root, deps) {
       }
       if (isEscape) {
         press('cancel');
-      } else if (isTab) {
-        const step = event.shiftKey ? -1 : 1;
+      } else if (isTab || isArrow) {
+        // ← and → walk as Shift+Tab and Tab do (ruled): End is one ← from where it starts.
+        const back = isTab ? event.shiftKey : event.key === 'ArrowLeft';
+        const step = back ? -1 : 1;
         const from = at === -1 ? buttons.indexOf(keepButton) : at;
         buttons[(from + step + buttons.length) % buttons.length]?.focus();
       } else {
