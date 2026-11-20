@@ -2504,7 +2504,11 @@ head (8.2.3), but in the card no row is special. A row whose group no other row 
 and a row without a group, are drawn as before; during a typed search (a word in the filter,
 12.8) no block is formed. Under chips alone (follow-up F35) the blocks are formed by this rule over
 the rows the chips leave: a block of fewer than two of them is no block, a closed block stays closed
-and its caption counts the rows left, and setting or clearing a chip opens and closes none. A
+and its caption counts the rows left, and setting or clearing a chip opens and closes none by
+itself. A block closed under a chip while the chip hides the selected session, one of the block's
+group (a click on its caption looks only at the rows drawn), is drawn open again when the chip is
+cleared, since it then holds the selected session, as below, and the page forgets that it was
+closed (ruled). A
 block is open unless the page's view names its section and group in `closed` (8.2.3): the
 page remembers the blocks the user closed, per window, until a reload; a block the user closed stays
 closed until it is opened or the page reloads, also when its rows leave and a block of that section
@@ -3326,7 +3330,7 @@ One rule matches for the filter and for the switcher:
   alone lists no done session, and Done lists the done ones by itself. Under chips alone (no word)
   the list is drawn as without the filter over the rows that remain: the sections keep their fold,
   the blocks are formed by 12.2's rule, a closed one's caption counting the rows left, and setting
-  or clearing a chip folds, unfolds, opens and closes nothing; the footer of done sessions is shown
+  or clearing a chip folds, unfolds, opens and closes nothing by itself (12.2); the footer of done sessions is shown
   and counts the done sessions the chips match (`2 done hidden · show`; its `show` turns Show done
   on), and when they leave no row the list says `Only done sessions match the filter.` above it
   (ruled; `No session matches the filter.` when no done one matches either); with Done set no

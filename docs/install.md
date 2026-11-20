@@ -1556,7 +1556,9 @@ the footer says how many done ones it leaves out, `2 done hidden · show`, whose
 `Done` lists the done ones by itself, and then there is no footer. With chips alone the sections
 stay as they are — Earlier folded or unfolded as it was, ← and → and a click on its header fold
 and unfold it — and so do the cards, each counting the sessions the chips leave in it; setting or
-clearing a chip folds, unfolds, opens and closes nothing. Esc clears the words, not the chips: a
+clearing a chip folds, unfolds, opens and closes nothing by itself (a card you close while the chip
+hides the selected session in it opens again when the chip is cleared, as any card that holds the
+selected session does). Esc clears the words, not the chips: a
 chip stays on until it is clicked again, the page reloads, or the switcher (below) clears it to
 show a session it hides.
 

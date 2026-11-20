@@ -1239,6 +1239,49 @@ test('search and stacks in the list', async (t) => {
   );
 
   await t.test(
+    'a card closed under a chip while it holds the selected session that the chip hides (F35, ruled): the click on its caption closes it — the page looks only at the rows drawn —; clearing the chip draws it open again, since it holds the selected session (G5), and the page forgets the closing, so it stays open once the selection leaves',
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S1, 1n * MIN, 'ORB-1 first');
+      session(d, S2, 2n * MIN, 'ORB-1 second');
+      session(d, S3, 3n * MIN, 'ORB-1 third');
+      session(d, S4, 4n * MIN, 'plain');
+      setNote(d.deck, S2, 'n');
+      setNote(d.deck, S3, 'n');
+      await untilShape(page, [OPEN('ORB-1'), `*${S1}`, S2, S3, S4], 'an open card of three');
+
+      await toZone(page, 'list');
+      await clickChip(page, 'Has note');
+      await untilShape(page, [OPEN('ORB-1'), S2, S3], 'Has note: S1 hidden, still selected');
+      assert.equal((await lastView(page))['selected'], S1);
+      await clearKeyBar(page);
+      await captionOf(page, 'week', 'ORB-1').click();
+      await untilShape(page, [CLOSED('ORB-1')], 'the click closes it');
+      await untilClosed(page, shut('week', 'ORB-1'));
+      assert.equal(
+        await shownText(page, '#key-message'),
+        '',
+        'no refusal: no drawn row is selected',
+      );
+      assert.equal((await lastView(page))['selected'], S1);
+
+      await clickChip(page, 'Has note');
+      await untilShape(
+        page,
+        [OPEN('ORB-1'), `*${S1}`, S2, S3, S4],
+        'drawn open for its selected session',
+      );
+      await untilClosed(page, []);
+      await page.locator(`#list [data-id="${S4}"]`).click();
+      await untilSelected(page, S4);
+      await sleep(300);
+      assert.deepEqual(shapeOf(await lines(page)), [OPEN('ORB-1'), S1, S2, S3, `*${S4}`]);
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
     'the line of a filter that leaves no session listed (F35, as ruled): chips alone that match only done sessions, Show done off → `Only done sessions match the filter.` with the footer `1 done hidden · show` under it; nothing matching at all, `Done` with no done session matching, or a typed word → `No session matches the filter.` and no footer',
     async (t) => {
       const l = await launchedWithViews(t, chromium);
