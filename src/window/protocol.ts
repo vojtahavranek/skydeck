@@ -286,7 +286,7 @@ export interface RowPayload {
   /** S2 12.4: why the row needs you, null when it needs nothing (stage B, plan B 2.3). */
   attention: AttentionPayload | null;
   /** S2 12.2's block the row is drawn in (plan E6; the code calls a block a stack), null in none
-   *  (always while filtering). */
+   *  (always during a typed search, F35: `searching`). */
   stack: StackPayload | null;
   /** Follow-up F19 (S2 12.2): the status of the session's ticket while one is known (the row's
    *  small chip after the pull requests' chip), null otherwise. Optional for the reader: absent (a
@@ -307,8 +307,9 @@ export interface RowPayload {
 export interface RowCopyPayload {
   id: string;
   title: string | null;
-  /** The list shows it only with done sessions shown or a filter: an empty copy the user did not
-   *  keep that no terminal of the window shows (`isHiddenCopy`). Absent is true. */
+  /** The list shows it only with done sessions shown or a typed search (F35: a chip alone does
+   *  not): an empty copy the user did not keep that no terminal of the window shows
+   *  (`isHiddenCopy`). Absent is true. */
   hiddenWhileEmpty?: boolean;
 }
 /** Follow-up F19: a row's ticket status — the ticket's short name, the status' text (at most 40
@@ -325,8 +326,9 @@ export interface SectionPayload {
   lastNs: NsText | null;
   count: number;
   rows: RowPayload[];
-  /** F9: the section's closed blocks, in the section's order; [] while it is folded or the view is
-   *  filtering, and when it has none. Always sent. */
+  /** F9: the section's closed blocks, in the section's order; [] while it is folded or the view
+   *  has a typed search (F35: `searching`; chips alone keep them), and when it has none. Always
+   *  sent. */
   closedStacks: ClosedStackPayload[];
 }
 /** `state`: a TerminalState of 2.5 (`reconnecting` shows S2 7.8's bar); `notReported`: S2 7.5's "started, not reported". */
@@ -433,8 +435,13 @@ export interface ListMessage {
   favourites?: string[];
   // Stage E (plan E 2.3): optional for the reader — a list without them (a scripted list of the
   // test helpers, a server before stage E) counts as false and null.
-  /** E5: the view's words or chips are set (the page draws its empty line and folds nothing). */
+  /** E5: the view's words or chips are set (the page draws its empty line). */
   filtering?: boolean;
+  /** F35: a word of the view's filter is set (a typed search): the rows are flat, every section
+   *  unfolded, no block formed and no done session hidden, so the page folds nothing and shows
+   *  no footer of done sessions. Chips alone filter without it. Optional for the reader: absent
+   *  (a server before F35) is `filtering`. */
+  searching?: boolean;
   /** E8, E9: while view.switcher is a string; else null. */
   switcher?: SwitcherPayload | null;
   /** E13: the row of the session view.selected names, as the sections would carry it (its
@@ -446,8 +453,9 @@ export interface ListMessage {
 
 // Stage E (plan E 2.2, 2.3): search's message types, made by `src/window/view/search/`.
 
-/** E4: the chips that narrow the list (S2 12.8); Show done is `view.showDone`. */
-export type SearchChip = 'running' | 'open-pr' | 'note';
+/** E4: the chips that narrow the list (S2 12.8); F35's `done` lists only the sessions marked
+ *  done. Show done is `view.showDone`, no chip. */
+export type SearchChip = 'running' | 'open-pr' | 'note' | 'done';
 /** RowPayload.stack (E6; since F9 an OPEN block only, a closed one has no row in `rows`): the
  *  block of one group in one section (S2 12.2) the row is drawn in, as a card. */
 export interface StackPayload {
@@ -482,8 +490,9 @@ export interface ClosedStackPayload {
 export type SwitchRank = 'need' | 'open' | 'not-running' | 'done';
 /** E10: what the page changes so that its list shows the row, in this order of meaning:
  *  `filter` — its words or chips do not match the row; `done` — the row is done and not open and
- *  the view shows no done sessions once the filter is cleared; `folded` — the row is in Earlier
- *  and Earlier is folded once the filter is cleared. [] when the list shows the row. */
+ *  the view shows no done sessions once the filter is cleared, or (F35) while chips alone match it
+ *  but `done` is not one of them; `folded` — the row is in Earlier and Earlier is folded once the
+ *  filter is cleared (F35: under chips alone too). [] when the list shows the row. */
 export type HiddenBy = 'filter' | 'done' | 'folded';
 export interface SwitchItem {
   rank: SwitchRank;
@@ -819,7 +828,12 @@ const UNFOLDED: Check = (value, where) => {
 /** E4's chips. A record over the type, so that the compiler holds that it names every chip and no
  *  other; `SEARCH_CHIPS` of the view model is the same list (a case of the protocol's tests ties
  *  them: this module imports nothing of the view model). */
-const CHIPS: Readonly<Record<SearchChip, true>> = { running: true, 'open-pr': true, note: true };
+const CHIPS: Readonly<Record<SearchChip, true>> = {
+  running: true,
+  'open-pr': true,
+  note: true,
+  done: true,
+};
 
 const CHIP: Check = (value, where) => {
   if (typeof value !== 'string') return `${where}: wrong type`;

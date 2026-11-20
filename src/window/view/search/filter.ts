@@ -26,9 +26,14 @@ export const ID_PREFIX_MIN = 4;
 /** E9: the most ranges foundIn gives. */
 export const MAX_FOUND = 32;
 
-/** E4: the chips' values (the type is protocol.ts's); the protocol's parser takes the same three
- *  (a case of the protocol's tests ties them). */
-export const SEARCH_CHIPS: readonly SearchChip[] = Object.freeze(['running', 'open-pr', 'note']);
+/** E4: the chips' values (the type is protocol.ts's), F35's `done` the fourth; the protocol's
+ *  parser takes the same four (a case of the protocol's tests ties them). */
+export const SEARCH_CHIPS: readonly SearchChip[] = Object.freeze([
+  'running',
+  'open-pr',
+  'note',
+  'done',
+]);
 
 /** The first `units` UTF-16 units of `text`, one fewer when the cut would split a surrogate pair. */
 function head(text: string, units: number): string {
@@ -125,7 +130,8 @@ function hasOpenPr(row: ListRow): boolean {
 }
 
 /** E4: every chip set holds. `open`: the row is in Open (build.ts knows it: running, or
- *  starting in a terminal of the window). [] matches. */
+ *  starting in a terminal of the window). F35: `done`, the row is marked done (running or not).
+ *  [] matches. */
 export function matchesChips(row: ListRow, open: boolean, chips: readonly SearchChip[]): boolean {
   return chips.every((chip) => {
     switch (chip) {
@@ -135,11 +141,13 @@ export function matchesChips(row: ListRow, open: boolean, chips: readonly Search
         return hasOpenPr(row);
       case 'note':
         return row.hasNote;
+      case 'done':
+        return row.done;
     }
   });
 }
 
-/** E5: a word or a chip. */
+/** E5: a word or a chip (F35: `done` too). Only a word makes the list flat (build.ts). */
 export function isFiltering(words: readonly string[], chips: readonly SearchChip[]): boolean {
   return words.length > 0 || chips.length > 0;
 }

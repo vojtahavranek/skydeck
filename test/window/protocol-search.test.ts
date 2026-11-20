@@ -79,7 +79,7 @@ describe('view: a view without the fields of stage E is taken (a page of stage A
     }));
     taken({
       ...VIEW,
-      chips: ['running', 'open-pr', 'note'],
+      chips: ['running', 'open-pr', 'note', 'done'],
       closed,
       switcher: bytesLong(1024, '>'),
     });
@@ -100,21 +100,27 @@ describe('view.chips: distinct values of SearchChip (E4)', () => {
     }
   });
 
-  test('any order of the three is taken', () => {
+  test('any order of the four is taken', () => {
     taken({ ...VIEW, chips: ['note', 'running'] });
     taken({ ...VIEW, chips: ['note', 'open-pr', 'running'] });
+    taken({ ...VIEW, chips: ['done', 'note', 'open-pr', 'running'] });
   });
 
   test("the parser's chips are SEARCH_CHIPS: the type's members, the list and what is taken agree", () => {
     // A Record over the type must name every member and nothing else (the compiler holds it).
-    const members: Record<SearchChip, true> = { running: true, 'open-pr': true, note: true };
+    const members: Record<SearchChip, true> = {
+      running: true,
+      'open-pr': true,
+      note: true,
+      done: true,
+    };
     assert.deepEqual(Object.keys(members).sort(), [...SEARCH_CHIPS].sort());
     for (const chip of Object.keys(members)) {
       assert.equal(page({ ...VIEW, chips: [chip] }).ok, true, chip);
     }
   });
 
-  test('an unknown chip is refused, also Show done (it is view.showDone) and any other case', () => {
+  test('an unknown chip is refused, also Show done (it is view.showDone, not the chip `done`) and any other case', () => {
     for (const chip of [
       MARKER,
       'Running',
@@ -122,8 +128,9 @@ describe('view.chips: distinct values of SearchChip (E4)', () => {
       'open_pr',
       'openPr',
       'has-note',
-      'done',
+      'Done',
       'show-done',
+      'showDone',
       '',
       ' note',
       'note ',
@@ -136,6 +143,7 @@ describe('view.chips: distinct values of SearchChip (E4)', () => {
   test('a chip named twice is refused', () => {
     refused(page({ ...VIEW, chips: ['note', 'note'] }));
     refused(page({ ...VIEW, chips: ['running', 'open-pr', 'running'] }));
+    refused(page({ ...VIEW, chips: ['done', 'done'] }));
   });
 
   test('what is not an array of strings is refused', () => {
@@ -335,7 +343,7 @@ describe('the types of stage E (plan E 2.3) compile', () => {
       showDone: false,
       selected: null,
       // @ts-expect-error a chip is one of SearchChip
-      chips: ['done'],
+      chips: ['show-done'],
     } satisfies ViewMessage;
     refused(page(misspelt));
   });
@@ -381,12 +389,13 @@ describe('the types of stage E (plan E 2.3) compile', () => {
       more: 0,
       restore,
     };
-    const list = { filtering: true, switcher } satisfies Pick<
+    // F35: `searching`, a word is typed (a chip alone filters without it).
+    const list = { filtering: true, searching: false, switcher } satisfies Pick<
       ListMessage,
-      'filtering' | 'switcher'
+      'filtering' | 'searching' | 'switcher'
     >;
-    // Optional for the reader: a list of stage A has neither.
-    const older: Pick<ListMessage, 'filtering' | 'switcher'> = {};
+    // Optional for the reader: a list of stage A has none of them.
+    const older: Pick<ListMessage, 'filtering' | 'searching' | 'switcher'> = {};
     assert.deepEqual(JSON.parse(JSON.stringify({ row, item, list, older })), {
       row,
       item,

@@ -298,23 +298,28 @@ function stacked(
  *   the row of a `new` terminal's own session while the terminal is there, one of its own when
  *   the session has none yet (A28), unless it is done and stopped. F33: an empty copy the list
  *   hides (`isHiddenCopy`) that no terminal of the window shows is listed as a done one, open or not: only
- *   with `showDone` (or a filter), in no field of `counts` and no switcher item while hidden; it
+ *   with `showDone` (or a typed search), in no field of `counts` and no switcher item while hidden; it
  *   is not one of `doneHidden` unless it is done. One a terminal of the window shows is listed by
  *   the rules above, whatever else holds.
  * - Sections (S2 12.1, `sectionOf`): Open, Recent (key `week`), Earlier; Earlier folded unless the
- *   view unfolds it or the view is filtering (S2 12.8), a folded one with its count and time span
- *   and no rows.
- * - Search (S2 12.8, plan E2–E5): the view's words (`searchWords` of `filter`) and chips choose the
- *   rows of the sections; with either set the view is `filtering`: done rows are listed too (with
- *   their done mark), `doneHidden` is 0, no section is folded and no stack is formed. `counts` are
- *   the title bar's: every row listed without the filter once, by state, the starting ones,
- *   those running in another terminal and (F34) those in Claude Code's background apart, whatever
- *   the filter or the chips list.
- * - Blocks (S2 12.2, plan E6 as ruled 2026-11-16, F9): in every section while not filtering,
+ *   view unfolds it or a word is typed (S2 12.8), a folded one with its count and time span and no
+ *   rows.
+ * - Search (S2 12.8, plan E2–E5, F35): the view's words (`searchWords` of `filter`) and chips
+ *   choose the rows of the sections: a row is in them when it matches every word and every chip
+ *   (`done`: it is marked done) and, when the list hides it without the filter (done, an empty
+ *   copy), when `showDone`, a word or the chip `done` holds. With either set the view is
+ *   `filtering`; with a word it is `searching` too: done rows are listed (with their done mark),
+ *   `doneHidden` is 0, no section is folded and no stack is formed. Under chips alone the
+ *   sections fold and the blocks form as without the filter over the rows that remain, and
+ *   `doneHidden` counts the done rows the chips match that are not listed. `counts` are the title
+ *   bar's: every row listed without the filter once, by state, the starting ones, those running
+ *   in another terminal and (F34) those in Claude Code's background apart, whatever the filter or
+ *   the chips list.
+ * - Blocks (S2 12.2, plan E6 as ruled 2026-11-16, F9): in every section without a typed search,
  *   `stackRows` over the section's rows with `view.closed` as it comes (absent: every block open); a
  *   section's `count` and time span are all its rows', a closed block's too, its `rows` the drawn
  *   ones (an open block's rows; no row of a closed block, its first neither), its `closedStacks`
- *   its closed blocks' captions ([] while filtering or folded).
+ *   its closed blocks' captions ([] during a typed search or while folded).
  * - The switcher (S2 12.8, plan E8, E9): while `view.switcher` is a string, `switcherPayload` over
  *   every row listed with done ones shown (Open's in Open's order, then the others most recent
  *   first), each with what hides it from this page's list; else null. Its `restore` is null here.
@@ -353,8 +358,12 @@ export function buildListMessage(
   const words = searchWords(view.filter);
   const chips = view.chips ?? [];
   const filtering = isFiltering(words, chips);
+  // F35: a typed search lists done rows, unfolds every section and forms no block; chips alone
+  // narrow the list as it is drawn without them, and the chip `done` lists done rows by itself.
+  const searching = words.length > 0;
+  const doneChip = chips.includes('done');
   const unfolded = new Set(view.unfolded);
-  // Earlier as the view has it once the filter is cleared; while filtering nothing is folded.
+  // Earlier as the view has it once the filter is cleared; during a typed search nothing is folded.
   const earlierFolded = !unfolded.has('earlier');
   const switching = typeof view.switcher === 'string';
 
@@ -427,21 +436,26 @@ export function buildListMessage(
         counts[row.state] += 1;
       }
     }
-    // While filtering a done row the words and chips match is listed too (E5).
-    const inSection = matches && (listed || filtering);
+    // A row the view hides without the filter (done, an empty copy) is listed when a word is typed
+    // (E5) or, for a done one, under the chip `done` (F35) — never by another chip alone.
+    const inSection = matches && (listed || searching || doneChip);
     if (inSection) {
       shown.get(name)?.push(entry);
-    } else if (!filtering && row.done) {
-      doneHidden += 1; // the view hides done ones (an empty copy that is not done is no done one)
+    } else if (!searching && matches && row.done) {
+      // The view hides done ones (an empty copy that is not done is no done one); under chips
+      // alone, those the chips match (F35: the footer says how many a `show` would add).
+      doneHidden += 1;
     }
     // F33: the switcher lists an empty copy only while the list shows it (`a`, a typed search).
     if (switching && (!hiddenCopy || inSection)) {
-      // While filtering, a row the words and chips match is shown, done or in Earlier: nothing
-      // hides it. Otherwise each part names what hides it now or once the filter is cleared.
+      // During a typed search a row the words and chips match is shown, done or in Earlier:
+      // nothing hides it. Otherwise each part names what hides it now or once the filter is
+      // cleared (a pick clears every chip, `done` too); under chips alone (F35) a done row they
+      // match is hidden by `done` unless the chip `done` lists it, and Earlier folds.
       const hiddenBy: HiddenBy[] = [];
-      if (!filtering || !matches) {
+      if (!searching || !matches) {
         if (!matches) hiddenBy.push('filter');
-        if (!listed) hiddenBy.push('done');
+        if (!listed && !(matches && doneChip)) hiddenBy.push('done');
         if (name === 'earlier' && earlierFolded) hiddenBy.push('folded');
       }
       switchable.push({ entry, open, hiddenBy });
@@ -452,7 +466,7 @@ export function buildListMessage(
   const sections = SECTIONS.map((name) => {
     const entries = shown.get(name) ?? [];
     entries.sort(name === 'open' ? compareOpen : compareRecent);
-    const folded = name === 'earlier' && !filtering && earlierFolded;
+    const folded = name === 'earlier' && !searching && earlierFolded;
     if (!folded) {
       // G5: also a row a closed block hides, so that `needYou` does not move with the blocks.
       for (const { payload } of entries) {
@@ -461,8 +475,8 @@ export function buildListMessage(
         }
       }
     }
-    // S2 12.2: a filter flattens every block.
-    const drawn = filtering
+    // S2 12.2: a typed search flattens every block; chips alone keep them (F35).
+    const drawn = searching
       ? () => ({ rows: entries.map((entry) => entry.payload), closedStacks: [] })
       : () => stacked(name, entries, view.closed, view.selected);
     return sectionPayload(name, entries, folded, drawn);
@@ -490,6 +504,7 @@ export function buildListMessage(
       input.selected !== null && input.selected.sessionId === view.selected ? input.selected : null,
     dirs: projectDirs(input.rows),
     filtering,
+    searching,
     switcher: typeof view.switcher === 'string' ? switcher(view.switcher, switchable, facts) : null,
     selectedRow,
   };

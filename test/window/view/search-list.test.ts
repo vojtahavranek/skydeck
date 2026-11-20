@@ -238,15 +238,22 @@ test('done: a filter that matches a done row lists it with its done mark, and do
   assert.equal(other.doneHidden, 0);
 });
 
-test('done: the chip `note` alone lists the done rows with a note, and doneHidden is 0', () => {
+test('done: the chip `note` alone lists no done row (F35); doneHidden counts the done ones it matches', () => {
   const list = rows(
     [idle(S1, 'alpha', MIN), idle(S2, 'beta', 2n * MIN, true), idle(S3, 'gamma', 3n * MIN, true)],
     { metas: [meta(S1, { note: 'n1' }), meta(S2, { note: 'n2' })] },
   );
   const message = buildListMessage(input({ rows: list, view: { chips: ['note'] } }));
-  assert.deepEqual(allIds(message), [S1, S2]);
-  assert.equal(rowIn(message, S2).done, true);
-  assert.equal(message.doneHidden, 0);
+  assert.deepEqual(allIds(message), [S1]);
+  assert.equal(message.doneHidden, 1);
+  // With Show done, or with the chip `done`, the done one with a note is listed with its mark.
+  const shown = buildListMessage(input({ rows: list, view: { chips: ['note'], showDone: true } }));
+  assert.deepEqual(allIds(shown), [S1, S2]);
+  assert.equal(rowIn(shown, S2).done, true);
+  assert.equal(shown.doneHidden, 0);
+  const done = buildListMessage(input({ rows: list, view: { chips: ['note', 'done'] } }));
+  assert.deepEqual(allIds(done), [S2]);
+  assert.equal(done.doneHidden, 0);
 });
 
 test("done: without a filter or a chip, stage A's rule — hidden, counted in doneHidden", () => {
@@ -320,7 +327,7 @@ test('counts: a done row that needs nothing, listed by a filter, is in no count 
       rows: rows([idle(S1, 'alpha', MIN), idle(S2, 'beta', MIN, true)], {
         metas: [meta(S2, { note: 'n' })],
       }),
-      view: { chips: ['note'] },
+      view: { chips: ['note', 'done'] },
     }),
   );
   assert.deepEqual(allIds(chip), [S2]);
@@ -377,19 +384,24 @@ test('chips: `running` keeps the rows in Open — in the window, elsewhere, star
 });
 
 test('chips: `open-pr` keeps the rows with a pull request not known to be merged or closed', () => {
-  const message = buildListMessage(input({ ...chipWorld(), view: { chips: ['open-pr'] } }));
+  // Earlier unfolded by the view: a chip unfolds nothing (F35).
+  const message = buildListMessage(
+    input({ ...chipWorld(), view: { chips: ['open-pr'], unfolded: ['earlier'] } }),
+  );
   assert.deepEqual(allIds(message), [S3, S5]);
 });
 
 test('chips: `note` keeps the rows with a note', () => {
-  const message = buildListMessage(input({ ...chipWorld(), view: { chips: ['note'] } }));
+  const message = buildListMessage(
+    input({ ...chipWorld(), view: { chips: ['note'], unfolded: ['earlier'] } }),
+  );
   assert.deepEqual(allIds(message), [S2, S4, S5]);
 });
 
 test('chips: two together, and with a word — every chip and every word must hold', () => {
   const world = chipWorld();
   const build = (view: Partial<ViewInput['view']>) =>
-    allIds(buildListMessage(input({ ...world, view })));
+    allIds(buildListMessage(input({ ...world, view: { unfolded: ['earlier'], ...view } })));
   assert.deepEqual(build({ chips: ['note', 'open-pr'] }), [S5]);
   assert.deepEqual(build({ chips: ['note', 'running'] }), [S2]);
   assert.deepEqual(build({ chips: ['running', 'note'], filter: 'beta' }), [S2]);
@@ -398,13 +410,16 @@ test('chips: two together, and with a word — every chip and every word must ho
   assert.deepEqual(build({ chips: ['running', 'open-pr', 'note'] }), []);
 });
 
-test('chips: while a chip is set Earlier is unfolded', () => {
+test('chips: a chip folds and unfolds nothing (F35): Earlier stays as the view has it', () => {
   const message = buildListMessage(input({ ...chipWorld(), view: { chips: ['note'] } }));
-  assert.equal(section(message, 'earlier').folded, false);
-  assert.deepEqual(ids(message, 'earlier'), [S5]);
-  for (const s of message.sections) {
-    assert.equal(s.folded, false, s.name);
-  }
+  assert.equal(section(message, 'earlier').folded, true);
+  assert.equal(section(message, 'earlier').count, 1);
+  assert.deepEqual(ids(message, 'earlier'), []);
+  const unfolded = buildListMessage(
+    input({ ...chipWorld(), view: { chips: ['note'], unfolded: ['earlier'] } }),
+  );
+  assert.equal(section(unfolded, 'earlier').folded, false);
+  assert.deepEqual(ids(unfolded, 'earlier'), [S5]);
   const plain = buildListMessage(input({ ...chipWorld() }));
   assert.equal(section(plain, 'earlier').folded, true);
 });
@@ -713,7 +728,7 @@ test('blocks: a closed block whose member is drawn with a terminal that has not 
   );
 });
 
-test('blocks: a filter or a chip flattens every block, in every section', () => {
+test('blocks: a filter flattens every block, in every section (a chip alone does not since F35)', () => {
   const list = rows(
     [
       running(S4, { pid: 9004, transcript: { aiTitle: 'ORB-1 runs' } }),
@@ -735,7 +750,11 @@ test('blocks: a filter or a chip flattens every block, in every section', () => 
     [S4, { pid: 9004, tty: null }],
     [S5, { pid: 9005, tty: null }],
   ]);
-  for (const view of [{ filter: 'fix' }, { filter: 'orb-1' }, { chips: ['note' as const] }]) {
+  for (const view of [
+    { filter: 'fix' },
+    { filter: 'orb-1' },
+    { filter: 'orb-1', chips: ['note' as const] },
+  ]) {
     for (const closed of [undefined, [], [...shut('open', 'ORB-1'), ...shut('week', 'ORB-1')]]) {
       const why = `${JSON.stringify(view)} ${JSON.stringify(closed)}`;
       const message = buildListMessage(input({ rows: list, elsewhere, view: { closed, ...view } }));

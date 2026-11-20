@@ -21,7 +21,7 @@ import {
 } from '../../../../src/window/view/search/filter.ts';
 import { windowChip } from '../../../../src/window/view/chip.ts';
 import { attached, ds, meta, prRow, rowOf, rows } from '../../../helpers/derived.ts';
-import { S1, S2, S3 } from '../../../helpers/platform.ts';
+import { S1, S2, S3, T0 } from '../../../helpers/platform.ts';
 
 /** What a row is given in a test: every field neutral unless named. */
 interface RowSpec {
@@ -33,6 +33,8 @@ interface RowSpec {
   prs?: PrRow[];
   /** F18: the ticket's address. */
   ticket?: string;
+  /** F35: marked done. */
+  done?: boolean;
 }
 
 /** A row as step 1 loads it: its title a name set in Claude Code, its group and note in meta. */
@@ -45,6 +47,7 @@ function row(spec: RowSpec = {}): ListRow {
       id,
       dir: spec.dir === undefined ? '/home/dev/plain' : spec.dir,
       transcript: { customTitle: spec.title ?? 'neutral' },
+      ...(spec.done === true ? { hidden: true, doneAtNs: T0 } : {}),
     }),
     {
       metas: hasMeta
@@ -74,7 +77,7 @@ test('the bounds of E3 and the chips of E4 are as the plan fixes them', () => {
   assert.equal(FIELD_UNITS, 16_384);
   assert.equal(ID_PREFIX_MIN, 4);
   assert.equal(MAX_FOUND, 32);
-  assert.deepEqual(SEARCH_CHIPS, ['running', 'open-pr', 'note']);
+  assert.deepEqual(SEARCH_CHIPS, ['running', 'open-pr', 'note', 'done']);
   assert.ok(Object.isFrozen(SEARCH_CHIPS));
 });
 
@@ -456,6 +459,16 @@ test('matchesChips: note holds for a row with a note', () => {
   assert.equal(matchesChips(row(), true, ['note']), false);
 });
 
+test('matchesChips: done holds for a row marked done (F35), running or not', () => {
+  assert.equal(matchesChips(row({ done: true }), false, ['done']), true);
+  assert.equal(matchesChips(row({ done: true }), true, ['done']), true);
+  assert.equal(matchesChips(row(), false, ['done']), false);
+  assert.equal(matchesChips(row({ note: 'x' }), true, ['done']), false);
+  assert.equal(matchesChips(row({ done: true, note: 'x' }), false, ['note', 'done']), true);
+  assert.equal(matchesChips(row({ done: true }), false, ['note', 'done']), false);
+  assert.equal(matchesChips(row({ done: true }), false, ['running', 'done']), false);
+});
+
 test('matchesChips: every chip set must hold', () => {
   const withNote = row({ note: 'remember' });
   assert.equal(matchesChips(withNote, true, ['running', 'note']), true);
@@ -473,6 +486,7 @@ test('isFiltering: a word or a chip', () => {
   assert.equal(isFiltering(['fix'], []), true);
   assert.equal(isFiltering([], ['note']), true);
   assert.equal(isFiltering(['fix'], ['running']), true);
+  assert.equal(isFiltering([], ['done']), true);
   assert.equal(isFiltering([], []), false);
 });
 
