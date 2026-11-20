@@ -100,14 +100,14 @@ until part 9 or part 10 tells you to.
    plugged in with the lid open, and run `caffeinate -i` in a terminal tab of your own (Ctrl+C ends
    it), so that it does not sleep. I edit files only inside this clone. The commands the work needs
    are these families: `sh` (the probe, the fact run's script); `git` (status, diff, log, show,
-   branch, remote, `config user.*`, fetch, add, commit, switch, merge, push to your fork, and one
-   `git clone` for the check at the end); `gh` (auth status, api, repo fork, repo view, pr create,
-   pr view, pr checks, pr comment, workflow run, run list, run view, run watch); `npm` (ci, test,
-   run), `npx playwright install chromium` (it downloads about 150 MB into
+   rev-parse, branch, remote, `config user.*`, fetch, add, commit, switch, merge, push to your fork,
+   and one `git clone` for the check at the end); `gh` (auth status, api, repo fork, repo view, pr
+   create, pr view, pr checks, pr comment, workflow run, run list, run view, run watch); `npm` (ci,
+   test, run), `npx playwright install chromium` (it downloads about 150 MB into
    `~/Library/Caches/ms-playwright`), `node`; `python3`; `perl` (to bound a command's time); `ps`,
-   `sysctl`, `sw_vers`, `vm_stat`, `lsof`, `uname`, `xcode-select -p`; `mktemp`, and `rm` only
-   inside this clone, the suite's sandboxes and the folders I make under `/tmp`; `kill` only for
-   process ids the suite left behind; `grep`, `sed`, `awk`, `sort`, `head`, `tr`, `cat`, `ls`,
+   `sysctl`, `sw_vers`, `vm_stat`, `lsof`, `uname`, `xcode-select -p`; `mktemp`, `mkdir`, and `rm`
+   only inside this clone, the suite's sandboxes and the folders I make under `/tmp`; `kill` only
+   for process ids the suite left behind; `grep`, `sed`, `awk`, `sort`, `head`, `tr`, `cat`, `ls`,
    `date`, `env`, `whoami`, `hostname`, `scutil --get ComputerName`; `shellcheck` if you have it;
    `claude --help`, and the one `claude -p` of question 4. How you let them run without a question
    each time is your choice; I never change my own permissions or settings. If the session stops for
@@ -134,10 +134,11 @@ in the final report what stayed unchecked.
 On your human's machine (it holds their real Claude Code sessions and their work):
 
 - Work only inside this clone (switch branches in it; no worktree), the suite's sandboxes
-  (`test/helpers/`), and folders you make with `mktemp -d` under `/tmp` (the fact run of part 4.2, a
-  pull request's body), which you remove when done. The one exception is the check clone of part 9,
-  `~/skydeck-mac-check`, made once at the end. (The caches `npm` and Playwright keep, and `gh`'s own
-  settings, are theirs to write.) Reason: everything else is your human's.
+  (`test/helpers/`), and folders you make with `mktemp -d` under `/tmp` (a pull request's body),
+  which you remove when done; the fact run's folder of part 4.2 is inside the clone. The one
+  exception is the check clone of part 9, `~/skydeck-mac-check`, made once at the end. (The caches
+  `npm` and Playwright keep, and `gh`'s own settings, are theirs to write.) Reason: everything else
+  is your human's.
 - Run code only through the suite (`npm test`, `npm run test:page`, single test files, the commands
   of part 8), the probe and the fact run of part 4. Never run `bin/skydeck` or `node src/...`
   outside a test, not even with `--help`: the launcher writes a cache into `~/.cache/skydeck`, most
@@ -164,7 +165,9 @@ On your human's machine (it holds their real Claude Code sessions and their work
   before you write a pull request's body or a comment, search what you are about to publish for your
   human's user name, home folder, machine name and host name (`whoami`, `$HOME`, `scutil --get
   ComputerName`, `hostname`): `git diff origin/main...HEAD | grep -i "<each>"` (and the same over
-  the body's file) must print nothing.
+  the body's file) must print nothing. Before the first push, look at the commits' author too (`git
+  log -1 --format='%an <%ae>'`): it must be the identity your human chose in 2.2, set for this clone
+  only; you set nothing globally.
 - The status file holds forms, yes/no answers, counts and plain words only, never a pasted output of
   `doctor`, `ls`, the probe's unmasked parts or the fact run (they hold paths, titles and names).
 - Once your human has installed skydeck from the check clone (part 9), never change that clone: the
@@ -236,7 +239,9 @@ does:
   `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`): a hook inherits Claude Code's environment, so without
   this the hook could show your session's values instead of what the scripted run sets. Nothing of
   the login, the provider or the settings is removed.
-- At most two minutes (`perl -e 'alarm 120; exec @ARGV'`), in a folder of its own under `/tmp`.
+- At most two minutes (`perl -e 'alarm 120; exec @ARGV'`), in a folder of its own inside the clone,
+  `.git/skydeck-facts` (git never tracks anything under `.git`). Claude Code reads the clone's
+  `CLAUDE.md` there, as in any session started inside the clone: a few more words of prompt.
 
 Never use `--restricted`, `--bare`, `env -i` or another `CLAUDE_CONFIG_DIR` for it: your human's
 login or provider settings would be lost. First check that `claude --help` lists each of
@@ -247,7 +252,8 @@ login or provider settings would be lost. First check that `claude --help` lists
 Make the folder, the hook, the settings file and the run script, and run it (one block, as it is):
 
 ```sh
-facts=$(mktemp -d /tmp/skydeck-facts.XXXXXX)
+facts="$(git rev-parse --absolute-git-dir)/skydeck-facts"
+mkdir "$facts" || { echo "$facts is there already: stop"; exit 1; }
 cat >"$facts/hook.sh" <<'EOF'
 #!/bin/sh
 # Records what a hook receives: names, forms and yes/no only, never a value.
@@ -292,16 +298,14 @@ env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u CLAUDE_
 echo "claude ended with $?"
 EOF
 sh "$facts/run.sh" "$facts"
-echo "$facts"
 ```
 
-A shell variable does not outlive one command of yours: use the folder by the path the last line
-printed. Read its `SessionStart.txt` and `SessionEnd.txt` (not `answer.txt`: it is Claude Code's
-answer or its error, which may name the account; read only whether it is the word `ok`). Write the
-facts, as forms and yes/no, into "Facts found on a Mac" below (in the M1 branch). Then check what
-the run left:
+Then read `.git/skydeck-facts/SessionStart.txt` and `SessionEnd.txt` (not `answer.txt`: it is Claude
+Code's answer or its error, which may name the account; read only whether it is the word `ok`).
+Write the facts, as forms and yes/no, into "Facts found on a Mac" below (in the M1 branch). Then
+check what the run left:
 
-- its folder: remove it (`rm -r /tmp/skydeck-facts.<…>`);
+- its folder: remove it (`rm -r .git/skydeck-facts`, from the clone's top folder);
 - whether Claude Code kept a transcript after all: list the names only, `ls -d
   "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*skydeck-facts*`. Whatever this or anything else
   shows in your human's real folders is REPORTED to them (in the status file and at the end), never
@@ -309,6 +313,8 @@ the run left:
 
 If the run failed, or `SessionStart.txt` is missing (the hooks did not fire), try nothing else: the
 facts move to the hands-on check, where your human's real install shows them at its first session.
+Whether `SessionEnd` runs at a normal end of a `-p` run is not documented (EXPECTED: yes); a missing
+`SessionEnd.txt` alone is a fact to write down, not a failure.
 
 What it settles: whether `CLAUDE_PID`, `CLAUDE_CODE_SESSION_ID` and `CLAUDE_CODE_ENTRYPOINT` are set
 in a hook on a Mac (the hook relies on all three: `bin/skydeck-hook`; `CLAUDE_PID` is documented

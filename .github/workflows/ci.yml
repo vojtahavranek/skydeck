@@ -63,7 +63,7 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       # By name: bin/skydeck-keeper is python, not sh (plan A14).
-      - run: shellcheck bin/skydeck bin/skydeck-hook bin/skydeck-keepalive
+      - run: shellcheck bin/skydeck bin/skydeck-hook bin/skydeck-keepalive scripts/mac-probe.sh
       - run: python3 -m py_compile bin/skydeck-keeper
       # Each `shard` list against itself (no knowledge of the legs): every entry is i/n for one n,
       # each i from 1 to n appears once, there are as many lists as steps that give Node a shard, and
