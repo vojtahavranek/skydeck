@@ -19,7 +19,8 @@ F8), at "Updating skydeck"; W33 checks install's offer to turn off Claude Code's
 F13), at "The window's theme"; W35 checks the flags a session was started with in the header
 (follow-up F16), at "The flags a session was started with"; W36 checks the new form's favourite
 flags (follow-up F15) and its group chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
-session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status".
+session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status"; W40 checks
+a copy that Claude Code's background feature makes (follow-up F33), at "A copy made in agent view".
 
 Setup:
 
@@ -2638,3 +2639,53 @@ Not tried before this check was written: all of it with the real Claude Code. Th
 suite's stand-in program by the same hang-up (it runs its SessionEnd hook with reason `other`, as
 Claude Code does for a closed terminal), and check the dialog's keys and words in headless
 Chromium; they never start `claude`.
+
+## A copy made in agent view
+
+The check of a copy that Claude Code's background feature makes of a session (follow-up F33; design
+5.3 "Copies", 7.2; design-step-2.md 12.1, 12.2; [install.md](install.md), "A copy made by Claude
+Code's background feature"): W40, on one new throwaway session in `~/skydeck-try` and nothing else.
+No test may start the real `claude`, so only this shows what Claude Code really starts when a session
+goes to its background — whether it is the copy skydeck looks for (`--fork-session --resume`), and
+when its history reaches the copy's transcript. The tests feed the hook's recorded command and a
+process's command line to skydeck by hand.
+
+## W40. A copy made in agent view (real claude)
+
+Setup: skydeck updated to a commit that has follow-up F33 (`skydeck update`, W32), then the window
+open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Write down the time
+and the Claude Code version (`claude --version`).
+
+1. **A throwaway session.** In a WSL terminal of your own (not the window): `cd ~/skydeck-try &&
+   claude`, then `Reply with the single word ok, in this chat, with no tool and no file.` and Enter;
+   wait for the reply. In the window it is one row under Open, `running in another terminal`. Write
+   down its short id and its title once it has one.
+2. **To the background.** In that session, on an empty prompt, type `/bg` and Enter (agent view
+   opens; if it does not, `claude agents`). Wait 10 seconds. Expected: the window still shows ONE
+   row with that title — no second one under Open or Recent, without a reload. In another terminal,
+   `skydeck ls --all`: when Claude Code made a copy, a second row with that title and the marks
+   `continued,empty-copy`; write down its short id (none: write that down, and the check ends here).
+   `skydeck ls` does not list it.
+3. **Shown with `a`.** In the window, Ctrl+Shift+L (`Focus: list`) and `a`. Expected: the copy is
+   listed, marked `empty copy`; hovering the mark shows `an empty copy of "<the title>" made by Claude
+   Code; it shows by itself once it has a first message`. Press `a` again: it is hidden again.
+4. **Its first prompt.** In agent view, open the background session and give it `Reply with the
+   single word ok, in this chat, with no tool and no file.` Expected: within a few seconds, without a
+   reload, the copy appears in the window by itself, marked `continued`; hovering the mark shows `it
+   began as a copy of "<the title>"`. `skydeck show <its short id>` prints `continues:` with the
+   throwaway session's id and a line `link:     copy <that short id> -> <its short id> at …`.
+5. **The end of the check.** Stop the background session in agent view as Claude Code's own help
+   there says, and `/exit` the throwaway session if it still runs. In the window, mark both done
+   (`d` on each, after looking at the header's short id).
+
+Write down: the time of the setup and the Claude Code version; for each step whether it went as
+expected; in step 2, whether a second row ever showed without `a` and for how long, and what `skydeck
+show --json <the copy's short id>` printed under `links`; in step 4, how long it took to appear;
+whether the copy came back as a second row at any later time (after a restart of Claude Code's
+background, say).
+
+Not tried before this check was written: all of it with the real Claude Code. Which command the
+background feature runs is known from one tester's report: `claude --fork-session --resume <the
+original's transcript> --permission-mode auto`. What Claude Code does with such a copy later — the
+`source` of its start, when its history is written under its new id, whether its supervisor starts
+it again — is not known, and nothing in skydeck depends on it.

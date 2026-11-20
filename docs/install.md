@@ -788,6 +788,15 @@ effect.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
   terminal shows a card instead: it cannot be shown in the window. Once you `/exit` it there, it
   can be resumed here.
+- **A copy made by Claude Code's background feature.** Agent view and `/bg` can start a copy of a
+  session (`claude --fork-session --resume …`, which you can also type yourself): a new session
+  that holds only the title of the one it copies, running in Claude Code's background. While it
+  has no message the list does not show it as a second row of that session: `a` shows it, as it
+  shows done sessions, marked `empty copy` (its tooltip names the session it copies), and so does
+  `skydeck ls --all`; restore never offers it. Once you give it a prompt (in agent view) it is
+  listed by itself, without a reload, marked `continued`, its tooltip naming the session it began
+  as a copy of. A copy that a terminal of the window shows is always listed. skydeck does not stop
+  it: it runs in Claude Code's background as before.
 - **A new session**: Ctrl+Shift+N (in a browser tab the browser keeps Ctrl+Shift+N for itself:
   use the `+ New` button there), with its directory,
   label, group and `claude` flags. Flags you use often can be favourites: the ★ at the end of the
