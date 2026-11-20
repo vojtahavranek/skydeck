@@ -396,6 +396,10 @@ export interface ListMessage {
     running: number;
     starting: number;
     elsewhere: number;
+    /** Follow-up F34: the sessions Claude Code runs in its background (`elsewhere.background`),
+     *  each counted here and not in `elsewhere`. The server always sends it; optional for the
+     *  reader: absent (a server before F34) is none. */
+    background?: number;
     notRunning: number;
   };
   /** Plan B7: `count`, the listed rows that need you, whatever the filter or the fold (the title

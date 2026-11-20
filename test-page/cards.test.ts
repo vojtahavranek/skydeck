@@ -764,7 +764,7 @@ test('the right side', async (t) => {
   );
 
   await t.test(
-    "F34: light, dark and the forced themes: the card and the row of a session in Claude Code's background are drawn as another terminal's",
+    "F34: the title bar's count; light, dark and the forced themes: the card and the row of a session in Claude Code's background are drawn as another terminal's",
     async (t) => {
       const s = await scripted(t, chromium);
       s.serve(
@@ -784,9 +784,21 @@ test('the right side', async (t) => {
               },
               [S2]: { state: 'running', elsewhere: { pid: 42, tty: '/dev/pts/2', dir: null } },
             },
+            list: {
+              counts: {
+                working: 0,
+                waiting: 0,
+                running: 0,
+                starting: 0,
+                elsewhere: 1,
+                background: 1,
+                notRunning: 0,
+              },
+            },
           },
         ),
       );
+      await showsText(s.page, '#counts', /^1 in another terminal · 1 in the background$/);
       /** The colours and sizes of the selected session's card and of its row's second line. */
       const drawn = (id: string): Promise<Row> =>
         s.page.evaluate((id) => {

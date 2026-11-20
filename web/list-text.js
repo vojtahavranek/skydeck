@@ -512,12 +512,14 @@ const COUNTS = /** @type {const} */ ([
   ['running', 'running', 'running'],
   ['starting', 'starting', 'starting'],
   ['elsewhere', 'elsewhere', 'in another terminal'],
+  ['background', 'background', 'in the background'], // F34; absent from a server before it
   ['notRunning', 'not-running', 'not running'],
 ]);
 
 /**
  * The title bar's counts per state (S2 12.1, stage A: states only; "needs you" comes with stage
- * B): each state that has sessions, `3 working`, `2 in another terminal`, `14 not running`.
+ * B): each state that has sessions, `3 working`, `2 in another terminal`, (F34) `1 in the
+ * background`, `14 not running`.
  * @param {ListMessage['counts']} counts
  * @returns {{ state: string, text: string }[]}
  */

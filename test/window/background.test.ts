@@ -48,7 +48,11 @@ function liveFile(d: TestDeck, change: string | Record<string, unknown>): void {
 }
 
 /** S1's row as the window lists it, with no terminal of the window: what the server would send. */
-function rowOfS1(d: TestDeck): { state: string; elsewhere: ElsewherePayload | null } {
+function rowOfS1(d: TestDeck): {
+  state: string;
+  elsewhere: ElsewherePayload | null;
+  counts: { elsewhere: number; background?: number };
+} {
   refresh(d.deck);
   const rows = loadRows(d.deck);
   const nowNs = d.platform.clock.nowNs();
@@ -70,7 +74,7 @@ function rowOfS1(d: TestDeck): { state: string; elsewhere: ElsewherePayload | nu
   });
   const row = message.sections.flatMap((section) => section.rows).find((one) => one.id === S1);
   assert.ok(row !== undefined, 'S1 is listed');
-  return { state: row.state, elsewhere: row.elsewhere };
+  return { state: row.state, elsewhere: row.elsewhere, counts: message.counts };
 }
 
 /** A deck where S1 runs outside every terminal of the window, its live file as `change` says. */
@@ -91,6 +95,7 @@ test('F34: a trusted live file of kind `bg` makes the row say it runs in Claude 
     background: true,
   });
   assert.equal(row.state, 'working', 'its state is read from the file as for any session');
+  assert.deepEqual([row.counts.elsewhere, row.counts.background], [0, 1], "the title bar's counts");
 });
 
 test('F34: every other live file reads as a session in another terminal, as before', async (t) => {
@@ -112,6 +117,7 @@ test('F34: every other live file reads as a session in another terminal, as befo
         dir: '/home/dev/projects/demo',
         background: false,
       });
+      assert.deepEqual([row.counts.elsewhere, row.counts.background], [1, 0]);
     });
   }
 });

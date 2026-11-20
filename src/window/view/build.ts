@@ -303,8 +303,9 @@ function stacked(
  * - Search (S2 12.8, plan E2–E5): the view's words (`searchWords` of `filter`) and chips choose the
  *   rows of the sections; with either set the view is `filtering`: done rows are listed too (with
  *   their done mark), `doneHidden` is 0, no section is folded and no stack is formed. `counts` are
- *   the title bar's: every row listed without the filter once, by state, the starting ones and
- *   those running elsewhere apart, whatever the filter or the chips list.
+ *   the title bar's: every row listed without the filter once, by state, the starting ones,
+ *   those running in another terminal and (F34) those in Claude Code's background apart, whatever
+ *   the filter or the chips list.
  * - Blocks (S2 12.2, plan E6 as ruled 2026-11-16, F9): in every section while not filtering,
  *   `stackRows` over the section's rows with `view.closed` as it comes (absent: every block open); a
  *   section's `count` and time span are all its rows', a closed block's too, its `rows` the drawn
@@ -353,7 +354,15 @@ export function buildListMessage(
   const earlierFolded = !unfolded.has('earlier');
   const switching = typeof view.switcher === 'string';
 
-  const counts = { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 };
+  const counts = {
+    working: 0,
+    waiting: 0,
+    running: 0,
+    starting: 0,
+    elsewhere: 0,
+    background: 0,
+    notRunning: 0,
+  };
   let needYouCount = 0;
   const shown = new Map<SectionName, Entry[]>(SECTIONS.map((name) => [name, []]));
   const switchable: SwitchEntry[] = [];
@@ -399,6 +408,8 @@ export function buildListMessage(
         needYouCount += 1;
       } else if (payload.starting) {
         counts.starting += 1;
+      } else if (payload.elsewhere?.background === true) {
+        counts.background += 1; // F34: in Claude Code's background, not in another terminal
       } else if (payload.elsewhere !== null) {
         counts.elsewhere += 1;
       } else if (row.state === 'not-running') {

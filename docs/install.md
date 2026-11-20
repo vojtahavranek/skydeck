@@ -1281,8 +1281,10 @@ so they show for the sessions that run in another terminal too; `ended unexpecte
 the window's own terminals.
 
 **The title bar** starts with the count, `3 need you` (`1 needs you`), after a dot in the waiting
-colour, before the counts per state: `3 need you · 2 working · 1 waiting · 14 not running`. A
-session that needs you is counted there and in no other count. The count takes in every session
+colour, before the counts per state: `3 need you · 2 working · 1 waiting · 14 not running`, with
+`1 in another terminal` and `1 in the background` (a session Claude Code runs in its background)
+before `not running` when there are such sessions. A session that needs you is counted there and
+in no other count. The count takes in every session
 the list lists, also those the filter or the folded Earlier hides; a done session that has stopped
 is counted only while done sessions are shown (`show`, `a`). The window's title, which the taskbar
 button shows, is `(3) skydeck`, and `skydeck` while none needs you.

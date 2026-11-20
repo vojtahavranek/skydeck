@@ -718,6 +718,33 @@ describe("countsText: the title bar's counts per state (S2 12.1, stage A)", () =
     );
   });
 
+  test('F34: the sessions in Claude Code’s background have their own count, right after another terminal’s; absent (a server before F34) is none', () => {
+    const counts = {
+      working: 1,
+      waiting: 0,
+      running: 0,
+      starting: 0,
+      elsewhere: 2,
+      background: 3,
+      notRunning: 4,
+    };
+    assert.deepEqual(countsText(counts), [
+      { state: 'working', text: '1 working' },
+      { state: 'elsewhere', text: '2 in another terminal' },
+      { state: 'background', text: '3 in the background' },
+      { state: 'not-running', text: '4 not running' },
+    ]);
+    assert.deepEqual(
+      countsText({ ...counts, elsewhere: 0, background: 1 }).map((part) => part.text),
+      ['1 working', '1 in the background', '4 not running'],
+    );
+    const { background: _none, ...before } = counts;
+    assert.deepEqual(
+      countsText(before).map((part) => part.text),
+      ['1 working', '2 in another terminal', '4 not running'],
+    );
+  });
+
   test('a state without sessions is left out; none at all is no text', () => {
     assert.deepEqual(
       countsText({ working: 0, waiting: 1, running: 0, starting: 0, elsewhere: 0, notRunning: 0 }),

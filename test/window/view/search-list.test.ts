@@ -296,6 +296,7 @@ test('counts: counts and needYou.count are the same with and without a filter th
     running: 0,
     starting: 0,
     elsewhere: 0,
+    background: 0,
     notRunning: 1,
   });
   assert.equal(filtered.needYou.count, plain.needYou.count);
