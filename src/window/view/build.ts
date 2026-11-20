@@ -296,7 +296,11 @@ function stacked(
  * - Listed (design 7.2 through `isListed`): done sessions only with `showDone`; a session that is
  *   open — running, or starting in a terminal of the window — whatever its done mark (S2 12.10);
  *   the row of a `new` terminal's own session while the terminal is there, one of its own when
- *   the session has none yet (A28), unless it is done and stopped.
+ *   the session has none yet (A28), unless it is done and stopped. F33: an empty copy (its mark
+ *   `empty-copy`) that no terminal of the window shows is listed as a done one, open or not: only
+ *   with `showDone` (or a filter), in no field of `counts` and no switcher item while hidden; it
+ *   is not one of `doneHidden` unless it is done. One a terminal of the window shows is listed by
+ *   the rules above, whatever else holds.
  * - Sections (S2 12.1, `sectionOf`): Open, Recent (key `week`), Earlier; Earlier folded unless the
  *   view unfolds it or the view is filtering (S2 12.8), a folded one with its count and time span
  *   and no rows.
@@ -385,9 +389,13 @@ export function buildListMessage(
       selectedRow = payload;
     }
     const open = payload.starting || row.state !== 'not-running';
+    // F33: an empty copy that no terminal of the window shows is listed as a done one is, only
+    // with done ones shown, open or not; one a terminal of the window shows is never hidden.
+    const hiddenCopy = terminal === null && row.marks.includes('empty-copy');
     // Listed without the filter (stage A's rule with the view's showDone): the counts' rows.
     const listed =
-      isListed(row, open || view.showDone) || (ownNew && (open || view.showDone || !row.done));
+      isListed(row, (open && !hiddenCopy) || view.showDone, terminal !== null) ||
+      (ownNew && (open || view.showDone || !row.done));
     // No Searchable is made while no word is set (task 90's review).
     const matches =
       (words.length === 0 || matchesWords(searchable(row), words)) &&
@@ -411,10 +419,11 @@ export function buildListMessage(
     const inSection = matches && (listed || filtering);
     if (inSection) {
       shown.get(name)?.push(entry);
-    } else if (!filtering) {
-      doneHidden += 1; // not filtering, so it is done and the view hides done ones
+    } else if (!filtering && row.done) {
+      doneHidden += 1; // the view hides done ones (an empty copy that is not done is no done one)
     }
-    if (switching) {
+    // F33: the switcher lists an empty copy only while the list shows it (`a`, a typed search).
+    if (switching && (!hiddenCopy || inSection)) {
       // While filtering, a row the words and chips match is shown, done or in Earlier: nothing
       // hides it. Otherwise each part names what hides it now or once the filter is cleared.
       const hiddenBy: HiddenBy[] = [];

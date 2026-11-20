@@ -293,6 +293,16 @@ export interface RowPayload {
    *  always sends it; optional for the reader: absent (a scripted row, a server before F30) is
    *  false. */
   endable?: boolean;
+  /** Follow-up F33: the session this one began as a copy of (design 5.3 "Copies") — its id, and its
+   *  title as the list shows it, null when skydeck has no row for it —; null for a session that is
+   *  no copy. The server always sends it; optional for the reader: absent (a scripted row, a server
+   *  before F33) is none. */
+  copyOf?: RowCopyPayload | null;
+}
+/** Follow-up F33: what a copy's row names of its original. */
+export interface RowCopyPayload {
+  id: string;
+  title: string | null;
 }
 /** Follow-up F19: a row's ticket status — the ticket's short name, the status' text (at most 40
  *  characters, sanitised) and its category (one of the six words), null for none. */

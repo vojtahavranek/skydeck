@@ -120,6 +120,7 @@ test('rowPayload: has exactly the fields of RowPayload — no note text, no sess
     'stack',
     'ticketStatus', // F19: the ticket's status while one is known, else null
     'endable', // F30: the session can be ended from the window
+    'copyOf', // F33: the session a copy began as a copy of, else null
   ];
   assert.deepEqual(Object.keys(rowPayload(row, NONE)).sort(), [...keys].sort());
 });

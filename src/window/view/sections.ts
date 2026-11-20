@@ -101,7 +101,8 @@ function noteHead(note: string | null): string[] {
  * (S2 12.3, `windowChip`), not design 7.3's of `ls`. Stage A has no attention and no stacks.
  * F19: `ticketStatus` is the session's ticket status while one is known — its name, its text and
  * its category —, else null (the row's chip is not drawn). F30: `endable` while the session runs in
- * the row's terminal of the window and that terminal can be ended (`TerminalInfo.endable`).
+ * the row's terminal of the window and that terminal can be ended (`TerminalInfo.endable`). F33:
+ * `copyOf` names the session a copy began as a copy of (`ListRow.copyOf`), else null.
  */
 export function rowPayload(
   row: ListRow,
@@ -165,6 +166,7 @@ export function rowPayload(
             status: row.ticketStatus.status,
             category: row.ticketStatus.category,
           },
+    copyOf: row.copyOf === undefined ? null : { id: row.copyOf.id, title: row.copyOf.title },
   };
 }
 
