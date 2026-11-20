@@ -3,7 +3,7 @@
 // mockup's 4.2, rounded up for the reach to Undo). A later line replaces the one shown. Like the
 // page's other chrome it takes no keyboard on a click: its Undo cancels its mousedown, so the
 // keyboard stays where the user was. Its interface is plan D's contract 2.4. Every text reaches
-// the DOM as text.
+// the DOM as text. Since F30 a line can stay until the next one (the wait of an end, web/app.js).
 
 /** How long a line stays. */
 const SHOWN_MS = 5000;
@@ -44,8 +44,10 @@ export function createToast(root) {
     /**
      * @param {string} line
      * @param {(() => void) | null} onUndo
+     * @param {boolean} [stay] F30: the line stays until a later one replaces it (a wait's line,
+     *   `Ending the session…`), not 5 seconds
      */
-    show(line, onUndo) {
+    show(line, onUndo, stay = false) {
       text.textContent = line;
       undo = onUndo;
       undoButton.hidden = onUndo === null;
@@ -53,7 +55,7 @@ export function createToast(root) {
       if (timer !== null) {
         clearTimeout(timer);
       }
-      timer = setTimeout(hide, SHOWN_MS);
+      timer = stay ? null : setTimeout(hide, SHOWN_MS);
     },
     hide,
   };
