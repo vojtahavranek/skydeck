@@ -1980,7 +1980,8 @@ install would leave).
    `Focus: list`: there ← acts on the list (it closes a group). Then press ← once, and look.
    Expected: the terminal stays as it is, the same empty prompt; no list of sessions (Claude Code's
    agent view, a table of sessions with an input at the bottom) takes it over, and the list on the
-   left gets no new row "running in another terminal". Only when the terminal is unchanged, press
+   left gets no new row "running in Claude Code's background" (nor one "running in another
+   terminal"). Only when the terminal is unchanged, press
    ← a second time (Claude Code asks for a second press in some cases, `Press ← again to open
    agents`), and look again: the same is expected.
 
@@ -1989,7 +1990,13 @@ install would leave).
    nothing into agent view's input (every prompt entered there starts a new session of its own),
    and press Esc, which goes back to the conversation. That does not end it: "Detaching never stops
    a background session", and the row is made "even when the conversation has no messages yet", so
-   until it is ended the window may list a row for `skydeck-try` as running in another terminal.
+   until it is ended the window may list a row for `skydeck-try` as `running in Claude Code's
+   background`. When it does, select that row and look at its card: the title `Running in Claude
+   Code's background`, `pid <n>` with no `/dev/pts/…` after it, and the words `Claude Code runs this
+   session itself, without a terminal. skydeck cannot show it here. To see it or end it, run claude
+   agents in a terminal. Once it has ended it can be resumed in the window.` When the row says
+   `running in another terminal` instead, write that down: Claude Code did not mark it as a
+   background session in the way skydeck reads.
    End it now: look that the terminal shows the throwaway session (the header's short id, and
    `skydeck-try` as its folder) and has the keyboard (`Focus: terminal`), then type `/stop` ("To end
    a session from inside it, run /stop"). When Esc did not go back (agent view's table is still in
@@ -2004,8 +2011,8 @@ install would leave).
 4. **The end.** End the throwaway session: its terminal has the keyboard (`Focus: terminal`; look
    at the short id, since `/exit` ends the session it is typed into), type `/exit`, then `Close` on
    its ended bar. When step 3's branch was taken, the session is ended already: only `Close`, if
-   the ended bar shows; and when the list still shows a row for `skydeck-try` as running in another
-   terminal, write that down. The shortcut stays off, on purpose. Sessions you
+   the ended bar shows; and when the list still shows a row for `skydeck-try` as running in Claude
+   Code's background (or in another terminal), write that down. The shortcut stays off, on purpose. Sessions you
    started before step 1 keep it until you start them again (`/exit`, then resume them).
 
 To put the shortcut back on (not part of the check): in Claude Code, `/config`, the option "← opens
