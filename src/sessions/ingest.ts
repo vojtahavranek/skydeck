@@ -12,6 +12,7 @@ import { NS_PER_DAY, NS_PER_MINUTE } from '../platform/time.ts';
 import type { Files, Ns } from '../platform/types.ts';
 import { isDatabaseFailure } from '../store/store.ts';
 import type { LinkKind } from '../store/types.ts';
+import { linkCopy } from './copies.ts';
 import type { Deck } from './deck.ts';
 import { describeError, recordProblems } from './problems.ts';
 
@@ -153,7 +154,9 @@ function holdsKnownSession(deck: Deck, event: SpoolEvent, known: KnownSessions):
 
 /**
  * Inserts the event and, for a start that clears, resumes or forks, the link from the session the
- * same process held before (5.3 "Links"), in one transaction. Returns the new id, or null when the
+ * same process held before (5.3 "Links"), in one transaction. F33: a start whose recorded command
+ * makes a copy (`copyOf`) also writes, in the same transaction, the copy link to the process's
+ * first session when it has none yet (`linkCopy`). Returns the new id, or null when the
  * spool file was ingested before. A scripted start (of a known session) is stored as an event of
  * kind `scripted`, which says only that its process holds the session, and its end as one of kind
  * `scripted-end`, which says only that the process no longer does: no detail, launch command or
@@ -214,6 +217,9 @@ function insert(deck: Deck, event: SpoolEvent): number | null {
         kind: linkKind,
         timeNs: event.timeNs,
       });
+    }
+    if (id !== null && event.copyOf !== undefined) {
+      linkCopy(store, event, event.copyOf);
     }
     return id;
   });

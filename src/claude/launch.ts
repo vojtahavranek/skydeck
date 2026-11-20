@@ -637,6 +637,44 @@ export function isPrintRun(argv: readonly string[]): boolean {
   );
 }
 
+const RESUME_FLAG = SPEC_BY_NAME.get('--resume');
+const FORK_SESSION_FLAG = SPEC_BY_NAME.get('--fork-session');
+const TRANSCRIPT_SUFFIX = '.jsonl';
+
+/** The session id a `--resume` value names: the id, or a path whose last part is `<id>.jsonl`. */
+function resumedSessionId(value: string): string | null {
+  const lower = value.toLowerCase();
+  if (isSessionId(lower)) return lower;
+  const name = posix.basename(value);
+  if (!name.endsWith(TRANSCRIPT_SUFFIX)) return null;
+  const id = name.slice(0, -TRANSCRIPT_SUFFIX.length).toLowerCase();
+  return isSessionId(id) ? id : null;
+}
+
+/**
+ * Follow-up F33 (design 5.3 "Copies"): the session a launch command (program first) starts a copy
+ * of — `--fork-session` together with `--resume` (or `-r`) whose value is a session id or a path
+ * whose last part is `<session id>.jsonl`, the id lowercased; Claude Code's background feature
+ * starts `claude --fork-session --resume <the original's transcript>`. null for any other command:
+ * no `--fork-session`, a `--resume` without a value (it opens a picker), a value that is neither
+ * (a name Claude Code searches for), no `--resume` at all. The flags are found as
+ * `sessionPickingFlags` finds them (alone, as `--flag=value`, inside a cluster of short flags);
+ * of several `--resume`, the last one counts. Ask it of the RECORDED command: `storableArgv` drops
+ * both flags. Only the id is ever kept of it, never the value (principle 4).
+ */
+export function copiedSessionOf(argv: readonly string[]): string | null {
+  let forked = false;
+  let resumed: string | null = null;
+  for (const item of parseLaunchArgs(argv.slice(1))) {
+    if (item.kind !== 'flag') continue;
+    const specs = readFlagToken(item.tokens[0] as string).specs;
+    if (FORK_SESSION_FLAG !== undefined && specs.includes(FORK_SESSION_FLAG)) forked = true;
+    // A value-taking flag ends a cluster, so the value belongs to the token's last flag.
+    if (RESUME_FLAG !== undefined && specs.at(-1) === RESUME_FLAG) resumed = item.values[0] ?? '';
+  }
+  return forked && resumed !== null ? resumedSessionId(resumed) : null;
+}
+
 /** A flag found in an argument list: as written (a cluster of short flags: the whole token), and its table entry. */
 export interface FoundFlag {
   written: string;

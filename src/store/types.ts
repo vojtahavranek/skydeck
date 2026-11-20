@@ -34,7 +34,13 @@ export interface EventRow {
 }
 export type NewEvent = Omit<EventRow, 'id'>;
 
-export type LinkKind = 'clear' | 'switch' | 'fork';
+/**
+ * `clear`, `switch`, `fork`: one process moved from one session to another (design 5.3 "Links").
+ * `copy` (follow-up F33): a process started with `--fork-session --resume <id>` holds, as its first
+ * session, a copy of <id>. The column has no CHECK: a new kind needs no migration, and a skydeck
+ * from before it derives no mark from such a row.
+ */
+export type LinkKind = 'clear' | 'switch' | 'fork' | 'copy';
 export interface LinkRow {
   eventId: number;
   fromSession: string;
