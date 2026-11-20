@@ -58,7 +58,11 @@ const titleRecord = (sessionId: string): Record<string, unknown> => ({
  * feature's command, whose transcript holds only the copied title. `running`: pid 4242 still runs
  * (a trusted live file); else it exited.
  */
-function copyDeck(t: Parameters<typeof testDeck>[0], running: boolean): TestDeck {
+function copyDeck(
+  t: Parameters<typeof testDeck>[0],
+  running: boolean,
+  status: 'idle' | 'busy' | 'waiting' = 'idle',
+): TestDeck {
   const d = testDeck(t, { env: (s) => ({ SKYDECK_HANDOFF: join(s.root, 'handoff') }) });
   writeTranscript(d, ORIGINAL, [titleRecord(ORIGINAL), userRecord(ORIGINAL, T0 - 600n * SEC)]);
   writeTranscript(d, COPY, [titleRecord(COPY)]);
@@ -98,7 +102,7 @@ function copyDeck(t: Parameters<typeof testDeck>[0], running: boolean): TestDeck
     ) as Record<string, unknown>;
     writeFileSync(
       join(d.deck.places.claudeHome, 'sessions', `${PID}.json`),
-      JSON.stringify({ ...busy, pid: PID, sessionId: COPY, status: 'idle' }),
+      JSON.stringify({ ...busy, pid: PID, sessionId: COPY, status }),
     );
     d.proc.setProcess(PID, { stat: statLine(PID, 51234567), cmdline: ['claude'] });
   }
@@ -151,6 +155,15 @@ describe('skydeck ls and show on an empty copy', () => {
     assert.match(text, /\nlink: +copy 1c6a4d2f -> 0b5f3c1e at /);
     assert.match(text, /\nmarks: +continued,empty-copy\n/);
   });
+
+  for (const status of ['busy', 'waiting'] as const) {
+    test(`its process ${status === 'busy' ? 'works' : 'asks a question'} (live file ${status}): in ls at once, marked continued, whatever its transcript says yet`, async (t) => {
+      const d = copyDeck(t, true, status);
+      const copy = (await listed(d)).find((session) => session.id === COPY);
+      assert.deepEqual(copy?.marks, ['continued']);
+      assert.equal(copy?.continuedFrom, ORIGINAL);
+    });
+  }
 
   test('its first message: in ls by the usual rules, marked continued', async (t) => {
     const d = copyDeck(t, true);

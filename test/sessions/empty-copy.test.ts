@@ -5,15 +5,15 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import type { ProcessKey } from '../../src/claude/live.ts';
+import type { LiveFile, ProcessKey } from '../../src/claude/live.ts';
 import type { Ns } from '../../src/platform/types.ts';
 import { deriveSessions } from '../../src/sessions/derive.ts';
 import type { DeriveInput } from '../../src/sessions/derive.ts';
-import { buildList, flatRows, isListed } from '../../src/sessions/list.ts';
+import { buildList, flatRows, isHiddenCopy, isListed } from '../../src/sessions/list.ts';
 import { planRestore } from '../../src/sessions/restore.ts';
 import type { DerivedSession } from '../../src/sessions/types.ts';
 import type { EventRow, LinkRow, TranscriptRow } from '../../src/store/types.ts';
-import { ds, meta, rows, transcriptRow } from '../helpers/derived.ts';
+import { attached, ds, meta, prRow, rows, transcriptRow } from '../helpers/derived.ts';
 import { BOOT_A, BOOT_B, S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
 
 const ORIGINAL = S2;
@@ -180,6 +180,96 @@ describe('derive: the empty-copy mark and copyOf', () => {
     );
     assert.deepEqual(copy.marks, ['continued', 'empty-copy']);
     assert.equal(copy.copyOf, S3);
+  });
+});
+
+/** The copy's process P1 alive, its trusted live file saying `status` (null: no live file at all). */
+function runningCopy(status: string | null): DerivedSession {
+  const file: LiveFile = {
+    pid: P1.pid,
+    sessionId: COPY,
+    cwd: '/home/dev/projects/demo',
+    procStart: P1.procStart,
+    entrypoint: 'cli',
+    name: null,
+    status,
+    waitingFor: status === 'waiting' ? 'a permission' : null,
+    updatedAtNs: T0,
+    statusUpdatedAtNs: T0,
+    mtimeNs: T0,
+  };
+  return one(
+    derive({
+      events: [startOf(COPY, T0, 1)],
+      links: [link('copy', ORIGINAL, COPY, 1)],
+      transcripts: [transcriptRow(COPY, TITLE_ONLY)],
+      liveFiles: status === null ? [] : [file],
+      isAlive: (p) => p.pid === P1.pid,
+    }),
+    COPY,
+  );
+}
+
+describe('derive (ruled): a copy that works or asks is in use, whatever its transcript says yet', () => {
+  test('its live file says busy: working, continued, not empty', () => {
+    const copy = runningCopy('busy');
+    assert.equal(copy.state, 'working');
+    assert.deepEqual(copy.marks, ['continued']);
+  });
+
+  test('its live file says waiting (a question: a permission, a choice): not empty', () => {
+    const copy = runningCopy('waiting');
+    assert.equal(copy.state, 'waiting');
+    assert.equal(copy.stateDetail, 'a permission');
+    assert.deepEqual(copy.marks, ['continued']);
+  });
+
+  test('idle at its first prompt, or no live file that says more: empty', () => {
+    assert.deepEqual(runningCopy('idle').marks, ['continued', 'empty-copy']);
+    const unknown = runningCopy(null);
+    assert.equal(unknown.state, 'running');
+    assert.deepEqual(unknown.marks, ['continued', 'empty-copy']);
+  });
+
+  test('once its process has stopped working, an empty transcript makes it empty again', () => {
+    assert.deepEqual(one(copyOf(TITLE_ONLY), COPY).marks, ['continued', 'empty-copy']);
+  });
+});
+
+describe('list (ruled): an empty copy that carries something of the user’s is listed as any', () => {
+  const copy = (): DerivedSession => one(copyOf(TITLE_ONLY), COPY);
+  const pr = prRow('acme/web', 7);
+  const cases: [string, Parameters<typeof rows>[1]][] = [
+    ['a label', { metas: [meta(COPY, { label: 'mine' })] }],
+    ['a group the user set', { metas: [meta(COPY, { group: 'mine' })] }],
+    ['a note', { metas: [meta(COPY, { note: 'remember this' })] }],
+    ['a ticket', { metas: [meta(COPY, { ticket: 'https://example.com/browse/ABC-123' })] }],
+    ['a pull request', { prs: [pr], sessionPrs: [attached(COPY, pr)] }],
+  ];
+  for (const [what, extra] of cases) {
+    test(`${what}: listed without showAll, its marks kept`, () => {
+      const [row] = rows([copy()], extra);
+      assert.ok(row);
+      assert.equal(isHiddenCopy(row), false);
+      assert.equal(isListed(row, false), true);
+      assert.deepEqual(row.marks, ['continued', 'empty-copy']);
+    });
+  }
+
+  test('a group the title gives (a ticket key copied with the title) is not the user’s: hidden', () => {
+    const [row] = rows([
+      one(
+        derive({
+          events: [startOf(COPY, T0, 1), exitOf(COPY, T0 + SEC, 2)],
+          links: [link('copy', ORIGINAL, COPY, 1)],
+          transcripts: [transcriptRow(COPY, { ...TITLE_ONLY, aiTitle: 'ABC-123 made-up title' })],
+        }),
+        COPY,
+      ),
+    ]);
+    assert.equal(row?.group, 'ABC-123');
+    assert.equal(row?.groupSource, 'title');
+    assert.equal(row === undefined ? null : isListed(row, false), false);
   });
 });
 

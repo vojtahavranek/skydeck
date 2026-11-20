@@ -2670,7 +2670,8 @@ and the Claude Code version (`claude --version`).
    `skydeck ls --all`: when Claude Code made a copy, a second row with that title and the marks
    `continued,empty-copy`; write down its short id. `skydeck ls` does not list it. Then, for the
    copy (or, when there is none, for a second row with that title that has no such mark),
-   `skydeck show <its short id>`: write down whether its `holder:` line says `(scripted run)`, and
+   `skydeck show <its short id>`: write down its `state:` line, whether its `holder:` line says
+   `(scripted run)`, and
    with that line's pid `tr '\0' ' ' </proc/<pid>/cmdline; echo`: write down the flags it prints,
    leaving out the value after `--resume` (a path). No copy and no second row: write that down,
    and the check ends here.

@@ -330,12 +330,35 @@ export function buildRows(input: {
 }
 
 /**
- * 7.2: entrypoint other than cli → false; not running and no transcript → false (D27, also with
- * showAll); done (unless showAll) → false; an empty copy (F33: marked `empty-copy`) unless showAll
- * or a terminal of the window shows it (`inWindow`, the window's own knowledge) → false, running
- * or not; expired with nothing the user attached (no label, no group set by the user, no note, no
- * pull request, no ticket) → false. A group that only `groupPattern` took from the title is not
+ * Whether the user attached nothing to the row (7.2): no label, no group set by the user, no
+ * note, no pull request, no ticket. A group that only `groupPattern` took from the title is not
  * something the user attached.
+ */
+function nothingAttached(row: ListRow): boolean {
+  return (
+    row.label === null &&
+    row.groupSource !== 'meta' &&
+    !row.hasNote &&
+    row.prs.length === 0 &&
+    row.ticket === null
+  );
+}
+
+/**
+ * F33 (7.2): a row that `isListed` hides as an empty copy unless it shows done ones: marked
+ * `empty-copy` (6.3: no message yet, neither working nor asking) and carrying nothing the user
+ * attached (`nothingAttached`). The window keeps it listed while a terminal of the window shows it.
+ */
+export function isHiddenCopy(row: ListRow): boolean {
+  return row.marks.includes('empty-copy') && nothingAttached(row);
+}
+
+/**
+ * 7.2: entrypoint other than cli → false; not running and no transcript → false (D27, also with
+ * showAll); done (unless showAll) → false; an empty copy that carries nothing of the user's (F33,
+ * `isHiddenCopy`) unless showAll or a terminal of the window shows it (`inWindow`, the window's
+ * own knowledge) → false, running or not; expired with nothing the user attached
+ * (`nothingAttached`) → false.
  */
 export function isListed(row: ListRow, showAll: boolean, inWindow = false): boolean {
   const transcript = row.session.transcript;
@@ -349,16 +372,10 @@ export function isListed(row: ListRow, showAll: boolean, inWindow = false): bool
   if (row.done && !showAll) {
     return false;
   }
-  if (row.marks.includes('empty-copy') && !showAll && !inWindow) {
+  if (!showAll && !inWindow && isHiddenCopy(row)) {
     return false;
   }
-  const nothingAttached =
-    row.label === null &&
-    row.groupSource !== 'meta' &&
-    !row.hasNote &&
-    row.prs.length === 0 &&
-    row.ticket === null;
-  return !(row.marks.includes('expired') && nothingAttached);
+  return !(row.marks.includes('expired') && nothingAttached(row));
 }
 
 /**

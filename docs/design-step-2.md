@@ -1191,13 +1191,14 @@ background session with a new id, whose program runs under a `claude bg-pty-host
 re-parented to init, outside the terminal's process tree; the terminal's program shows agent view,
 and what the user types there then goes to a background session (observed on Claude Code 2.1.311,
 design.md 14). By the rule above the window lists the background session as running in another
-terminal, with its turns "finished · not seen" (seen is kept for the session the terminal shows,
-12.4), while the terminal's row keeps its own session, which never took that prompt. skydeck does
-not follow such a session into the terminal: the fields that would tie the two (`parkedJobId` in
-the live-session file of the terminal's program, `kind` `bg` and `jobId` in the background
-session's) are not documented, and following them would change the mapping of 7.5. The key is
-pressed by accident because ← also closes a group in the list (12.9). So `skydeck install` offers
-to turn the shortcut off and `skydeck doctor` reports it (design.md 8). The switch is
+terminal — once it has a message when it is a copy (follow-up F33, design.md 5.3 "Copies": an empty
+copy shows only with done sessions, 12.1) —, with its turns "finished · not seen" (seen is kept for
+the session the terminal shows, 12.4), while the terminal's row keeps its own session, which never
+took that prompt. skydeck does not follow such a session into the terminal: the fields that would
+tie the two (`parkedJobId` in the live-session file of the terminal's program, `kind` `bg` and
+`jobId` in the background session's) are not documented, and following them would change the mapping
+of 7.5. The key is pressed by accident because ← also closes a group in the list (12.9). So `skydeck
+install` offers to turn the shortcut off and `skydeck doctor` reports it (design.md 8). The switch is
 `leftArrowOpensAgents`, "default `true`", a global config key that lives in `~/.claude.json`
 ("Claude Code ignores this key in settings.json"; with `CLAUDE_CONFIG_DIR` set, the file lives
 under that directory); `false`: "Claude Code turns the shortcut off; in a session you attached to
@@ -2311,10 +2312,14 @@ switcher search done ones too (12.8).
 
 **An empty copy** (follow-up F33). A copy Claude Code's background feature made of a session
 (design 5.3 "Copies": its process was started with `--fork-session --resume <the original>`)
-that has had no message yet (design 6.3's `empty-copy`) is not a second row of that session: no
+that has had no message yet and sits idle (design 6.3's `empty-copy`: one whose process works, or
+waits for an answer to a question, is in use and shows at once, whatever its transcript says yet),
+and that carries nothing the user attached (a label, a group, a note, a ticket, a pull request: one
+that does is listed as any, marked `empty copy`), is not a second row of that session: no
 terminal of the window showing it, it is listed as a done one is — only while done sessions are
-shown (`a`, `Show done`) or a typed search or a chip finds it —, also while it runs, so under Open too it is
-hidden, in no count of the title bar, and not one of the footer's done ones (it is not done). A
+shown (`a`, `Show done`) or a typed search or a chip finds it —, also while it runs, so under Open
+too it is hidden, in no count of the title bar, and not one of the footer's done ones (it is not
+done). A
 row that a terminal of the window shows — the session runs there, the terminal was opened for it
 and is starting, or its ended bar is up — is listed by the rules above, whatever else holds.
 Hiding is a matter of the list only: the guard, the double-resume check, reconcile and the holders

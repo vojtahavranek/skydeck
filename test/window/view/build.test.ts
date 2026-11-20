@@ -1146,7 +1146,7 @@ function valueImports(path: string): [string[], string][] {
     .map(([, , what, from]) => [(what ?? '').replace(/[{}\s]/g, '').split(','), from ?? '']);
 }
 
-test("src/window/view/ imports values only from text, A8's isListed, D4's CHIP_ORDER and windowChip, B's attention and E's search/; search/ only from its own files and sanitize", () => {
+test("src/window/view/ imports values only from text, A8's isListed (and F33's isHiddenCopy), D4's CHIP_ORDER and windowChip, B's attention and E's search/; search/ only from its own files and sanitize", () => {
   const dir = join(import.meta.dirname, '../../../src/window/view');
   const files = readdirSync(dir).filter((name) => name.endsWith('.ts'));
   assert.deepEqual(files.sort(), [
@@ -1163,7 +1163,8 @@ test("src/window/view/ imports values only from text, A8's isListed, D4's CHIP_O
         from === './attention.ts' ||
         (from === './chip.ts' && names.every((n) => n === 'windowChip')) ||
         from === '../../text/sanitize.ts' ||
-        (from === '../../sessions/list.ts' && names.every((n) => n === 'isListed')) ||
+        (from === '../../sessions/list.ts' &&
+          names.every((n) => n === 'isListed' || n === 'isHiddenCopy')) ||
         (from === '../../github.ts' && names.every((n) => n === 'CHIP_ORDER')) ||
         from === './search/filter.ts' ||
         from === './search/stacks.ts' ||

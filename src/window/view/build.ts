@@ -2,14 +2,14 @@
  * The window's view model (S2 12, stage A): the rows step 1 loads, the window's terminals and one
  * page's view state become that page's `list` message. Pure: it needs nothing but its input.
  *
- * Imports (S2 4.3, plan A8): types of `sessions`, step 1's `isListed`, the window's message and hub
- * types, and `text`. Stage B adds attention (`./attention.ts`, plan B 2.4): each row's, and the
+ * Imports (S2 4.3, plan A8): types of `sessions`, step 1's `isListed` (and F33's `isHiddenCopy`),
+ * the window's message and hub types, and `text`. Stage B adds attention (`./attention.ts`, plan B 2.4): each row's, and the
  * page's `needYou`. Stage E adds search (`./search/`, plan E1): the filter's words and chips, the
  * stacks and the switcher's ranking; design 7.4's `matchesFilter` stays for `ls` and the
  * interactive list.
  */
 import type { Ns } from '../../platform/types.ts';
-import { isListed } from '../../sessions/list.ts';
+import { isHiddenCopy, isListed } from '../../sessions/list.ts';
 import type { ListRow } from '../../sessions/list.ts';
 import type { DerivedSession } from '../../sessions/types.ts';
 import { sanitize } from '../../text/sanitize.ts';
@@ -296,8 +296,8 @@ function stacked(
  * - Listed (design 7.2 through `isListed`): done sessions only with `showDone`; a session that is
  *   open — running, or starting in a terminal of the window — whatever its done mark (S2 12.10);
  *   the row of a `new` terminal's own session while the terminal is there, one of its own when
- *   the session has none yet (A28), unless it is done and stopped. F33: an empty copy (its mark
- *   `empty-copy`) that no terminal of the window shows is listed as a done one, open or not: only
+ *   the session has none yet (A28), unless it is done and stopped. F33: an empty copy the list
+ *   hides (`isHiddenCopy`) that no terminal of the window shows is listed as a done one, open or not: only
  *   with `showDone` (or a filter), in no field of `counts` and no switcher item while hidden; it
  *   is not one of `doneHidden` unless it is done. One a terminal of the window shows is listed by
  *   the rules above, whatever else holds.
@@ -389,9 +389,10 @@ export function buildListMessage(
       selectedRow = payload;
     }
     const open = payload.starting || row.state !== 'not-running';
-    // F33: an empty copy that no terminal of the window shows is listed as a done one is, only
-    // with done ones shown, open or not; one a terminal of the window shows is never hidden.
-    const hiddenCopy = terminal === null && row.marks.includes('empty-copy');
+    // F33: an empty copy (that carries nothing of the user's) that no terminal of the window
+    // shows is listed as a done one is, only with done ones shown, open or not; one a terminal of
+    // the window shows is never hidden.
+    const hiddenCopy = terminal === null && isHiddenCopy(row);
     // Listed without the filter (stage A's rule with the view's showDone): the counts' rows.
     const listed =
       isListed(row, (open && !hiddenCopy) || view.showDone, terminal !== null) ||

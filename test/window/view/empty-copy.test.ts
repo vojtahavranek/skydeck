@@ -12,7 +12,7 @@ import type { TerminalInfo } from '../../../src/window/hub.ts';
 import type { RowPayload, SectionPayload } from '../../../src/window/protocol.ts';
 import { buildListMessage } from '../../../src/window/view/build.ts';
 import type { ViewInput } from '../../../src/window/view/build.ts';
-import { ds, rows } from '../../helpers/derived.ts';
+import { ds, meta, rows } from '../../helpers/derived.ts';
 import { BOOT_A, S1, S2, S3, SEC, T0 } from '../../helpers/platform.ts';
 
 const NOW = T0;
@@ -210,6 +210,23 @@ describe('the window: what keeps an empty copy listed', () => {
       }),
     );
     assert.equal(rowIn(message, COPY).starting, true);
+  });
+
+  test('it carries something of the user’s (a label): listed under Open, counted, its mark kept', () => {
+    const message = buildListMessage(
+      input({ rows: rows(sessions(), { metas: [meta(COPY, { label: 'mine' })] }) }),
+    );
+    assert.deepEqual(shownIds(message), [ORIGINAL, COPY].sort());
+    assert.equal(section(message, 'open').rows[0]?.id, COPY);
+    assert.deepEqual(rowIn(message, COPY).marks, ['continued', 'empty-copy']);
+    assert.equal(message.counts.elsewhere, 1);
+    const items = buildListMessage(
+      input({
+        rows: rows(sessions(), { metas: [meta(COPY, { label: 'mine' })] }),
+        view: { switcher: '' },
+      }),
+    ).switcher?.items.map((item) => item.row.id);
+    assert.deepEqual(items?.sort(), [ORIGINAL, COPY].sort());
   });
 
   test('its first turn or input: listed by the usual rules, marked continued only', () => {

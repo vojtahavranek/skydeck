@@ -153,6 +153,12 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
         ));
     const continuedBy = continuation.get(id);
     const copyOf = copied.get(id)?.fromSession;
+    // F33 (ruled): a copy whose process works, or waits for an answer to a question (a dialog), is
+    // in use whatever its transcript says yet; only one idle at its first prompt, or not running, is
+    // empty.
+    const inUse = holders.some(
+      (held) => held.live?.status === 'busy' || held.live?.status === 'waiting',
+    );
     const has: Record<Mark, boolean> = {
       'ended-unexpectedly': endedUnexpectedly,
       'was-working': wasWorking,
@@ -160,6 +166,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
       // F33: a copy with no turn and no input yet (no transcript, or one with only a title).
       'empty-copy':
         copyOf !== undefined &&
+        !inUse &&
         (transcript === null ||
           (transcript.lastTurnRole === null && transcript.lastUserNs === null)),
       expired: transcript !== null && transcript.missingSinceNs !== null,
