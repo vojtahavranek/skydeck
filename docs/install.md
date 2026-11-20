@@ -787,11 +787,12 @@ effect.
   exact command it will run. Enter, a double click or `Resume here` resumes it into the window.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
   terminal shows a card instead: it cannot be shown in the window. Once you `/exit` it there, it
-  can be resumed here. A session sent to Claude Code's background (with ← or `/bg`) has no
-  terminal at all. When Claude Code marks it as a background session in the file it keeps for
-  each running session (it did for ←), its row says `running in Claude Code's background`, and
-  its card says to run `claude agents` in a terminal to see it or end it; otherwise it reads as
-  `running in another terminal`. Once it has ended it can be resumed here too.
+  can be resumed here. A session in Claude Code's background has no terminal at all. One sent
+  there with ← shows it: its row says `running in Claude Code's background`, and its card says to
+  run `claude agents` in a terminal to see it or end it. The same is expected for the other ways
+  into the background (`/bg`, `claude --bg`, `/fork`); one that Claude Code does not mark as a
+  background session reads as `running in another terminal`. Once it has ended it can be resumed
+  here too.
 - **A new session**: Ctrl+Shift+N (in a browser tab the browser keeps Ctrl+Shift+N for itself:
   use the `+ New` button there), with its directory,
   label, group and `claude` flags. Flags you use often can be favourites: the ★ at the end of the
