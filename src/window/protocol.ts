@@ -4,7 +4,9 @@
  * through JSDoc `@import`), strict validators for what arrives from a page or a command, and the
  * binary output frame. Later stages add their messages and `act` kinds here: stage D's are label,
  * group, note, done, undone, pr-refresh, pr-add and pr-rm (plan D 2.2); stage C's are restore and
- * dismiss-restore, the banner, and `POST /resume`, `/new` and `/restore` (plan C 2.2).
+ * dismiss-restore, the banner, and `POST /resume`, `/new` and `/restore` (plan C 2.2); follow-up
+ * F36's are settings, setting-set and setting-default, the server's `settings` and the settings
+ * screen's payload (S2 12.13).
  *
  * The validators read foreign input: they never throw and return `{ ok: false, kind }` with a fixed
  * kind that never quotes the input (plan A22), so a caller can log the kind. This module imports

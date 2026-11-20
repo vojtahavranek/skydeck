@@ -233,13 +233,15 @@ export function createSettingsDialog(root, deps) {
         children.push(element('div', 'settings-group', group));
       }
       let row = rows.get(setting.key);
+      let made = false;
       if (row === undefined) {
         row = makeRow(setting);
         rows.set(setting.key, row);
+        made = true;
       }
       const text = controlText(setting);
       if (row.control !== null) {
-        if (redraw.has(setting.key) || row.control.value === row.drawn) {
+        if (made || redraw.has(setting.key) || row.control.value === row.drawn) {
           row.control.value = text;
           // A value that no option or number field shows (a hand edit) keeps the drawn text, so that
           // the field reads as unchanged.

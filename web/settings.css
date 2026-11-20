@@ -115,10 +115,11 @@
   font: inherit;
   cursor: pointer;
 }
+/* Save is told apart by its border and weight, not by an accent ground: white on the dark
+   schemes' --accent is under 4.5 : 1. */
 .setting-line .setting-save {
-  background: var(--accent);
   border-color: var(--accent);
-  color: var(--on-accent);
+  font-weight: 600;
 }
 .setting-line button[disabled] {
   opacity: 0.55;

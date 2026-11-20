@@ -4,7 +4,9 @@
  * group and note, done and undone, its pull requests; from stage C restore the banner's sessions
  * and dismiss its offer (S2 12.7); since F15 add and remove the new form's favourite flags (S2
  * 12.6); since F18 set or remove the session's ticket (S2 12.5); since F30 end a session's program and
- * mark it done, on the user's word in the page's dialog (`end-session`, end-session.ts). Every field of an action is the page's — any page that passed the handshake — so each
+ * mark it done, on the user's word in the page's dialog (`end-session`, end-session.ts); since F36
+ * read the settings screen and change one setting of config.json (`settings`, `setting-set`,
+ * `setting-default`, settings.ts: no path, no program, no key outside its table's changeable ones). Every field of an action is the page's — any page that passed the handshake — so each
  * one is checked here again and goes through step 1's own rules: a resume
  * names a session and nothing more (the guard, the lock and the command builder decide the rest,
  * S2 11.1), a new session's directory, label, group and flags are checked as `skydeck new` checks
