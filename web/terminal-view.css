@@ -21,6 +21,7 @@
   --tv-bright-cyan: #3192aa;
   --tv-bright-white: #8c959f;
   --tv-selection: #b6d3fb;
+  --tv-cursor: #24292f;
   --tv-overlay: rgba(255, 255, 255, 0.94);
   /* The room between the terminal's text and its box (F2): terminal-view.js reads these four
      (`padding`, registered below as lengths, so in any unit and wherever they are set) from the
@@ -55,6 +56,29 @@
   initial-value: 0px;
 }
 /* Dark: the system's, or forced (style.css says how; the two rules are the same). */
+/* The colour themes (style.css says how they are laid over the schemes). Pleiades takes
+   Andromeda's terminal colours, and in the bright slots, which Andromeda leaves the same, its
+   other syntax colours: hot pink, purple, the comments' grey. */
+:root[data-palette-light='iris'] {
+  --tv-black: #000000;
+  --tv-red: #cd3131;
+  --tv-green: #107c10;
+  --tv-yellow: #949800;
+  --tv-blue: #0451a5;
+  --tv-magenta: #bc05bc;
+  --tv-cyan: #0598bc;
+  --tv-white: #555555;
+  --tv-bright-black: #666666;
+  --tv-bright-red: #cd3131;
+  --tv-bright-green: #14ce14;
+  --tv-bright-yellow: #b5ba00;
+  --tv-bright-blue: #0451a5;
+  --tv-bright-magenta: #bc05bc;
+  --tv-bright-cyan: #0598bc;
+  --tv-bright-white: #a5a5a5;
+  --tv-selection: #dccdf6;
+  --tv-cursor: #6c47c9;
+}
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
     --tv-black: #2e3436;
@@ -74,6 +98,7 @@
     --tv-bright-cyan: #56d4dd;
     --tv-bright-white: #f0f3f6;
     --tv-selection: #2f4a73;
+    --tv-cursor: #d6d9de;
     --tv-overlay: rgba(29, 32, 37, 0.94);
   }
 }
@@ -95,7 +120,96 @@
   --tv-bright-cyan: #56d4dd;
   --tv-bright-white: #f0f3f6;
   --tv-selection: #2f4a73;
+  --tv-cursor: #d6d9de;
   --tv-overlay: rgba(29, 32, 37, 0.94);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-palette-dark='iris']:not([data-theme='light']) {
+    --tv-black: #000000;
+    --tv-red: #cd3131;
+    --tv-green: #0dbc79;
+    --tv-yellow: #e5e510;
+    --tv-blue: #2472c8;
+    --tv-magenta: #bc3fbc;
+    --tv-cyan: #11a8cd;
+    --tv-white: #e5e5e5;
+    --tv-bright-black: #666666;
+    --tv-bright-red: #f14c4c;
+    --tv-bright-green: #23d18b;
+    --tv-bright-yellow: #f5f543;
+    --tv-bright-blue: #3b8eea;
+    --tv-bright-magenta: #d670d6;
+    --tv-bright-cyan: #29b8db;
+    --tv-bright-white: #e5e5e5;
+    --tv-selection: #4a3c70;
+    --tv-cursor: #9d7df2;
+    --tv-overlay: rgba(29, 25, 41, 0.94);
+  }
+}
+:root[data-palette-dark='iris'][data-theme='dark'] {
+  --tv-black: #000000;
+  --tv-red: #cd3131;
+  --tv-green: #0dbc79;
+  --tv-yellow: #e5e510;
+  --tv-blue: #2472c8;
+  --tv-magenta: #bc3fbc;
+  --tv-cyan: #11a8cd;
+  --tv-white: #e5e5e5;
+  --tv-bright-black: #666666;
+  --tv-bright-red: #f14c4c;
+  --tv-bright-green: #23d18b;
+  --tv-bright-yellow: #f5f543;
+  --tv-bright-blue: #3b8eea;
+  --tv-bright-magenta: #d670d6;
+  --tv-bright-cyan: #29b8db;
+  --tv-bright-white: #e5e5e5;
+  --tv-selection: #4a3c70;
+  --tv-cursor: #9d7df2;
+  --tv-overlay: rgba(29, 25, 41, 0.94);
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-palette-dark='pleiades']:not([data-theme='light']) {
+    --tv-black: #000000;
+    --tv-red: #ee5d43;
+    --tv-green: #96e072;
+    --tv-yellow: #ffe66d;
+    --tv-blue: #7cb7ff;
+    --tv-magenta: #ff00aa;
+    --tv-cyan: #00e8c6;
+    --tv-white: #d5ced9;
+    --tv-bright-black: #8a8b92;
+    --tv-bright-red: #f92672;
+    --tv-bright-green: #96e072;
+    --tv-bright-yellow: #ffe66d;
+    --tv-bright-blue: #7cb7ff;
+    --tv-bright-magenta: #c74ded;
+    --tv-bright-cyan: #00e8c6;
+    --tv-bright-white: #ffffff;
+    --tv-selection: #3d4352;
+    --tv-cursor: #ffe66d;
+    --tv-overlay: rgba(35, 38, 46, 0.94);
+  }
+}
+:root[data-palette-dark='pleiades'][data-theme='dark'] {
+  --tv-black: #000000;
+  --tv-red: #ee5d43;
+  --tv-green: #96e072;
+  --tv-yellow: #ffe66d;
+  --tv-blue: #7cb7ff;
+  --tv-magenta: #ff00aa;
+  --tv-cyan: #00e8c6;
+  --tv-white: #d5ced9;
+  --tv-bright-black: #8a8b92;
+  --tv-bright-red: #f92672;
+  --tv-bright-green: #96e072;
+  --tv-bright-yellow: #ffe66d;
+  --tv-bright-blue: #7cb7ff;
+  --tv-bright-magenta: #c74ded;
+  --tv-bright-cyan: #00e8c6;
+  --tv-bright-white: #ffffff;
+  --tv-selection: #3d4352;
+  --tv-cursor: #ffe66d;
+  --tv-overlay: rgba(35, 38, 46, 0.94);
 }
 
 .terminal {

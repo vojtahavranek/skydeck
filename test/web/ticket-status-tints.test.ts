@@ -8,6 +8,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
+import { colourSchemes } from './colour-schemes.ts';
+
 const css = (file: string): string =>
   readFileSync(new URL(`../../web/${file}`, import.meta.url), 'utf8').replaceAll(
     /\/\*[^]*?\*\//g,
@@ -80,25 +82,6 @@ const GROUNDS = [
   ["the header (the ticket's chip)", 'cards.css', '.card-header', '--panel'],
 ] as const;
 
-/** The light and dark custom properties of a style sheet's :root blocks. */
-function schemes(file: string): Record<'light' | 'dark', Map<string, string>> {
-  const text = css(file);
-  const read = (block: string): Map<string, string> =>
-    new Map(
-      [...block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)].map(([, n, v]) => [
-        n ?? '',
-        (v ?? '').trim(),
-      ]),
-    );
-  const light = /:root\s*\{([^}]*)\}/.exec(text);
-  const dark =
-    /@media \(prefers-color-scheme: dark\)\s*\{\s*:root:not\(\[data-theme='light'\]\)\s*\{([^}]*)\}/.exec(
-      text,
-    );
-  assert.ok(light !== null && dark !== null);
-  return { light: read(light[1] ?? ''), dark: read(dark[1] ?? '') };
-}
-
 function luminance(hex: string): number {
   const channel = (at: number): number => {
     const c = Number.parseInt(hex.slice(at, at + 2), 16) / 255;
@@ -113,7 +96,7 @@ function contrast(a: string, b: string): number {
 }
 
 describe("the six categories' contrast: at least 4.5 : 1 on each ground the chips stand on", () => {
-  const vars = schemes('style.css');
+  const vars = colourSchemes('style.css');
   test('the grounds are still the variables measured', () => {
     for (const [where, file, selector, name] of GROUNDS) {
       const text = css(file);
@@ -123,10 +106,10 @@ describe("the six categories' contrast: at least 4.5 : 1 on each ground the chip
       assert.equal(/\bbackground(?:-color)?:\s*var\((--[\w-]+)\)/.exec(body)?.[1], name, where);
     }
   });
-  for (const scheme of ['light', 'dark'] as const) {
+  for (const { name: scheme, values } of vars) {
     test(`${scheme}: every category's text on its own background and on each ground`, (t) => {
       const value = (name: string): string => {
-        const found = vars[scheme].get(name);
+        const found = values.get(name);
         assert.ok(found !== undefined && /^#[0-9a-f]{6}$/i.test(found), `${scheme} ${name}`);
         return found;
       };

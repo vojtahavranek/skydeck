@@ -832,7 +832,8 @@ export function createTerminalView(root, deps) {
 
   // The colours follow the page's light or dark scheme (style.css, terminal-view.css): the
   // system's, and the title bar's switch, which sets <html data-theme> (web/theme.js; follow-up
-  // F13). Every terminal is repainted, a hidden one too.
+  // F13) —, and the scheme's colour theme, <html data-palette-light> and <html data-palette-dark>
+  // (the title bar's second switch). Every terminal is repainted, a hidden one too.
   const retheme = () => {
     for (const t of terms.values()) {
       t.xterm.options.theme = theme();
@@ -841,7 +842,7 @@ export function createTerminalView(root, deps) {
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', retheme);
   new MutationObserver(retheme).observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ['data-theme'],
+    attributeFilter: ['data-theme', 'data-palette-light', 'data-palette-dark'],
   });
 
   /** @type {ReturnType<typeof setTimeout> | null} */
@@ -1393,7 +1394,8 @@ const COLOURS = /** @type {const} */ ([
 
 /**
  * The terminal's colours from the page's styles: foreground and background as app.js reports
- * them to the server (`start.theme`, style.css), the ANSI colours from terminal-view.css.
+ * them to the server (`start.theme`, style.css), the ANSI colours and the cursor from
+ * terminal-view.css.
  * @returns {ITheme}
  */
 function theme() {
@@ -1406,7 +1408,7 @@ function theme() {
   const named = [
     ['foreground', '--term-fg'],
     ['background', '--term-bg'],
-    ['cursor', '--term-fg'],
+    ['cursor', '--tv-cursor'],
     ['cursorAccent', '--term-bg'],
     ['selectionBackground', '--tv-selection'],
     ...COLOURS.map(

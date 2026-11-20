@@ -55,7 +55,7 @@ import { blockInfo, paneFor, sessionRow } from './pane.js';
 import { cutWords } from './search-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
-import { createThemeSwitch } from './theme.js';
+import { createPaletteSwitch, createThemeSwitch } from './theme.js';
 import { createToast } from './toast.js';
 
 // S2 8.2.2: before anything else.
@@ -110,6 +110,7 @@ const dom = {
   switcher: byId('switcher'),
   switchButton: byId('switch-button'),
   themeButton: /** @type {HTMLButtonElement} */ (byId('theme-button')),
+  paletteButton: /** @type {HTMLButtonElement} */ (byId('palette-button')),
   measure: byId('cell-measure'),
 };
 /** The page under a dialog: inert while one is shown (D2), so that nothing in it takes the keyboard. */
@@ -381,13 +382,17 @@ dom.switchButton.addEventListener('click', () => {
 // changed — a click, another window's change, the system's scheme while the page follows it — the
 // server is told them again (`theme`), so that it answers OSC 10 / 11 with the colours the
 // terminals have (S2 7.2); while the connection is down, the next `start` carries them. The
-// terminal view repaints its terminals by itself (it watches <html data-theme>). A click passes
-// no gate: it moves no keyboard and changes no selection.
-createThemeSwitch(dom.themeButton, {
+// terminal view repaints its terminals by itself (it watches <html data-theme> and the colour
+// themes' attributes). A click passes no gate: it moves no keyboard and changes no selection. The
+// colour themes' switch beside it (S2 12.1) tells the server the same way.
+/** @type {{ changed(): void }} */
+const coloursChanged = {
   changed: () => {
     send({ t: 'theme', theme: theme() });
   },
-});
+};
+createThemeSwitch(dom.themeButton, coloursChanged);
+createPaletteSwitch(dom.paletteButton, coloursChanged);
 
 /** Whether a dialog or the switcher is shown (D2, E11, F30: then the page is modal). */
 function modal() {

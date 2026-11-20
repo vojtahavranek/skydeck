@@ -22,6 +22,8 @@
   --sel: #dde8fb;
   --selline: #5b8def;
   --accent: #2f6fde;
+  /* The text on an --accent background (a primary button). */
+  --on-accent: #ffffff;
   --wait: #b7791f;
   --wait-bg: #fdf3dc;
   --crash: #c93c37;
@@ -48,6 +50,31 @@
   --term-font-size: 14px;
   color-scheme: light;
 }
+/* The colour themes of the title bar's second switch (web/theme-text.js PALETTES; S2 12.1): each
+   lays its own values over the scheme it belongs to, so it declares only what it changes. A light
+   one is a plain rule ahead of the dark scheme, which overrides every property it declares
+   (test/web/theme.test.ts holds them a part of the dark block's); a dark one is a dark block of
+   its own, with its twin for forced dark, after the default dark scheme. */
+/* Iris: after Windows Terminal's T3 Iris Light, its lavender stronger, and the list a little
+   brighter than the terminal. */
+:root[data-palette-light='iris'] {
+  --bg: #ede6fa;
+  --panel: #fcfaff;
+  --panel2: #f3eefc;
+  --line: #e3daf4;
+  --line2: #d3c6ec;
+  --edge: #ebe4f7;
+  --card-edge: #d5c8ee;
+  --text: #241523;
+  --dim: #5c4b78;
+  --faint: #8b7ba8;
+  --sel: #ece4fb;
+  --selline: #6c47c9;
+  --accent: #6c47c9;
+  --kbd: #ece5f8;
+  --term-bg: #f6f2fd;
+  --term-fg: #241523;
+}
 /* The dark scheme: the system's while the page follows it, and forced dark (`<html
    data-theme="dark">`, the title bar's switch, follow-up F13) whatever the system says; forced
    light (`data-theme="light"`) keeps :root's. The two rules hold the same declarations in the same
@@ -67,6 +94,7 @@
     --sel: #253247;
     --selline: #6ea2ff;
     --accent: #6ea2ff;
+    --on-accent: #ffffff;
     --wait: #f0b941;
     --wait-bg: #3a2f14;
     --crash: #f2665f;
@@ -101,6 +129,7 @@
   --sel: #253247;
   --selline: #6ea2ff;
   --accent: #6ea2ff;
+  --on-accent: #ffffff;
   --wait: #f0b941;
   --wait-bg: #3a2f14;
   --crash: #f2665f;
@@ -119,6 +148,87 @@
   --term-bg: #121417;
   --term-fg: #d6d9de;
   color-scheme: dark;
+}
+/* Iris, dark: after Windows Terminal's T3 Iris Dark. */
+@media (prefers-color-scheme: dark) {
+  :root[data-palette-dark='iris']:not([data-theme='light']) {
+    --bg: #16131f;
+    --panel: #241f32;
+    --panel2: #2a2439;
+    --line: #332c45;
+    --line2: #41395a;
+    --edge: #2b253b;
+    --card-edge: #4b4364;
+    --text: #ece6f2;
+    --dim: #aaa1b9;
+    --faint: #7a7090;
+    --sel: #3a305c;
+    --selline: #9d7df2;
+    --accent: #9d7df2;
+    --kbd: #352e4a;
+    --term-bg: #1d1929;
+    --term-fg: #fffaff;
+  }
+}
+:root[data-palette-dark='iris'][data-theme='dark'] {
+  --bg: #16131f;
+  --panel: #241f32;
+  --panel2: #2a2439;
+  --line: #332c45;
+  --line2: #41395a;
+  --edge: #2b253b;
+  --card-edge: #4b4364;
+  --text: #ece6f2;
+  --dim: #aaa1b9;
+  --faint: #7a7090;
+  --sel: #3a305c;
+  --selline: #9d7df2;
+  --accent: #9d7df2;
+  --kbd: #352e4a;
+  --term-bg: #1d1929;
+  --term-fg: #fffaff;
+}
+/* Pleiades: after VS Code's Andromeda theme (Eliver Lara, MIT), with its teal accent and dark
+   text on it, as Andromeda's badges have. */
+@media (prefers-color-scheme: dark) {
+  :root[data-palette-dark='pleiades']:not([data-theme='light']) {
+    --bg: #1b1d23;
+    --panel: #272a33;
+    --panel2: #2b303b;
+    --line: #333844;
+    --line2: #3f4553;
+    --edge: #2c3039;
+    --card-edge: #4b5162;
+    --text: #d5ced9;
+    --dim: #a39fa8;
+    --faint: #746f77;
+    --sel: #323745;
+    --selline: #00e8c6;
+    --accent: #00e8c6;
+    --on-accent: #20232b;
+    --kbd: #363b47;
+    --term-bg: #23262e;
+    --term-fg: #d5ced9;
+  }
+}
+:root[data-palette-dark='pleiades'][data-theme='dark'] {
+  --bg: #1b1d23;
+  --panel: #272a33;
+  --panel2: #2b303b;
+  --line: #333844;
+  --line2: #3f4553;
+  --edge: #2c3039;
+  --card-edge: #4b5162;
+  --text: #d5ced9;
+  --dim: #a39fa8;
+  --faint: #746f77;
+  --sel: #323745;
+  --selline: #00e8c6;
+  --accent: #00e8c6;
+  --on-accent: #20232b;
+  --kbd: #363b47;
+  --term-bg: #23262e;
+  --term-fg: #d5ced9;
 }
 
 * {

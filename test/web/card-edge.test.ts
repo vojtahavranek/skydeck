@@ -5,33 +5,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
+import { colourSchemes } from './colour-schemes.ts';
+
 /** The least contrast of the card's edge against the list and against the card itself. */
 const EDGE_MIN = 1.3;
-
-/** The custom properties of a block of CSS declarations. */
-function properties(block: string): Map<string, string> {
-  const found = new Map<string, string>();
-  for (const [, name, value] of block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
-    found.set(name as string, (value as string).trim());
-  }
-  return found;
-}
-
-/** The light (`:root`) and dark (`prefers-color-scheme: dark`, unless forced light; forced dark is
- *  the same declarations, test/web/theme.test.ts) variables of web/style.css. */
-function schemes(): { light: Map<string, string>; dark: Map<string, string> } {
-  const css = readFileSync(new URL('../../web/style.css', import.meta.url), 'utf8').replaceAll(
-    /\/\*[^]*?\*\//g,
-    '',
-  );
-  const dark =
-    /@media \(prefers-color-scheme: dark\)\s*\{\s*:root:not\(\[data-theme='light'\]\)\s*\{([^}]*)\}/.exec(
-      css,
-    );
-  const light = /:root\s*\{([^}]*)\}/.exec(css);
-  assert.ok(light !== null && dark !== null, 'style.css has a light and a dark :root');
-  return { light: properties(light[1] ?? ''), dark: properties(dark[1] ?? '') };
-}
 
 /** WCAG 2's contrast ratio of two `#rrggbb` colours. */
 function contrast(a: string, b: string): number {
@@ -64,7 +41,7 @@ describe("a block's card (F9)", () => {
     assert.match(card, /\bmargin:\s*8px;/);
   });
 
-  for (const [name, scheme] of Object.entries(schemes())) {
+  for (const { name, values: scheme } of colourSchemes('style.css')) {
     test(`${name}: the edge is at least ${EDGE_MIN} : 1 against the list and the card; the card is off the list`, () => {
       const edge = scheme.get('--card-edge');
       const panel = scheme.get('--panel');

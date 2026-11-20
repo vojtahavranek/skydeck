@@ -203,7 +203,7 @@ Added to design 11:
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
 | `src/window/view/search/` | The rules of search as pure functions (stage E, plan E1): the filter's words and chips (12.8), the blocks (12.2; the code calls them stacks), the switcher's ranking (12.8); `build.ts` calls them. No pattern is ever built from a search text. | values: its own files and `text`'s `sanitize` only; types: sessions, `protocol.ts`, `hub.ts`, `view/sections.ts` |
-| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the theme switch's stored choice on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
+| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the stored choices of the theme switch and the colour themes' switch on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
 
@@ -871,15 +871,15 @@ the last focused page reports (the headless terminal has no colours); a reported
 only when it is exactly `#rrggbb`, else — and until a page has sent its theme — xterm.js's
 default colour is (foreground `#ffffff`, background `#000000`). A page reports its colours in
 `start` (8.2.2) and, from follow-up F13, again in `theme` (8.2.3) whenever they change while it is
-open: a click on the title bar's theme switch (12.1), the same choice made in another window of
-the profile, or the system's scheme while the page follows it. The server keeps each page's latest
-for that page's next `focus`, and answers from it at once while that page is the one that had
-focus last, also when its window has lost the focus since (the system's scheme is changed in
-Windows' settings, outside the window). So a program that asks after a change is told the colours
-its terminal has then; before F13 the answer stayed the `start`'s until the page was loaded again,
-also after a change of the system's scheme. It does not answer XTVERSION
-in the first version (9.3). It never answers while it replays (7.3). The answers to a record's
-queries go to the keeper once that record has been applied.
+open: a click on the title bar's theme switch or its colour themes' switch (12.1), the same choice
+made in another window of the profile, or the system's scheme while the page follows it. The server
+keeps each page's latest for that page's next `focus`, and answers from it at once while that page
+is the one that had focus last, also when its window has lost the focus since (the system's scheme
+is changed in Windows' settings, outside the window). So a program that asks after a change is told
+the colours its terminal has then; before F13 the answer stayed the `start`'s until the page was
+loaded again, also after a change of the system's scheme. It does not answer XTVERSION in the first
+version (9.3). It never answers while it replays (7.3). The answers to a record's queries go to the
+keeper once that record has been applied.
 
 The serialise addon does not restore everything (section 21). The server adds what it misses at
 the end of every snapshot, from state it tracks with parser hooks that follow xterm.js 6.0.0's own
@@ -1515,7 +1515,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `detach` | `term` | Stop it. |
 | `input` | `term`, `data` | Typed text (UTF-8) for the terminal; `binary: true` when `data` is a byte string from xterm.js's binary channel (mouse reports). Makes this page the size owner. |
 | `resize` | `term`, `cols`, `rows` | The page's fitted size (8.2.6). |
-| `theme` | `theme` (`fg`, `bg`: each a text, checked exactly as `start.theme`, 8.2.2) | From follow-up F13: the page's colours changed while it is open — a click on the title bar's theme switch, the same choice made in another window of the profile, or the system's scheme while the page follows it (12.1). The server keeps them for the page's next `focus`, and answers OSC 10 and 11 from them at once while the page is the one that had focus last (7.2). |
+| `theme` | `theme` (`fg`, `bg`: each a text, checked exactly as `start.theme`, 8.2.2) | From follow-up F13: the page's colours changed while it is open — a click on the title bar's theme switch or its colour themes' switch, the same choice made in another window of the profile, or the system's scheme while the page follows it (12.1). The server keeps them for the page's next `focus`, and answers OSC 10 and 11 from them at once while the page is the one that had focus last (7.2). |
 | `act` | `id`, `kind`, and the fields of the next table | An action (11, 12). The server answers `result` with the same `id`. |
 
 | `act` kind | Fields | Effect |
@@ -1778,14 +1778,14 @@ starts with `xterm.js` and then changes wheel scrolling, glyph-atlas resets and 
 W5; the answer is a one-line change in the screen side.
 
 The colours OSC 10 and 11 are answered with are the page's (7.2). From follow-up F13 a program that
-asks after a click on the title bar's theme switch (12.1), or after a change of the system's scheme,
-is told the colours its terminal has then. A program that asked before keeps what it was told until
-it asks again: nothing tells a running program that the colours changed — no notification of a
-theme change is sent to programs, which is not part of F13. Claude Code's `/theme` has an "Auto
-(match terminal)" theme; its documentation (read 2026-11-18) says only "Selecting the auto option
-detects your terminal's light or dark background, so the theme follows OS appearance changes
-whenever your terminal does". How and when it detects — whether through OSC 11, at a session's
-start or again while it runs — is not documented; W5 and W34 write down what is seen.
+asks after a click on the title bar's theme switch or its colour themes' switch (12.1), or after a
+change of the system's scheme, is told the colours its terminal has then. A program that asked
+before keeps what it was told until it asks again: nothing tells a running program that the colours
+changed — no notification of a theme change is sent to programs, which is not part of F13. Claude
+Code's `/theme` has an "Auto (match terminal)" theme; its documentation (read 2026-11-18) says only
+"Selecting the auto option detects your terminal's light or dark background, so the theme follows OS
+appearance changes whenever your terminal does". How and when it detects — whether through OSC 11,
+at a session's start or again while it runs — is not documented; W5 and W34 write down what is seen.
 
 ### 9.4 Widths
 
@@ -2394,14 +2394,14 @@ a click does (`Theme: follows the system. Click for light.`, `Theme: light. Clic
 `Theme: dark. Click to follow the system.`); its word keeps the room of the widest, so that a click
 moves nothing. Forced dark is exactly the system's dark and forced light exactly the system's
 light: every colour of the page and `color-scheme` (scroll bars, form controls); at a click every
-terminal of the page is repainted in the new colours — background, text, the sixteen colours, the
-selection —, a hidden one too, as after a change of the system's scheme. A click moves no keyboard
-(the title bar takes none, 12.9) and changes no selection; there is no key chord, no `config.json`
-key and no command-line flag for it. The choice is the page's: one key of its `localStorage`
-(`skydeck-theme`, `light` or `dark`; none for Auto), so it holds across reloads and restarts of the
-window and in every window of the profile, and another window of the profile follows a change at
-once (the `storage` event). A stored value that is neither, or storage that throws or is missing,
-is Auto; the button then still works for the life of the page. A classic script of its own
+terminal of the page is repainted in the new colours — background, text, the cursor, the sixteen
+colours, the selection —, a hidden one too, as after a change of the system's scheme. A click moves
+no keyboard (the title bar takes none, 12.9) and changes no selection; there is no key chord, no
+`config.json` key and no command-line flag for it. The choice is the page's: one key of its
+`localStorage` (`skydeck-theme`, `light` or `dark`; none for Auto), so it holds across reloads and
+restarts of the window and in every window of the profile, and another window of the profile follows
+a change at once (the `storage` event). A stored value that is neither, or storage that throws or is
+missing, is Auto; the button then still works for the life of the page. A classic script of its own
 (`web/theme-early.js`, loaded in `<head>` ahead of the style sheets, which the policy allows as it
 is, 8.2.1) puts the stored choice on `<html data-theme>` before the first paint, so that no frame
 shows the other theme. Nothing of it is sent to or kept by the server but the colours, which the
@@ -2409,6 +2409,34 @@ page reports again for OSC 10 and 11 (8.2.3 `theme`; 7.2, 9.3). In each style sh
 scheme (`style.css`, `terminal-view.css`, `attention.css`) the dark values are written twice — the
 system's, scoped to "not forced light", and a twin for forced dark — and a unit test holds the two
 equal declaration by declaration. Check W34.
+
+**The colour themes** (2026-11-20: so that the colours can be chosen, not only the scheme). Each
+scheme has themes of its own, as Windows Terminal's light and dark colour schemes do: the default —
+skydeck's colours, as above — and Iris in both, after Windows Terminal's T3 Iris Light and Dark (the
+light one's lavender stronger); Pleiades in dark only, after VS Code's Andromeda theme (Eliver Lara,
+MIT). A second small button in the title bar, right before the theme switch and drawn as it is,
+shows a four-pointed star and the theme of the scheme the page shows now (`Default`, `Iris`,
+`Pleiades`). A click goes to that scheme's next theme, after the last back to the default, and
+leaves the other scheme's as it is; its tooltip says the scheme, its theme and what a click does
+(`Dark colours: Iris. Click for Pleiades.`); its word keeps the room of the widest, and follows the
+scheme shown when the theme switch or the system changes it. A theme changes the page's neutral
+colours — the backgrounds, lines, text, the selection, the accent and the text on it (`--on-accent`)
+— and the terminal's: background, text, cursor, the sixteen colours, the selection. The attention
+marks, the waiting and crash colours and the chips' tints stay the scheme's, and every contrast the
+unit tests hold for the default holds for each theme (they read the schemes through
+`test/web/colour-schemes.ts`). In both themes of Iris, and in Pleiades, the list is a little
+brighter than the terminal. The choice is the page's, as the scheme's is: one key of its
+`localStorage` per scheme (`skydeck-palette-light`, `skydeck-palette-dark`: the theme's name, none
+for the default), put on `<html data-palette-light>` and `<html data-palette-dark>` by
+`web/theme-early.js` before the first paint and followed by another window of the profile at once; a
+stored value that is no theme of its scheme is the default, and storage that throws or is missing
+keeps the choice for the life of the page. In the style sheets that have themes (`style.css`,
+`terminal-view.css`) a light theme is a plain rule ahead of the dark scheme that sets only
+properties the dark scheme sets, so that dark overrides it whole; a dark theme is a dark block of
+its own, scoped as the default's, with its twin for forced dark; `test/web/theme.test.ts` holds that
+structure and the page suite the computed values. As for the theme switch, there is no key chord, no
+`config.json` key and no command-line flag, and nothing of it goes to the server but the colours
+(8.2.3 `theme`).
 
 ### 12.2 Rows
 

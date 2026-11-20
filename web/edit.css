@@ -187,7 +187,7 @@ textarea.edit-field {
 .edit-actions .edit-save {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .edit-actions button[disabled] {
   opacity: 0.55;
@@ -220,7 +220,7 @@ textarea.edit-field {
 .end-actions .end-end {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .end-actions button:focus {
   outline: 2px solid var(--selline);

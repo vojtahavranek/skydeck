@@ -8,6 +8,12 @@
 // (`theme`), and the server answers OSC 10 / 11 from them. The page has web/'s real modules, on a
 // scripted stand-in server (helpers/shell.ts) and, for the answers, on a real test server with the
 // stand-in program.
+//
+// The colour themes' switch before it (S2 12.1): `✦` and the theme of the scheme the page shows,
+// a click going through that scheme's themes, each scheme keeping its own; each theme's values the
+// same forced as by the system, a light theme leaving the dark scheme as it is; every terminal
+// repainted at a click and the server told the colours; the choices on <html> from the first
+// painted frame after a reload, and a second page of the profile following at once.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -17,8 +23,15 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 
 import { sleep } from '../test/helpers/keeper.ts';
 import { S1, S2 } from '../test/helpers/platform.ts';
-import { THEME_KEY, themeTitle, themeWord } from '../web/theme-text.js';
-import type { Theme } from '../web/theme-text.js';
+import {
+  PALETTE_KEYS,
+  paletteTitle,
+  paletteWord,
+  THEME_KEY,
+  themeTitle,
+  themeWord,
+} from '../web/theme-text.js';
+import type { Palette, Theme } from '../web/theme-text.js';
 import { browser, newContext, newPage } from './helpers/browser.ts';
 import {
   active,
@@ -307,6 +320,79 @@ async function selectFirstLine(page: Page, term: string): Promise<void> {
 function themesSent(d: Deck, from: number): { n: number; message: Message }[] {
   return d.sent.slice(from).filter((entry) => entry.message['t'] === 'theme');
 }
+
+/** What the colour themes' switch shows and keeps: the word, the glyph, the title, the two
+ *  attributes on <html> and the two stored values. */
+async function paletteState(page: Page): Promise<{
+  word: string;
+  glyph: string;
+  title: string;
+  light: string | null;
+  dark: string | null;
+  storedLight: string | null;
+  storedDark: string | null;
+}> {
+  return readPage(
+    page,
+    (keys) => {
+      const button = document.getElementById('palette-button');
+      const stored = (key: string): string | null => {
+        try {
+          return localStorage.getItem(key);
+        } catch {
+          return 'throws';
+        }
+      };
+      return {
+        word: button?.querySelector('.theme-word')?.textContent ?? '',
+        glyph: button?.querySelector('.theme-glyph')?.textContent ?? '',
+        title: button?.getAttribute('title') ?? '',
+        light: document.documentElement.getAttribute('data-palette-light'),
+        dark: document.documentElement.getAttribute('data-palette-dark'),
+        storedLight: stored(keys.light),
+        storedDark: stored(keys.dark),
+      };
+    },
+    PALETTE_KEYS,
+  );
+}
+
+/** Asserts what the colour themes' switch shows: `palette`, of `scheme`. */
+async function showsPalette(
+  page: Page,
+  scheme: Scheme,
+  palette: Palette,
+  where: string,
+): Promise<void> {
+  const now = await paletteState(page);
+  assert.equal(now.word, paletteWord(palette), `${where}: the word`);
+  assert.equal(now.title, paletteTitle(scheme, palette), `${where}: the title`);
+  assert.equal(now.glyph, '✦', `${where}: the star`);
+}
+
+/** Asserts the two attributes on <html> and the two stored values. */
+async function keeps(
+  page: Page,
+  light: string | null,
+  dark: string | null,
+  where: string,
+): Promise<void> {
+  const now = await paletteState(page);
+  assert.deepEqual(
+    { light: now.light, dark: now.dark, storedLight: now.storedLight, storedDark: now.storedDark },
+    { light, dark, storedLight: light, storedDark: dark },
+    `${where}: <html> and the storage`,
+  );
+}
+
+/** A mouse click on the colour themes' switch. */
+async function clickPalette(page: Page): Promise<void> {
+  await page.locator('#palette-button').click();
+}
+
+/** The terminal's colours of each theme (style.css), as the page reports them. */
+const LIGHT_IRIS_COLOURS = { fg: '#241523', bg: '#f6f2fd' };
+const DARK_IRIS_COLOURS = { fg: '#fffaff', bg: '#1d1929' };
 
 test("the title bar's theme switch (follow-up F13)", async (t) => {
   const chromium = await browser(t);
@@ -903,6 +989,221 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       await clickSwitch(l.page); // Auto, light system
       assert.deepEqual(await asked(), LIGHT_COLOURS, 'at Auto');
       assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'the colour themes’ switch stands right before the theme switch, drawn as it is, ✦ and the default at first; a click goes through the themes of the scheme the page shows, each kept under its scheme’s key and put on <html>, each scheme keeping its own; the word follows the scheme shown; no click moves a button of the title bar',
+    async (t) => {
+      const { page, problems } = await opened(t, chromium);
+      const layout = await readPage(
+        page,
+        () => {
+          const button = document.getElementById('palette-button');
+          const style = (element: Element | null): Record<string, string> => {
+            if (element === null) return {};
+            const s = getComputedStyle(element);
+            return {
+              fontSize: s.fontSize,
+              color: s.color,
+              border: s.borderTopColor + ' ' + s.borderTopWidth + ' ' + s.borderTopStyle,
+              radius: s.borderTopLeftRadius,
+              padding: s.padding,
+              cursor: s.cursor,
+            };
+          };
+          return {
+            parent: button?.parentElement?.className ?? null,
+            next: button?.nextElementSibling?.id ?? null,
+            type: button?.getAttribute('type') ?? null,
+            glyphHidden: button?.querySelector('.theme-glyph')?.getAttribute('aria-hidden') ?? null,
+            mine: style(button),
+            theme: style(document.getElementById('theme-button')),
+          };
+        },
+        null,
+      );
+      assert.equal(layout.parent, 'titlebar');
+      assert.equal(layout.next, 'theme-button', 'right before the theme switch');
+      assert.equal(layout.type, 'button');
+      assert.equal(layout.glyphHidden, 'true', 'the glyph is not read out');
+      assert.deepEqual(layout.mine, layout.theme, "the theme switch's style");
+      await showsPalette(page, 'light', 'default', 'at first');
+      await keeps(page, null, null, 'at first');
+
+      const buttonsAt = async (): Promise<number[]> =>
+        readPage(
+          page,
+          () =>
+            ['palette-button', 'theme-button', 'switch-button'].flatMap((id) => {
+              const box = document.getElementById(id)?.getBoundingClientRect();
+              return [box?.x ?? -1, box?.width ?? -1];
+            }),
+          null,
+        );
+      const at = await buttonsAt();
+
+      await clickPalette(page);
+      await showsPalette(page, 'light', 'iris', 'light, a click');
+      await keeps(page, 'iris', null, 'light, a click');
+      assert.deepEqual(await buttonsAt(), at, 'light Iris: no button moves');
+
+      await clickSwitch(page);
+      await clickSwitch(page); // Dark, under a light system
+      await showsPalette(page, 'dark', 'default', 'forced dark: its own choice');
+      await clickPalette(page);
+      await showsPalette(page, 'dark', 'iris', 'dark, a click');
+      await clickPalette(page);
+      await showsPalette(page, 'dark', 'pleiades', 'dark, two clicks');
+      await keeps(page, 'iris', 'pleiades', 'each scheme its own');
+      assert.deepEqual(await buttonsAt(), at, 'Pleiades: no button moves');
+
+      await clickSwitch(page); // Auto, under a light system
+      await showsPalette(page, 'light', 'iris', 'Auto under a light system');
+      await systemScheme(page, 'dark');
+      await until(
+        async () => (await paletteState(page)).word === paletteWord('pleiades'),
+        'the word follows the system',
+      );
+      await showsPalette(page, 'dark', 'pleiades', 'Auto under a dark system');
+      await clickPalette(page);
+      await showsPalette(page, 'dark', 'default', 'dark, back to the default');
+      await keeps(page, 'iris', null, 'the default is no attribute and no key');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'each theme gives the custom properties of style.css and terminal-view.css its own values, the same forced as by the system; a light theme leaves the dark scheme as it is; the attention colours stay',
+    async (t) => {
+      const { page, problems } = await opened(t, chromium);
+      const light = await computed(page);
+      await systemScheme(page, 'dark');
+      const dark = await computed(page);
+      await systemScheme(page, 'light');
+      await clickPalette(page); // light Iris
+      const lightIris = await computed(page);
+      await systemScheme(page, 'dark');
+      assert.deepEqual(await computed(page), dark, 'light Iris leaves the dark scheme as it is');
+      await clickPalette(page); // dark Iris
+      const darkIris = await computed(page);
+      await clickPalette(page); // Pleiades
+      const pleiades = await computed(page);
+
+      const own = [
+        '--bg',
+        '--panel2',
+        '--accent',
+        '--term-bg',
+        '--tv-red',
+        '--tv-cursor',
+        '--tv-selection',
+      ];
+      for (const [what, values, scheme] of [
+        ['light Iris', lightIris, light],
+        ['dark Iris', darkIris, dark],
+        ['Pleiades', pleiades, dark],
+      ] as const) {
+        assert.deepEqual(Object.keys(values), Object.keys(scheme), `${what}: the same properties`);
+        for (const name of own) {
+          assert.notEqual(values[name], scheme[name], `${what}: ${name} is its own`);
+        }
+        assert.equal(values['--need-finished'], scheme['--need-finished'], `${what}: attention`);
+        assert.equal(values['color-scheme'], scheme['color-scheme'], `${what}: color-scheme`);
+      }
+      assert.notEqual(
+        pleiades['--on-accent'],
+        dark['--on-accent'],
+        'Pleiades: dark text on its accent',
+      );
+
+      await clickSwitch(page); // Light, under a dark system
+      assert.deepEqual(await computed(page), lightIris, 'forced light under a dark system');
+      await clickSwitch(page); // Dark, under a dark system
+      assert.deepEqual(await computed(page), pleiades, 'forced dark under a dark system');
+      await systemScheme(page, 'light');
+      assert.deepEqual(await computed(page), pleiades, 'forced dark under a light system');
+      await clickSwitch(page); // Auto, under a light system
+      assert.deepEqual(await computed(page), lightIris, 'Auto under a light system');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    "at a click on the colour themes' switch every terminal of the page is repainted in the theme's colours — the shown one at once, a hidden one when it is shown again — and the server is told the colours",
+    async (t) => {
+      const { page, d, problems } = await opened(t, chromium);
+      await clickRow(page, S1);
+      await untilShown(page, TERM_A);
+      const light = await termColours(page, TERM_A);
+      const from = d.sent.length;
+      await clickPalette(page); // light Iris
+      await until(
+        async () => (await termColours(page, TERM_A)).background !== light.background,
+        'A repainted at the click',
+      );
+      const iris = await termColours(page, TERM_A);
+      assert.equal(iris.background, 'rgb(246, 242, 253)', 'the background');
+      assert.equal(iris.foreground, 'rgb(36, 21, 35)', 'the text');
+      assert.equal(iris.palette[1], 'rgb(205, 49, 49)', 'red');
+      await until(() => themesSent(d, from).length > 0, 'the server is told');
+      assert.deepEqual(themesSent(d, from).at(-1)?.message['theme'], LIGHT_IRIS_COLOURS);
+      await clickRow(page, S2);
+      await untilShown(page, TERM_B);
+      assert.deepEqual(await termColours(page, TERM_B), iris, 'B, hidden at the click, is Iris');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'the colour themes survive a reload: from the first painted frame on, every frame is in the stored theme, also while the early script and the modules are held back 600 ms; a second page of the same profile follows a click at once and tells its server its colours',
+    async (t) => {
+      const context: BrowserContext = await newContext(chromium);
+      t.after(() => context.close());
+      const one = await context.newPage();
+      const two = await context.newPage();
+      const problems = [one, two].map((page) => problemsOf(page));
+      for (const page of [one, two]) await systemScheme(page, 'dark');
+      const d = await deck(t);
+      await open(d, one);
+      await open(d, two, false); // the same profile: the key is stored already
+      const from = d.sent.length;
+      await clickPalette(one); // dark Iris
+      await until(async () => (await paletteState(two)).dark === 'iris', 'the second page follows');
+      await showsPalette(two, 'dark', 'iris', 'the second page');
+      assert.equal((await computed(two))['--bg'], (await computed(one))['--bg'], 'its colours');
+      await until(
+        () => new Set(themesSent(d, from).map((entry) => entry.n)).size === 2,
+        'both pages tell their server',
+      );
+      for (const entry of themesSent(d, from)) {
+        assert.deepEqual(entry.message['theme'], DARK_IRIS_COLOURS, `connection ${entry.n}`);
+      }
+
+      await two.close();
+      await one.addInitScript(FRAMES);
+      const bg = (await computed(one))['--bg'];
+      for (const held of [0, 600]) {
+        if (held > 0) await slow(one, held);
+        await one.reload();
+        await connection(one, 'open');
+        const { frames, firstPaint } = await framesOf(one);
+        assert.ok(firstPaint > 0, 'the page was painted');
+        assert.ok(
+          (frames[0]?.at ?? Infinity) <= firstPaint + 1,
+          `the first recorded frame (${frames[0]?.at}) comes no later than the first paint (${firstPaint})`,
+        );
+        const other = frames.filter((frame) => frame.bg !== bg);
+        assert.deepEqual(other, [], `held ${held} ms: no frame in another theme`);
+        await showsPalette(one, 'dark', 'iris', `after the reload (held ${held} ms)`);
+        await one.unrouteAll();
+      }
+      assert.deepEqual(
+        d.starts().at(-1)?.['theme'],
+        DARK_IRIS_COLOURS,
+        'the start after the reload',
+      );
+      for (const found of problems) assert.deepEqual(found, []);
     },
   );
 });

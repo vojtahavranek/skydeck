@@ -1,5 +1,5 @@
 // The pull-request chips' quiet tints (follow-up F4): the variables of web/style.css, in both
-// colour schemes, read from the files themselves. Each tint's text has a contrast of at least
+// colour schemes and each colour theme (test/web/colour-schemes.ts), read from the files themselves. Each tint's text has a contrast of at least
 // 4.5 : 1 (WCAG 2) against its own background (the list's and the header's chips) and against
 // every background the state's words stand on (PLACES: a row, a hovered and a selected row, the
 // header, the dialog, the switcher and its highlighted item — each checked to be that variable
@@ -8,6 +8,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
+
+import { colourSchemes } from './colour-schemes.ts';
 
 const TINTS = ['red', 'amber', 'blue', 'green', 'purple'] as const;
 const MIN_CONTRAST = 4.5;
@@ -122,7 +124,7 @@ function hueDistance(a: number, b: number): number {
 }
 
 describe('the chip tints of web/style.css (follow-up F4)', () => {
-  const style = schemes('style.css');
+  const style = colourSchemes('style.css');
   const attention = schemes('attention.css');
 
   test('the helpers measure as WCAG 2 does', () => {
@@ -133,8 +135,7 @@ describe('the chip tints of web/style.css (follow-up F4)', () => {
     assert.ok(hueDistance(chromaHue('#ff0000').hue, 29) < 1);
   });
 
-  for (const scheme of ['light', 'dark'] as const) {
-    const vars = style[scheme];
+  for (const { name: scheme, scheme: kind, values: vars } of style) {
     const value = (name: string): string => {
       const found = vars.get(name);
       assert.ok(found !== undefined, `${scheme}: ${name} is set`);
@@ -193,7 +194,7 @@ describe('the chip tints of web/style.css (follow-up F4)', () => {
       const taken = new Set(
         ['--wait', '--wait-bg', '--crash', '--crash-bg', '--accent', '--selline']
           .map(value)
-          .concat([...attention[scheme].values()].filter((v) => v.startsWith('#')))
+          .concat([...attention[kind].values()].filter((v) => v.startsWith('#')))
           .map((v) => v.toLowerCase()),
       );
       for (const tint of TINTS) {
@@ -208,7 +209,7 @@ describe('the chip tints of web/style.css (follow-up F4)', () => {
 
     test(`${scheme}: red, amber and green are softer colours of the attention marks' families`, () => {
       const need = (name: string): string => {
-        const found = attention[scheme].get(name) ?? attention.light.get(name);
+        const found = attention[kind].get(name) ?? attention.light.get(name);
         assert.ok(found !== undefined, `${name} in attention.css`);
         return found.startsWith('var(') ? value(found.slice(4, -1)) : found;
       };

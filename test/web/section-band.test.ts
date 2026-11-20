@@ -6,36 +6,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
+import { colourSchemes } from './colour-schemes.ts';
+
 /** WCAG 2's least contrast for text of this size (12 px), and for a mark that must be seen. */
 const TEXT_MIN = 4.5;
 const MARK_MIN = 3;
 /** The least contrast of the band's ground against the list's, so that the band is seen at all
  *  (as built: 1.10 : 1 light, 1.09 : 1 dark). */
 const GROUND_MIN = 1.05;
-
-/** The custom properties of a block of CSS declarations. */
-function properties(block: string): Map<string, string> {
-  const found = new Map<string, string>();
-  for (const [, name, value] of block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
-    found.set(name as string, (value as string).trim());
-  }
-  return found;
-}
-
-/**
- * The light (the first `:root` rule) and dark (the `:root…` rule inside `prefers-color-scheme:
- * dark`, whatever its selector adds after `:root`) variables of web/style.css.
- */
-function schemes(): { light: Map<string, string>; dark: Map<string, string> } {
-  const css = readFileSync(new URL('../../web/style.css', import.meta.url), 'utf8').replaceAll(
-    /\/\*[^]*?\*\//g,
-    '',
-  );
-  const dark = /@media \(prefers-color-scheme: dark\)\s*\{\s*:root[^{]*\{([^}]*)\}/.exec(css);
-  const light = /:root\s*\{([^}]*)\}/.exec(css);
-  assert.ok(light !== null && dark !== null, 'style.css has a light and a dark :root');
-  return { light: properties(light[1] ?? ''), dark: properties(dark[1] ?? '') };
-}
 
 /** WCAG 2's contrast ratio of two `#rrggbb` colours. */
 function contrast(a: string, b: string): number {
@@ -98,7 +76,7 @@ describe("the section headers' bands (F17)", () => {
     assert.equal(variable(rule('.section-span'), 'color'), '--dim');
   });
 
-  for (const [name, scheme] of Object.entries(schemes())) {
+  for (const { name, values: scheme } of colourSchemes('style.css')) {
     test(`${name}: every word of a band at least ${TEXT_MIN} : 1 against it, Open's mark at least ${MARK_MIN} : 1; the band at least ${GROUND_MIN} : 1 against the list`, () => {
       const colour = (property: string): string => {
         const value = scheme.get(property);

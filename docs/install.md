@@ -1725,6 +1725,22 @@ The page also has a manifest, for the icon: Edge's menu may offer to install the
 Do not: the window is opened by `skydeck window`, and the page is built not to be installable (its
 manifest names no start address).
 
+#### Colours
+
+Two buttons at the right of the title bar, before `Switch…`, choose the window's colours. Every
+window of the same Edge profile follows a change at once, and the choice holds across restarts.
+
+- `◐ Auto`, `◐ Light`, `◐ Dark`: light or dark as Windows is (Auto), or always light or dark.
+- `✦ Default`, `✦ Iris`, `✦ Pleiades`: the colour theme of the light or dark the window shows now,
+  for the list and the terminals alike. Light and dark each keep their own: light has Default and
+  Iris, dark has Default, Iris and Pleiades (after VS Code's Andromeda theme). A click goes to the
+  next theme.
+
+**Claude Code's own theme.** Claude Code draws parts of its screen in the colours of its own theme
+(`/theme`), whatever the window shows. Set it to **Auto (match terminal)**, so that it picks its
+light or dark theme to match the window's. A Claude Code that runs does not follow a later switch
+of the window between light and dark: after one, start or resume the session again.
+
 ### Known limits of stage A
 
 - **A second window** could open when `skydeck window` started a server while an old window was
