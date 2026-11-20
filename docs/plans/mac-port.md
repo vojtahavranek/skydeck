@@ -5,6 +5,14 @@ human said "read `docs/plans/mac-port.md` and start working on it". This file is
 Follow it literally; where it is silent, do the safe thing named in part 10 (stop that task, write
 it into the status file, go on with what does not depend on it).
 
+**First: a start, or a resume?** Before any other command, run `ls docs/plans/mac-port-status.md
+.git/refs/heads` (it runs no `git`). If the status file is there, or a branch named `mac-…` is
+listed (a `git branch --list 'mac-*'` says the same once part 2.1 has shown that `git` is real), you
+are RESUMING after a stop or a context loss: read parts 3 and 10, then the status file of the newest
+stage branch, and go on from where it says. Do not run part 2 again and ask no question again: the
+answers are in the status file. A changed tree is then your own unfinished task (look at it, then
+finish or undo it), not your human's work. Otherwise this is the first start: part 2.
+
 Every file, function and constant this plan names was checked against the code of `main` at commit
 8e0184b. Names and lines drift: find each by searching for its name (your search tool, or `grep -rn
 "<name>" src bin web test`; `rg` may not be installed on a Mac). Where the code at your commit says
@@ -16,9 +24,9 @@ confirms or refutes each EXPECTED; one that proves false stops only the tasks th
 
 ## 1. What this is, and who does what
 
-The goal, in a user's words: skydeck works on a Mac as it does on WSL. First the command line
-(sessions show as running, busy, waiting or idle; labels, resume and restore work), then the window
-in Chrome, then restore after a restart. On Linux and WSL nothing changes.
+The goal, in a user's words: skydeck works on a Mac as it does on WSL. First the command line (each
+session shows as `working`, `waiting` or `not-running`; labels, resume and restore work), then the
+window in Chrome, then restore after a restart. On Linux and WSL nothing changes.
 
 - **You** build and test on this Mac, and open pull requests from a fork in your human's GitHub
   account against `main` of the repository this clone came from (its `origin`). One pull request per
@@ -54,9 +62,10 @@ yourself):
 - `this is a Mac: yes`. Otherwise STOP: this plan is for a Mac.
 - `macOS:` a version. Node.js 24 needs macOS 13.5 or newer (EXPECTED, from Node.js's list of
   supported systems): older, STOP. The `node` line below shows whether it runs at all.
-- `developer tools: found`, and `python3` and `git` show a version. STOP when they say "only Apple's
-  stub": the suite runs `/usr/bin/python3` and `/usr/bin/git`, which would then open the install
-  window. Print for your human: `xcode-select --install`.
+- `developer tools: found`. Otherwise STOP, whatever `python3` and `git` show (a Homebrew python3 or
+  git first on `PATH` shows a version even without them): the suite and the launcher run
+  `/usr/bin/python3` and `/usr/bin/git` themselves, which without the developer tools are only
+  Apple's stubs and open the install window. Print for your human: `xcode-select --install`.
 - `python3` 3.9 or newer, from the developer tools or Homebrew. Older or missing: STOP (the window's
   terminals and the suite's keeper tests need it).
 - `node` 24.12 or newer. Otherwise STOP and print for your human: install Node.js 24 from
@@ -74,10 +83,10 @@ yourself):
   uses). Without one, M1 and M2a go on; tell your human that M2b's hands-on check needs Chrome.
 
 Then run `git remote -v` and `git status`: `origin` must be the repository on github.com and the
-tree clean (a changed tree is your human's work in progress: STOP and ask), and `git fetch origin`
-then `git show origin/main:scripts/mac-probe.sh` must work (this plan is on `main`; without it your
-branches would start from a `main` without the plan: STOP and ask). Your human is still there for
-these first commands, and for the questions that follow.
+tree clean (at a first start a changed tree is your human's work in progress: STOP and ask), and
+`git fetch origin` then `git show origin/main:scripts/mac-probe.sh` must work (this plan is on
+`main`; without it your branches would start from a `main` without the plan: STOP and ask). Your
+human is still there for these first commands, and for the questions that follow.
 
 ### 2.2 The questions, asked once
 
@@ -128,7 +137,8 @@ until part 9 or part 10 tells you to.
 
 A no to 1 or 3: STOP (you cannot deliver). A no to 2: open the pull requests without the fork's run
 and say so in each. A no to 4: leave the hook facts to the hands-on check (part 9). A no to 5: say
-in the final report what stayed unchecked.
+in the final report what stayed unchecked. Then fork, make the branch `mac-m1` (part 7) and write
+the answers into its status file at once; only then the fact run of part 4.2.
 
 ## 3. Hard rules
 
@@ -266,7 +276,9 @@ login or provider settings would be lost. First check that `claude --help` lists
 `--max-budget-usd`, `--no-session-persistence` and `--model`. If one is missing, STOP the fact run
 (not the port): the facts move to the hands-on check (part 9).
 
-Make the folder, the hook, the settings file and the run script, and run it (one block, as it is):
+First write "fact run: started" into the status file and commit it; if the status file already says
+so, never run it again (this is how ONCE survives a context loss). Then make the folder, the hook,
+the settings file and the run script, and run it (one block, as it is):
 
 ```sh
 facts="$(git rev-parse --show-toplevel)/.mac-port-scratch/facts"
@@ -382,8 +394,11 @@ reason "needs a Mac".
 
 ### M1: the command line on a Mac
 
-Goal: after `skydeck install` on a Mac, `skydeck ls` shows each session as running, busy, waiting or
-idle, `show`, labels, groups, notes, `resume` and `restore` work, and `doctor` tells the truth.
+Goal: after `skydeck install` on a Mac, `skydeck ls` shows each open session as `working` (a turn
+runs) or `waiting` (at its prompt, or asking something), and the others as `not-running` (the states
+of `docs/design.md` 6.2; `running` is only the fallback when no live-session file of the session can
+be trusted); `show`, labels, groups, notes, `resume` and `restore` work, and `doctor` tells the
+truth.
 
 **Task 1: the suite tells the truth on a Mac.** Run the whole suite on the unchanged code (part 8's
 commands; for this first run give node a limit per case, `node --test --test-timeout=60000 <files>`,
@@ -847,13 +862,15 @@ one: stop THAT task, write it into the status file, go on with what does not dep
   a pull request has been merged (squashed) into `main`, `git fetch origin` and merge `origin/main`
   into the next stage's branch; take `main`'s side wherever the content is the same.
 - **Small commits**, each with a message that says what changed and why, in plain words.
-- **The status file**, `docs/plans/mac-port-status.md`, committed in the stage branch you work on:
-  the stage and task you are on; what is done; the skips table (M1 task 1); facts and decisions put
-  in doubt; the pull requests and branches; the last full run on the Mac (commands, counts, time);
-  the hands-on results. Update and commit it after every task, on the newest stage branch only; when
-  you merge an earlier branch into a later one, keep the later one's status file. After a context
-  loss or in a new session: read this plan's parts 3 and 10, then the status file of the newest
-  stage branch (`git branch --list 'mac-*'`), and go on from there.
+- **The status file**, `docs/plans/mac-port-status.md`, committed in the stage branch you work on
+  (make it as soon as `mac-m1` exists): the answers to the five questions of 2.2; "fact run:
+  started", written and committed BEFORE that run (part 4.2), and its outcome after; the stage and
+  task you are on; what is done; the skips table (M1 task 1); facts and decisions put in doubt; the
+  pull requests and branches; the last full run on the Mac (commands, counts, time); the hands-on
+  results. Update and commit it after every task, on the newest stage branch only; when you merge an
+  earlier branch into a later one, keep the later one's status file. After a context loss or in a
+  new session: read this plan's parts 3 and 10, then the status file of the newest stage branch
+  (`git branch --list 'mac-*'`), and go on from there.
 - **A second, fresh agent reviews each stage** before its pull request (a sub-agent with a clean
   context). Give it: this plan's parts 3, 5 (the stage) and 6, the diff (`git diff <base
   branch>...HEAD`), and the suite's counts; tell it to change nothing, run no full suite and report
@@ -913,10 +930,12 @@ they tell you what they see, and you write each result into the status file of t
    not, they add `export PATH="$HOME/.local/bin:$PATH"` to their `~/.zshrc` themselves. Then
    `skydeck doctor`: every line true on a Mac, no `problem` but those it explains.
 2. In a scratch folder, `claude --verbose` (one flag, to be seen later): `skydeck ls` shows it
-   running; a prompt makes it busy (working); a permission question makes it waiting; after the
-   answer it is idle (this is M1's gate, seen for real). `skydeck show <its label or id prefix>`
-   prints a line `holder: pid <n> since …` (without one, the hook got no `CLAUDE_PID` on this Mac:
-   report it), and, if M3 task 2 stores arguments, `launch:` names `--verbose`.
+   `waiting`; a prompt makes it `working`; a permission question makes it `waiting` again, with what
+   it waits for in `skydeck show`. This is M1's gate, seen for real: if it shows `running` instead,
+   its live-session file was not trusted (skydeck's reading of the start differs from the file's):
+   report it, as the failure it is. `skydeck show <its label or id prefix>` prints a line `holder:
+   pid <n> since …` (without one, the hook got no `CLAUDE_PID` on this Mac: report it), and, if M3
+   task 2 stores arguments, `launch:` names `--verbose`.
 3. `skydeck window`: a Chrome app window opens; its title is `skydeck`, its Dock icon; the session's
    terminal works; `skydeck window --print-url` opened in Chrome works too.
 4. Keys: Ctrl+Shift with a letter (the window's keys), Ctrl+Tab, Cmd+C and Cmd+V in the terminal,

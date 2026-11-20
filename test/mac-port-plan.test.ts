@@ -26,7 +26,10 @@ const PLAN = readFileSync(join(import.meta.dirname, '..', 'docs', 'plans', 'mac-
 
 /** The plan's fact-run block: the first `sh` block after the sentence that introduces it. */
 function factRunBlock(): string {
-  const intro = PLAN.indexOf('Make the folder, the hook, the settings file and the run script');
+  // The sentence may break over lines anywhere.
+  const intro = PLAN.search(
+    /make\s+the\s+folder,\s+the\s+hook,\s+the\s+settings\s+file\s+and\s+the\s+run\s+script/,
+  );
   assert.notEqual(intro, -1, 'the plan no longer introduces its fact-run block');
   const start = PLAN.indexOf('```sh\n', intro);
   const end = PLAN.indexOf('\n```', start + 6);

@@ -72,7 +72,7 @@ tidy_path() {
     BEGIN { n = split(known, words, " "); for (i = 1; i <= n; i++) plain[words[i]] = 1 }
     {
       for (i = 1; i <= NF; i++) {
-        if ($i == "" || ($i in plain) || $i ~ /^v?[0-9]+(\.[0-9]+)*$/) continue
+        if ($i == "" || ($i in plain) || $i ~ /^(v[0-9]+(\.[0-9]+)*|[0-9]+(\.[0-9]+)+)$/) continue
         gsub(/[^ -~]/, "?", $i); gsub(/[a-z]/, "a", $i); gsub(/[A-Z]/, "A", $i); gsub(/[0-9]/, "9", $i)
       }
       print
@@ -285,8 +285,15 @@ if claude_path=$(command -v claude 2>/dev/null); then
 else
   say "claude" "not found on PATH"
 fi
-names=$(LC_ALL=C awk 'BEGIN { for (k in ENVIRON) if (k ~ /^CLAUDE/) print k }' | sort | tr '\n' ' ')
-say "CLAUDE* variables here (names only)" "[$names]"
+# Whether each variable Claude Code is known to set is here, and how many other CLAUDE* ones are:
+# a variable's name too can tell about this Mac's setup.
+LC_ALL=C awk 'BEGIN {
+  n = split("CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID CLAUDE_PID CLAUDE_CONFIG_DIR CLAUDE_PROJECT_DIR CLAUDE_ENV_FILE", known, " ")
+  for (i = 1; i <= n; i++) { seen[known[i]] = 1; print known[i] " here: " ((known[i] in ENVIRON) ? "yes" : "no") }
+  other = 0
+  for (k in ENVIRON) if (k ~ /^CLAUDE/ && !(k in seen)) other++
+  print "other CLAUDE* variables here: " other
+}'
 if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then
   say "CLAUDE_CONFIG_DIR" "set"
   claude_home=$CLAUDE_CONFIG_DIR
@@ -345,8 +352,14 @@ sub mask {
   $s =~ s/[^\x20-\x7e]/?/g; $s =~ s/[a-z]/a/g; $s =~ s/[A-Z]/A/g; $s =~ s/[0-9]/9/g;
   return $s;
 }
-# A fixed word such as idle or cli: shown only when it is one short lower-case word; else masked.
-sub word { my $s = shift; return $s =~ /\A[a-z-]{1,20}\z/ ? $s : mask($s); }
+# The words a field may show; any other value is "(other)".
+my %words = (
+  kind => { map { $_ => 1 } qw(interactive bg) },
+  status => { map { $_ => 1 } qw(idle busy waiting shell) },
+  entrypoint => { map { $_ => 1 } qw(cli sdk-cli sdk-ts sdk-py claude-vscode claude-desktop) },
+  nameSource => { map { $_ => 1 } qw(user auto) },
+);
+sub word { my ($k, $s) = @_; return $words{$k}{$s} ? $s : "(other)"; }
 # What ps says of a process, read in UTC (as skydeck reads it) or, with "local", in the local time.
 sub ps {
   my ($what, $pid, $local) = @_;
@@ -368,8 +381,6 @@ if (@own) {
   splice(@files, 3) if @files > 3;
 }
 print "no live-session file in the folder (is a Claude Code session open?)\n" if !@files;
-# Fields whose values are fixed words; every other value is masked.
-my %word = map { $_ => 1 } qw(kind status entrypoint nameSource);
 # Program names that may be named; any other is "(other)".
 my %prog = map { $_ => 1 } qw(claude node bun deno sh bash zsh env);
 # Options of claude that may be named; any other word of the arguments is only counted.
@@ -393,7 +404,7 @@ for my $f (@files) {
     elsif (ref($v) eq "HASH") { $value = "object with " . scalar(keys %$v) . " fields"; }
     elsif (ref($v) eq "ARRAY") { $value = "list with " . scalar(@$v) . " items"; }
     elsif (JSON::PP::is_bool($v)) { $value = $v ? "true" : "false"; }
-    elsif ($word{$k}) { $value = "[" . word("$v") . "]"; }
+    elsif ($words{$k}) { $value = "[" . word($k, "$v") . "]"; }
     else { $value = "[" . mask("$v") . "]"; }
     print "  $name ($type): $value\n";
   }

@@ -53,6 +53,7 @@ const SECRETS = [
   '10:00:01',
   '1763632801',
   '1762333953',
+  '7654321',
   String(OTHER_PID),
   String(OWN_PID),
 ];
@@ -84,11 +85,12 @@ function mac(
   s.link('sh', 'sed', 'awk', 'head', 'sort', 'tr', 'basename', 'env', 'perl', 'sleep');
   const home = join(s.root, 'Users', USER);
   const marks = join(s.root, 'marks');
+  mkdirSync(marks);
   const stubs = join(s.root, 'usr-bin');
   const developer = join(s.root, 'Library', 'Developer', 'CommandLineTools');
   const nvm = join(home, '.nvm', 'versions', 'node', 'v24.12.0', 'bin');
   const localBin = join(home, '.local', 'bin');
-  const tools = join(s.root, 'opt', `${USER} tools`, 'bin');
+  const tools = join(s.root, 'opt', '7654321', `${USER} tools`, 'bin');
   const accented = join(s.root, 'opt', 'Přemysl', 'bin');
   mkdirSync(join(home, 'skydeck'), { recursive: true });
   mkdirSync(join(home, 'Applications', 'Google Chrome.app'), { recursive: true });
@@ -160,8 +162,9 @@ function mac(
     // A line with an unexpected character (here a quote) is masked whole.
     `echo "Mach Virtual Memory Statistics: (page size of 16384 bytes)"; echo "Pages free:      123456."; echo "Pages active:    7890."; echo "Pages of ${USER}'s cache:  4242."`,
   );
+  // The probe only looks for these two; run, they leave a mark the test looks for.
   for (const name of ['lsof', 'open']) {
-    standIn(s.bin, name, 'exit 0');
+    standIn(s.bin, name, `echo ran > '${join(marks, name)}'; exit 0`);
   }
   standIn(nvm, 'node', 'case $1 in --version) echo v24.12.0 ;; -e) echo yes ;; esac');
   standIn(
@@ -182,11 +185,7 @@ function mac(
   );
   // Apple's stubs: they would open a window. Run, they leave a mark the test looks for.
   for (const name of ['python3', 'git']) {
-    standIn(
-      stubs,
-      name,
-      `mkdir -p '${marks}'; echo ran > '${join(marks, name)}'; echo "Jane"; exit 1`,
-    );
+    standIn(stubs, name, `echo ran > '${join(marks, name)}'; echo "Jane"; exit 1`);
   }
   standIn(
     accented,
@@ -205,7 +204,7 @@ function mac(
       'if [ "$*" = --version ]; then',
       `  ${options.claudeVersion ?? 'echo "2.1.329 (Claude Code)"'}`,
       'else',
-      `  mkdir -p '${marks}'; echo "$*" > '${join(marks, 'claude')}'; exit 1`,
+      `  echo "$*" > '${join(marks, 'claude')}'; exit 1`,
       'fi',
     ].join('\n'),
   );
@@ -228,6 +227,8 @@ function mac(
         CLAUDE_PID: String(OWN_PID),
         CLAUDE_CODE_SESSION_ID: SESSION,
         CLAUDE_CODE_OAUTH_TOKEN: `tok-${USER}-7781`,
+        // A variable's name can tell about the setup too: only known names are named.
+        CLAUDE_ACME_PAYROLL_URL: 'https://example.com',
         SKYDECK_TEST_STUB_DIR: stubs,
         ...extra,
       }),
@@ -267,7 +268,9 @@ function liveFiles(claudeFolder: string): void {
       kind: 'interactive',
       entrypoint: 'cli',
       name: 'Merger memo, Jane',
-      status: 'idle',
+      // Words that are no status and no name source of Claude Code's: shown as (other).
+      status: 'payroll',
+      nameSource: 'jane',
     }),
   );
   // The folder holds other files too; the probe never reads one that is not <pid>.json.
@@ -315,12 +318,12 @@ function runProbe(m: Mac, shell: string[], env: Record<string, string>): Ran {
   });
   const ms = Date.now() - started;
   assert.equal(result.error, undefined);
-  assert.deepEqual(tree(m.s.root), before, 'the probe changed something in the sandbox');
-  assert.equal(
-    existsSync(m.marks),
-    false,
-    'a stand-in of a stub, or claude beyond --version, was run',
+  assert.deepEqual(
+    readdirSync(m.marks),
+    [],
+    'a stand-in of a stub, open, lsof, or claude beyond --version, was run',
   );
+  assert.deepEqual(tree(m.s.root), before, 'the probe changed something in the sandbox');
   return { status: result.status, stdout: result.stdout, stderr: result.stderr, ms };
 }
 
@@ -377,7 +380,7 @@ describe('scripts/mac-probe.sh', () => {
       assert.equal(line(ran.stdout, 'python3: getpeereid in libc'), 'yes');
       assert.match(line(ran.stdout, 'git'), /^2\.39\.5 {2}\(/);
       assert.match(line(ran.stdout, 'zsh'), /^5\.9 {2}\(\/.*\/opt\/A\?+a+\/bin\/zsh\)$/);
-      assert.match(line(ran.stdout, 'gh'), /^2\.62\.0 {2}\(\/.*\/opt\/[a -]+\/bin\/gh\)$/);
+      assert.match(line(ran.stdout, 'gh'), /^2\.62\.0 {2}\(\/.*\/opt\/9+\/[a -]+\/bin\/gh\)$/);
       assert.equal(line(ran.stdout, 'date +%s%N'), '[9999999999A]');
       assert.equal(
         line(ran.stdout, 'kern.bootsessionuuid'),
@@ -386,10 +389,11 @@ describe('scripts/mac-probe.sh', () => {
       assert.equal(line(ran.stdout, 'ps lstart'), '[Aaa Aaa 99 99:99:99 9999]');
       assert.equal(line(ran.stdout, 'ps lstart the same in two calls'), 'yes');
       assert.equal(line(ran.stdout, 'claude'), '2.1.329  (~/.local/bin/claude)');
-      assert.equal(
-        line(ran.stdout, 'CLAUDE* variables here (names only)'),
-        '[CLAUDECODE CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_SESSION_ID CLAUDE_PID ]',
-      );
+      assert.equal(line(ran.stdout, 'CLAUDECODE here'), 'yes');
+      assert.equal(line(ran.stdout, 'CLAUDE_PID here'), 'yes');
+      assert.equal(line(ran.stdout, 'CLAUDE_CODE_SESSION_ID here'), 'yes');
+      assert.equal(line(ran.stdout, 'CLAUDE_CODE_ENTRYPOINT here'), 'no');
+      assert.equal(line(ran.stdout, 'other CLAUDE* variables here'), '2');
       assert.equal(line(ran.stdout, 'its sessions folder'), 'there, 2 live-session files');
       assert.equal(
         line(ran.stdout, 'read'),
@@ -453,6 +457,8 @@ describe('scripts/mac-probe.sh', () => {
       ran.stdout,
       /^ {2}procStart equals ps lstart: NO\n {2}procStart equals ps lstart in local time: YES$/m,
     );
+    assert.match(ran.stdout, /^ {2}status \(text\): \[\(other\)\]$/m);
+    assert.match(ran.stdout, /^ {2}nameSource \(text\): \[\(other\)\]$/m);
   });
 
   test('a program that does not answer is ended after five seconds', (t) => {
