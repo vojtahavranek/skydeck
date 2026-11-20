@@ -417,7 +417,12 @@ test('matchesChips: open-pr holds while a pull request is not known to be merged
     ['changes-requested', prRow('o/r', 4, { review: 'changes-requested' })],
     ['checks-pending', prRow('o/r', 5, { checks: 'pending' })],
     ['review-required', prRow('o/r', 6, { review: 'review-required' })],
+    ['unresolved-comments', prRow('o/r', 11, { review: 'unresolved-comments' })],
     ['draft', prRow('o/r', 7, { state: 'draft' })],
+    ['checks-not-reported', prRow('o/r', 15, { checks: 'not-reported' })],
+    ['blocked', prRow('o/r', 12, { review: 'blocked' })],
+    ['open', prRow('o/r', 13, { review: 'not-required', checks: null })],
+    ['checks-passing', prRow('o/r', 14, { review: 'not-required', checks: 'passing' })],
     ['approved-green', prRow('o/r', 8)],
     ['merged', prRow('o/r', 9, { state: 'merged' })],
     ['closed', prRow('o/r', 10, { state: 'closed' })],
@@ -435,8 +440,8 @@ test('matchesChips: open-pr holds while a pull request is not known to be merged
     const chip = windowChip(target.prs);
     assert.equal(matchesChips(target, false, ['open-pr']), (chip?.open ?? 0) > 0, level);
   }
-  const merged = byLevel[8]?.[1];
-  const closed = byLevel[9]?.[1];
+  const merged = byLevel.find(([name]) => name === 'merged')?.[1];
+  const closed = byLevel.find(([name]) => name === 'closed')?.[1];
   assert.ok(merged !== undefined && closed !== undefined);
   for (const [level, pr] of byLevel.filter(([name]) => !finished(name))) {
     assert.equal(matchesChips(row({ prs: [merged, pr, closed] }), false, ['open-pr']), true, level);

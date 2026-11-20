@@ -935,14 +935,32 @@ unless you moved the selection meanwhile. `Done` in the header selects nothing i
 `d` on a session marked done (shown with `a`), and `Undone`, mark it undone, without a toast. A
 held `d` acts once, and so does a double click on a button of the header.
 
-**The pull-request dialog** (`p`, `Pull requests` or `+ PR`) lists every attached pull request on
-a line of its own: `acme/web #7 · approved, green · checked 4m ago` (or `checks failing`, `changes
-requested`, `checks pending`, `review required`, `draft`; `not fetched` until it is first read),
-and one that cannot be read with when it was last read and its error, `acme/web #7 · can't read ·
-last read 3h ago · gh: HTTP 502` (`never read` when it never was; a long error is cut, and the
-line's tooltip has it whole, after the pull request's title). The merged and closed ones are
-folded into `30 merged, 2 closed ▸`; a click unfolds them (they show no age: they are never read
-again). On a line:
+**The pull-request dialog** (`p`, `Pull requests` or `+ PR`) lists every attached pull request on a
+line of its own: `acme/web #7 · approved, green · checked 4m ago` (or `checks failing`, `changes
+requested`, `checks pending`, `review required`, `unresolved comments`, `draft`, `blocked`, `checks
+passing`, `open`; `not fetched` until it is first read). They say what GitHub waits for before it
+merges, also when the repository asks for it through rulesets: `review required` until it has the
+approvals its rules ask for (from people who can write to the repository), `checks pending` while
+checks run, `unresolved comments` while a conversation its rules ask to resolve is open, then
+`draft`; a required check that has not reported says `checks pending` only after these (it can wait
+for days, and the review is what you can act on); `blocked` means GitHub will not let you merge it
+now for a reason skydeck does not read (code owners, a rule on who may merge, a deployment). Where
+GitHub gives its own review decision, that decision counts, not the number of approvals. `approved,
+green` needs an approval, unless GitHub's answer does not say what it waits for (a pull request
+whose base branch is gone, say), and it does not promise that nothing else is in the way: conflicts
+and a branch behind its base are not shown, and right after the base branch moved GitHub may not
+have worked out yet whether it blocks the merge (a `blocked` it showed before stays; the next `↻`
+can turn `approved, green` into `blocked`). With no review asked for it is `checks passing`, or
+`open` without any checks. When GitHub refuses the full question or does not answer it in time (a
+field it no longer knows, a scope your token lacks, a timeout, HTTP 502 or 504), skydeck asks once
+more with its question of before, and for that refresh the lines show the states of before:
+`approved, green` for a pull request no classic branch protection asks a review for, and no
+`unresolved comments`, `blocked`, `checks passing` or `open`. A pull request read by an older
+skydeck keeps its old words until it is read again. One that cannot be read shows when it was last
+read and its error, `acme/web #7 · can't read · last read 3h ago · gh: HTTP 502` (`never read` when
+it never was; a long error is cut, and the line's tooltip has it whole, after the pull request's
+title). The merged and closed ones are folded into `30 merged, 2 closed ▸`; a click unfolds them
+(they show no age: they are never read again). On a line:
 
 - a click that selected no text opens the pull request in your default browser (`window.links`);
 - `×` detaches it and shows the toast `Detached acme/web #7` with `Undo`, which attaches it again.
@@ -960,14 +978,17 @@ attached by themselves (design.md 7.3).
 **The window's chip**, in the list and on the header's third line, counts the open pull requests
 and the merged ones apart: `PR · failing` for one open pull request, `3 PRs · failing` for three,
 named by the one that most needs you (in this order: `can't read`, `not fetched`, `failing`,
-`changes`, `pending`, `review`, `draft`, `approved`), with `+30` after it for 30 merged ones;
+`changes`, `pending`, `review`, `comments`, `draft`, `pending` for a required check that has not
+reported, `blocked`, `open`, `green` for checks passing, `approved`), with `+30` after it for 30
+merged ones;
 with none open, `3 merged`, or a dim `closed`. It is dotted while it says `can't read`, and its
 tooltip lists each open one with its state. `skydeck ls` and the interactive list keep the command
 line's chip (design.md 7.3).
 
 The chip has a quiet colour for its state, in both colour schemes: red for `failing` and
-`changes`, amber for `pending`, blue for `review`, green for `approved`, purple for `3 merged`;
-`draft`, `closed`, `not fetched` and `can't read` stay grey. Its `+30` has the chip's colour (dim
+`changes`, amber for `pending`, blue for `review`, `comments` and `blocked`, green for `approved`
+and `green`, purple for `3 merged`; `draft`, `open`, `closed`, `not fetched` and `can't read` stay
+grey. Its `+30` has the chip's colour (dim
 on a grey chip). The header's open pull requests, the state on a line of the pull-request dialog
 and the quick switcher's chip show the state's words in the same colour. Sessions that need you
 stay the strongest in the list: only they have a coloured bar at the left and their reason's line
@@ -1163,7 +1184,7 @@ For a GitHub issue the failures have the pull requests' words: `gh timed out aft
 not installed`, the first line of `gh`'s own message (not logged in: `To get started with GitHub
 CLI, please run:  gh auth login`), `gh exited <n>`, and `not found` or GitHub's message for an
 issue it does not find. `gh` is called as for the pull requests (`gh api graphql --hostname
-github.com`, in batches of 50, 10 seconds, no `GH_HOST`).
+github.com`, 10 seconds, no `GH_HOST`), in batches of 50 (the pull requests' hold 10).
 
 **An example**, for a made-up tracker at `https://tickets.example.com/`, whose API answers
 `{"state": "In Progress"}` for `GET /api/tickets/<key>` to a bearer token. Save it as

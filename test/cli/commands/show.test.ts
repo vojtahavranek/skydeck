@@ -490,3 +490,109 @@ test('show of a session held outside the window prints its holder line as before
   assert.doesNotMatch(d.stdout(), /skydeck window/);
   assert.equal(existsSync(join(d.sandbox.skydeckHome, 'run')), false);
 });
+
+/** F32: `gh` answers an approved pull request with passing checks that GitHub will not merge (q<i>: BLOCKED). */
+function ghBlocked() {
+  return fakeRunner((call: RunCall) => {
+    const aliases = call.args.filter((arg) => /^n\d+=/.test(arg)).length;
+    const { data } = JSON.parse(openAnswer(aliases)) as {
+      data: Record<string, { pullRequest: Record<string, unknown> }>;
+    };
+    for (let i = 0; i < aliases; i++) {
+      const p = data[`p${i}`];
+      if (p !== undefined) p.pullRequest['reviewDecision'] = 'APPROVED';
+      data[`q${i}`] = {
+        pullRequest: {
+          mergeStateStatus: 'BLOCKED',
+          latestOpinionatedReviews: { totalCount: 1, nodes: [{ state: 'APPROVED' }] },
+          reviewThreads: { totalCount: 0, nodes: [] },
+          baseRef: { rules: { totalCount: 0, nodes: [] } },
+          commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+        },
+      };
+    }
+    return runResult({ stdout: JSON.stringify({ data }) });
+  });
+}
+
+test('F32: show prints a pull request GitHub will not merge as blocked, with its stored review', async (t) => {
+  const d = sessionsWithPrs(t);
+  assert.equal(await main(['show', '0b5f', '--refresh'], withRunner(d, ghBlocked())), 0);
+  assert.ok(
+    d.stdout().includes(`\npr:        ${PR1}  blocked review blocked checks passing\n`),
+    d.stdout(),
+  );
+
+  const before = d.stdout().length;
+  assert.equal(await main(['show', '0b5f', '--json'], d.ctx), 0);
+  const json = JSON.parse(d.stdout().slice(before)) as ShowJson;
+  assert.deepEqual(
+    json.prs.map((pr) => [pr.review, pr.checks]),
+    [
+      ['blocked', 'passing'],
+      ['blocked', 'passing'],
+    ],
+  );
+});
+
+test('F32 (ruled): a required check that has not reported is stored as not-reported; the review comes first', async (t) => {
+  const d = sessionsWithPrs(t);
+  const runner = fakeRunner((call: RunCall) => {
+    const aliases = call.args.filter((arg) => /^n\d+=/.test(arg)).length;
+    const { data } = JSON.parse(openAnswer(aliases)) as { data: Record<string, unknown> };
+    for (let i = 0; i < aliases; i++) {
+      data[`q${i}`] = {
+        pullRequest: {
+          mergeStateStatus: 'BLOCKED',
+          latestOpinionatedReviews: { totalCount: 0, nodes: [] },
+          reviewThreads: { totalCount: 0, nodes: [] },
+          baseRef: {
+            rules: {
+              totalCount: 2,
+              nodes: [
+                {
+                  type: 'PULL_REQUEST',
+                  repositoryRuleset: { enforcement: 'ACTIVE' },
+                  parameters: {
+                    __typename: 'PullRequestParameters',
+                    requiredApprovingReviewCount: 1,
+                    requiredReviewThreadResolution: false,
+                  },
+                },
+                {
+                  type: 'REQUIRED_STATUS_CHECKS',
+                  repositoryRuleset: { enforcement: 'ACTIVE' },
+                  parameters: {
+                    __typename: 'RequiredStatusChecksParameters',
+                    requiredStatusChecks: [{ context: 'deploy' }],
+                  },
+                },
+              ],
+            },
+          },
+          commits: {
+            nodes: [
+              {
+                commit: {
+                  statusCheckRollup: {
+                    contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'build' }] },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      };
+    }
+    return runResult({ stdout: JSON.stringify({ data }) });
+  });
+  assert.equal(await main(['show', '0b5f', '--refresh'], withRunner(d, runner)), 0);
+  assert.ok(
+    d
+      .stdout()
+      .includes(
+        `\npr:        ${PR1}  review-required review review-required checks not-reported\n`,
+      ),
+    d.stdout(),
+  );
+});

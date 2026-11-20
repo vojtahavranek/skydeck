@@ -964,4 +964,160 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
       await settle({ switcher: await switcherOf(first) }, 'the switcher, back to the first states');
     },
   );
+
+  // Follow-up F32: the four new levels. Unresolved comments and blocked take review required's
+  // tint (blue), checks passing approved's (green); open stays grey, as a draft.
+  const F32_CASES: Case[] = [
+    {
+      title: 'unresolved comments',
+      prs: [pr('unresolved-comments')],
+      text: 'PR · comments',
+      tint: 'blue',
+    },
+    { title: 'blocked', prs: [pr('blocked')], text: 'PR · blocked', tint: 'blue' },
+    { title: 'checks passing', prs: [pr('checks-passing')], text: 'PR · green', tint: 'green' },
+    { title: 'open', prs: [pr('open')], text: 'PR · open', tint: DIM },
+    {
+      title: 'a required check not reported',
+      prs: [pr('checks-not-reported')],
+      text: 'PR · pending',
+      tint: 'amber',
+    },
+    {
+      title: 'green and blocked, two merged',
+      prs: [pr('checks-passing'), pr('blocked'), ...merged(2)],
+      text: '2 PRs · blocked +2',
+      tint: 'blue',
+    },
+  ];
+  const F32_WORDS: Record<string, [string, string, Tint | null]> = {
+    'unresolved-comments': ['comments', 'unresolved comments', 'blue'],
+    blocked: ['blocked', 'blocked', 'blue'],
+    'checks-passing': ['green', 'checks passing', 'green'],
+    open: ['open', 'open', null],
+    'checks-not-reported': ['pending', 'checks pending', 'amber'],
+  };
+
+  await t.test(
+    "F32: the new levels' chips in the list, the header and the switcher, and their words in the header's line and the dialog's lines, light and dark",
+    async (t) => {
+      const rows = F32_CASES.map((c, at) =>
+        row(sid(401 + at), {
+          title: c.title,
+          lastActivityNs: String(NOW_NS - BigInt(at + 1) * 10n * MIN_NS),
+          prs: c.prs,
+          chip: windowChip(c.prs as { level: string }[]),
+        }),
+      );
+      const all = Object.keys(F32_WORDS).map(pr);
+      const every = sid(420);
+      rows.push(
+        row(every, {
+          title: 'every new state',
+          lastActivityNs: String(NOW_NS - 100n * MIN_NS),
+          prs: all,
+          chip: windowChip(all as { level: string }[]),
+        }),
+      );
+      const { page } = await world(t, chromium, rows);
+      await page.waitForFunction(
+        (count) => document.querySelectorAll('#list .row-chip:not([hidden])').length === count,
+        rows.length,
+        { timeout: PAGE_WAIT_MS },
+      );
+      const shape = {
+        weight: '400',
+        border: '1px 1px 1px 1px',
+        padding: '0px 6px',
+        radius: '9px',
+        size: '11px',
+        height: 18,
+      };
+      const listChip = (at: number): string => `#list [data-id="${sid(401 + at)}"] .row-chip`;
+      for (const s of ['light', 'dark'] as const) {
+        await scheme(page, s);
+        for (const [at, c] of F32_CASES.entries()) {
+          const look = await lookOf(page, listChip(at), '.row-chip-merged');
+          await assertLook(page, look, c, 'list', `${s}, list`, shape);
+        }
+      }
+      for (const [at, c] of F32_CASES.entries()) {
+        await scheme(page, 'light');
+        await clickRow(page, sid(401 + at));
+        await showsText(page, '#cards .header-title', new RegExp(`^${RegExp.escape(c.title)}$`));
+        for (const s of ['light', 'dark'] as const) {
+          await scheme(page, s);
+          const header = await lookOf(page, '#cards .header-chip', '.header-chip-merged');
+          await assertLook(page, header, c, 'header', `${s}, header`, shape);
+        }
+      }
+
+      await scheme(page, 'light');
+      await clickRow(page, every);
+      await showsText(page, '#cards .header-title', /^every new state$/);
+      await page.locator('#cards .header-prs-button').click();
+      await page.waitForFunction(
+        (count) => document.querySelectorAll('.edit-prs-open .edit-pr').length === count,
+        all.length,
+        { timeout: PAGE_WAIT_MS },
+      );
+      for (const s of ['light', 'dark'] as const) {
+        await scheme(page, s);
+        const items = await partsOf(page, '#cards .header-pr', '.header-pr-state');
+        const lines = await partsOf(page, '.edit-pr-text', '.edit-pr-state');
+        assert.equal(items.length, all.length, 'one item per open pull request');
+        assert.equal(lines.length, all.length, 'one line per pull request');
+        for (const [place, drawn, which] of [
+          ['header', items, 0],
+          ['dialog', lines, 1],
+        ] as const) {
+          for (const [at, got] of drawn.entries()) {
+            const given = all[at] as Row;
+            const level = given['level'] as string;
+            const [words, lineWords, tint] = F32_WORDS[level] ?? ['', '', null];
+            const where = `${s}, ${place}, ${level}`;
+            const [want] = await resolve(page, [
+              { color: tint === null ? got.own : `var(--pr-${tint})`, background: 'transparent' },
+            ]);
+            assert.equal(got.words, which === 0 ? words : lineWords, `${where}: the words`);
+            assert.ok(
+              got.text.startsWith(`acme/web #${String(given['number'])} · ${got.words}`),
+              `${where}: ${JSON.stringify(got.text)}`,
+            );
+            assert.equal(got.level, level, `${where}: the state it names`);
+            assert.equal(got.color, want?.color, `${where}: the words' colour`);
+            assert.equal(got.background, want?.background, `${where}: no background`);
+            assert.equal(got.weight, '400', `${where}: not bold`);
+          }
+        }
+      }
+
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('.edit-dialog', { state: 'hidden', timeout: PAGE_WAIT_MS });
+      await page.keyboard.press('Control+Shift+P');
+      await page.waitForFunction(
+        (count) => document.querySelectorAll('#switcher .switcher-item').length === count,
+        rows.length,
+        { timeout: PAGE_WAIT_MS },
+      );
+      for (const s of ['light', 'dark'] as const) {
+        await scheme(page, s);
+        const chips = await page.evaluate(() =>
+          [...document.querySelectorAll('#switcher .switcher-item .switcher-chip')].map((chip) => ({
+            text: chip.textContent ?? '',
+            color: getComputedStyle(chip).color,
+          })),
+        );
+        for (const [at, c] of F32_CASES.entries()) {
+          const [want] = await resolve(page, [
+            typeof c.tint === 'string'
+              ? { color: `var(--pr-${c.tint})`, background: 'transparent' }
+              : { color: 'var(--faint)', background: 'transparent' },
+          ]);
+          assert.equal(chips[at]?.text, c.text, `${s}, switcher: the words`);
+          assert.equal(chips[at]?.color, want?.color, `${s}, switcher, ${c.text}: its colour`);
+        }
+      }
+    },
+  );
 });

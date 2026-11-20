@@ -415,10 +415,50 @@ never received a prompt has no transcript (14).
   that pull request at once (same 10 second timeout, so a fresh attachment shows its status); a
   failed fetch leaves it "can't read" and `pr add` still succeeds. `pr rm` detaches; a detached
   pull request is not attached again by a later `pr-link` record.
-- **Status** is fetched with `gh api graphql`, using query variables, in batches of at most 50
-  pull requests per query, with a 10 second timeout. Per pull request it stores state (`open`,
-  `draft`, `merged`, `closed`), review decision, the combined checks result, the time of the last
-  successful fetch and the time and error of the last attempt.
+- **Status** is fetched with `gh api graphql`, using query variables, in batches of at most 10
+  pull requests per query (50 before follow-up F32: GitHub takes much longer for what it is asked
+  since, and a batch that runs out of time leaves all of its pull requests "can't read"), with a
+  10 second timeout. Per pull request it stores state (`open`, `draft`, `merged`, `closed`), its
+  review, the combined checks result, the time of the last successful fetch and the time and error
+  of the last attempt.
+- **What GitHub needs before it merges** (follow-up F32). GitHub's own review decision is null
+  when no classic branch protection asks for reviews, also when a ruleset does, and the checks'
+  rollup holds only the checks that have reported. So the same query also asks, under a second
+  alias of each pull request, for GitHub's merge state, the latest reviews of those who can write to
+  the repository ("writers"), the review threads, the rules of the base branch (its rulesets; never
+  the classic branch protection, which can need more than read access and shows in the decision)
+  and the names of the checks the last commit has reported: at most 50 reviews and 50 rules, 100
+  threads and 100 checks. Only the rules of rulesets that are enforced count: a rule whose ruleset
+  is in evaluate mode or disabled is passed by; one whose ruleset's enforcement cannot be read
+  counts (GitHub documents the list as the active rules). From them:
+  - the checks are pending when the rollup says so (they run); when the rollup says neither
+    failing nor pending and a check the rules require is not among the reported ones (only when
+    every reported one was seen), they are stored as `not-reported` (ruled: a check that has not
+    started can stay so for days, so it ranks after the review, below);
+  - the review is the first that applies of: changes requested (the decision, or a writer's latest
+    review while the decision is not approved); review required (the decision, or, when there is
+    none, the rules need more approvals than the writers gave: the largest count among the rules, 0
+    for none; ruled: a decision GitHub gives is its own count and takes rulesets into account, ours
+    of the writers' latest reviews is an approximation, so only a null decision is decided by the
+    rules and the count); unresolved comments (the rules ask for resolved conversations and a thread
+    is not resolved); blocked (GitHub's merge state is `BLOCKED` while the checks pass or there are
+    none and it is no draft: GitHub will not let it be merged now for a reason skydeck does not
+    read, such as code owners, a rule on who may merge, or a deployment; ruled: a merge state of
+    `UNKNOWN`, which GitHub answers while it has not worked the state out, keeps what was stored
+    about blocked, and every other state decides anew); approved (the decision, or, with no
+    decision, the rules need N of at least 1 and N writers approved); not required (no decision, and
+    no rule needs an approval); else the decision.
+  - Each part is optional. One that is missing, malformed, cut short (more than were asked for) or
+    that an error of the answer lies under is not used, and the pull request is read from the
+    rest, exactly as before F32 where nothing better is known: none of them makes it "can't read".
+    No column was added: the review is stored with three more values; a row read before F32 shows
+    as before until it is read again.
+  - When GitHub rejects the query as a whole (it checks a query before it runs it: a field or a
+    type its schema no longer has, or a scope the token lacks) or the batch runs out of time
+    (skydeck's timeout, GitHub's HTTP 502 or 504), the batch is asked once more with the query of
+    before F32 and read as before: for that refresh its pull requests show the states of before
+    (ruled). That is the one second request, never more than once a batch, only after those
+    failures; a rate limit or any other failure is not asked again.
 - Merged and closed pull requests are never fetched again. A pull request that no session has
   attached any more (every attachment detached) is not refreshed either, an explicit refresh
   included. The others are refreshed by two rules. An **automatic** refresh (the interactive list
@@ -439,9 +479,23 @@ never received a prompt has no transcript (14).
   successful fetch — never as closed.
 - A pull request that has never been fetched and has no failed attempt is shown as "not
   fetched": it is neither read nor unreadable, so a fresh attachment does not look broken.
+- **A pull request's state** (open or draft) is the first that applies of: checks failing,
+  changes requested, checks pending (the rollup's: they run), review required, unresolved
+  comments, draft, a required check not reported (a level of its own, ruled, with the words and
+  the colour of checks pending), blocked; then
+  checks passing (no review asked for, the checks pass), open (no review asked for, no checks at
+  all), else approved and green (approved, with checks that pass or none; or nothing known of the
+  review, as for a row read before F32, or rules that need approvals that cannot be counted: the
+  reviews not read, or more than 50). So "approved and green" needs a real approval wherever
+  GitHub's answer tells what is needed, but does not promise that nothing else is in the way: not
+  shown are conflicts and a branch behind its base (GitHub's merge state `DIRTY` and `BEHIND`,
+  the latter hiding `BLOCKED`), and a merge state GitHub has not worked out yet (`UNKNOWN`, as
+  right after the base branch moved: the next read can show `blocked`).
 - **Chip.** A row shows one chip for all attached pull requests: the worst state among them in
-  this order — can't read, not fetched, checks failing, changes requested, checks pending, review
-  required, draft, approved and green, merged, closed — and the count.
+  this order, the order of one pull request's state above (ruled) — can't read, not fetched,
+  checks failing, changes requested, checks pending, review required, unresolved comments, draft,
+  a required check not reported, blocked, open, checks passing, approved and green, merged, closed
+  — and the count.
 - **A ticket's status** (follow-up F19). The ticket of a session — the one set on it (7.1), else the
   address its group gives through `ticketUrl` (design-step-2.md 12.5) — has a status when a
   *provider* takes its address: first the configuration's `ticketStatus`, a list of at most 8
@@ -449,8 +503,8 @@ never received a prompt has no transcript (14).
   (run as a list of words, never through a shell: install.md, "A ticket's status"); else, for the
   address of a GitHub issue (`https://github.com/<owner>/<repo>/issues/<number>`, keyed as a pull
   request is, with `issues` for `pull`), `gh api graphql` in batches of its own — the pull
-  requests' query is not touched — with the pull requests' limits (50 to a batch, 10 seconds, the
-  same environment and failure words). A pull request's address gets no status, whatever a rule's
+  requests' query is not touched — with 50 to a batch (the pull requests' batch before F32), 10
+  seconds, and the pull requests' environment and failure words. A pull request's address gets no status, whatever a rule's
   `match` says. A status is a text of at most 40 characters and, optionally, one of six categories
   (`todo`, `doing`, `review`, `blocked`, `done`, `closed`) that only colours it; a GitHub issue is
   `open` (`doing`), `closed` (`done`), `not planned` or `duplicate` (`closed`). It is cached by
@@ -541,7 +595,15 @@ A reader that closes standard output early (`skydeck ls | head -1`) is not an er
 Times are UTC ISO 8601 with milliseconds. `dir` is the project directory as stored (the text views
 show it sanitised, 7.4), so that it can be used as a path; the characters a terminal would act on
 are written as `\uXXXX` escapes like in any other string of the JSON. Sessions are in list order. A pull request's `state`,
-`review`, `checks` and `okAt` are null until it has been fetched. `show --json` prints one
+`review`, `checks` and `okAt` are null until it has been fetched. `review` is `approved`,
+`changes-requested`, `review-required` or, since follow-up F32 and still in version 1,
+`unresolved-comments`, `blocked` or `not-required` (7.3); `checks` is `passing`, `failing`,
+`pending` or, since F32, `not-reported` (a check the rules require has not reported). A reader of
+version 1 that knows only the earlier values meets a word it does not know, and gets
+`not-required` where it got null for a pull request that no rule asks to review. Since F32
+`review` is no longer GitHub's decision alone: an approved pull request that has open
+conversations or that GitHub will not merge exports `unresolved-comments` or `blocked`, so a
+reader that looks for `approved` no longer finds it there. `show --json` prints one
 session object with `doneAt` (the time it was marked done while it is done, else null), `note`,
 `ticket` (`{ "url", "text", "status", "category", "okAt", "triedAt", "error" }`: the ticket set on
 it, its short name (7.1) and, from follow-up F19, its status, its category, the times of the last

@@ -7,6 +7,7 @@ import {
   BATCH_SIZE,
   CHIP_ORDER,
   GH_TIMEOUT_MS,
+  PR_BATCH_SIZE,
   batchArgs,
   chipFor,
   fetchPrs,
@@ -182,7 +183,8 @@ function row(store: Store, number: number): PrRow {
 }
 
 describe('constants', () => {
-  test('a batch holds at most 50 pull requests and gh gets 10 seconds', () => {
+  test('a batch holds at most 10 pull requests (50 issues) and gh gets 10 seconds', () => {
+    assert.equal(PR_BATCH_SIZE, 10);
     assert.equal(BATCH_SIZE, 50);
     assert.equal(GH_TIMEOUT_MS, 10_000);
   });
@@ -338,15 +340,18 @@ describe('batchArgs', () => {
     assert.ok(list.includes("r0=r'\\n"));
   });
 
-  test('a batch holds from 1 to BATCH_SIZE keys', () => {
+  test('a batch holds from 1 to PR_BATCH_SIZE keys', () => {
     const one = key(URL1);
     assert.equal(batchArgs([one]).length, 6 + 6);
     assert.equal(
-      batchArgs(Array.from({ length: BATCH_SIZE }, () => one)).length,
-      6 + 6 * BATCH_SIZE,
+      batchArgs(Array.from({ length: PR_BATCH_SIZE }, () => one)).length,
+      6 + 6 * PR_BATCH_SIZE,
     );
     assert.throws(() => batchArgs([]), RangeError);
-    assert.throws(() => batchArgs(Array.from({ length: BATCH_SIZE + 1 }, () => one)), RangeError);
+    assert.throws(
+      () => batchArgs(Array.from({ length: PR_BATCH_SIZE + 1 }, () => one)),
+      RangeError,
+    );
   });
 });
 
@@ -603,12 +608,12 @@ describe('parseBatch', () => {
 });
 
 describe('fetchPrs and refreshPrs', () => {
-  test('120 due rows go out in 3 gh calls of 50, 50 and 20, each with a 10 second timeout', async (t) => {
+  test('25 due rows go out in 3 gh calls of 10, 10 and 5, each with a 10 second timeout', async (t) => {
     const { store, runner, deps } = deck(t, answerAll());
-    seed(store, 1, 120, { state: 'open', ageMin: 10 });
+    seed(store, 1, 25, { state: 'open', ageMin: 10 });
     const outcome = await refreshPrs(deps, { force: false, refreshMinutes: 5 });
-    assert.deepEqual(outcome, { fetched: 120, failed: 0 });
-    assert.deepEqual(runner.calls.map(aliasesOf), [50, 50, 20]);
+    assert.deepEqual(outcome, { fetched: 25, failed: 0 });
+    assert.deepEqual(runner.calls.map(aliasesOf), [10, 10, 5]);
     for (const call of runner.calls) {
       assert.equal(call.command, 'gh');
       assert.deepEqual(call.options, { timeoutMs: 10000, env: GH_ENV });
@@ -637,14 +642,16 @@ describe('fetchPrs and refreshPrs', () => {
 
   test('a batch that timed out keeps the old status, records the attempt and counts as failed', async (t) => {
     let call = 0;
+    // F32: a batch that timed out is asked once more with the query of before; that times out too.
     const { store, runner, deps } = deck(t, (c) =>
-      ++call === 1 ? runResult({ code: null, timedOut: true }) : answerAll()(c),
+      ++call <= 2 ? runResult({ code: null, timedOut: true }) : answerAll()(c),
     );
-    seed(store, 1, 60, { state: 'open', ageMin: 10, review: 'approved', checks: 'passing' });
+    seed(store, 1, 15, { state: 'open', ageMin: 10, review: 'approved', checks: 'passing' });
     const outcome = await refreshPrs(deps, { force: false, refreshMinutes: 5 });
-    assert.deepEqual(outcome, { fetched: 10, failed: 50 });
-    const [first, second] = runner.calls;
-    assert.ok(first && second);
+    assert.deepEqual(outcome, { fetched: 5, failed: 10 });
+    const [first, again, second] = runner.calls;
+    assert.ok(first && again && second);
+    assert.deepEqual(numbersOf(again), numbersOf(first));
     for (const number of numbersOf(first)) {
       const failed = row(store, number);
       assert.equal(failed.state, 'open');
@@ -665,10 +672,10 @@ describe('fetchPrs and refreshPrs', () => {
 
   test('a failed batch does not stop the batches after it', async (t) => {
     const { store, runner, deps } = deck(t, () => runResult({ code: 1, stderr: 'HTTP 502' }));
-    seed(store, 1, 60);
+    seed(store, 1, 15);
     const outcome = await refreshPrs(deps, { force: false, refreshMinutes: 5 });
-    assert.deepEqual(outcome, { fetched: 0, failed: 60 });
-    assert.equal(runner.calls.length, 2);
+    assert.deepEqual(outcome, { fetched: 0, failed: 15 });
+    assert.equal(runner.calls.length, 4, 'F32: each batch is asked once more after HTTP 502');
     assert.ok(store.prs().every((p) => p.error === 'HTTP 502' && p.state === null));
   });
 
@@ -904,14 +911,15 @@ describe('refreshPrs: the pace of an automatic refresh, and the explicit one', (
   test('a pull request that keeps failing is asked about at the pace of the refresh age, not at every refresh', async (t) => {
     const { store, clock, runner, deps } = deck(t, timedOut);
     seed(store, 1, 1);
+    // F32: an attempt that times out is asked once more with the query of before: two calls.
     await refreshPrs(deps, { force: false, refreshMinutes: 5 });
-    assert.equal(runner.calls.length, 1, 'never tried: asked');
+    assert.equal(runner.calls.length, 2, 'never tried: asked');
     clock.advanceMs(4 * 60_000);
     await refreshPrs(deps, { force: false, refreshMinutes: 5 });
-    assert.equal(runner.calls.length, 1, 'the last attempt was 4 minutes ago');
+    assert.equal(runner.calls.length, 2, 'the last attempt was 4 minutes ago');
     clock.advanceMs(2 * 60_000);
     await refreshPrs(deps, { force: false, refreshMinutes: 5 });
-    assert.equal(runner.calls.length, 2, 'the last attempt was 6 minutes ago');
+    assert.equal(runner.calls.length, 4, 'the last attempt was 6 minutes ago');
   });
 
   test('with session ids, only the pull requests those sessions have attached are asked about', async (t) => {
@@ -1197,7 +1205,12 @@ describe('chipFor', () => {
         'changes-requested',
         'checks-pending',
         'review-required',
+        'unresolved-comments',
         'draft',
+        'checks-not-reported',
+        'blocked',
+        'open',
+        'checks-passing',
         'approved-green',
         'merged',
         'closed',
@@ -1210,7 +1223,12 @@ describe('chipFor', () => {
       at({ review: 'changes-requested' }),
       at({ checks: 'pending' }),
       at({ review: 'review-required' }),
+      at({ review: 'unresolved-comments' }),
       pr({ state: 'draft' }),
+      at({ checks: 'not-reported' }),
+      at({ review: 'blocked' }),
+      at({ review: 'not-required' }),
+      at({ review: 'not-required', checks: 'passing' }),
       at({}),
       pr({ state: 'merged' }),
       pr({ state: 'closed' }),

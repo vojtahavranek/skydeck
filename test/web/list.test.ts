@@ -848,3 +848,43 @@ describe('rowText: a row that needs you (S2 12.2, 12.4; plan B13)', () => {
     assert.equal(notRunning.stateLine, null);
   });
 });
+
+describe("F32: the chip's words for the new levels (S2 12.3)", () => {
+  const cases: ReadonlyArray<readonly [string, string]> = [
+    ['unresolved-comments', 'comments'],
+    ['blocked', 'blocked'],
+    ['open', 'open'],
+    ['checks-passing', 'green'],
+    ['checks-not-reported', 'pending'],
+  ];
+  for (const [level, words] of cases) {
+    test(`one open pull request of level ${level}: "PR · ${words}", and the level it names`, () => {
+      const text = rowText(row({ prs: [pr(level, 1)], chip: chip(level, 1) }), now, null);
+      assert.equal(text.chip?.text, `PR · ${words}`);
+      assert.equal(text.chip?.dotted, false);
+      assert.equal(text.chip?.level, level, 'a level the page knows: it names its tint');
+      assert.equal(chipText(chip(level, 3, 2)), `3 PRs · ${words} +2`);
+    });
+  }
+
+  test('the tooltip names each open one in its own words', () => {
+    const text = rowText(
+      row({
+        prs: [
+          pr('blocked', 1),
+          pr('checks-passing', 2),
+          pr('open', 3),
+          pr('unresolved-comments', 4),
+        ],
+        chip: chip('unresolved-comments', 4),
+      }),
+      now,
+      null,
+    );
+    assert.equal(text.chip?.text, '4 PRs · comments');
+    assert.equal(
+      text.chip?.tip,
+      'o/r #1 · blocked\no/r #2 · green\no/r #3 · open\no/r #4 · comments',
+    );
+  });
+});

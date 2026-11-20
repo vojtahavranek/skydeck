@@ -2507,8 +2507,11 @@ interactive list: open and finished pull requests are counted apart.
 - **The chip** shows the number of open ones when there is more than one, and the state of the
   one that most needs the user, in design 7.3's order without merged and closed: can't read
   (`can't read`), not fetched (`not fetched`), checks failing (`failing`), changes requested
-  (`changes`), checks pending (`pending`), review required (`review`), draft (`draft`), approved
-  and green (`approved`). After it `+<n>` for the merged ones, when there are any: in the chip's
+  (`changes`), checks pending (`pending`), review required (`review`), unresolved comments
+  (`comments`), draft (`draft`), a required check not reported (`pending`), blocked (`blocked`),
+  open (`open`), checks passing (`green`), approved and green (`approved`); what the five that
+  follow-up F32 added mean: design 7.3.
+  After it `+<n>` for the merged ones, when there are any: in the chip's
   tint (below), dim only on a grey chip. Closed ones are not counted.
 - **With nothing open:** `<n> merged` (in merged's tint) when any is merged, else `closed` (dim);
   no chip when none is attached.
@@ -2551,11 +2554,11 @@ header; the dialog; the switcher and its highlighted item), in both schemes
 | State | Tint |
 |---|---|
 | checks failing (`failing`), changes requested (`changes`) | red |
-| checks pending (`pending`) | amber |
-| review required (`review`) | blue |
-| approved and green (`approved`) | green |
+| checks pending (`pending`), a required check not reported (`pending`) | amber |
+| review required (`review`), unresolved comments (`comments`), blocked (`blocked`) | blue |
+| approved and green (`approved`), checks passing (`green`) | green |
 | merged (`3 merged`, a merged line of the dialog) | purple |
-| draft, closed, not fetched, can't read, a state the page does not know | grey, as before |
+| draft, open, closed, not fetched, can't read, a state the page does not know | grey, as before |
 
 **A ticket's status** (follow-up F19) takes the same tints and no new colour, by its category — one
 of six words, which the page checks against its own list (`knownCategory`; any other word, and no
@@ -2567,10 +2570,10 @@ which hold in the light scheme, the dark one and the forced themes alike).
 | Category | Tint | The pull requests' level of that tint |
 |---|---|---|
 | `blocked` | red (`--pr-red`) | checks failing, changes requested |
-| `review` | amber (`--pr-amber`) | checks pending |
-| `doing` | blue (`--pr-blue`) | review required |
-| `done` | green (`--pr-green`) | approved and green |
-| `todo`, `closed`, none, or a word the page does not know | grey (`--dim`), as a draft or a closed pull request's chip | draft, closed, not fetched, can't read |
+| `review` | amber (`--pr-amber`) | checks pending, a required check not reported |
+| `doing` | blue (`--pr-blue`) | review required, unresolved comments, blocked |
+| `done` | green (`--pr-green`) | approved and green, checks passing |
+| `todo`, `closed`, none, or a word the page does not know | grey (`--dim`), as a draft or a closed pull request's chip | draft, open, closed, not fetched, can't read |
 
 Purple (merged) is not used. The words stay, so the colour never says anything alone. The two chips
 stand on the grounds that `test/web/pr-tints.test.ts` measures (a row, hovered and selected; the
@@ -4544,7 +4547,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W25 | A Windows program holding the port: with a small Windows program listening on `127.0.0.1:<port>` before skydeck's server starts, does the WSL server still answer from Windows on `[::1]:<port>`? If it does, a program between page and server is possible (15.3). Also: does Edge drop a service worker whose script the real server answers with 404? Answered for Chromium by the page suite (17.4, plan task 26): no, the worker keeps answering and stays registered; Edge itself is still to be checked here. | A | 15.3 |
 | W26 | **Real claude**, using the alternate screen (`/tui fullscreen`, or a full-screen program it runs): `skydeck window --restart` while it is showing, compare the screen before and after, then leave the alternate screen and compare again. What a snapshot does not restore (7.2: scroll region, saved cursor, character sets) would show as a misplaced cursor or wrongly scrolled or drawn lines. | A | 7.2, 7.3 |
 | W27 | With `ticketUrl` set to the user's ticket system's address and the throwaway session labelled with one of their ticket keys, the group chip shows `↗` and a click opens that ticket where links open (W12), logged in; without `ticketUrl` the chip is plain text. The check copies the user's `config.json` aside first when there is one and gives it back at the end only when the file holds no change since but the check's own line (else the user mends it by hand); when there was none, it removes the file it created; it clears the label it set. | D | 12.5, 9.6 |
-| W28 | `+ PR` with a pull request of the user's own on the throwaway session: its item and its line in the pull-request dialog show its state within seconds (their `gh` login), the list's chip agrees, `skydeck show` agrees; × detaches it. | D | 12.3, 12.5 |
+| W28 | `+ PR` with a pull request of the user's own on the throwaway session: its item and its line in the pull-request dialog show its state within seconds (their `gh` login), the list's chip agrees, `skydeck show` agrees; the state agrees with what GitHub's page waits for (F32); × detaches it. | D | 12.3, 12.5 |
 | W29 | **Real claude**, on two layouts (US, Czech): `l`, F2, `g`, `n`, `p` and `d` in the list; Enter saves a label, Ctrl+Enter a note, Esc twice discards a changed note; Undo in the toast brings the session back; `skydeck show <short id>` in a WSL terminal shows the same label, group and note. With changed text in the note's dialog, F5 and the keyboard's refresh key do not reload the window; if one does, the text is lost — write down which key, and report it (the reload guard of 12.9 does not hold in Edge for it). Every step uses the throwaway session and checks the header's short id or the dialog's heading first; after `d`, Undo before the next key; at the end the check clears the label, group and note it set. | D | 12.5, 12.9 |
 | W30 | On the user's own sessions, without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a block's card closed with ← and opened again with → (blocks are open by default from follow-up F3, drawn as cards with a selectable caption from follow-up F9), a click on a caption, the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |
 | W31 | Czech and US layouts in the filter's and the switcher's fields: AltGr characters and dead keys type; Ctrl+Shift+P opens and closes the switcher on both. | E | 12.8, 12.9 |

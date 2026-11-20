@@ -81,8 +81,16 @@ export interface TranscriptRow {
 }
 
 export type PrState = 'open' | 'draft' | 'merged' | 'closed';
-export type PrReview = 'approved' | 'changes-requested' | 'review-required';
-export type PrChecks = 'passing' | 'failing' | 'pending';
+/** F32: the last three are what GitHub needs beside its decision (design 7.3); a row read before has none of them. */
+export type PrReview =
+  | 'approved'
+  | 'changes-requested'
+  | 'review-required'
+  | 'unresolved-comments'
+  | 'blocked'
+  | 'not-required';
+/** F32 (ruled): `not-reported` is a check the rules require that has not reported while the rollup says neither failing nor pending. */
+export type PrChecks = 'passing' | 'failing' | 'pending' | 'not-reported';
 
 export interface PrRow {
   url: string;

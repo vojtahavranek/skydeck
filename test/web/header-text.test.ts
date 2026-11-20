@@ -646,3 +646,38 @@ describe('F18: the ticket chip and the ticket field', () => {
     assert.equal(ticketField(null).value, '');
   });
 });
+
+describe('F32: the new levels in the header and in the dialog (S2 12.5, D13)', () => {
+  const cases = [
+    ['unresolved-comments', 'comments', 'unresolved comments'],
+    ['blocked', 'blocked', 'blocked'],
+    ['open', 'open', 'open'],
+    ['checks-passing', 'green', 'checks passing'],
+    ['checks-not-reported', 'pending', 'checks pending'],
+  ] as const;
+
+  test("the header's line says the chip's words, the dialog's line its own, with the age", () => {
+    for (const [level, chipWords, lineWords] of cases) {
+      assert.equal(prItemText(pr(level)), `acme/web #7 · ${chipWords}`, level);
+      assert.deepEqual(prItemParts(pr(level)), {
+        name: 'acme/web #7 · ',
+        state: chipWords,
+        level,
+      });
+      assert.equal(prLineText(pr(level), now), `acme/web #7 · ${lineWords} · checked 4m ago`);
+      assert.deepEqual(prLineParts(pr(level), now), {
+        head: 'acme/web #7 · ',
+        state: lineWords,
+        tail: ' · checked 4m ago',
+        level,
+      });
+    }
+  });
+
+  test('approved, green keeps its words', () => {
+    assert.equal(
+      prLineText(pr('approved-green'), now),
+      'acme/web #7 · approved, green · checked 4m ago',
+    );
+  });
+});
