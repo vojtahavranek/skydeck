@@ -519,19 +519,22 @@ export function createSettings(deps: SettingsDeps): Settings {
   const refused = (error: string): SettingOutcome => ({ ok: false, error, payload: payload() });
 
   /** The key a page named, when it is one the window changes; else the refusal's words. */
-  const changeable = (key: string): SettingKey | string => {
-    if (!isKey(key)) return `skydeck has no setting ${JSON.stringify(sanitize(key))}`;
-    const row = SETTINGS[key];
-    if (row.kind === 'show' && row.names !== null) {
-      return `${key} ${NAMES[row.names]}: it is changed in the file only (${path})`;
+  const changeable = (name: string): { key: SettingKey } | { refusal: string } => {
+    if (!isKey(name))
+      return { refusal: `skydeck has no setting ${JSON.stringify(sanitize(name))}` };
+    const row = SETTINGS[name];
+    if (row.kind === 'show') {
+      const names = row.names === null ? 'is shown only' : NAMES[row.names];
+      return { refusal: `${name} ${names}: it is changed in the file only (${path})` };
     }
-    return key;
+    return { key: name };
   };
 
   /** G3: the one key set (`value`) or removed (undefined) in the file read now. */
   const change = (name: string, value: unknown): SettingOutcome => {
-    const key = changeable(name);
-    if (!isKey(key)) return refused(key);
+    const named = changeable(name);
+    if ('refusal' in named) return refused(named.refusal);
+    const { key } = named;
     const look = lookAt(files, path);
     if (look.state === 'refused') {
       return refused(`${look.problem}; mend the file by hand first: nothing was changed`);
