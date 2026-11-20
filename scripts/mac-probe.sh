@@ -175,8 +175,8 @@ case $HOME in
   *) say "HOME" "not an absolute path" ;;
 esac
 case ":$PATH:" in
-  *":$HOME/.local/bin:"*) say "~/.local/bin on PATH" "yes" ;;
-  *) say "~/.local/bin on PATH" "no" ;;
+  *":$HOME/.local/bin:"*) say "PATH holds ~/.local/bin" "yes" ;;
+  *) say "PATH holds ~/.local/bin" "no" ;;
 esac
 
 section "programs"
@@ -258,6 +258,8 @@ masked "ps tty" ps -o tty= -p $$
 masked "ps command" ps -ww -o command= -p $$
 if have perl; then
   printf 'ps cost: '
+  # The program is perl's: its $ are perl's, not this shell's.
+  # shellcheck disable=SC2016
   limited perl -MTime::HiRes=time -e '
     my $pid = shift;
     my $t = time;
@@ -265,6 +267,8 @@ if have perl; then
     printf "%.1f ms per call (20 calls)\n", (time - $t) * 1000 / 20;
   ' $$ 2>/dev/null || echo "failed"
   printf 'ps snapshot cost: '
+  # The program is perl's: its $ are perl's, not this shell's.
+  # shellcheck disable=SC2016
   limited perl -MTime::HiRes=time -e '
     my $t = time;
     my @l = `LC_ALL=C TZ=UTC ps -A -o pid=,ppid=,lstart= 2>/dev/null`;

@@ -105,14 +105,14 @@ until part 9 or part 10 tells you to.
    create, pr view, pr checks, pr comment, workflow run, run list, run view, run watch); `npm` (ci,
    test, run), `npx playwright install chromium` (it downloads about 150 MB into
    `~/Library/Caches/ms-playwright`), `node`; `python3`; `perl` (to bound a command's time); `ps`,
-   `sysctl`, `sw_vers`, `vm_stat`, `lsof`, `uname`, `xcode-select -p`; `mktemp`, `mkdir`, and `rm`
-   only inside this clone, the suite's sandboxes and the folders I make under `/tmp`; `kill` only
-   for process ids the suite left behind; `grep`, `sed`, `awk`, `sort`, `head`, `tr`, `cat`, `ls`,
-   `date`, `env`, `whoami`, `hostname`, `scutil --get ComputerName`; `shellcheck` if you have it;
-   `claude --help`, and the one `claude -p` of question 4. How you let them run without a question
-   each time is your choice; I never change my own permissions or settings. If the session stops for
-   any reason (a usage limit, a closed lid, a restart), start Claude Code again in this clone and
-   say 'read docs/plans/mac-port.md and go on': I resume from my status file."
+   `sysctl`, `sw_vers`, `vm_stat`, `lsof`, `uname`, `xcode-select -p`; `mkdir`, and `rm` only inside
+   this clone and the suite's sandboxes; `kill` only for process ids the suite left behind; `grep`,
+   `sed`, `awk`, `sort`, `head`, `tr`, `cat`, `ls`, `date`, `env`, `whoami`, `hostname`, `scutil
+   --get ComputerName`; `shellcheck` if you have it; `claude --help`, and the one `claude -p` of
+   question 4. How you let them run without a question each time is your choice; I never change my
+   own permissions or settings. If the session stops for any reason (a usage limit, a closed lid, a
+   restart), start Claude Code again in this clone and say 'read docs/plans/mac-port.md and go on':
+   I resume from my status file."
 4. **The facts only your Claude Code can show** (part 4.2). Show them the `claude -p …` line of part
    4.2 as it is, and say: "May I run this once? It starts Claude Code scripted, in a throwaway
    folder, with a throwaway hook that records only the NAMES of what a hook receives. It costs one
@@ -133,12 +133,12 @@ in the final report what stayed unchecked.
 
 On your human's machine (it holds their real Claude Code sessions and their work):
 
-- Work only inside this clone (switch branches in it; no worktree), the suite's sandboxes
-  (`test/helpers/`), and folders you make with `mktemp -d` under `/tmp` (a pull request's body),
-  which you remove when done; the fact run's folder of part 4.2 is inside the clone. The one
-  exception is the check clone of part 9, `~/skydeck-mac-check`, made once at the end. (The caches
-  `npm` and Playwright keep, and `gh`'s own settings, are theirs to write.) Reason: everything else
-  is your human's.
+- Work only inside this clone (switch branches in it; no worktree) and the suite's sandboxes
+  (`test/helpers/`). Your own scratch files (the fact run's folder of part 4.2, a pull request's
+  body) go under the clone's `.git/` folder, which git never tracks, and you remove them when done.
+  The one exception is the check clone of part 9, `~/skydeck-mac-check`, made once at the end. (The
+  caches `npm` and Playwright keep, and `gh`'s own settings, are theirs to write.) Reason:
+  everything else is your human's.
 - Run code only through the suite (`npm test`, `npm run test:page`, single test files, the commands
   of part 8), the probe and the fact run of part 4. Never run `bin/skydeck` or `node src/...`
   outside a test, not even with `--help`: the launcher writes a cache into `~/.cache/skydeck`, most
@@ -164,10 +164,11 @@ On your human's machine (it holds their real Claude Code sessions and their work
   in any of it; example values use `example.com`, `/Users/you`, `ABC-123`. Before every push, and
   before you write a pull request's body or a comment, search what you are about to publish for your
   human's user name, home folder, machine name and host name (`whoami`, `$HOME`, `scutil --get
-  ComputerName`, `hostname`): `git diff origin/main...HEAD | grep -i "<each>"` (and the same over
-  the body's file) must print nothing. Before the first push, look at the commits' author too (`git
-  log -1 --format='%an <%ae>'`): it must be the identity your human chose in 2.2, set for this clone
-  only; you set nothing globally.
+  ComputerName`, `hostname`): `git diff origin/main...HEAD | grep -i "<each>"`, the same over the
+  commit messages (`git log origin/main..HEAD --format=%B`) and over the body's file must print
+  nothing. Before the first push, look at the commits' author too (`git log -1 --format='%an
+  <%ae>'`): it must be the identity your human chose in 2.2, set for this clone only; you set
+  nothing globally.
 - The status file holds forms, yes/no answers, counts and plain words only, never a pasted output of
   `doctor`, `ls`, the probe's unmasked parts or the fact run (they hold paths, titles and names).
 - Once your human has installed skydeck from the check clone (part 9), never change that clone: the
@@ -199,6 +200,9 @@ On the code:
 - No runtime dependency (Node.js's own modules only); Node.js 24.12 or newer; python3 3.9 or newer
   (the developer tools' python3 is 3.9). No new dependency of any kind.
 - The words a user reads are plain, and true on the system they read them on.
+- Every shell file you change or add passes `shellcheck`: the lint job of `.github/workflows/ci.yml`
+  runs it on the files its `shellcheck` line names (add a new shell file there), and where
+  `shellcheck` is on PATH you run it yourself before each push.
 - A change in behaviour updates the design (`docs/design.md`, `docs/design-step-2.md`) and the guide
   (`docs/install.md`) in the same pull request (`AGENTS.md` part 2).
 
@@ -414,6 +418,7 @@ is the ONLY place that reads this text (decision 6.1): skydeck's own readings al
 day, the end of a year, 29 February, every month name, a wrong weekday, extra words, an empty text,
 a time out of range; and the local form in a child process with a set `TZ` (one with summer time),
 including the hour that comes twice when the clocks go back, which reads as the earlier of the two.
+Done when they pass on Linux and on the Mac.
 
 **Task 3: a live-session file's `procStart` on a Mac.** In `src/claude/live.ts`, `procStartOf`
 accepts that text too, through `procStartFromLstart`, in the form the facts found (`'utc'` expected;
@@ -480,25 +485,26 @@ On this path the hook calls `ps`, `sysctl` and `perl` by name, as it calls `date
 `PATH` lacks `/usr/sbin` (where `sysctl` is), the Mac path appends `/usr/sbin` to `PATH` first
 (stand-ins on the sandbox's `PATH` still come first); say so in the hook's header and the design.
 
-In `src/claude/hookinput.ts` (`parseSpoolFile`), read `lstart` through `procStartFromLstart` when
-`stat` is empty (the hook always writes the `stat=` line), and take the boot id in lower case (on
-Linux it already is). Old readers ignore the new key (unknown keys are ignored). For tests on Linux,
-let the hook take its `/proc` folder (for every read of it, the test of the path too) from
-`SKYDECK_TEST_PROC` when it is an absolute path, as `bin/skydeck-keepalive` does; a test points it
-at an empty folder and writes stand-ins of `ps`, `sysctl`, `date` and `perl` into the sandbox's
-`bin` (`sandbox.link` finds programs only in `/usr/bin` and `/bin`, and `sysctl` is in `/usr/sbin`).
-Update the hook's header and `docs/design.md` 5.1 ("only sh builtins plus …": on a Mac also `ps`,
-`sysctl` and the time source). Tests first in `test/bin/hook.test.ts` (Mac path, on Linux with
-stand-ins and on the Mac for real) and `test/claude/hookinput.test.ts`. Measure the hook on the Mac:
-`SessionEnd` hooks share about 1.5 s (design section 14).
+In `src/claude/hookinput.ts` (`parseSpoolFile`), read `lstart` through `procStartFromLstart(…,
+'utc')` when `stat` is empty (the hook always writes the `stat=` line), and take the boot id in
+lower case (on Linux it already is). Old readers ignore the new key (unknown keys are ignored). For
+tests on Linux, let the hook take its `/proc` folder (for every read of it, the test of the path
+too) from `SKYDECK_TEST_PROC` when it is an absolute path, as `bin/skydeck-keepalive` does; a test
+points it at an empty folder and writes stand-ins of `ps`, `sysctl`, `date` and `perl` into the
+sandbox's `bin` (`sandbox.link` finds programs only in `/usr/bin` and `/bin`, and `sysctl` is in
+`/usr/sbin`). Update the hook's header and `docs/design.md` 5.1 ("only sh builtins plus …": on a Mac
+also `ps`, `sysctl` and the time source). Tests first in `test/bin/hook.test.ts` (Mac path, on Linux
+with stand-ins and on the Mac for real) and `test/claude/hookinput.test.ts`. Measure the hook on the
+Mac: `SessionEnd` hooks share about 1.5 s (design section 14). Done when they pass, the hook's Linux
+tests are unchanged and green, and the hook's time on the Mac is written into the status file.
 
 **Task 6: liveness end to end.** First the suite's own helpers, which read `/proc` themselves: the
 stand-in program (`test/fixtures/standin/standin.ts` reads `/proc/self/stat` and `/proc/self/limits`
 when it starts, so every test that starts it fails on a Mac), `test/fixtures/fake-serve/`, and
 `procStartOf` in `test/helpers/keeper.ts`. Give each a Mac path (the same process start, through
-`ps` and `procStartFromLstart`; no limits file on a Mac), Linux unchanged. Then: with tasks 2 to 5,
-a session's start from the hook, from its live-session file and from `Proc.stat` must be the same
-number, or every session shows as not running (`isAlive`, `isLiveFileTrusted` in
+`ps` and `procStartFromLstart(…, 'utc')`; no limits file on a Mac), Linux unchanged. Then: with
+tasks 2 to 5, a session's start from the hook, from its live-session file and from `Proc.stat` must
+be the same number, or every session shows as not running (`isAlive`, `isLiveFileTrusted` in
 `src/claude/live.ts`). This is M1's gate: skydeck's reading of a running session's start equals the
 live file's. Test it on the Mac end to end: the real hook (Mac path) with `CLAUDE_PID` set to a
 process the test started, ingest, then `isAlive` true; and a made-up live-session file with that
@@ -801,7 +807,8 @@ one: stop THAT task, write it into the status file, go on with what does not dep
   If the fork's Actions cannot be switched on (a no to question 2, or `gh workflow run` refuses),
   open the pull requests without it and say so in each.
 - **Pull requests.** One per stage against `main`, opened when the stage is done, with its body in a
-  file under `/tmp`:
+  file inside the clone that git never tracks (`body="$(git rev-parse
+  --absolute-git-dir)/skydeck-pr-body.md"`; remove it after):
 
   ```sh
   upstream=$(git remote get-url origin | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')
@@ -809,12 +816,12 @@ one: stop THAT task, write it into the status file, go on with what does not dep
   gh pr create --repo "$upstream" --base main --head "$login:<branch>" --title "macOS: <stage goal>" --body-file "$body"
   ```
 
-  Each command of yours starts a fresh shell: set `upstream` and `login` in the same command that
-  uses them. Keep "allow edits by maintainers" on (the default). A stacked one says in its first
-  line which pull request it sits on, and that its diff holds that one's commits until that one is
-  merged. The body says: what the stage does, in a user's words; the tests added; the skips added
-  and removed; the suite's commands and counts on the Mac (part 8); what the review found and what
-  you changed; what is left.
+  Each command of yours starts a fresh shell: set `upstream`, `login` and `body` in the same command
+  that uses them. Keep "allow edits by maintainers" on (the default). A stacked one says in its
+  first line which pull request it sits on, and that its diff holds that one's commits until that
+  one is merged. The body says: what the stage does, in a user's words; the tests added; the skips
+  added and removed; the suite's commands and counts on the Mac (part 8); what the review found and
+  what you changed; what is left.
 - **Never wait for the maintainer.** When a stage's pull request is open, go on with the next stage
   on top. When you push a fix to an earlier stage's branch, merge that branch into every later stage
   branch at once (`git merge`, never a rebase), so that they stay identical where they overlap. When
