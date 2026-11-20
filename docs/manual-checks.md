@@ -1132,9 +1132,10 @@ select the throwaway session: the header's third line says `no pull request` and
 6. Open the pull request's page on GitHub and read what it says above the merge button (approvals
    still required, checks pending, conversations to resolve, merging blocked). Expected (no test
    can show GitHub's real answer): the line says `approved, green` only when that page shows the
-   approvals it needs and waits for nothing else; otherwise the first in the chip's order of
-   `checks pending`, `review required`, `unresolved comments`, `blocked`; `checks passing` or
-   `open` only where the page asks for no review.
+   approvals it needs and waits for nothing else; otherwise the first that applies of `checks
+   pending` (checks running), `review required`, `unresolved comments`, `draft`, `checks pending`
+   (a required check that has not reported), `blocked`; `checks passing` or `open` only where the
+   page asks for no review.
 7. `×` on the line. Expected: the line goes, and the toast says `Detached <owner>/<repo> #<n>`
    with `Undo` (leave it). Esc. The header's third line says `no pull request` and `+ PR` again,
    and `skydeck show <short id>` has no `pr:` line.

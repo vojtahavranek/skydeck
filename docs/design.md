@@ -427,8 +427,10 @@ never received a prompt has no transcript (14).
   threads and 100 checks. Only the rules of rulesets that are enforced count: a rule whose ruleset
   is in evaluate mode or disabled is passed by; one whose ruleset's enforcement cannot be read
   counts (GitHub documents the list as the active rules). From them:
-  - the checks are pending when the rollup says so, or when a check the rules require is not among
-    the reported ones (only when every reported one was seen);
+  - the checks are pending when the rollup says so (they run); when the rollup says neither
+    failing nor pending and a check the rules require is not among the reported ones (only when
+    every reported one was seen), they are stored as `not-reported` (ruled: a check that has not
+    started can stay so for days, so it ranks after the review, below);
   - the review is the first that applies of: changes requested (the decision, or a writer's latest
     review while the decision is not approved); review required (the decision, or the rules need
     more approvals than the writers gave: the largest count among the rules, 0 for none);
@@ -467,7 +469,8 @@ never received a prompt has no transcript (14).
 - A pull request that has never been fetched and has no failed attempt is shown as "not
   fetched": it is neither read nor unreadable, so a fresh attachment does not look broken.
 - **A pull request's state** (open or draft) is the first that applies of: checks failing,
-  changes requested, checks pending, review required, unresolved comments, draft, blocked; then
+  changes requested, checks pending (the rollup's: they run), review required, unresolved
+  comments, draft, checks pending (a required check has not reported), blocked; then
   checks passing (no review asked for, the checks pass), open (no review asked for, no checks at
   all), else approved and green (approved, with checks that pass or none; or nothing known of the
   review, as for a row read before F32). So "approved and green" needs a real approval wherever
@@ -577,10 +580,10 @@ show it sanitised, 7.4), so that it can be used as a path; the characters a term
 are written as `\uXXXX` escapes like in any other string of the JSON. Sessions are in list order. A pull request's `state`,
 `review`, `checks` and `okAt` are null until it has been fetched. `review` is `approved`,
 `changes-requested`, `review-required` or, since follow-up F32 and still in version 1,
-`unresolved-comments`, `blocked` or `not-required` (7.3); `checks` is also `pending` when a
-check the rules require has not reported. A reader of version 1 that knows only the first three
-meets a word it does not know, and gets `not-required` where it got null for a pull request that
-no rule asks to review. `show --json` prints one
+`unresolved-comments`, `blocked` or `not-required` (7.3); `checks` is `passing`, `failing`,
+`pending` or, since F32, `not-reported` (a check the rules require has not reported). A reader of
+version 1 that knows only the earlier values meets a word it does not know, and gets
+`not-required` where it got null for a pull request that no rule asks to review. `show --json` prints one
 session object with `doneAt` (the time it was marked done while it is done, else null), `note`,
 `ticket` (`{ "url", "text", "status", "category", "okAt", "triedAt", "error" }`: the ticket set on
 it, its short name (7.1) and, from follow-up F19, its status, its category, the times of the last

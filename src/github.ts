@@ -493,8 +493,10 @@ function readMerge(
 }
 
 /**
- * The checks with F32's facts: the rollup's (failing and pending stay), else pending when a check
- * the rules require is not among the reported ones — only when every reported one is known.
+ * The checks with F32's facts: the rollup's (failing and pending stay), else `not-reported` when a
+ * check the rules require is not among the reported ones — only when every reported one is known.
+ * Ruled: apart from pending, because a check that has not started can stay so for days and ranks
+ * after the review (`prLevel`).
  */
 function checksWith(rollup: PrChecks | null, merge: MergeFacts | null): PrChecks | null {
   if (rollup === 'failing' || rollup === 'pending' || merge?.rules == null) {
@@ -504,7 +506,7 @@ function checksWith(rollup: PrChecks | null, merge: MergeFacts | null): PrChecks
   if (reported === null) {
     return rollup;
   }
-  return rules.contexts.some((name) => !reported.has(name)) ? 'pending' : rollup;
+  return rules.contexts.some((name) => !reported.has(name)) ? 'not-reported' : rollup;
 }
 
 /**
@@ -512,8 +514,8 @@ function checksWith(rollup: PrChecks | null, merge: MergeFacts | null): PrChecks
  * changes requested (the decision, or a writer's latest review while the decision is not
  * APPROVED); review required (the decision, or the rules need more approvals than the writers
  * gave); unresolved comments (the rules ask for resolved conversations and a thread is not);
- * blocked (GitHub's merge state is BLOCKED while the checks neither fail nor are pending and it is
- * no draft: a reason not modelled here, code owners, a merge queue, a deployment); approved (the
+ * blocked (GitHub's merge state is BLOCKED while the checks pass or there are none, and it is no
+ * draft: a reason not modelled here, code owners, a merge queue, a deployment); approved (the
  * decision, or the rules need N ≥ 1 and N writers approved, every rule seen); not required (no
  * decision and every rule seen needs no approval); else the decision as before F32 (null when
  * nothing better is known). Without the q<i> part, the decision alone, as before.
@@ -544,7 +546,7 @@ function reviewWith(
   if (rules?.resolution === true && merge.unresolved) {
     return 'unresolved-comments';
   }
-  if (merge.mergeState === 'BLOCKED' && checks !== 'failing' && checks !== 'pending' && !draft) {
+  if (merge.mergeState === 'BLOCKED' && (checks === 'passing' || checks === null) && !draft) {
     return 'blocked';
   }
   if (classic === 'approved') {
@@ -1094,10 +1096,12 @@ export type ChipLevel = (typeof CHIP_ORDER)[number];
  * Level of one pull request: error non-null → cant-read; state null (never fetched, D11) →
  * unfetched; merged → merged; closed → closed; otherwise (open or draft) the first that applies
  * of: checks failing → checks-failing; review changes-requested → changes-requested; checks
- * pending → checks-pending; review review-required → review-required; review unresolved-comments
- * → unresolved-comments; draft → draft; review blocked → blocked; review not-required → checks
- * passing → checks-passing, else open; else (approved, or not known: a row read before F32, an
- * answer without its facts) approved-green.
+ * pending (the rollup's: checks running) → checks-pending; review review-required →
+ * review-required; review unresolved-comments → unresolved-comments; draft → draft; checks
+ * not-reported (a required check has not reported; ruled: after the review and the draft) →
+ * checks-pending; review blocked → blocked; review not-required → checks passing →
+ * checks-passing, else open; else (approved, or not known: a row read before F32, an answer
+ * without its facts) approved-green.
  */
 export function prLevel(pr: PrRow): ChipLevel {
   if (pr.error !== null) {
@@ -1126,6 +1130,9 @@ export function prLevel(pr: PrRow): ChipLevel {
   }
   if (pr.state === 'draft') {
     return 'draft';
+  }
+  if (pr.checks === 'not-reported') {
+    return 'checks-pending';
   }
   if (pr.review === 'blocked') {
     return 'blocked';

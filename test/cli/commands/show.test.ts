@@ -534,3 +534,65 @@ test('F32: show prints a pull request GitHub will not merge as blocked, with its
     ],
   );
 });
+
+test('F32 (ruled): a required check that has not reported is stored as not-reported; the review comes first', async (t) => {
+  const d = sessionsWithPrs(t);
+  const runner = fakeRunner((call: RunCall) => {
+    const aliases = call.args.filter((arg) => /^n\d+=/.test(arg)).length;
+    const { data } = JSON.parse(openAnswer(aliases)) as { data: Record<string, unknown> };
+    for (let i = 0; i < aliases; i++) {
+      data[`q${i}`] = {
+        pullRequest: {
+          mergeStateStatus: 'BLOCKED',
+          latestOpinionatedReviews: { totalCount: 0, nodes: [] },
+          reviewThreads: { totalCount: 0, nodes: [] },
+          baseRef: {
+            rules: {
+              totalCount: 2,
+              nodes: [
+                {
+                  type: 'PULL_REQUEST',
+                  repositoryRuleset: { enforcement: 'ACTIVE' },
+                  parameters: {
+                    __typename: 'PullRequestParameters',
+                    requiredApprovingReviewCount: 1,
+                    requiredReviewThreadResolution: false,
+                  },
+                },
+                {
+                  type: 'REQUIRED_STATUS_CHECKS',
+                  repositoryRuleset: { enforcement: 'ACTIVE' },
+                  parameters: {
+                    __typename: 'RequiredStatusChecksParameters',
+                    requiredStatusChecks: [{ context: 'deploy' }],
+                  },
+                },
+              ],
+            },
+          },
+          commits: {
+            nodes: [
+              {
+                commit: {
+                  statusCheckRollup: {
+                    contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'build' }] },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      };
+    }
+    return runResult({ stdout: JSON.stringify({ data }) });
+  });
+  assert.equal(await main(['show', '0b5f', '--refresh'], withRunner(d, runner)), 0);
+  assert.ok(
+    d
+      .stdout()
+      .includes(
+        `\npr:        ${PR1}  review-required review review-required checks not-reported\n`,
+      ),
+    d.stdout(),
+  );
+});

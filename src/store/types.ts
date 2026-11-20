@@ -82,7 +82,8 @@ export type PrReview =
   | 'unresolved-comments'
   | 'blocked'
   | 'not-required';
-export type PrChecks = 'passing' | 'failing' | 'pending';
+/** F32 (ruled): `not-reported` is a check the rules require that has not reported while the rollup says neither failing nor pending. */
+export type PrChecks = 'passing' | 'failing' | 'pending' | 'not-reported';
 
 export interface PrRow {
   url: string;

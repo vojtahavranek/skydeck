@@ -264,7 +264,7 @@ describe('F32: the one query asks for what GitHub needs before it merges', () =>
 // --- T3: what is true ----------------------------------------------------------------------------
 
 describe('F32: the bug, and each level alone', () => {
-  test('the bug: no decision, rules need 2 with none, a required check missing, a thread open, rollup SUCCESS → checks pending', () => {
+  test('the bug: no decision, rules need 2 with none, a required check missing, a thread open, rollup SUCCESS → review required (ruled)', () => {
     const result = parseOne(
       answer(
         basics(null, 'SUCCESS'),
@@ -284,9 +284,50 @@ describe('F32: the bug, and each level alone', () => {
       title: 'Fix the retry',
       state: 'open',
       review: 'review-required',
-      checks: 'pending',
+      checks: 'not-reported',
     });
+    assert.equal(prLevel(rowOf(result)), 'review-required');
+  });
+
+  test('ruled: the bug with two approvals and every thread resolved, the check still not reported → checks pending', () => {
+    const q = merge({
+      mergeState: 'BLOCKED',
+      reviews: ['APPROVED', 'APPROVED'],
+      threads: [true],
+      rules: [reviewRule(2, true), checksRule(...REQUIRED), ...OTHER_RULES],
+      contexts: REPORTED,
+    });
+    const result = parseOne(answer(basics(null, 'SUCCESS'), q));
+    assert.deepEqual(result.ok && [result.review, result.checks], ['approved', 'not-reported']);
+    assert.equal(prLevel(rowOf(result)), 'checks-pending', 'never approved-green, and not blocked');
+  });
+
+  test('ruled: a rollup that says PENDING (checks running) still comes before review required', () => {
+    const q = merge({ rules: [reviewRule(2), checksRule('deploy')], contexts: [context('build')] });
+    const result = parseOne(answer(basics(null, 'PENDING'), q));
+    assert.deepEqual(result.ok && [result.review, result.checks], ['review-required', 'pending']);
     assert.equal(prLevel(rowOf(result)), 'checks-pending');
+    assert.equal(levelOf(basics('REVIEW_REQUIRED', 'PENDING'), merge()), 'checks-pending');
+  });
+
+  test('ruled: a required check not reported comes after review required, unresolved comments and the draft, before blocked', () => {
+    const missing = { rules: [checksRule('deploy')], contexts: [context('build')] };
+    const at = (p: Record<string, unknown>, more: Merge) =>
+      levelOf(p, merge({ ...missing, ...more }));
+    assert.equal(at(basics('REVIEW_REQUIRED', 'SUCCESS'), {}), 'review-required');
+    assert.equal(
+      at(basics('APPROVED', 'SUCCESS'), {
+        rules: [...missing.rules, reviewRule(0, true)],
+        threads: [false],
+      }),
+      'unresolved-comments',
+    );
+    assert.equal(at(basics(null, 'SUCCESS', { isDraft: true }), {}), 'draft');
+    assert.equal(at(basics('APPROVED', 'SUCCESS'), { mergeState: 'BLOCKED' }), 'checks-pending');
+    assert.equal(at(basics(null, 'SUCCESS'), {}), 'checks-pending', 'nothing asks for a review');
+    assert.equal(at(basics(null, null), { contexts: null }), 'checks-pending', 'no checks at all');
+    assert.equal(at(basics('CHANGES_REQUESTED', 'SUCCESS'), {}), 'changes-requested');
+    assert.equal(levelOf(basics(null, 'FAILURE'), merge(missing)), 'checks-failing');
   });
 
   test('the bug once the check has reported: review required; once approved twice: unresolved comments', () => {
@@ -347,7 +388,7 @@ describe('F32: the bug, and each level alone', () => {
     assert.equal(prLevel(rowOf(result)), 'changes-requested', 'before pending checks');
   });
 
-  test('a required check that has not reported is pending, a check run or a commit status alike', () => {
+  test('a required check that has not reported is not-reported, a check run or a commit status alike', () => {
     const rules = [checksRule('build', 'ci/legacy')];
     const both = [context('build'), context('ci/legacy', 'status')];
     assert.equal(
@@ -356,15 +397,15 @@ describe('F32: the bug, and each level alone', () => {
     );
     for (const contexts of [[context('build')], [context('ci/legacy', 'status')], []]) {
       const result = parseOne(answer(basics(null, 'SUCCESS'), merge({ rules, contexts })));
-      assert.equal(result.ok && result.checks, 'pending', JSON.stringify(contexts));
+      assert.equal(result.ok && result.checks, 'not-reported', JSON.stringify(contexts));
     }
   });
 
-  test('a required check on a commit that reported nothing at all is pending', () => {
+  test('a required check on a commit that reported nothing at all is not reported: checks pending', () => {
     const result = parseOne(
       answer(basics(null, null), merge({ rules: [checksRule('build')], contexts: null })),
     );
-    assert.equal(result.ok && result.checks, 'pending');
+    assert.equal(result.ok && result.checks, 'not-reported');
     assert.equal(prLevel(rowOf(result)), 'checks-pending');
   });
 
@@ -373,7 +414,7 @@ describe('F32: the bug, and each level alone', () => {
     const result = parseOne(
       answer(basics(null, 'SUCCESS'), merge({ rules, contexts: [context('build')] })),
     );
-    assert.equal(result.ok && result.checks, 'pending', 'build is not Build');
+    assert.equal(result.ok && result.checks, 'not-reported', 'build is not Build');
   });
 
   test('failing checks stay failing, whatever is missing', () => {
@@ -693,7 +734,7 @@ describe('F32: an answer without the new parts, or with them broken, is read as 
     const result = parseOne(
       answer(basics(null, 'SUCCESS'), { ...merge(), baseRef: { rules: checks } }),
     );
-    assert.equal(result.ok && result.checks, 'pending');
+    assert.equal(result.ok && result.checks, 'not-reported');
   });
 
   test('more rules than were asked for: no approval is claimed from those that were seen', () => {
@@ -863,6 +904,20 @@ describe('F32: prLevel and chipFor', () => {
     assert.equal(prLevel(pr({ review: 'not-required', checks: 'failing' })), 'checks-failing');
   });
 
+  test('ruled: checks not-reported read checks pending, after review required, unresolved comments and the draft', () => {
+    const missing = (over: Partial<PrRow>) => prLevel(pr({ checks: 'not-reported', ...over }));
+    assert.equal(missing({}), 'checks-pending');
+    assert.equal(missing({ review: 'approved' }), 'checks-pending');
+    assert.equal(missing({ review: 'not-required' }), 'checks-pending');
+    assert.equal(missing({ review: 'blocked' }), 'checks-pending');
+    assert.equal(missing({ review: 'review-required' }), 'review-required');
+    assert.equal(missing({ review: 'unresolved-comments' }), 'unresolved-comments');
+    assert.equal(missing({ review: 'changes-requested' }), 'changes-requested');
+    assert.equal(missing({ state: 'draft' }), 'draft');
+    assert.equal(missing({ state: 'draft', review: 'review-required' }), 'review-required');
+    assert.equal(prLevel(pr({ checks: 'pending', review: 'review-required' })), 'checks-pending');
+  });
+
   test('a row read before F32 shows as before: approved, or nothing known, is approved-green', () => {
     assert.equal(prLevel(pr({ review: 'approved', checks: 'passing' })), 'approved-green');
     assert.equal(prLevel(pr({ review: 'approved', checks: null })), 'approved-green');
@@ -950,9 +1005,9 @@ describe('F32: fetchPrs saves the new facts in the columns there are', () => {
       return prLevel(row);
     };
     assert.deepEqual(await fetchPrs(d.deps, [URL7]), { fetched: 1, failed: 0 });
-    assert.equal(level(), 'checks-pending');
+    assert.equal(level(), 'review-required');
     const row = d.store.prs().find((p) => p.url === URL7);
-    assert.deepEqual(row && [row.review, row.checks], ['review-required', 'pending']);
+    assert.deepEqual(row && [row.review, row.checks], ['review-required', 'not-reported']);
 
     q = merge({ rules: [reviewRule(0, true)], threads: [false] });
     await fetchPrs(d.deps, [URL7]);
@@ -1077,7 +1132,10 @@ describe('F32: only the rules of rulesets that are enforced count', () => {
         },
       ];
       const result = parseOne(answer(basics(null, 'SUCCESS'), q, errors), { code: 1 });
-      assert.deepEqual(result.ok && [result.review, result.checks], ['review-required', 'pending']);
+      assert.deepEqual(result.ok && [result.review, result.checks], [
+        'review-required',
+        'not-reported',
+      ]);
     }
   });
 });

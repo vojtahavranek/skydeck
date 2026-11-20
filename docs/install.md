@@ -910,23 +910,23 @@ unless you moved the selection meanwhile. `Done` in the header selects nothing i
 `d` on a session marked done (shown with `a`), and `Undone`, mark it undone, without a toast. A
 held `d` acts once, and so does a double click on a button of the header.
 
-**The pull-request dialog** (`p`, `Pull requests` or `+ PR`) lists every attached pull request on
-a line of its own: `acme/web #7 · approved, green · checked 4m ago` (or `checks failing`, `changes
+**The pull-request dialog** (`p`, `Pull requests` or `+ PR`) lists every attached pull request on a
+line of its own: `acme/web #7 · approved, green · checked 4m ago` (or `checks failing`, `changes
 requested`, `checks pending`, `review required`, `unresolved comments`, `draft`, `blocked`, `checks
 passing`, `open`; `not fetched` until it is first read). They say what GitHub waits for before it
 merges, also when the repository asks for it through rulesets: `review required` until it has the
 approvals its rules ask for (from people who can write to the repository), `checks pending` while
-a required check has not reported, `unresolved comments` while a conversation its rules ask to
-resolve is open, `blocked` when GitHub will not merge it for a reason skydeck does not show (code
-owners, a merge queue, a deployment). `approved, green` needs an approval, unless GitHub's answer
-does not say what it waits for (a pull request whose base branch is gone, say); with no review
-asked for it is `checks passing`, or `open` without any checks. A pull request read by an older skydeck
-keeps its old words until it is read again. One that cannot be read shows when it was last read
-and its error, `acme/web #7 · can't read ·
-last read 3h ago · gh: HTTP 502` (`never read` when it never was; a long error is cut, and the
-line's tooltip has it whole, after the pull request's title). The merged and closed ones are
-folded into `30 merged, 2 closed ▸`; a click unfolds them (they show no age: they are never read
-again). On a line:
+checks run, `unresolved comments` while a conversation its rules ask to resolve is open, then
+`draft`; a required check that has not reported says `checks pending` only after these (it can wait
+for days, and the review is what you can act on), and `blocked` when GitHub will not merge it for a
+reason skydeck does not show (code owners, a merge queue, a deployment). `approved, green` needs an
+approval, unless GitHub's answer does not say what it waits for (a pull request whose base branch
+is gone, say); with no review asked for it is `checks passing`, or `open` without any checks. A
+pull request read by an older skydeck keeps its old words until it is read again. One that cannot
+be read shows when it was last read and its error, `acme/web #7 · can't read · last read 3h ago ·
+gh: HTTP 502` (`never read` when it never was; a long error is cut, and the line's tooltip has it
+whole, after the pull request's title). The merged and closed ones are folded into `30 merged, 2
+closed ▸`; a click unfolds them (they show no age: they are never read again). On a line:
 
 - a click that selected no text opens the pull request in your default browser (`window.links`);
 - `×` detaches it and shows the toast `Detached acme/web #7` with `Undo`, which attaches it again.
