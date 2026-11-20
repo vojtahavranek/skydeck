@@ -376,3 +376,50 @@ test('ls shows an error text from gh without its escape sequences', async (t) =>
   assert.ok(!d.stdout().includes('\x1b'), JSON.stringify(d.stdout()));
   assert.equal(listed(d).sessions[0]?.prs[0]?.error, 'boom red');
 });
+
+/** F32: `gh` answers as ghOpen, and with GitHub's merge facts (q<i>): no rule, no review asked for. */
+function ghNothingAsks() {
+  const q = {
+    pullRequest: {
+      mergeStateStatus: 'CLEAN',
+      latestOpinionatedReviews: { totalCount: 0, nodes: [] },
+      reviewThreads: { totalCount: 0, nodes: [] },
+      baseRef: { rules: { totalCount: 0, nodes: [] } },
+      commits: {
+        nodes: [
+          {
+            commit: {
+              statusCheckRollup: {
+                contexts: { totalCount: 1, nodes: [{ __typename: 'CheckRun', name: 'build' }] },
+              },
+            },
+          },
+        ],
+      },
+    },
+  };
+  return fakeRunner((call: RunCall) => {
+    const aliases = call.args.filter((arg) => /^n\d+=/.test(arg)).length;
+    const { data } = JSON.parse(openAnswer(aliases)) as { data: Record<string, unknown> };
+    for (let i = 0; i < aliases; i++) data[`q${i}`] = q;
+    return runResult({ stdout: JSON.stringify({ data }) });
+  });
+}
+
+test('F32: with no review asked for, ls prints checks-passing, and --json the stored review not-required', async (t) => {
+  const d = sessionsWithPrs(t);
+  assert.equal(await main(['ls', '--refresh'], withRunner(d, ghNothingAsks())), 0);
+  assert.match(d.stdout(), /2pr:checks-passing {2}0b5f3c1e/);
+  assert.match(d.stdout(), /1pr:checks-passing {2}1c6a4d2f/);
+
+  const before = d.stdout().length;
+  assert.equal(await main(['ls', '--json'], d.ctx), 0);
+  const json = JSON.parse(d.stdout().slice(before)) as {
+    sessions: { prs: { review: string | null; checks: string | null }[] }[];
+  };
+  const prs = json.sessions.flatMap((session) => session.prs);
+  assert.equal(prs.length, 3);
+  for (const pr of prs) {
+    assert.deepEqual([pr.review, pr.checks], ['not-required', 'passing']);
+  }
+});

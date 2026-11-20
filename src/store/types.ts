@@ -74,7 +74,14 @@ export interface TranscriptRow {
 }
 
 export type PrState = 'open' | 'draft' | 'merged' | 'closed';
-export type PrReview = 'approved' | 'changes-requested' | 'review-required';
+/** F32: the last three are what GitHub needs beside its decision (design 7.3); a row read before has none of them. */
+export type PrReview =
+  | 'approved'
+  | 'changes-requested'
+  | 'review-required'
+  | 'unresolved-comments'
+  | 'blocked'
+  | 'not-required';
 export type PrChecks = 'passing' | 'failing' | 'pending';
 
 export interface PrRow {

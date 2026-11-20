@@ -90,7 +90,11 @@ describe('windowChip: the rest of S2 12.3', () => {
       'changes-requested',
       'checks-pending',
       'review-required',
+      'unresolved-comments',
+      'blocked',
       'draft',
+      'open',
+      'checks-passing',
       'approved-green',
     ]);
     // Each level against every one after it, in both orders of the input.

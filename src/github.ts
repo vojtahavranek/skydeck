@@ -90,6 +90,15 @@ export function issueKey(text: string): PrKey | null {
 }
 
 export const BATCH_SIZE = 50;
+/**
+ * Follow-up F32: the pull requests of one query. Since F32 GitHub works out much more per pull
+ * request (above all `mergeStateStatus`, then the reported checks), within the same 10 seconds: a
+ * query for 25 took from 3.6 to 8.8 s on large public repositories and one for 50 failed with
+ * GitHub's own HTTP 502, where one for 50 took 4.3 s before; one for 10 took at most 5.4 s. A
+ * batch that runs out of time makes every pull request of it unreadable, so a batch holds 10.
+ * The issues keep BATCH_SIZE: their query did not change.
+ */
+export const PR_BATCH_SIZE = 10;
 export const GH_TIMEOUT_MS = 10_000;
 
 const MS_PER_MINUTE = 60_000;
@@ -123,16 +132,45 @@ export function prsDue(
 const PULL_REQUEST_FIELDS =
   'title state isDraft reviewDecision commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }';
 
+// Follow-up F32: how many of each a pull request's answer holds at most (GitHub allows 100).
+const REVIEWS_ASKED = 50;
+const THREADS_ASKED = 100;
+const RULES_ASKED = 50;
+const CONTEXTS_ASKED = 100;
+
 /**
- * The `gh` arguments for one batch (1 to BATCH_SIZE keys): `api graphql --hostname github.com`
+ * Follow-up F32: what GitHub needs before it merges, beside its decision and the rollup's state:
+ * its merge state, the writers' latest reviews, the review threads, the rules of the base branch
+ * (rulesets; never the classic `branchProtectionRule`, which can need more than read access and
+ * already shows in `reviewDecision`) and the names of the checks the last commit has reported.
+ * Asked under an alias of its own, `q<i>` on p<i>'s variables: `mergeStateStatus` and
+ * `reviewThreads` cannot be null in GitHub's schema, so an error inside them nulls the whole
+ * `pullRequest` around them — q<i>'s, while p<i> is read exactly as before (`readMerge`).
+ */
+const MERGE_FIELDS = [
+  'mergeStateStatus',
+  `latestOpinionatedReviews(first: ${REVIEWS_ASKED}, writersOnly: true) { totalCount nodes { state } }`,
+  `reviewThreads(first: ${THREADS_ASKED}) { totalCount nodes { isResolved } }`,
+  `baseRef { rules(first: ${RULES_ASKED}) { totalCount nodes { type parameters { __typename` +
+    ' ... on PullRequestParameters { requiredApprovingReviewCount requiredReviewThreadResolution }' +
+    ' ... on RequiredStatusChecksParameters { requiredStatusChecks { context } } } } } }',
+  'commits(last: 1) { nodes { commit { statusCheckRollup {' +
+    ` contexts(first: ${CONTEXTS_ASKED}) { totalCount nodes { __typename` +
+    ' ... on CheckRun { name } ... on StatusContext { context } } } } } } }',
+].join(' ');
+
+/**
+ * The `gh` arguments for one batch (1 to PR_BATCH_SIZE keys): `api graphql --hostname github.com`
  * (so `GH_HOST` or a configured enterprise host cannot send the question elsewhere), the query,
- * then one owner, repository and number variable per key. Values never appear inside the query text, so
- * nothing a key holds can change what is asked. Throws RangeError for an empty or oversized batch
- * (a bug of the caller: the query for no pull request is not valid GraphQL).
+ * then one owner, repository and number variable per key. Each key is asked about under two
+ * aliases on the same variables: `p<i>` (PULL_REQUEST_FIELDS, as before F32) and `q<i>`
+ * (MERGE_FIELDS). Values never appear inside the query text, so nothing a key holds can change
+ * what is asked. Throws RangeError for an empty or oversized batch (a bug of the caller: the query
+ * for no pull request is not valid GraphQL).
  */
 export function batchArgs(keys: readonly PrKey[]): string[] {
-  if (keys.length < 1 || keys.length > BATCH_SIZE) {
-    throw new RangeError(`a batch holds 1 to ${BATCH_SIZE} pull requests, not ${keys.length}`);
+  if (keys.length < 1 || keys.length > PR_BATCH_SIZE) {
+    throw new RangeError(`a batch holds 1 to ${PR_BATCH_SIZE} pull requests, not ${keys.length}`);
   }
   const declarations = keys
     .map((_, i) => `$o${i}: String!, $r${i}: String!, $n${i}: Int!`)
@@ -140,7 +178,8 @@ export function batchArgs(keys: readonly PrKey[]): string[] {
   const selections = keys
     .map(
       (_, i) =>
-        `p${i}: repository(owner: $o${i}, name: $r${i}) { pullRequest(number: $n${i}) { ${PULL_REQUEST_FIELDS} } }`,
+        `p${i}: repository(owner: $o${i}, name: $r${i}) { pullRequest(number: $n${i}) { ${PULL_REQUEST_FIELDS} } }` +
+        ` q${i}: repository(owner: $o${i}, name: $r${i}) { pullRequest(number: $n${i}) { ${MERGE_FIELDS} } }`,
     )
     .join(' ');
   const args = [
@@ -227,11 +266,281 @@ function rollupState(pullRequest: Record<string, unknown>): unknown {
   return isRecord(rollup) ? rollup['state'] : undefined;
 }
 
+// --- follow-up F32: what GitHub needs before it merges (MERGE_FIELDS, the q<i> part) -----------
+
+/** The base branch's rules as far as they were seen (`baseRules`). */
+interface Rules {
+  /** The largest `requiredApprovingReviewCount` among them; 0 for none. */
+  approvals: number;
+  /** One asks for resolved conversations. */
+  resolution: boolean;
+  /** The checks they require, by name. */
+  contexts: string[];
+  /** Every rule was seen and read: what none of them asks for is not asked. */
+  complete: boolean;
+}
+
+/** The q<i> part of one pull request (`readMerge`); each fact null (or false) when not known. */
+interface MergeFacts {
+  /** `mergeStateStatus` as GitHub spells it (`BLOCKED`, `CLEAN`, …). */
+  mergeState: string | null;
+  /** The writers' latest reviews: their approvals, whether one asks for changes, and whether every one was seen. */
+  reviews: { approved: number; changesRequested: boolean; complete: boolean } | null;
+  /** A review thread that is not resolved was seen. */
+  unresolved: boolean;
+  rules: Rules | null;
+  /** The names of every check the last commit has reported (none when its rollup is null); null when not all are known. */
+  reported: ReadonlySet<string> | null;
+}
+
 /**
- * One `pullRequest` object of the answer. A state this code does not know (GitHub added one) is a
- * failure, not a guess: a pull request that cannot be understood is never shown as closed.
+ * A connection `{ totalCount, nodes }` of the answer: its nodes, and whether they are all of it
+ * (`totalCount` at most their number, none of them null); null when it is no connection.
  */
-function readPullRequest(pullRequest: Record<string, unknown>, atNs: Ns): PrFetchResult {
+function connection(value: unknown): { nodes: unknown[]; complete: boolean } | null {
+  const nodes = isRecord(value) ? value['nodes'] : undefined;
+  if (!isRecord(value) || !Array.isArray(nodes)) {
+    return null;
+  }
+  const total = value['totalCount'];
+  return {
+    nodes,
+    complete: typeof total === 'number' && total <= nodes.length && nodes.every(isRecord),
+  };
+}
+
+function writerReviews(value: unknown): MergeFacts['reviews'] {
+  const seen = connection(value);
+  if (seen === null) {
+    return null;
+  }
+  const reviews = { approved: 0, changesRequested: false, complete: seen.complete };
+  for (const node of seen.nodes) {
+    const state = isRecord(node) ? node['state'] : undefined;
+    if (state === 'APPROVED') {
+      reviews.approved++;
+    } else if (state === 'CHANGES_REQUESTED') {
+      reviews.changesRequested = true;
+    } else if (typeof state !== 'string') {
+      reviews.complete = false;
+    }
+  }
+  return reviews;
+}
+
+function unresolvedThread(value: unknown): boolean {
+  const seen = connection(value);
+  return seen !== null && seen.nodes.some((node) => isRecord(node) && node['isResolved'] === false);
+}
+
+/**
+ * The rules of the base branch (`baseRef.rules`): the largest count of approvals a PULL_REQUEST
+ * rule needs, whether one (or a REQUIRED_REVIEW_THREAD_RESOLUTION rule) asks for resolved
+ * conversations, the contexts of the REQUIRED_STATUS_CHECKS rules. Rules of other types are
+ * passed by. A rule that cannot be read leaves them incomplete; null for no base branch or no list.
+ */
+function baseRules(baseRef: unknown): Rules | null {
+  const seen = isRecord(baseRef) ? connection(baseRef['rules']) : null;
+  if (seen === null) {
+    return null;
+  }
+  const rules: Rules = { approvals: 0, resolution: false, contexts: [], complete: seen.complete };
+  for (const node of seen.nodes) {
+    const type = isRecord(node) ? node['type'] : undefined;
+    const parameters = isRecord(node) ? node['parameters'] : undefined;
+    const params = isRecord(parameters) ? parameters : {};
+    if (typeof type !== 'string') {
+      rules.complete = false;
+    } else if (type === 'PULL_REQUEST') {
+      const count = params['requiredApprovingReviewCount'];
+      const resolution = params['requiredReviewThreadResolution'];
+      if (
+        params['__typename'] === 'PullRequestParameters' &&
+        typeof count === 'number' &&
+        Number.isSafeInteger(count) &&
+        count >= 0 &&
+        typeof resolution === 'boolean'
+      ) {
+        rules.approvals = Math.max(rules.approvals, count);
+        rules.resolution ||= resolution;
+      } else {
+        rules.complete = false;
+      }
+    } else if (type === 'REQUIRED_STATUS_CHECKS') {
+      const checks = params['requiredStatusChecks'];
+      if (params['__typename'] !== 'RequiredStatusChecksParameters' || !Array.isArray(checks)) {
+        rules.complete = false;
+        continue;
+      }
+      for (const check of checks as unknown[]) {
+        const name = isRecord(check) ? check['context'] : undefined;
+        if (typeof name === 'string') {
+          rules.contexts.push(name);
+        } else {
+          rules.complete = false;
+        }
+      }
+    } else if (type === 'REQUIRED_REVIEW_THREAD_RESOLUTION') {
+      rules.resolution = true;
+    }
+  }
+  return rules;
+}
+
+/**
+ * The names of the checks the last commit has reported: a check run's `name`, a commit status's
+ * `context`; none when its rollup is null (it reported nothing). Null when that is not known: no
+ * commit, a rollup or a context that cannot be read, or more contexts than were asked for.
+ */
+function reportedChecks(commits: unknown): ReadonlySet<string> | null {
+  const nodes = isRecord(commits) ? commits['nodes'] : undefined;
+  const node: unknown = Array.isArray(nodes) ? nodes[0] : undefined;
+  const commit = isRecord(node) ? node['commit'] : undefined;
+  if (!isRecord(commit)) {
+    return null;
+  }
+  const rollup = commit['statusCheckRollup'];
+  if (rollup === null) {
+    return new Set();
+  }
+  const seen = isRecord(rollup) ? connection(rollup['contexts']) : null;
+  if (seen === null || !seen.complete) {
+    return null;
+  }
+  const names = new Set<string>();
+  for (const context of seen.nodes) {
+    const kind = isRecord(context) ? context['__typename'] : undefined;
+    const field = kind === 'CheckRun' ? 'name' : kind === 'StatusContext' ? 'context' : null;
+    const name = field !== null && isRecord(context) ? context[field] : undefined;
+    if (typeof name !== 'string') {
+      return null;
+    }
+    names.add(name);
+  }
+  return names;
+}
+
+/**
+ * The q<i> part of the answer (MERGE_FIELDS). Null when it is not there (no alias, a null
+ * repository or pull request, an error at q<i> or its pull request). A part that an error of the
+ * answer lies under (path q<i>, pullRequest, <part>, …) is not used at all: a value GitHub nulled
+ * by an error (a rollup, a list) would else read as a fact.
+ */
+function readMerge(
+  data: Record<string, unknown>,
+  errors: unknown,
+  alias: string,
+): MergeFacts | null {
+  const repository = data[alias];
+  const pullRequest = isRecord(repository) ? repository['pullRequest'] : undefined;
+  if (!isRecord(pullRequest)) {
+    return null;
+  }
+  const hit = new Set<unknown>();
+  for (const entry of Array.isArray(errors) ? (errors as unknown[]) : []) {
+    const path = isRecord(entry) ? entry['path'] : undefined;
+    if (Array.isArray(path) && path[0] === alias) {
+      if (path.length <= 2) {
+        return null;
+      }
+      hit.add(path[2]);
+    }
+  }
+  const part = (name: string): unknown => (hit.has(name) ? undefined : pullRequest[name]);
+  const mergeState = part('mergeStateStatus');
+  return {
+    mergeState: typeof mergeState === 'string' ? mergeState : null,
+    reviews: writerReviews(part('latestOpinionatedReviews')),
+    unresolved: unresolvedThread(part('reviewThreads')),
+    rules: baseRules(part('baseRef')),
+    reported: reportedChecks(part('commits')),
+  };
+}
+
+/**
+ * The checks with F32's facts: the rollup's (failing and pending stay), else pending when a check
+ * the rules require is not among the reported ones — only when every reported one is known.
+ */
+function checksWith(rollup: PrChecks | null, merge: MergeFacts | null): PrChecks | null {
+  if (rollup === 'failing' || rollup === 'pending' || merge?.rules == null) {
+    return rollup;
+  }
+  const { rules, reported } = merge;
+  if (reported === null) {
+    return rollup;
+  }
+  return rules.contexts.some((name) => !reported.has(name)) ? 'pending' : rollup;
+}
+
+/**
+ * The stored review (design 7.3, F32): the first that applies of —
+ * changes requested (the decision, or a writer's latest review while the decision is not
+ * APPROVED); review required (the decision, or the rules need more approvals than the writers
+ * gave); unresolved comments (the rules ask for resolved conversations and a thread is not);
+ * blocked (GitHub's merge state is BLOCKED while the checks neither fail nor are pending and it is
+ * no draft: a reason not modelled here, code owners, a merge queue, a deployment); approved (the
+ * decision, or the rules need N ≥ 1 and N writers approved, every rule seen); not required (no
+ * decision and every rule seen needs no approval); else the decision as before F32 (null when
+ * nothing better is known). Without the q<i> part, the decision alone, as before.
+ */
+function reviewWith(
+  decision: unknown,
+  merge: MergeFacts | null,
+  checks: PrChecks | null,
+  draft: boolean,
+): PrReview | null {
+  const classic = reviewOf(decision);
+  if (merge === null) {
+    return classic;
+  }
+  const { reviews, rules } = merge;
+  if (
+    classic === 'changes-requested' ||
+    (reviews?.changesRequested === true && classic !== 'approved')
+  ) {
+    return 'changes-requested';
+  }
+  if (
+    classic === 'review-required' ||
+    (rules !== null && reviews?.complete === true && reviews.approved < rules.approvals)
+  ) {
+    return 'review-required';
+  }
+  if (rules?.resolution === true && merge.unresolved) {
+    return 'unresolved-comments';
+  }
+  if (merge.mergeState === 'BLOCKED' && checks !== 'failing' && checks !== 'pending' && !draft) {
+    return 'blocked';
+  }
+  if (classic === 'approved') {
+    return 'approved';
+  }
+  if (
+    rules?.complete === true &&
+    rules.approvals > 0 &&
+    reviews !== null &&
+    reviews.approved >= rules.approvals
+  ) {
+    return 'approved';
+  }
+  if (decision === null && rules?.complete === true && rules.approvals === 0) {
+    return 'not-required';
+  }
+  return classic;
+}
+
+/**
+ * One `pullRequest` object of the answer (p<i>), with the q<i> part of the same pull request
+ * (`merge`, null when there is none). A state this code does not know (GitHub added one) is a
+ * failure, not a guess: a pull request that cannot be understood is never shown as closed. Only
+ * p<i> can fail it: what q<i> holds, or lacks, only changes the review and checks of an open one
+ * (a draft included); a merged or closed one is read as before F32.
+ */
+function readPullRequest(
+  pullRequest: Record<string, unknown>,
+  atNs: Ns,
+  merge: MergeFacts | null,
+): PrFetchResult {
   const title = pullRequest['title'];
   if (typeof title !== 'string') {
     return { ok: false, atNs, error: 'GitHub answered without a title' };
@@ -240,13 +549,16 @@ function readPullRequest(pullRequest: Record<string, unknown>, atNs: Ns): PrFetc
   if (state === null) {
     return { ok: false, atNs, error: 'GitHub answered with a pull request state not known here' };
   }
+  // What GitHub waits for before it merges means nothing once it is merged or closed.
+  const facts = state === 'merged' || state === 'closed' ? null : merge;
+  const checks = checksWith(checksOf(rollupState(pullRequest)), facts);
   return {
     ok: true,
     atNs,
     title,
     state,
-    review: reviewOf(pullRequest['reviewDecision']),
-    checks: checksOf(rollupState(pullRequest)),
+    review: reviewWith(pullRequest['reviewDecision'], facts, checks, state === 'draft'),
+    checks,
   };
 }
 
@@ -285,9 +597,10 @@ function errorFor(errors: unknown, alias: string): string | null {
  *   could not read" (stderr is not used: gh succeeded, and a line on it may concern one pull
  *   request only); otherwise the first line of stderr, else "gh exited <code>" ("gh was killed by a
  *   signal" when there is no code).
- * - otherwise per alias p<i>: a `pullRequest` object → ok (see `readPullRequest`); null or
- *   missing → failed with the message of the `errors[]` entry whose path[0] is p<i>, else of the
- *   first entry with no path, else "not found".
+ * - otherwise per alias p<i>: a `pullRequest` object → ok (see `readPullRequest`, with q<i>'s part
+ *   as `readMerge` reads it); null or missing → failed with the message of the `errors[]` entry
+ *   whose path[0] is p<i>, else of the first entry with no path, else "not found". An error of
+ *   q<i> never fails a pull request and is never its message (F32).
  * `gh` exits non-zero when some aliases fail; the per-alias data is still used.
  */
 export function parseBatch(
@@ -322,7 +635,7 @@ export function parseBatch(
       const repository = data[alias];
       const pullRequest = isRecord(repository) ? repository['pullRequest'] : undefined;
       const outcome: PrFetchResult = isRecord(pullRequest)
-        ? readPullRequest(pullRequest, atNs)
+        ? readPullRequest(pullRequest, atNs, readMerge(data, answer['errors'], `q${i}`))
         : { ok: false, atNs, error: errorFor(answer['errors'], alias) ?? 'not found' };
       return [key.url, outcome];
     }),
@@ -393,7 +706,7 @@ async function fetchBatch(
 
 /**
  * Fetches exactly the given pull requests (urls of existing prs rows; others are ignored, and a
- * repeated url is fetched once) in batches of BATCH_SIZE through `gh api graphql`, one batch after
+ * repeated url is fetched once) in batches of PR_BATCH_SIZE through `gh api graphql`, one batch after
  * the other, and saves every result with store.savePrResult. A failure of `gh` is a failed result
  * saved on the rows, never an exception; there is no call at all for an empty list.
  *
@@ -423,8 +736,8 @@ export async function fetchPrs(
   let fetched = 0;
   let failed = 0;
   const stopped = (): boolean => signal?.aborted === true;
-  for (let start = 0; start < keys.length && !stopped(); start += BATCH_SIZE) {
-    const results = await fetchBatch(deps, keys.slice(start, start + BATCH_SIZE), signal);
+  for (let start = 0; start < keys.length && !stopped(); start += PR_BATCH_SIZE) {
+    const results = await fetchBatch(deps, keys.slice(start, start + PR_BATCH_SIZE), signal);
     if (stopped()) {
       break; // the caller has gone: what arrived is not wanted, not even as a failure
     }
@@ -680,7 +993,7 @@ export async function fetchIssueStatuses(
   return stopped() ? new Map() : results;
 }
 
-/** 7.3 chip, worst first. */
+/** 7.3 chip, worst first (F32: unresolved comments and blocked after review required; open and checks passing before approved, green). */
 export const CHIP_ORDER = [
   'cant-read',
   'unfetched',
@@ -688,7 +1001,11 @@ export const CHIP_ORDER = [
   'changes-requested',
   'checks-pending',
   'review-required',
+  'unresolved-comments',
+  'blocked',
   'draft',
+  'open',
+  'checks-passing',
   'approved-green',
   'merged',
   'closed',
@@ -699,8 +1016,10 @@ export type ChipLevel = (typeof CHIP_ORDER)[number];
  * Level of one pull request: error non-null → cant-read; state null (never fetched, D11) →
  * unfetched; merged → merged; closed → closed; otherwise (open or draft) the first that applies
  * of: checks failing → checks-failing; review changes-requested → changes-requested; checks
- * pending → checks-pending; review review-required → review-required; draft → draft; else
- * approved-green.
+ * pending → checks-pending; review review-required → review-required; review unresolved-comments
+ * → unresolved-comments; draft → draft; review blocked → blocked; review not-required → checks
+ * passing → checks-passing, else open; else (approved, or not known: a row read before F32, an
+ * answer without its facts) approved-green.
  */
 export function prLevel(pr: PrRow): ChipLevel {
   if (pr.error !== null) {
@@ -724,7 +1043,19 @@ export function prLevel(pr: PrRow): ChipLevel {
   if (pr.review === 'review-required') {
     return 'review-required';
   }
-  return pr.state === 'draft' ? 'draft' : 'approved-green';
+  if (pr.review === 'unresolved-comments') {
+    return 'unresolved-comments';
+  }
+  if (pr.state === 'draft') {
+    return 'draft';
+  }
+  if (pr.review === 'blocked') {
+    return 'blocked';
+  }
+  if (pr.review === 'not-required') {
+    return pr.checks === 'passing' ? 'checks-passing' : 'open';
+  }
+  return 'approved-green';
 }
 
 /** The worst level among `prs` and their count; null for an empty list. */
