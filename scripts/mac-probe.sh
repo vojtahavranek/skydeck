@@ -13,7 +13,7 @@
 #
 # It never runs /usr/bin/python3 or /usr/bin/git when they are only Apple's stubs, which open the
 # "install the developer tools" window. Every program it starts is ended after five seconds at the
-# latest (where perl exists, as it does on every Mac).
+# latest (where perl exists; macOS has shipped it so far).
 #
 # Its output is meant to be pasted into a public pull request. It shows no value as it is but
 # version numbers, counts, lengths, yes or no, and words from fixed lists; everything else is
@@ -217,6 +217,10 @@ for tool in sysctl ps vm_stat lsof open; do
     say "$tool" "not found"
   fi
 done
+if have vm_stat; then
+  # The form of its first lines, for a reading of the memory that is free.
+  limited vm_stat 2>/dev/null </dev/null | head -n 3 | mask | sed 's/^/vm_stat, masked: /'
+fi
 
 section "time"
 masked "date +%s%N" date +%s%N
@@ -337,9 +341,11 @@ sub mask {
 }
 # A fixed word such as idle or cli: shown only when it is one short lower-case word; else masked.
 sub word { my $s = shift; return $s =~ /\A[a-z-]{1,20}\z/ ? $s : mask($s); }
+# What ps says of a process, read in UTC (as skydeck reads it) or, with "local", in the local time.
 sub ps {
-  my ($what, $pid) = @_;
-  my $o = `LC_ALL=C TZ=UTC ps -ww -o $what= -p $pid 2>/dev/null`;
+  my ($what, $pid, $local) = @_;
+  my $zone = $local ? "" : "TZ=UTC ";
+  my $o = `LC_ALL=C ${zone}ps -ww -o $what= -p $pid 2>/dev/null`;
   $o = "" if !defined $o;
   $o =~ s/^\s+|\s+$//g;
   return $o;
@@ -398,6 +404,7 @@ for my $f (@files) {
   print "  ps lstart of its process: [", mask($start), "]\n";
   if (defined $j->{procStart} && !ref($j->{procStart})) {
     print "  procStart equals ps lstart: ", ($j->{procStart} eq $start ? "YES" : "NO"), "\n";
+    print "  procStart equals ps lstart in local time: ", ($j->{procStart} eq ps("lstart", $pid, 1) ? "YES" : "NO"), "\n";
   }
   my $comm = ps("comm", $pid); $comm =~ s{.*/}{};
   my @words = split(/\s+/, ps("command", $pid));

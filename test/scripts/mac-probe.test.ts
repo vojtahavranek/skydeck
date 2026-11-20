@@ -47,6 +47,9 @@ const SECRETS = [
   '0123456789',
   'Nov  5',
   '09:12:33',
+  '08:01:02',
+  '09:01:02',
+  '123456',
   '10:00:01',
   '1763632801',
   '1762333953',
@@ -128,7 +131,9 @@ function mac(
       'case $pid in',
       `  ${OWN_PID}) ppid=1 start='${OWN_START}' tty=ttys003 comm=${localBin}/claude`,
       `    command="claude --append-system-prompt be terse for ACME --model opus the secret merger plan" ;;`,
+      // In UTC (TZ=UTC, as skydeck asks) and in the made-up Mac's own time, an hour later.
       `  ${OTHER_PID}) ppid=1 start='Wed Nov  4 08:01:02 2026' tty=ttys009 comm=node`,
+      `    if [ "\${TZ-}" != UTC ]; then start='Wed Nov  4 09:01:02 2026'; fi`,
       `    command="node ${localBin}/claude --resume ${OTHER_SESSION}" ;;`,
       `  *) ppid=${options.parentOf} start='Fri Nov 20 10:00:01 2026' tty=ttys004 comm=sh`,
       `    command="sh /Users/${USER}/skydeck/scripts/mac-probe.sh" ;;`,
@@ -149,7 +154,12 @@ function mac(
     'date',
     'case $1 in +%s%N) echo 1763632801N ;; -u) echo 2026-11-20T10:00:01Z ;; *) exit 1 ;; esac',
   );
-  for (const name of ['vm_stat', 'lsof', 'open']) {
+  standIn(
+    s.bin,
+    'vm_stat',
+    'echo "Mach Virtual Memory Statistics: (page size of 16384 bytes)"; echo "Pages free:      123456."; echo "Pages active:    7890."; echo "Pages inactive:  4242."',
+  );
+  for (const name of ['lsof', 'open']) {
     standIn(s.bin, name, 'exit 0');
   }
   standIn(nvm, 'node', 'case $1 in --version) echo v24.12.0 ;; -e) echo yes ;; esac');
@@ -252,7 +262,7 @@ function liveFiles(claudeFolder: string): void {
       pid: OTHER_PID,
       sessionId: OTHER_SESSION,
       cwd: `/Users/${USER}/Přemysl merger`,
-      procStart: '1762333953',
+      procStart: 'Wed Nov  4 09:01:02 2026',
       kind: 'interactive',
       entrypoint: 'cli',
       name: 'Merger memo, Jane',
@@ -389,6 +399,12 @@ describe('scripts/mac-probe.sh', () => {
       assert.match(ran.stdout, /^ {2}startedAt \(not text\): \[9999999999999\]$/m);
       assert.match(ran.stdout, /^ {2}status \(text\): \[busy\]$/m);
       assert.match(ran.stdout, /^ {2}procStart equals ps lstart: YES$/m);
+      assert.match(ran.stdout, /^ {2}procStart equals ps lstart in local time: YES$/m);
+      assert.match(
+        ran.stdout,
+        /^vm_stat, masked: Aaaa Aaaaaaa Aaaaaa Aaaaaaaaaa: \(aaaa aaaa aa 99999 aaaaa\)$/m,
+      );
+      assert.match(ran.stdout, /^vm_stat, masked: Aaaaa aaaa: +999999\.$/m);
       assert.match(ran.stdout, /^ {2}CLAUDE_PID is its process number: YES$/m);
       assert.match(
         ran.stdout,
@@ -429,7 +445,11 @@ describe('scripts/mac-probe.sh', () => {
       "no Claude Code among this script's parents: the newest three live-session files",
     );
     assert.equal(ran.stdout.match(/^file \d+, /gm)?.length, 2);
-    assert.match(ran.stdout, /^ {2}procStart equals ps lstart: NO$/m);
+    // The other session's file holds its start in local time: told apart from UTC.
+    assert.match(
+      ran.stdout,
+      /^ {2}procStart equals ps lstart: NO\n {2}procStart equals ps lstart in local time: YES$/m,
+    );
   });
 
   test('a program that does not answer is ended after five seconds', (t) => {
