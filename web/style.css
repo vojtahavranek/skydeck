@@ -166,7 +166,8 @@ kbd {
    own style sheet adds `--tint-bg`, the faint background, and keeps its own grey without a tint.
    A level not named here (draft, open, closed, not fetched, can't read) or none sets nothing: it
    stays as it is. `:where()` adds no specificity, so each element's own rules decide as before.
-   F32: unresolved comments and blocked take review required's tint, checks passing approved's. */
+   F32: unresolved comments and blocked take review required's tint, checks passing approved's,
+   a required check that has not reported checks pending's (its words are pending's too). */
 :where(.row-chip, .header-chip, .header-pr-state, .edit-pr-state, .switcher-chip) {
   &[data-level='checks-failing'],
   &[data-level='changes-requested'] {
@@ -174,7 +175,8 @@ kbd {
     --tint-bg: var(--pr-red-bg);
     color: var(--tint);
   }
-  &[data-level='checks-pending'] {
+  &[data-level='checks-pending'],
+  &[data-level='checks-not-reported'] {
     --tint: var(--pr-amber);
     --tint-bg: var(--pr-amber-bg);
     color: var(--tint);

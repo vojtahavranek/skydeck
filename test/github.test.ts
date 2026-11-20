@@ -642,14 +642,16 @@ describe('fetchPrs and refreshPrs', () => {
 
   test('a batch that timed out keeps the old status, records the attempt and counts as failed', async (t) => {
     let call = 0;
+    // F32: a batch that timed out is asked once more with the query of before; that times out too.
     const { store, runner, deps } = deck(t, (c) =>
-      ++call === 1 ? runResult({ code: null, timedOut: true }) : answerAll()(c),
+      ++call <= 2 ? runResult({ code: null, timedOut: true }) : answerAll()(c),
     );
     seed(store, 1, 15, { state: 'open', ageMin: 10, review: 'approved', checks: 'passing' });
     const outcome = await refreshPrs(deps, { force: false, refreshMinutes: 5 });
     assert.deepEqual(outcome, { fetched: 5, failed: 10 });
-    const [first, second] = runner.calls;
-    assert.ok(first && second);
+    const [first, again, second] = runner.calls;
+    assert.ok(first && again && second);
+    assert.deepEqual(numbersOf(again), numbersOf(first));
     for (const number of numbersOf(first)) {
       const failed = row(store, number);
       assert.equal(failed.state, 'open');
@@ -673,7 +675,7 @@ describe('fetchPrs and refreshPrs', () => {
     seed(store, 1, 15);
     const outcome = await refreshPrs(deps, { force: false, refreshMinutes: 5 });
     assert.deepEqual(outcome, { fetched: 0, failed: 15 });
-    assert.equal(runner.calls.length, 2);
+    assert.equal(runner.calls.length, 4, 'F32: each batch is asked once more after HTTP 502');
     assert.ok(store.prs().every((p) => p.error === 'HTTP 502' && p.state === null));
   });
 
@@ -909,14 +911,15 @@ describe('refreshPrs: the pace of an automatic refresh, and the explicit one', (
   test('a pull request that keeps failing is asked about at the pace of the refresh age, not at every refresh', async (t) => {
     const { store, clock, runner, deps } = deck(t, timedOut);
     seed(store, 1, 1);
+    // F32: an attempt that times out is asked once more with the query of before: two calls.
     await refreshPrs(deps, { force: false, refreshMinutes: 5 });
-    assert.equal(runner.calls.length, 1, 'never tried: asked');
+    assert.equal(runner.calls.length, 2, 'never tried: asked');
     clock.advanceMs(4 * 60_000);
     await refreshPrs(deps, { force: false, refreshMinutes: 5 });
-    assert.equal(runner.calls.length, 1, 'the last attempt was 4 minutes ago');
+    assert.equal(runner.calls.length, 2, 'the last attempt was 4 minutes ago');
     clock.advanceMs(2 * 60_000);
     await refreshPrs(deps, { force: false, refreshMinutes: 5 });
-    assert.equal(runner.calls.length, 2, 'the last attempt was 6 minutes ago');
+    assert.equal(runner.calls.length, 4, 'the last attempt was 6 minutes ago');
   });
 
   test('with session ids, only the pull requests those sessions have attached are asked about', async (t) => {
@@ -1203,8 +1206,9 @@ describe('chipFor', () => {
         'checks-pending',
         'review-required',
         'unresolved-comments',
-        'blocked',
         'draft',
+        'checks-not-reported',
+        'blocked',
         'open',
         'checks-passing',
         'approved-green',
@@ -1220,8 +1224,9 @@ describe('chipFor', () => {
       at({ checks: 'pending' }),
       at({ review: 'review-required' }),
       at({ review: 'unresolved-comments' }),
-      at({ review: 'blocked' }),
       pr({ state: 'draft' }),
+      at({ checks: 'not-reported' }),
+      at({ review: 'blocked' }),
       at({ review: 'not-required' }),
       at({ review: 'not-required', checks: 'passing' }),
       at({}),

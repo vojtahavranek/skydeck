@@ -223,10 +223,6 @@ function firstLine(text: string): string | null {
   return null;
 }
 
-function failAll(keys: readonly PrKey[], atNs: Ns, error: string): Map<string, PrFetchResult> {
-  return new Map(keys.map((key) => [key.url, { ok: false, atNs, error }]));
-}
-
 function reviewOf(decision: unknown): PrReview | null {
   switch (decision) {
     case 'APPROVED':
@@ -516,8 +512,8 @@ function checksWith(rollup: PrChecks | null, merge: MergeFacts | null): PrChecks
 /**
  * The stored review (design 7.3, F32): the first that applies of —
  * changes requested (the decision, or a writer's latest review while the decision is not
- * APPROVED); review required (the decision, or the rules need more approvals than the writers
- * gave); unresolved comments (the rules ask for resolved conversations and a thread is not);
+ * APPROVED); review required (the decision, or, without one, the rules need more approvals than
+ * the writers gave: ruled from real answers, a decision GitHub gives wins over the count); unresolved comments (the rules ask for resolved conversations and a thread is not);
  * blocked (GitHub's merge state is BLOCKED while the checks pass or there are none, and it is no
  * draft: a reason not modelled here, code owners, a merge queue, a deployment); approved (the
  * decision, or the rules need N ≥ 1 and N writers approved, every rule seen); not required (no
@@ -543,7 +539,10 @@ function reviewWith(
   }
   if (
     classic === 'review-required' ||
-    (rules !== null && reviews?.complete === true && reviews.approved < rules.approvals)
+    (classic === null &&
+      rules !== null &&
+      reviews?.complete === true &&
+      reviews.approved < rules.approvals)
   ) {
     return 'review-required';
   }
@@ -571,6 +570,17 @@ function reviewWith(
 }
 
 /**
+ * What one pull request's answer gives: its result, and (ruled) whether it keeps what was stored
+ * about blocked — when GitHub's merge state is UNKNOWN (not worked out yet: it says nothing either
+ * way) and the review would be blocked had it said BLOCKED. `fetchPrs` then keeps a stored
+ * `blocked`; every other state decides anew.
+ */
+interface Read {
+  result: PrFetchResult;
+  keepsBlocked: boolean;
+}
+
+/**
  * One `pullRequest` object of the answer (p<i>), with the q<i> part of the same pull request
  * (`merge`, null when there is none). A state this code does not know (GitHub added one) is a
  * failure, not a guess: a pull request that cannot be understood is never shown as closed. Only
@@ -581,25 +591,37 @@ function readPullRequest(
   pullRequest: Record<string, unknown>,
   atNs: Ns,
   merge: MergeFacts | null,
-): PrFetchResult {
+): Read {
   const title = pullRequest['title'];
   if (typeof title !== 'string') {
-    return { ok: false, atNs, error: 'GitHub answered without a title' };
+    return {
+      result: { ok: false, atNs, error: 'GitHub answered without a title' },
+      keepsBlocked: false,
+    };
   }
   const state = stateOf(pullRequest['state'], pullRequest['isDraft']);
   if (state === null) {
-    return { ok: false, atNs, error: 'GitHub answered with a pull request state not known here' };
+    const error = 'GitHub answered with a pull request state not known here';
+    return { result: { ok: false, atNs, error }, keepsBlocked: false };
   }
   // What GitHub waits for before it merges means nothing once it is merged or closed.
   const facts = state === 'merged' || state === 'closed' ? null : merge;
   const checks = checksWith(checksOf(rollupState(pullRequest)), facts);
+  const decision = pullRequest['reviewDecision'];
+  const draft = state === 'draft';
+  const keepsBlocked =
+    facts?.mergeState === 'UNKNOWN' &&
+    reviewWith(decision, { ...facts, mergeState: 'BLOCKED' }, checks, draft) === 'blocked';
   return {
-    ok: true,
-    atNs,
-    title,
-    state,
-    review: reviewWith(pullRequest['reviewDecision'], facts, checks, state === 'draft'),
-    checks,
+    result: {
+      ok: true,
+      atNs,
+      title,
+      state,
+      review: reviewWith(decision, facts, checks, draft),
+      checks,
+    },
+    keepsBlocked,
   };
 }
 
@@ -649,11 +671,23 @@ export function parseBatch(
   result: RunResult,
   atNs: Ns,
 ): Map<string, PrFetchResult> {
+  return new Map([...parseReads(keys, result, atNs)].map(([url, read]) => [url, read.result]));
+}
+
+/** A result of every key, none of which keeps anything (`Read`). */
+function failReads(keys: readonly PrKey[], atNs: Ns, error: string): Map<string, Read> {
+  return new Map(
+    keys.map((key) => [key.url, { result: { ok: false, atNs, error }, keepsBlocked: false }]),
+  );
+}
+
+/** parseBatch with what each pull request keeps (`Read`), for fetchPrs. */
+function parseReads(keys: readonly PrKey[], result: RunResult, atNs: Ns): Map<string, Read> {
   if (result.timedOut) {
-    return failAll(keys, atNs, `gh timed out after ${GH_TIMEOUT_MS / 1000} s`);
+    return failReads(keys, atNs, `gh timed out after ${GH_TIMEOUT_MS / 1000} s`);
   }
   if (result.notFound) {
-    return failAll(keys, atNs, 'gh is not installed');
+    return failReads(keys, atNs, 'gh is not installed');
   }
   let answer: unknown;
   try {
@@ -665,19 +699,20 @@ export function parseBatch(
   if (!isRecord(answer) || !isRecord(data)) {
     if (result.code === 0) {
       // gh succeeded, so a line on stderr is no explanation, and may be about one pull request only.
-      return failAll(keys, atNs, 'gh returned output skydeck could not read');
+      return failReads(keys, atNs, 'gh returned output skydeck could not read');
     }
     const reason = result.code === null ? 'gh was killed by a signal' : `gh exited ${result.code}`;
-    return failAll(keys, atNs, firstLine(result.stderr) ?? reason);
+    return failReads(keys, atNs, firstLine(result.stderr) ?? reason);
   }
   return new Map(
     keys.map((key, i) => {
       const alias = `p${i}`;
       const repository = data[alias];
       const pullRequest = isRecord(repository) ? repository['pullRequest'] : undefined;
-      const outcome: PrFetchResult = isRecord(pullRequest)
+      const error = errorFor(answer['errors'], alias) ?? 'not found';
+      const outcome: Read = isRecord(pullRequest)
         ? readPullRequest(pullRequest, atNs, readMerge(data, answer['errors'], `q${i}`))
-        : { ok: false, atNs, error: errorFor(answer['errors'], alias) ?? 'not found' };
+        : { result: { ok: false, atNs, error }, keepsBlocked: false };
       return [key.url, outcome];
     }),
   );
@@ -757,17 +792,38 @@ function rejectedQuery(result: RunResult): boolean {
 }
 
 /**
+ * F32 (ruled): a batch that ran out of time — skydeck's own timeout, or GitHub's HTTP 502 or 504
+ * (gh names the status on its stderr; the answer has no `data`) — is asked once more too: the
+ * query of before needs much less of GitHub's time.
+ */
+function outOfTime(result: RunResult): boolean {
+  if (result.timedOut) {
+    return true;
+  }
+  if (result.notFound || !/\bHTTP 50[24]\b/.test(result.stderr)) {
+    return false;
+  }
+  try {
+    const answer: unknown = JSON.parse(result.stdout);
+    return !(isRecord(answer) && isRecord(answer['data']));
+  } catch {
+    return true;
+  }
+}
+
+/**
  * One `gh` call for one batch. A runner that rejects (gh not executable, say) fails the batch.
  * F32 (ruled), the one second request: when GitHub rejects the query as a whole
- * (`rejectedQuery`), the batch is asked once more with the query of before F32 (same variables,
- * timeout and environment) and read as before — never worse than before, after a schema change
- * too. Not when the signal has fired meanwhile.
+ * (`rejectedQuery`) or the batch ran out of time (`outOfTime`), it is asked once more with the
+ * query of before F32 (same variables, timeout and environment) and read as before — never worse
+ * than before, after a schema change too. Never more than once a batch, and not when the signal
+ * has fired meanwhile.
  */
 async function fetchBatch(
   deps: Deps,
   keys: readonly PrKey[],
   signal: AbortSignal | undefined,
-): Promise<Map<string, PrFetchResult>> {
+): Promise<Map<string, Read>> {
   const options: RunOptions = { timeoutMs: GH_TIMEOUT_MS, env: ghEnvironment(deps.env) };
   if (signal !== undefined) {
     options.signal = signal;
@@ -782,12 +838,16 @@ async function fetchBatch(
     }
   };
   let result = await ask(batchArgs(keys));
-  if (typeof result !== 'string' && rejectedQuery(result) && signal?.aborted !== true) {
+  if (
+    typeof result !== 'string' &&
+    (rejectedQuery(result) || outOfTime(result)) &&
+    signal?.aborted !== true
+  ) {
     result = await ask(queryArgs(keys, false));
   }
   return typeof result === 'string'
-    ? failAll(keys, deps.clock.nowNs(), result)
-    : parseBatch(keys, result, deps.clock.nowNs());
+    ? failReads(keys, deps.clock.nowNs(), result)
+    : parseReads(keys, result, deps.clock.nowNs());
 }
 
 /**
@@ -830,12 +890,14 @@ export async function fetchPrs(
     // The transaction is synchronous: it holds no lock while `gh` is running.
     deps.store.transaction(() => {
       const current = new Map(deps.store.prs().map((row) => [row.url, row]));
-      for (const [url, result] of results) {
+      for (const [url, { result, keepsBlocked }] of results) {
         const row = current.get(url);
         if (row === undefined || isFinal(row)) {
           continue;
         }
-        deps.store.savePrResult(url, result);
+        // Ruled: GitHub's merge state UNKNOWN says nothing either way, so a stored `blocked` stays.
+        const kept = keepsBlocked && result.ok && row.review === 'blocked';
+        deps.store.savePrResult(url, kept ? { ...result, review: 'blocked' } : result);
         if (result.ok) {
           fetched++;
         } else {
@@ -1079,7 +1141,11 @@ export async function fetchIssueStatuses(
   return stopped() ? new Map() : results;
 }
 
-/** 7.3 chip, worst first (F32: unresolved comments and blocked after review required; open and checks passing before approved, green). */
+/**
+ * 7.3 chip, worst first: the order of one pull request's line (`prLevel`; ruled for F32), so that
+ * the chip of several follows it. `checks-not-reported` has the words and the tint of
+ * `checks-pending`; open and checks passing come before approved, green.
+ */
 export const CHIP_ORDER = [
   'cant-read',
   'unfetched',
@@ -1088,8 +1154,9 @@ export const CHIP_ORDER = [
   'checks-pending',
   'review-required',
   'unresolved-comments',
-  'blocked',
   'draft',
+  'checks-not-reported',
+  'blocked',
   'open',
   'checks-passing',
   'approved-green',
@@ -1105,7 +1172,7 @@ export type ChipLevel = (typeof CHIP_ORDER)[number];
  * pending (the rollup's: checks running) → checks-pending; review review-required →
  * review-required; review unresolved-comments → unresolved-comments; draft → draft; checks
  * not-reported (a required check has not reported; ruled: after the review and the draft) →
- * checks-pending; review blocked → blocked; review not-required → checks passing →
+ * checks-not-reported; review blocked → blocked; review not-required → checks passing →
  * checks-passing, else open; else (approved, or not known: a row read before F32, an answer
  * without its facts) approved-green.
  */
@@ -1138,7 +1205,7 @@ export function prLevel(pr: PrRow): ChipLevel {
     return 'draft';
   }
   if (pr.checks === 'not-reported') {
-    return 'checks-pending';
+    return 'checks-not-reported';
   }
   if (pr.review === 'blocked') {
     return 'blocked';

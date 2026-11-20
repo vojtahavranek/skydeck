@@ -2498,8 +2498,9 @@ interactive list: open and finished pull requests are counted apart.
   one that most needs the user, in design 7.3's order without merged and closed: can't read
   (`can't read`), not fetched (`not fetched`), checks failing (`failing`), changes requested
   (`changes`), checks pending (`pending`), review required (`review`), unresolved comments
-  (`comments`), blocked (`blocked`), draft (`draft`), open (`open`), checks passing (`green`),
-  approved and green (`approved`); what the four that follow-up F32 added mean: design 7.3.
+  (`comments`), draft (`draft`), a required check not reported (`pending`), blocked (`blocked`),
+  open (`open`), checks passing (`green`), approved and green (`approved`); what the five that
+  follow-up F32 added mean: design 7.3.
   After it `+<n>` for the merged ones, when there are any: in the chip's
   tint (below), dim only on a grey chip. Closed ones are not counted.
 - **With nothing open:** `<n> merged` (in merged's tint) when any is merged, else `closed` (dim);
@@ -2543,7 +2544,7 @@ header; the dialog; the switcher and its highlighted item), in both schemes
 | State | Tint |
 |---|---|
 | checks failing (`failing`), changes requested (`changes`) | red |
-| checks pending (`pending`) | amber |
+| checks pending (`pending`), a required check not reported (`pending`) | amber |
 | review required (`review`), unresolved comments (`comments`), blocked (`blocked`) | blue |
 | approved and green (`approved`), checks passing (`green`) | green |
 | merged (`3 merged`, a merged line of the dialog) | purple |
@@ -2559,7 +2560,7 @@ which hold in the light scheme, the dark one and the forced themes alike).
 | Category | Tint | The pull requests' level of that tint |
 |---|---|---|
 | `blocked` | red (`--pr-red`) | checks failing, changes requested |
-| `review` | amber (`--pr-amber`) | checks pending |
+| `review` | amber (`--pr-amber`) | checks pending, a required check not reported |
 | `doing` | blue (`--pr-blue`) | review required, unresolved comments, blocked |
 | `done` | green (`--pr-green`) | approved and green, checks passing |
 | `todo`, `closed`, none, or a word the page does not know | grey (`--dim`), as a draft or a closed pull request's chip | draft, open, closed, not fetched, can't read |

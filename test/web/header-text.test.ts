@@ -653,6 +653,7 @@ describe('F32: the new levels in the header and in the dialog (S2 12.5, D13)', (
     ['blocked', 'blocked', 'blocked'],
     ['open', 'open', 'open'],
     ['checks-passing', 'green', 'checks passing'],
+    ['checks-not-reported', 'pending', 'checks pending'],
   ] as const;
 
   test("the header's line says the chip's words, the dialog's line its own, with the age", () => {

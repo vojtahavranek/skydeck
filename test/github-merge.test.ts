@@ -299,7 +299,11 @@ describe('F32: the bug, and each level alone', () => {
     });
     const result = parseOne(answer(basics(null, 'SUCCESS'), q));
     assert.deepEqual(result.ok && [result.review, result.checks], ['approved', 'not-reported']);
-    assert.equal(prLevel(rowOf(result)), 'checks-pending', 'never approved-green, and not blocked');
+    assert.equal(
+      prLevel(rowOf(result)),
+      'checks-not-reported',
+      'never approved-green, and not blocked',
+    );
   });
 
   test('ruled: a rollup that says PENDING (checks running) still comes before review required', () => {
@@ -323,9 +327,16 @@ describe('F32: the bug, and each level alone', () => {
       'unresolved-comments',
     );
     assert.equal(at(basics(null, 'SUCCESS', { isDraft: true }), {}), 'draft');
-    assert.equal(at(basics('APPROVED', 'SUCCESS'), { mergeState: 'BLOCKED' }), 'checks-pending');
-    assert.equal(at(basics(null, 'SUCCESS'), {}), 'checks-pending', 'nothing asks for a review');
-    assert.equal(at(basics(null, null), { contexts: null }), 'checks-pending', 'no checks at all');
+    assert.equal(
+      at(basics('APPROVED', 'SUCCESS'), { mergeState: 'BLOCKED' }),
+      'checks-not-reported',
+    );
+    assert.equal(
+      at(basics(null, 'SUCCESS'), {}),
+      'checks-not-reported',
+      'nothing asks for a review',
+    );
+    assert.equal(at(basics(null, null), { contexts: null }), 'checks-not-reported', 'no checks');
     assert.equal(at(basics('CHANGES_REQUESTED', 'SUCCESS'), {}), 'changes-requested');
     assert.equal(levelOf(basics(null, 'FAILURE'), merge(missing)), 'checks-failing');
   });
@@ -360,9 +371,18 @@ describe('F32: the bug, and each level alone', () => {
     assert.equal(prLevel(rowOf(result)), 'review-required');
   });
 
-  test('the rules need more than the classic decision: APPROVED with 1 of 2 is review required', () => {
-    const q = merge({ rules: [reviewRule(2)], reviews: ['APPROVED'] });
-    assert.equal(levelOf(basics('APPROVED', 'SUCCESS'), q), 'review-required');
+  test('ruled, from real answers: a decision GitHub gives wins over the count of the rules', () => {
+    const one = merge({ rules: [reviewRule(2)], reviews: ['APPROVED'] });
+    const approved = parseOne(answer(basics('APPROVED', 'SUCCESS'), one));
+    assert.equal(approved.ok && approved.review, 'approved');
+    assert.equal(prLevel(rowOf(approved)), 'approved-green', 'APPROVED with 1 writer of 2');
+    const two = merge({ rules: [reviewRule(2)], reviews: ['APPROVED', 'APPROVED'] });
+    assert.equal(levelOf(basics('REVIEW_REQUIRED', 'SUCCESS'), two), 'review-required');
+    assert.equal(
+      levelOf(basics(null, 'SUCCESS'), one),
+      'review-required',
+      'no decision: the count',
+    );
   });
 
   test('the largest count of the rules counts', () => {
@@ -417,7 +437,7 @@ describe('F32: the bug, and each level alone', () => {
       answer(basics(null, null), merge({ rules: [checksRule('build')], contexts: null })),
     );
     assert.equal(result.ok && result.checks, 'not-reported');
-    assert.equal(prLevel(rowOf(result)), 'checks-pending');
+    assert.equal(prLevel(rowOf(result)), 'checks-not-reported');
   });
 
   test('a check run named like a required status context is that context (names are compared exactly)', () => {
@@ -878,7 +898,7 @@ describe('F32: prLevel and chipFor', () => {
     };
   }
 
-  test('CHIP_ORDER: unresolved comments and blocked after review required; open and checks passing before approved', () => {
+  test('CHIP_ORDER is the order of one line (ruled): … review required, unresolved comments, draft, a check not reported, blocked; open and checks passing before approved', () => {
     assert.deepEqual(
       [...CHIP_ORDER],
       [
@@ -889,8 +909,9 @@ describe('F32: prLevel and chipFor', () => {
         'checks-pending',
         'review-required',
         'unresolved-comments',
-        'blocked',
         'draft',
+        'checks-not-reported',
+        'blocked',
         'open',
         'checks-passing',
         'approved-green',
@@ -922,12 +943,12 @@ describe('F32: prLevel and chipFor', () => {
     assert.equal(prLevel(pr({ review: 'not-required', checks: 'failing' })), 'checks-failing');
   });
 
-  test('ruled: checks not-reported read checks pending, after review required, unresolved comments and the draft', () => {
+  test('ruled: checks not-reported are their own level, after review required, unresolved comments and the draft', () => {
     const missing = (over: Partial<PrRow>) => prLevel(pr({ checks: 'not-reported', ...over }));
-    assert.equal(missing({}), 'checks-pending');
-    assert.equal(missing({ review: 'approved' }), 'checks-pending');
-    assert.equal(missing({ review: 'not-required' }), 'checks-pending');
-    assert.equal(missing({ review: 'blocked' }), 'checks-pending');
+    assert.equal(missing({}), 'checks-not-reported');
+    assert.equal(missing({ review: 'approved' }), 'checks-not-reported');
+    assert.equal(missing({ review: 'not-required' }), 'checks-not-reported');
+    assert.equal(missing({ review: 'blocked' }), 'checks-not-reported');
     assert.equal(missing({ review: 'review-required' }), 'review-required');
     assert.equal(missing({ review: 'unresolved-comments' }), 'unresolved-comments');
     assert.equal(missing({ review: 'changes-requested' }), 'changes-requested');
@@ -952,8 +973,9 @@ describe('F32: prLevel and chipFor', () => {
       pr({ checks: 'pending' }),
       pr({ review: 'review-required' }),
       pr({ review: 'unresolved-comments' }),
-      pr({ review: 'blocked' }),
       pr({ state: 'draft' }),
+      pr({ checks: 'not-reported' }),
+      pr({ review: 'blocked' }),
       pr({ review: 'not-required' }),
       pr({ review: 'not-required', checks: 'passing' }),
       pr({ review: 'approved', checks: 'passing' }),
@@ -973,7 +995,16 @@ describe('F32: prLevel and chipFor', () => {
       level(pr({ review: 'blocked' }), pr({ review: 'review-required' })),
       'review-required',
     );
-    assert.equal(level(pr({ review: 'blocked' }), pr({ state: 'draft' })), 'blocked');
+    assert.equal(level(pr({ review: 'blocked' }), pr({ state: 'draft' })), 'draft');
+    assert.equal(
+      level(pr({ review: 'blocked' }), pr({ checks: 'not-reported' })),
+      'checks-not-reported',
+    );
+    assert.equal(
+      level(pr({ checks: 'not-reported' }), pr({ review: 'review-required' })),
+      'review-required',
+      'the review the user can act on is not hidden behind a check that has not reported (C1)',
+    );
     assert.equal(level(pr({ state: 'draft' }), pr({ review: 'not-required' })), 'draft');
     assert.equal(
       level(pr({ review: 'not-required' }), pr({ review: 'not-required', checks: 'passing' })),
@@ -1304,9 +1335,9 @@ describe('F32: a query GitHub rejects as a whole is asked once more with the que
 
   test('other failures are not asked again', async (t) => {
     const failures: [string, RunResult][] = [
-      ['a timeout', runResult({ code: null, timedOut: true })],
       ['gh missing', runResult({ code: null, notFound: true })],
-      ['an HTTP error', runResult({ code: 1, stdout: '', stderr: 'gh: HTTP 502\n' })],
+      ['HTTP 503', runResult({ code: 1, stdout: '', stderr: 'gh: HTTP 503\n' })],
+      ['HTTP 500', runResult({ code: 1, stdout: '', stderr: 'gh: HTTP 500\n' })],
       ['output that is no JSON', runResult({ code: 0, stdout: 'not json' })],
       [
         "GitHub's own error without a path",
@@ -1345,6 +1376,37 @@ describe('F32: a query GitHub rejects as a whole is asked once more with the que
     }
   });
 
+  test("ruled: our own timeout, and GitHub's HTTP 502 or 504, are asked once more as before too", async (t) => {
+    for (const [name, failure] of [
+      ['a timeout', runResult({ code: null, timedOut: true })],
+      ['HTTP 502', runResult({ code: 1, stdout: '', stderr: 'gh: HTTP 502\n' })],
+      [
+        'HTTP 504',
+        runResult({
+          code: 1,
+          stdout: '{"message":"We couldn\'t respond to your request in time."}',
+          stderr: "gh: We couldn't respond to your request in time. (HTTP 504)\n",
+        }),
+      ],
+    ] as const) {
+      await t.test(name, async (t) => {
+        let call = 0;
+        const d = deck(t, [URL7], (c) => (++call === 1 ? failure : before(c)));
+        assert.deepEqual(await fetchPrs(d.deps, [URL7]), { fetched: 1, failed: 0 });
+        assert.equal(d.runner.calls.length, 2);
+        assert.equal(d.runner.calls[1]?.args[5], BEFORE);
+        assert.equal(prLevel(d.store.prs()[0] as PrRow), 'approved-green');
+      });
+    }
+  });
+
+  test('ruled: timed out again, the batch fails as before, with no third call', async (t) => {
+    const d = deck(t, [URL7], () => runResult({ code: null, timedOut: true }));
+    assert.deepEqual(await fetchPrs(d.deps, [URL7]), { fetched: 0, failed: 1 });
+    assert.equal(d.runner.calls.length, 2);
+    assert.equal(d.store.prs()[0]?.error, 'gh timed out after 10 s');
+  });
+
   test('a gh that cannot be started is not asked again', async (t) => {
     const d = deck(t, [URL7], () => {
       throw new Error('spawn gh EACCES');
@@ -1364,5 +1426,88 @@ describe('F32: a query GitHub rejects as a whole is asked once more with the que
       failed: 0,
     });
     assert.equal(d.runner.calls.length, 1);
+  });
+});
+
+// --- ruled: a merge state GitHub has not worked out keeps what was stored about blocked ------------
+
+describe('F32 (ruled): a merge state of UNKNOWN keeps what was stored about blocked', () => {
+  function deck(t: TestContext) {
+    const store = openStore(join(sandbox(t).root, 'skydeck.db'));
+    t.after(() => {
+      store.close();
+    });
+    store.transaction(() => {
+      store.ensurePr({ url: URL7, owner: 'acme', repo: 'web', number: 7 });
+    });
+    const state: { p: Record<string, unknown>; q: Record<string, unknown> } = {
+      p: basics('APPROVED', 'SUCCESS'),
+      q: merge(),
+    };
+    const runner = fakeRunner(() => runResult({ stdout: answer(state.p, state.q) }));
+    const deps = { runner, clock: fakeClock(T0), store, env: {} };
+    const read = async (p: Record<string, unknown>, q: Record<string, unknown>) => {
+      state.p = p;
+      state.q = q;
+      await fetchPrs(deps, [URL7]);
+      const row = store.prs().find((pr) => pr.url === URL7);
+      assert.ok(row);
+      return prLevel(row);
+    };
+    return { read };
+  }
+  const approved = basics('APPROVED', 'SUCCESS');
+
+  test('blocked, then UNKNOWN: still blocked; then CLEAN: cleared', async (t) => {
+    const { read } = deck(t);
+    assert.equal(await read(approved, merge({ mergeState: 'BLOCKED' })), 'blocked');
+    assert.equal(await read(approved, merge({ mergeState: 'UNKNOWN' })), 'blocked');
+    assert.equal(await read(approved, merge({ mergeState: 'UNKNOWN' })), 'blocked');
+    assert.equal(await read(approved, merge({ mergeState: 'CLEAN' })), 'approved-green');
+  });
+
+  test('not blocked, then UNKNOWN: still not blocked; never read before: not blocked', async (t) => {
+    const { read } = deck(t);
+    assert.equal(await read(approved, merge({ mergeState: 'UNKNOWN' })), 'approved-green');
+    assert.equal(await read(approved, merge({ mergeState: 'CLEAN' })), 'approved-green');
+    assert.equal(await read(approved, merge({ mergeState: 'UNKNOWN' })), 'approved-green');
+  });
+
+  test('every other state decides anew: BEHIND, DIRTY after blocked clear it', async (t) => {
+    for (const mergeState of ['BEHIND', 'DIRTY', 'UNSTABLE', 'HAS_HOOKS']) {
+      await t.test(mergeState, async (t) => {
+        const { read } = deck(t);
+        assert.equal(await read(approved, merge({ mergeState: 'BLOCKED' })), 'blocked');
+        assert.equal(await read(approved, merge({ mergeState })), 'approved-green');
+      });
+    }
+  });
+
+  test('UNKNOWN keeps blocked only while nothing before it applies', async (t) => {
+    const { read } = deck(t);
+    assert.equal(await read(approved, merge({ mergeState: 'BLOCKED' })), 'blocked');
+    const unknown = { mergeState: 'UNKNOWN' };
+    assert.equal(await read(basics('APPROVED', 'PENDING'), merge(unknown)), 'checks-pending');
+    assert.equal(await read(approved, merge({ mergeState: 'BLOCKED' })), 'blocked');
+    assert.equal(
+      await read(approved, merge({ ...unknown, rules: [reviewRule(0, true)], threads: [false] })),
+      'unresolved-comments',
+    );
+    assert.equal(await read(approved, merge({ mergeState: 'BLOCKED' })), 'blocked');
+    assert.equal(
+      await read(basics('APPROVED', 'SUCCESS', { isDraft: true }), merge(unknown)),
+      'draft',
+    );
+  });
+
+  test('an answer without the merge state, after blocked, keeps nothing: as before', async (t) => {
+    const { read } = deck(t);
+    assert.equal(await read(approved, merge({ mergeState: 'BLOCKED' })), 'blocked');
+    const { mergeStateStatus: _gone, ...noState } = merge();
+    assert.equal(await read(approved, noState), 'approved-green');
+  });
+
+  test("parseBatch alone (the lead's proof) reads UNKNOWN as not blocked: it does not know the row", () => {
+    assert.equal(levelOf(approved, merge({ mergeState: 'UNKNOWN' })), 'approved-green');
   });
 });

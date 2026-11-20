@@ -855,6 +855,7 @@ describe("F32: the chip's words for the new levels (S2 12.3)", () => {
     ['blocked', 'blocked'],
     ['open', 'open'],
     ['checks-passing', 'green'],
+    ['checks-not-reported', 'pending'],
   ];
   for (const [level, words] of cases) {
     test(`one open pull request of level ${level}: "PR · ${words}", and the level it names`, () => {

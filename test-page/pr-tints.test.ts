@@ -978,6 +978,12 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
     { title: 'checks passing', prs: [pr('checks-passing')], text: 'PR · green', tint: 'green' },
     { title: 'open', prs: [pr('open')], text: 'PR · open', tint: DIM },
     {
+      title: 'a required check not reported',
+      prs: [pr('checks-not-reported')],
+      text: 'PR · pending',
+      tint: 'amber',
+    },
+    {
       title: 'green and blocked, two merged',
       prs: [pr('checks-passing'), pr('blocked'), ...merged(2)],
       text: '2 PRs · blocked +2',
@@ -989,6 +995,7 @@ test("the pull-request chips' quiet tints (follow-up F4)", async (t) => {
     blocked: ['blocked', 'blocked', 'blue'],
     'checks-passing': ['green', 'checks passing', 'green'],
     open: ['open', 'open', null],
+    'checks-not-reported': ['pending', 'checks pending', 'amber'],
   };
 
   await t.test(
