@@ -80,7 +80,9 @@ yourself):
   print `false`: if it prints `true`, this clone came from a fork, and pull requests against it
   would never reach the maintainer: STOP and ask. `gh api repos/<owner>/<name> --jq .allow_forking`
   must print `true`, and `gh api user --jq .login` prints the login. Whether that account already
-  has a fork: `gh repo view <login>/<name>` (an error means none); if it has one, its branches: `gh
+  has a fork: `gh repo view <login>/<name> --json isFork,parent --jq '.isFork,
+  .parent.nameWithOwner'` (an error means no repository of that name; a repository of that name that
+  is not a fork of `<owner>/<name>` is in the way: STOP and ask); if it has one, its branches: `gh
   api --paginate repos/<login>/<name>/branches --jq '.[].name'`; a `mac-…` branch there is from an
   earlier try, which a push would collide with and force is forbidden: STOP and ask. Some company
   accounts may not fork outside their company: if `gh repo fork` refuses later, STOP and tell your
@@ -126,12 +128,12 @@ until part 9 or part 10 tells you to.
    `grep`, `sed`, `awk`, `sort`, `head`, `tail`, `wc`, `find`, `tr`, `cat`, `dirname`, `ls`,
    `sleep`, `date`, `env`, `whoami`, `hostname`, `scutil --get ComputerName`; `shellcheck` if you
    have it; `claude --help`, and the one `claude -p` of question 4. Many come in these forms: with
-   `TMPDIR=/tmp` or `NODE_OPTIONS=…` in front, behind `perl -e 'alarm …; exec @ARGV'`, or as a block
-   that starts with `facts="$(git …)"` (part 4.2): a permission rule for a family may not cover such
-   a form. How you let them run without a question each time is your choice; I never change my own
-   permissions or settings. If the session stops for any reason (a usage limit, a closed lid, a
-   restart), start Claude Code again in this clone and say 'read docs/plans/mac-port.md and go on':
-   I resume from my status file."
+   `TMPDIR=/tmp` or `NODE_OPTIONS=…` in front, behind `perl -e 'alarm …; exec @ARGV or exit 127'`,
+   or as a block that starts with `facts="$(git …)"` (part 4.2): a permission rule for a family may
+   not cover such a form. How you let them run without a question each time is your choice; I never
+   change my own permissions or settings. If the session stops for any reason (a usage limit, a
+   closed lid, a restart), start Claude Code again in this clone and say 'read
+   docs/plans/mac-port.md and go on': I resume from my status file."
 4. **The facts only your Claude Code can show** (part 4.2). Show them the `claude -p …` line of part
    4.2 as it is, and say: "May I run this once? It starts Claude Code scripted, in a throwaway
    folder inside this clone, with a throwaway hook that writes a file holding only these kinds of
@@ -502,10 +504,11 @@ whose zone is at UTC now, as in the UK in winter), take `'utc'`: the expectation
 asks `ps` with `LC_ALL=C TZ=UTC` comes from reading Claude Code's own program on Linux (EXPECTED on
 a Mac); write the form as UNSETTLED in the status file and the final report, and part 9 step 2
 settles it. The digits of Linux stay as they are. If the form is local time, `docs/install.md` gets
-the known limit: a session started in the hour that comes twice in autumn may show as not running.
-Tests first in `test/claude/live.test.ts`: a made-up Mac live-session file (the form from the facts,
-made-up values) gives the seconds; every existing case is unchanged. Done when the parse of the
-probe's masked form, filled with made-up digits, gives the expected number.
+the known limit: a session started in the hour that comes twice in autumn may show as `running` (its
+live-session file not trusted) instead of `working` or `waiting`. Tests first in
+`test/claude/live.test.ts`: a made-up Mac live-session file (the form from the facts, made-up
+values) gives the seconds; every existing case is unchanged. Done when the parse of the probe's
+masked form, filled with made-up digits, gives the expected number.
 
 **Task 4: the process facts on a Mac.** `Proc` (`src/platform/types.ts`) is synchronous and its
 Linux implementation `realProc` (`src/platform/real.ts`) reads `/proc`. Add a second implementation
@@ -885,7 +888,7 @@ one: stop THAT task, write it into the status file, go on with what does not dep
   fork="$(gh api user --jq .login)/${upstream#*/}"
   gh workflow run ci.yml --repo "$fork" --ref <branch>
   gh run list --repo "$fork" --workflow ci.yml --branch <branch> --limit 1 --json databaseId,status,conclusion
-  perl -e 'alarm 570; exec @ARGV' gh run watch <id> --repo "$fork" --exit-status
+  perl -e 'alarm 570; exec @ARGV or exit 127' gh run watch <id> --repo "$fork" --exit-status
   gh run view <id> --repo "$fork" --log-failed
   ```
 
@@ -963,9 +966,9 @@ tests` and the `ℹ skipped` lines of the unit jobs of one Node version and of t
 view <id> --repo "$fork" --log | grep -E 'ℹ (tests|skipped) [0-9]+'`, the job's name at the start of
 each line), and hold the branch's sums against the base's. Fix whatever the checks show. After the
 pull request is open, read its checks too, bounded (macOS has no `timeout`): `perl -e 'alarm 570;
-exec @ARGV' gh pr checks <n> --repo "$upstream" --watch` (with `upstream` set as in part 7), again
-while they run. A pull request from a fork may wait for the maintainer's approval before its first
-run there: go on meanwhile.
+exec @ARGV or exit 127' gh pr checks <n> --repo "$upstream" --watch` (with `upstream` set as in part
+7), again while they run. A pull request from a fork may wait for the maintainer's approval before
+its first run there: go on meanwhile.
 
 ## 9. The hands-on check, at the end (about fifteen minutes)
 

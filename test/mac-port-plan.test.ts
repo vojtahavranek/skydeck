@@ -76,7 +76,10 @@ function tree(root: string): Map<string, string> {
   return found;
 }
 
-function setUp(t: TestContext, options: { maxTurns?: boolean; claude?: boolean } = {}) {
+function setUp(
+  t: TestContext,
+  options: { maxTurns?: boolean; claude?: boolean; badInput?: boolean } = {},
+) {
   const s = sandbox(t);
   s.link('sh', 'cat', 'mkdir', 'awk', 'sort', 'perl', 'sed', 'ps', 'env', 'dirname', 'grep');
   const home = join(s.root, 'Users', USER);
@@ -120,7 +123,9 @@ function setUp(t: TestContext, options: { maxTurns?: boolean; claude?: boolean }
         'for a in "$@"; do if [ "$prev" = --settings ]; then settings=$a; fi; prev=$a; done',
         'for ev in SessionStart SessionEnd; do',
         `  cmd=$(perl -MJSON::PP -e 'local $/; my $j = decode_json(<STDIN>); print $j->{hooks}{$ARGV[0]}[0]{hooks}[0]{command}' "$ev" < "$settings")`,
-        `  printf '{"session_id":"${INNER_SESSION}","transcript_path":"/Users/${USER}/.claude/projects/acme/${INNER_SESSION}.jsonl","cwd":"/Users/${USER}/acme-payroll","hook_event_name":"%s","source":"startup"}' "$ev" |`,
+        options.badInput === true
+          ? `  printf 'not json from ${USER} %s' "$ev" |`
+          : `  printf '{"session_id":"${INNER_SESSION}","transcript_path":"/Users/${USER}/.claude/projects/acme/${INNER_SESSION}.jsonl","cwd":"/Users/${USER}/acme-payroll","hook_event_name":"%s","source":"startup"}' "$ev" |`,
         `    CLAUDE_PID=$$ CLAUDE_CODE_SESSION_ID=${INNER_SESSION} CLAUDE_CODE_ENTRYPOINT=sdk-cli sh -c "$cmd"`,
         'done',
         'echo ok',
@@ -248,6 +253,23 @@ describe("the plan's scripted Claude Code run (part 4.2), with a stand-in claude
       '.gitignore does not name /.mac-port-scratch/',
     );
     assert.match(PLAN, /`\.mac-port-scratch\/`/);
+  });
+
+  test('what a program of the hook prints on stderr never reaches its files', (t) => {
+    // An input that is no JSON makes perl complain; the hook drops that text.
+    const { clone, env } = setUp(t, { badInput: true });
+    assert.equal(runBlock(clone, env).status, 0);
+    const facts = join(clone, '.mac-port-scratch', 'facts');
+    for (const event of ['SessionStart', 'SessionEnd']) {
+      const text = readFileSync(join(facts, `${event}.txt`), 'utf8');
+      for (const line of text.replace(/\n$/, '').split('\n')) {
+        assert.ok(
+          FORMS.some((form) => form.test(line)),
+          `${event}.txt holds a line of no allowed form: ${JSON.stringify(line)}`,
+        );
+      }
+      assert.equal(text.includes('jqdoe'), false);
+    }
   });
 
   test('a second run refuses while the first one’s folder is there', (t) => {
