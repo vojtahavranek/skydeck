@@ -123,15 +123,15 @@ until part 9 or part 10 tells you to.
    `~/Library/Caches/ms-playwright`), `node`; `python3`; `perl` (to bound a command's time); `ps`,
    `sysctl`, `sw_vers`, `vm_stat`, `lsof`, `uname`, `xcode-select -p`; `mkdir`, `cp`, and `rm` only
    inside this clone and the suite's sandboxes; `kill` only for process ids the suite left behind;
-   `grep`, `sed`, `awk`, `sort`, `head`, `tail`, `wc`, `find`, `tr`, `cat`, `ls`, `sleep`, `date`,
-   `env`, `whoami`, `hostname`, `scutil --get ComputerName`; `shellcheck` if you have it; `claude
-   --help`, and the one `claude -p` of question 4. Many come in these forms: with `TMPDIR=/tmp` or
-   `NODE_OPTIONS=…` in front, behind `perl -e 'alarm …; exec @ARGV'`, or as a block that starts with
-   `facts="$(git …)"` (part 4.2): a permission rule for a family may not cover such a form. How you
-   let them run without a question each time is your choice; I never change my own permissions or
-   settings. If the session stops for any reason (a usage limit, a closed lid, a restart), start
-   Claude Code again in this clone and say 'read docs/plans/mac-port.md and go on': I resume from my
-   status file."
+   `grep`, `sed`, `awk`, `sort`, `head`, `tail`, `wc`, `find`, `tr`, `cat`, `dirname`, `ls`,
+   `sleep`, `date`, `env`, `whoami`, `hostname`, `scutil --get ComputerName`; `shellcheck` if you
+   have it; `claude --help`, and the one `claude -p` of question 4. Many come in these forms: with
+   `TMPDIR=/tmp` or `NODE_OPTIONS=…` in front, behind `perl -e 'alarm …; exec @ARGV'`, or as a block
+   that starts with `facts="$(git …)"` (part 4.2): a permission rule for a family may not cover such
+   a form. How you let them run without a question each time is your choice; I never change my own
+   permissions or settings. If the session stops for any reason (a usage limit, a closed lid, a
+   restart), start Claude Code again in this clone and say 'read docs/plans/mac-port.md and go on':
+   I resume from my status file."
 4. **The facts only your Claude Code can show** (part 4.2). Show them the `claude -p …` line of part
    4.2 as it is, and say: "May I run this once? It starts Claude Code scripted, in a throwaway
    folder inside this clone, with a throwaway hook that writes a file holding only these kinds of
