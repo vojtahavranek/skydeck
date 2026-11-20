@@ -144,7 +144,11 @@ describe('the settings through the server (S2 12.13, 8.2.3)', () => {
       { kind: 'setting-set', key: 'window', value: { links: 'edge' } },
       { kind: 'setting-set', key: 'prRefreshMinutes', value: [1] },
       { kind: 'setting-set', key: 'prRefreshMinutes', value: true },
-      { kind: 'setting-set', key: 'ticketUrl', value: `https://example.com/${'a'.repeat(4096)}{key}` },
+      {
+        kind: 'setting-set',
+        key: 'ticketUrl',
+        value: `https://example.com/${'a'.repeat(4096)}{key}`,
+      },
       { kind: 'setting-set', key: 'k'.repeat(1025), value: 1 },
       { kind: 'setting-set', key: 'prRefreshMinutes', value: 9, path: '/tmp/x' },
       { kind: 'setting-set', key: 'prRefreshMinutes' },
@@ -175,10 +179,20 @@ describe('AT ONCE: the running server uses the new value from its next use (G4)'
   test('groupPattern: the next list takes the group from the title by the new pattern, in every page', async (t) => {
     const d = serverSandbox(t);
     const { a, b } = await twoPages(t, d);
-    assert.equal((await a.act({ kind: 'label', sessionId: S1, text: 'abc-12 fix the retry' })).ok, true);
-    const before = await b.list((list) => rowOf(list)?.title === 'abc-12 fix the retry', 'labelled');
+    assert.equal(
+      (await a.act({ kind: 'label', sessionId: S1, text: 'abc-12 fix the retry' })).ok,
+      true,
+    );
+    const before = await b.list(
+      (list) => rowOf(list)?.title === 'abc-12 fix the retry',
+      'labelled',
+    );
     assert.equal(rowOf(before)?.group, null, 'the default pattern takes upper case keys only');
-    const result = await a.act({ kind: 'setting-set', key: 'groupPattern', value: '^[a-z]+-[0-9]+' });
+    const result = await a.act({
+      kind: 'setting-set',
+      key: 'groupPattern',
+      value: '^[a-z]+-[0-9]+',
+    });
     assert.equal(result.ok, true, JSON.stringify(result));
     await b.list((list) => rowOf(list)?.group === 'abc-12', "the group in B's next list", 5000);
   });
@@ -266,7 +280,11 @@ describe('AT ONCE: the next restore (G4)', () => {
     threeSessions(r);
     const test = await r.d.start();
     const page = await connectTestPage(t, r.d, test.server);
-    const set = await page.act({ kind: 'setting-set', key: 'restoreMinFreeMb', value: 999_999_999 });
+    const set = await page.act({
+      kind: 'setting-set',
+      key: 'restoreMinFreeMb',
+      value: 999_999_999,
+    });
     assert.equal(set.ok, true, JSON.stringify(set));
     const answer = postRestore(r.d, { sessionIds: [X1, X2], all: false });
     assert.equal((await answer.ended).status, 200);

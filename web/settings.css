@@ -1,0 +1,160 @@
+/* Follow-up F36 (S2 12.13): the title bar's `Settings` and the settings screen (web/settings.js),
+   a dialog over the page as stage D's (edit.css: .edit-scrim, .edit-dialog, .edit-field). It is
+   wider and taller than they are, and scrolls inside itself in a small window; its texts are
+   --text and --dim on --panel (and --crash for a refusal, a problem on its own ground), which every
+   theme holds to 4.5 : 1. A value is text: a long one wraps anywhere, a right-to-left one keeps its
+   order (bdi, dir="auto"). */
+.settings-button {
+  display: flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settings-button:hover {
+  border-color: var(--line);
+  color: var(--text);
+}
+.settings-button:focus-visible {
+  outline: 2px solid var(--selline);
+  outline-offset: 1px;
+}
+
+.edit-dialog.settings-dialog {
+  top: 40px;
+  width: min(760px, calc(100vw - 24px));
+  max-height: calc(100vh - 56px);
+  padding: 14px 16px;
+}
+.settings-file,
+.settings-copy,
+.settings-help,
+.settings-status {
+  margin: 0 0 6px;
+  color: var(--dim);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.settings-path {
+  color: var(--text);
+  font-family: var(--term-font);
+}
+.settings-help {
+  margin-bottom: 10px;
+}
+.settings-problem {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--crash-bg);
+  color: var(--text);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+.settings-problem-text {
+  font-family: var(--term-font);
+}
+.settings-problem[hidden],
+.settings-no-file[hidden],
+.settings-status[hidden],
+.setting-pending[hidden] {
+  display: none;
+}
+.settings-group {
+  margin: 14px 0 4px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.setting {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+}
+.setting-key {
+  color: var(--text);
+  font-family: var(--term-font);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.setting-meaning {
+  margin: 2px 0 6px;
+  color: var(--text);
+}
+.setting-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.setting-line .setting-control {
+  flex: 1 1 220px;
+  min-width: 0;
+  margin: 0;
+}
+.setting-value {
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--term-font);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.setting-line button {
+  padding: 4px 10px;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.setting-line .setting-save {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.setting-line button[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+.setting-line button:focus-visible,
+.settings-actions button:focus-visible {
+  outline: 2px solid var(--selline);
+  outline-offset: 1px;
+}
+.setting-facts,
+.setting-applies {
+  margin-top: 4px;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.setting-pending {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--wait-bg);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.setting-message {
+  margin-top: 4px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.setting-message:empty {
+  display: none;
+}
+.setting-message[data-outcome='refused'] {
+  color: var(--crash);
+}
+.settings-actions {
+  margin-top: 12px;
+}

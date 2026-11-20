@@ -29,6 +29,11 @@
 // puts it. A pick reveals the row (`list.reveal`, E10), selects it and does what Enter in the
 // list does; the restore offer sends `act restore` (E12).
 //
+// Follow-up F36 (S2 12.13): the settings screen of web/settings.js, opened by the title bar's
+// `Settings` and by the switcher's command `> settings`, each through `windowChordGate`. It is modal
+// as a dialog is (D2): `.app` is inert under its scrim, every window chord but Ctrl+Shift+H says
+// `close the settings first (Esc)`, Esc closes it, and the keyboard goes back where it was.
+//
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
 
@@ -55,6 +60,7 @@ import { blockInfo, paneFor, sessionRow } from './pane.js';
 import { cutWords } from './search-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
+import { createSettingsDialog } from './settings.js';
 import { createPaletteSwitch, createThemeSwitch } from './theme.js';
 import { createToast } from './toast.js';
 
@@ -105,6 +111,8 @@ const dom = {
   help: byId('help'),
   editor: byId('editor'),
   endDialog: byId('end-dialog'),
+  settings: byId('settings'),
+  settingsButton: byId('settings-button'),
   toast: byId('toast'),
   notifyOn: /** @type {HTMLButtonElement} */ (byId('notify-on')),
   switcher: byId('switcher'),
@@ -211,6 +219,8 @@ const state = {
   openedBy: '',
   /** F30: what had the keyboard when the dialog "Mark done" opened: Cancel gives it back. */
   enderFrom: /** @type {Element | null} */ (null),
+  /** F36: what had the keyboard when the settings screen opened: it gets it back. */
+  settingsFrom: /** @type {Element | null} */ (null),
 };
 
 /** @type {ReturnType<typeof createConnection> | null} */
@@ -303,6 +313,11 @@ const ender = createEndDialog(dom.endDialog, {
   gone: (text) => toast.show(text, null),
   closed: (choice) => enderClosed(choice),
 });
+// F36: the settings screen (web/settings.js).
+const settingsDialog = createSettingsDialog(dom.settings, {
+  act: (action) => act(action),
+  closed: () => settingsClosed(),
+});
 // Stage B (B15): a click on a notification passes the gate of a window chord, then selects. A
 // session this page's list does not show (its filter, the folded Earlier) and that has no terminal
 // of the window is not selected (ruled on review 2): the pane would be empty, and a focused page's
@@ -368,6 +383,11 @@ const switcher = createSwitcher(dom.switcher, {
   pick: (item) => switcherPick(item),
   restore: (sessionIds) => switcherRestore(sessionIds),
   closed: () => switcherClosed(),
+  settings: () => {
+    if (windowChordGate('settings')) {
+      openSettings();
+    }
+  },
   now: () => listNow(),
   timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone,
 });
@@ -376,6 +396,12 @@ const switcher = createSwitcher(dom.switcher, {
 dom.switchButton.addEventListener('click', () => {
   if (windowChordGate('switcher')) {
     openSwitcher();
+  }
+});
+// F36: the title bar's `Settings`, through the same gate; it takes no keyboard on a click either.
+dom.settingsButton.addEventListener('click', () => {
+  if (windowChordGate('settings')) {
+    openSettings();
   }
 });
 // Follow-up F13: the title bar's theme switch (web/theme.js). Whenever the page's colours may have
@@ -394,9 +420,9 @@ const coloursChanged = {
 createThemeSwitch(dom.themeButton, coloursChanged);
 createPaletteSwitch(dom.paletteButton, coloursChanged);
 
-/** Whether a dialog or the switcher is shown (D2, E11, F30: then the page is modal). */
+/** Whether a dialog or the switcher is shown (D2, E11, F30, F36: then the page is modal). */
 function modal() {
-  return editor.shown() || switcher.shown() || ender.shown();
+  return editor.shown() || switcher.shown() || ender.shown() || settingsDialog.shown();
 }
 
 // --- what the page says -------------------------------------------------------------------------
@@ -990,6 +1016,50 @@ function broughtTakesKeyboard() {
   return true;
 }
 
+// --- F36: the settings screen -------------------------------------------------------------------
+
+/**
+ * `Settings` or the switcher's `> settings`, once past the gate: the help hidden, the page inert
+ * under the dialog, which asks the server for the screen; it remembers what had the keyboard.
+ */
+function openSettings() {
+  if (modal()) {
+    return;
+  }
+  help.hide();
+  state.settingsFrom = document.activeElement;
+  appRoot.inert = true;
+  settingsDialog.open();
+}
+
+/**
+ * The settings screen closed, whatever closed it: the page is no longer inert, and the keyboard
+ * goes back where it was when that is still there — a text field, the list, the terminal —, else
+ * to the zone's holder; a terminal this page's resume brought meanwhile takes it first.
+ */
+function settingsClosed() {
+  appRoot.inert = false;
+  state.openedBy = '';
+  const from = state.settingsFrom;
+  state.settingsFrom = null;
+  if (broughtTakesKeyboard()) {
+    return;
+  }
+  if (
+    from instanceof HTMLElement &&
+    from !== document.body &&
+    from.isConnected &&
+    from.checkVisibility() &&
+    !dom.settings.contains(from)
+  ) {
+    from.focus();
+    if (document.activeElement === from) {
+      return;
+    }
+  }
+  giveKeyboard();
+}
+
 // --- stage E: the quick switcher (plan E task 98) ---------------------------------------------
 
 /**
@@ -1569,6 +1639,10 @@ function received(message) {
         keepKeyboard();
       }
       return;
+    case 'settings':
+      // F36: a setting was changed in some window; an open screen follows.
+      settingsDialog.update(message.settings);
+      return;
     case 'notify':
       // S2 13, B15: none for the session that is selected while this page has focus.
       notifications.show(message, { focused: document.hasFocus(), selected: state.selected });
@@ -1901,13 +1975,19 @@ function windowChordGate(kind) {
     return true;
   }
   if (kind === 'reload') {
-    if (!editor.changed()) {
+    if (!editor.changed() && !settingsDialog.changed()) {
       return true;
     }
     say('save or cancel the edit first');
     return false;
   }
-  say(ender.shown() ? 'close the dialog first (Esc)' : 'close the edit first (Esc)');
+  say(
+    ender.shown()
+      ? 'close the dialog first (Esc)'
+      : settingsDialog.shown()
+        ? 'close the settings first (Esc)'
+        : 'close the edit first (Esc)',
+  );
   return false;
 }
 
@@ -2099,6 +2179,9 @@ function onKeyDown(event) {
   if (ender.shown() && ender.key(event)) {
     return; // F30: Esc, Tab, Enter and Space are the dialog's
   }
+  if (settingsDialog.shown() && settingsKey(event)) {
+    return; // F36: Esc, Tab and Enter in a field are the screen's
+  }
   const zone = state.zone;
   let handled = false;
   const chord = windowChord(event, zone);
@@ -2172,6 +2255,43 @@ function dialogKey(event) {
     if (!event.repeat) {
       editor.escape();
     }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * F36: the keys the shown settings screen takes before anything else, in the capture phase — the
+ * auto-repeats of the key that opened it, Esc (once per press), Tab and Enter in a field
+ * (`settingsDialog.key`). True when it took the key; every other key goes on to onKeyDown's
+ * dispatch, where the chords meet `windowChordGate` and no list key acts.
+ * @param {KeyboardEvent} event
+ * @returns {boolean}
+ */
+function settingsKey(event) {
+  if (event.repeat && state.openedBy !== '' && event.code === state.openedBy) {
+    event.preventDefault();
+    return true;
+  }
+  if (event.isComposing || event.keyCode === 229) {
+    return false; // a key of an IME composition is the IME's
+  }
+  if (
+    event.key === 'Escape' &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey &&
+    !event.metaKey
+  ) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) {
+      settingsDialog.escape();
+    }
+    return true;
+  }
+  if (settingsDialog.key(event)) {
+    event.stopPropagation();
     return true;
   }
   return false;

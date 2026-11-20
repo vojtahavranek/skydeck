@@ -306,7 +306,7 @@ test('switcherPayload: a text whose first character is `>` lists no session, wha
   ]) {
     assert.deepEqual(
       switcherPayload(text, candidates, ['b']),
-      { query: text, command: true, items: [], more: 0, restore: null },
+      { query: text, command: true, items: [], more: 0, restore: null, settings: false },
       JSON.stringify(text),
     );
   }
@@ -488,13 +488,14 @@ test('switcherPayload: `query` is the text as given, not cut and not lower-cased
   assert.equal(payload.restore, null);
 });
 
-test('switcherPayload: nothing gives { query, command: false, items: [], more: 0, restore: null }', () => {
+test('switcherPayload: nothing gives { query, command: false, items: [], more: 0, restore: null, settings: false }', () => {
   assert.deepEqual(switcherPayload('', [], []), {
     query: '',
     command: false,
     items: [],
     more: 0,
     restore: null,
+    settings: false,
   });
   assert.deepEqual(switcherPayload('fix', [], ['n1']), {
     query: 'fix',
@@ -502,6 +503,7 @@ test('switcherPayload: nothing gives { query, command: false, items: [], more: 0
     items: [],
     more: 0,
     restore: null,
+    settings: false,
   });
   assert.deepEqual(switcherPayload('absent', [candidate({ id: 'a' })], []), {
     query: 'absent',
@@ -509,12 +511,20 @@ test('switcherPayload: nothing gives { query, command: false, items: [], more: 0
     items: [],
     more: 0,
     restore: null,
+    settings: false,
   });
 });
 
 test('switcherPayload: a payload with items has exactly the contract fields', () => {
   const payload = switcherPayload('', [candidate({ id: 'a' })], []);
-  assert.deepEqual(Object.keys(payload).sort(), ['command', 'items', 'more', 'query', 'restore']);
+  assert.deepEqual(Object.keys(payload).sort(), [
+    'command',
+    'items',
+    'more',
+    'query',
+    'restore',
+    'settings',
+  ]);
   assert.equal(payload.command, false);
 });
 
@@ -760,4 +770,30 @@ test('an item row is a RowPayload as build.ts makes it', () => {
   const row: RowPayload = c.row;
   assert.equal(row.title, 'typed');
   assert.equal(switcherPayload('', [c], []).items[0]?.row, row);
+});
+
+test('F36: `>` and a start of `settings` (at least one letter, any case, spaces trimmed) offers the settings command; nothing else does', () => {
+  const candidates = commandLike();
+  for (const text of ['>settings', '>s', '> set', '>Settings', '> SETTINGS ', '>  sett']) {
+    const payload = switcherPayload(text, candidates, []);
+    assert.deepEqual(
+      [payload.command, payload.settings, payload.items, payload.restore],
+      [true, true, [], null],
+      JSON.stringify(text),
+    );
+  }
+  for (const text of [
+    '>',
+    '> ',
+    '>restore',
+    '>r',
+    '> settingsx',
+    '>sx',
+    'settings',
+    ' >settings',
+    's',
+    '',
+  ]) {
+    assert.equal(switcherPayload(text, candidates, []).settings, false, JSON.stringify(text));
+  }
 });

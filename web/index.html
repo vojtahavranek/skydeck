@@ -12,7 +12,9 @@
      (`#palette-button`), and the classic script that applies their stored choices before the
      first paint, ahead of the style sheets (web/theme-early.js);
      follow-up F22's line on the right side while the list holds no session (`#right-none`);
-     follow-up F30's dialog "Mark done" for a session the window can end (`#end-dialog`). -->
+     follow-up F30's dialog "Mark done" for a session the window can end (`#end-dialog`);
+     follow-up F36's settings screen (`#settings`, web/settings.js), opened by the title bar's
+     `Settings` after `Switch…` (`#settings-button`), with its style sheet. -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -29,6 +31,7 @@
     <link rel="stylesheet" href="/assets/__VERSION__/web/attention.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/banner.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/search.css" />
+    <link rel="stylesheet" href="/assets/__VERSION__/web/settings.css" />
     <script type="module" src="/assets/__VERSION__/web/app.js"></script>
   </head>
   <body>
@@ -49,6 +52,7 @@
         <button class="switch-button" id="switch-button" type="button">
           ⌕ Switch… <kbd>Ctrl+Shift+P</kbd>
         </button>
+        <button class="settings-button" id="settings-button" type="button">Settings</button>
       </header>
       <div class="bar gone" id="gone" role="alert" hidden>
         <span id="gone-text"></span>
@@ -87,6 +91,7 @@
     </div>
     <div class="editor" id="editor" hidden></div>
     <div class="editor" id="end-dialog" hidden></div>
+    <div class="editor" id="settings" hidden></div>
     <div class="help" id="help" hidden></div>
     <div class="toast" id="toast" role="status" hidden></div>
     <div class="switcher" id="switcher" hidden></div>

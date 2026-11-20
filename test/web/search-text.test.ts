@@ -552,6 +552,10 @@ describe('switcherFooter', () => {
     assert.equal(switcherFooter('switch', 0), '↑ ↓ move · Enter switch · Esc close');
     assert.equal(switcherFooter('resume here', 0), '↑ ↓ move · Enter resume here · Esc close');
     assert.equal(switcherFooter('restore', 0), '↑ ↓ move · Enter restore · Esc close');
+    assert.equal(
+      switcherFooter('open the settings', 0),
+      '↑ ↓ move · Enter open the settings · Esc close',
+    );
   });
 
   test('each action, with more', () => {

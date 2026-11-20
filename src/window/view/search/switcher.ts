@@ -26,8 +26,10 @@ import type { Searchable } from './filter.ts';
 
 export const MAX_ITEMS = 50;
 
-/** The one command of the switcher's command form (E12). */
+/** The commands of the switcher's command form: stage C's restore offer (E12), and F36's
+ *  settings screen. */
 const RESTORE = 'restore';
+const SETTINGS = 'settings';
 /** What starts the command form (E12, ruled): the text's first character, nothing trimmed
  *  before it. */
 const COMMAND = '>';
@@ -79,6 +81,18 @@ export function restoreOffer(
     return null;
   }
   return { count: sessionIds.length, lastActivityNs: banner.lastActivityNs, sessionIds };
+}
+
+/**
+ * F36 (S2 12.13): the settings command is offered when the text is in command form and what
+ * follows the `>`, trimmed and lower-cased, is a start of `settings` of at least one letter (`>s`,
+ * `> set`, `>Settings`); `>` alone and `> foo` give none, and a text without `>` first never.
+ * It opens the page's settings screen and starts nothing, so it needs no banner or other state.
+ */
+export function settingsCommand(query: string): boolean {
+  if (!isCommand(query)) return false;
+  const command = query.slice(COMMAND.length).trim().toLowerCase();
+  return command !== '' && SETTINGS.startsWith(command);
 }
 
 export interface SwitchCandidate {
@@ -138,7 +152,8 @@ function inNeedOrder(
  * `not-running` (not open, not done), `done` (not open, done); inside each rank in the
  * candidates' order. The first MAX_ITEMS; `more` the rest; `restore` null. A text in command
  * form (its first character `>`, E12, ruled) lists no session: `command` true, `items` [] and
- * `more` 0, whatever follows the `>`; any other text gives `command` false.
+ * `more` 0, whatever follows the `>`, and `settings` whether it names the settings command (F36,
+ * settingsCommand); any other text gives `command` and `settings` false.
  */
 export function switcherPayload(
   query: string,
@@ -146,7 +161,14 @@ export function switcherPayload(
   needOrder: readonly string[],
 ): SwitcherPayload {
   if (isCommand(query)) {
-    return { query, command: true, items: [], more: 0, restore: null };
+    return {
+      query,
+      command: true,
+      items: [],
+      more: 0,
+      restore: null,
+      settings: settingsCommand(query),
+    };
   }
   const words = searchWords(query);
   const byRank: Record<SwitchRank, SwitchCandidate[]> = {
@@ -182,5 +204,12 @@ export function switcherPayload(
       });
     }
   }
-  return { query, command: false, items, more: matching - items.length, restore: null };
+  return {
+    query,
+    command: false,
+    items,
+    more: matching - items.length,
+    restore: null,
+    settings: false,
+  };
 }
