@@ -9,10 +9,12 @@ import type { Store } from '../store/store.ts';
 import type { EventRow } from '../store/types.ts';
 
 /**
- * The event the copy link to `copyOf` goes on: the process's first event, when it is a `start` or
- * an `observed` one of another session than `copyOf` and no copy link names its session yet (nor
- * any link that event). null when there is nothing to write — also for a process that cannot be
- * told apart from another (no pid, no process start: D7). Reads only.
+ * The event the copy link to `copyOf` goes on: the process's first event — its session is the
+ * earliest the process is known to have held: a `start`, an `observed` one, or an `end` when the
+ * spool file of its first start was lost; never a scripted run's (5.3) — when it names another
+ * session than `copyOf` and no copy link names its session yet (nor any link that event). null
+ * when there is nothing to write — also for a process that cannot be told apart from another (no
+ * pid, no process start: D7). Reads only.
  */
 export function copyLinkTarget(store: Store, process: ProcessKey, copyOf: string): EventRow | null {
   if (process.pid === 0 || process.procStart === null) {
@@ -21,7 +23,8 @@ export function copyLinkTarget(store: Store, process: ProcessKey, copyOf: string
   const first = store.firstEventOfProcess(process.bootId, process.pid, process.procStart);
   if (
     first === null ||
-    (first.kind !== 'start' && first.kind !== 'observed') ||
+    first.kind === 'scripted' ||
+    first.kind === 'scripted-end' ||
     first.sessionId === copyOf
   ) {
     return null;

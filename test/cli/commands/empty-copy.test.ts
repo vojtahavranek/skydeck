@@ -181,6 +181,16 @@ describe('skydeck ls and show on an empty copy', () => {
   });
 });
 
+test('ls --help says what --all lists besides the done sessions', async (t) => {
+  const d = testDeck(t);
+  const help = await run(d, ['ls', '--help']);
+  assert.equal(help.code, 0);
+  assert.match(
+    help.out,
+    /--all {7}also list the sessions marked done, and the copies of a session Claude Code made\n {14}that have no message yet\n/,
+  );
+});
+
 describe('done, undone and resume on a hidden copy', () => {
   test('done and undone take it by its short id; undone, it stays hidden while it is empty', async (t) => {
     const d = copyDeck(t, false);

@@ -2313,7 +2313,7 @@ switcher search done ones too (12.8).
 (design 5.3 "Copies": its process was started with `--fork-session --resume <the original>`)
 that has had no message yet (design 6.3's `empty-copy`) is not a second row of that session: no
 terminal of the window showing it, it is listed as a done one is — only while done sessions are
-shown (`a`, `Show done`) or a typed search finds it —, also while it runs, so under Open too it is
+shown (`a`, `Show done`) or a typed search or a chip finds it —, also while it runs, so under Open too it is
 hidden, in no count of the title bar, and not one of the footer's done ones (it is not done). A
 row that a terminal of the window shows — the session runs there, the terminal was opened for it
 and is starting, or its ended bar is up — is listed by the rules above, whatever else holds.

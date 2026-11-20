@@ -27,6 +27,10 @@ describe('copiedSessionOf: the session a command starts a copy of', () => {
       ['claude', '--fork-session', '--resume', PATH, '--permission-mode', 'auto'],
     ],
     ['an id in capitals', ['claude', '--fork-session', '--resume', S2.toUpperCase()]],
+    [
+      'a path whose name is an id in capitals',
+      ['claude', '--fork-session', '--resume', `/p/${S2.toUpperCase()}.jsonl`],
+    ],
     ['inside a cluster (-c-resume)', ['claude', '-c-resume', S2, '--fork-session']],
     ['the last of two --resume', ['claude', '--resume', S1, '--resume', S2, '--fork-session']],
   ];
@@ -44,6 +48,10 @@ describe('copiedSessionOf: the session a command starts a copy of', () => {
     ['--resume followed by a flag', ['claude', '--resume', '--fork-session']],
     ['a value that is a name, not an id', ['claude', '--fork-session', '--resume', 'my work']],
     ['a path not ending in .jsonl', ['claude', '--fork-session', '--resume', `/tmp/${S2}`]],
+    [
+      'a path ending in another suffix',
+      ['claude', '--fork-session', '--resume', `/tmp/${S2}.other`],
+    ],
     ['a .jsonl whose name is no id', ['claude', '--fork-session', '--resume', '/tmp/notes.jsonl']],
     ['an empty value', ['claude', '--fork-session', '--resume=']],
     ['the id after --, a positional', ['claude', '--fork-session', '--', '--resume', S2]],

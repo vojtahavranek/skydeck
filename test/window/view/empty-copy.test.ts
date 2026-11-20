@@ -175,6 +175,21 @@ describe('the window: what keeps an empty copy listed', () => {
     assert.equal(message.counts.running, 1);
   });
 
+  test('… running there and marked done: under Open with its done mark (S2 12.10), no done one hidden', () => {
+    const message = buildListMessage(
+      input({
+        rows: rows(sessions({ doneAtNs: T0, hidden: true })),
+        terminals: [terminal()],
+        elsewhere: new Map(),
+      }),
+    );
+    assert.deepEqual(
+      section(message, 'open').rows.map((row) => [row.id, row.done]),
+      [[COPY, true]],
+    );
+    assert.equal(message.doneHidden, 0);
+  });
+
   test('… its program ended (the ended bar): still listed, under Recent', () => {
     const message = buildListMessage(
       input({

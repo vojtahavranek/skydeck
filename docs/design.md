@@ -222,16 +222,20 @@ first session a NEW session that is a copy of that id: Claude Code's background 
 view, `/bg`) starts `claude --fork-session --resume <the original's transcript>`, and a user can
 type it. Only that id is kept, never the value (principle 4: a value can be a search term), as a
 row original → copy of kind `copy` in `links`, on the process's first event (its `start` or
-`observed` one), written once per session: at ingest, when a non-scripted `start` is recorded with
+`observed` one, or its `end` when the spool file of its first start was lost: its session is the
+earliest the process is known to have held; never a scripted run's), written once per session:
+at ingest, when a non-scripted `start` is recorded with
 such a command (whatever its detail: which `source` Claude Code sends for a copy is not known,
 14), and at reconcile (5.4) from the command line of a process that still runs. A copy of an id
 skydeck does not know is recorded all the same; a process whose first event names the id itself
 makes no copy; `--resume` alone, `--fork-session` alone, or a value that is neither (a name Claude
 Code searches for) make no copy. Sessions recorded before follow-up F33 get the link only if their
-process still runs at a later reconcile: nothing else is rewritten. A lost spool file of a copy's
-first start, followed by a `/clear` of its process before reconcile saw the copy, would link the
-cleared session in its place: a known limit, and it heals itself at that session's first prompt
-(7.2).
+process still runs at a later reconcile: nothing else is rewritten. A known limit: when the first
+event skydeck has of a copy's process is already that of a session the process `/clear`ed into —
+the spool files of both the copy's start and its end were lost, or no hook spoke at all and
+reconcile is the first to see a process that had cleared already (it started before `skydeck
+install`, or its hook did not run) —, that cleared session is linked in the copy's place. It heals
+itself at that session's first prompt (7.2).
 
 **Order.** "Earlier" and "latest" for events always mean ordering by (`time_ns`, `id`).
 

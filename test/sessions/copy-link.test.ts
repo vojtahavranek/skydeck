@@ -169,6 +169,46 @@ describe('ingest: the copy link from the hook’s recorded command', () => {
     );
     assert.deepEqual(d.deck.store.links(), []);
   });
+
+  test('a pid used again in the same boot is another process: the copy link is on the new one’s start', (t) => {
+    const d = testDeck(t);
+    const earlier = { procStart: 1111 };
+    ingest(d, [
+      start(S3, T0 - 100n * SEC, { argv: ['claude'], ...earlier }),
+      {
+        event: 'SessionEnd',
+        timeNs: T0 - 90n * SEC,
+        pid: PID,
+        input: hookInput('SessionEnd', S3, { reason: 'prompt_input_exit' }),
+        ...earlier,
+      },
+      start(S1, T0),
+    ]);
+    assert.deepEqual(d.deck.store.links(), [copyLink(3, S1, T0)]);
+  });
+
+  test('two copies by two processes: two links, one each', (t) => {
+    const d = testDeck(t);
+    ingest(d, [start(S1, T0), start(S3, T0 + SEC, { pid: 5555 })]);
+    assert.deepEqual(d.deck.store.links(), [copyLink(1, S1, T0), copyLink(2, S3, T0 + SEC)]);
+  });
+
+  test('the first start’s file lost: the end the process recorded first names the copy, and carries the link', (t) => {
+    const d = testDeck(t);
+    ingest(d, [
+      {
+        event: 'SessionEnd',
+        timeNs: T0 + 60n * SEC,
+        pid: PID,
+        input: hookInput('SessionEnd', S1, { reason: 'clear' }),
+      },
+      start(S3, T0 + 61n * SEC, { input: hookInput('SessionStart', S3, { source: 'clear' }) }),
+    ]);
+    assert.deepEqual(d.deck.store.links(), [
+      copyLink(1, S1, T0 + 60n * SEC),
+      { eventId: 2, fromSession: S1, toSession: S3, kind: 'clear', timeNs: T0 + 61n * SEC },
+    ]);
+  });
 });
 
 // --- reconcile ------------------------------------------------------------------------------------
@@ -307,6 +347,28 @@ describe('reconcile: the copy link from the process’s command line', () => {
     live(d, { sessionId: S3 });
     reconcile(d.deck);
     assert.deepEqual(d.deck.store.links(), [copyLink(first, S1, T0 - 30n * SEC)]);
+  });
+
+  test('a process whose first event is a scripted run’s gets no link', (t) => {
+    const d = running(t);
+    const id = d.deck.store.insertEvent({
+      spoolName: `${T0 - 30n * SEC}-${PID}-1.ev`,
+      timeNs: T0 - 30n * SEC,
+      kind: 'scripted',
+      detail: '',
+      rawDetail: 'resume',
+      sessionId: S1,
+      bootId: BOOT_A,
+      pid: PID,
+      procStart: START,
+      cwd: '/home/dev/projects/demo',
+      argv: null,
+      name: null,
+      payload: '{}',
+    });
+    assert.ok(id !== null);
+    reconcile(d.deck);
+    assert.deepEqual(d.deck.store.links(), []);
   });
 
   test('the original is the process’s own first session: no link', (t) => {

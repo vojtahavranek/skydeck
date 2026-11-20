@@ -1981,7 +1981,10 @@ install would leave).
    `Focus: list`: there ← acts on the list (it closes a group). Then press ← once, and look.
    Expected: the terminal stays as it is, the same empty prompt; no list of sessions (Claude Code's
    agent view, a table of sessions with an input at the bottom) takes it over, and the list on the
-   left gets no new row "running in another terminal". Only when the terminal is unchanged, press
+   left gets no new row "running in another terminal" — also with done sessions shown: a copy
+   Claude Code made that has no message yet is listed only then (follow-up F33), so press
+   Ctrl+Shift+L until `Focus: list`, `a`, look, `a` again, and Ctrl+Shift+L until `Focus:
+   terminal`. Only when the terminal is unchanged, press
    ← a second time (Claude Code asks for a second press in some cases, `Press ← again to open
    agents`), and look again: the same is expected.
 
@@ -1990,7 +1993,8 @@ install would leave).
    nothing into agent view's input (every prompt entered there starts a new session of its own),
    and press Esc, which goes back to the conversation. That does not end it: "Detaching never stops
    a background session", and the row is made "even when the conversation has no messages yet", so
-   until it is ended the window may list a row for `skydeck-try` as running in another terminal.
+   until it is ended the window may list a row for `skydeck-try` as running in another terminal
+(only with done sessions shown, `a`, while it has no message: F33).
    End it now: look that the terminal shows the throwaway session (the header's short id, and
    `skydeck-try` as its folder) and has the keyboard (`Focus: terminal`), then type `/stop` ("To end
    a session from inside it, run /stop"). When Esc did not go back (agent view's table is still in
@@ -2006,7 +2010,7 @@ install would leave).
    at the short id, since `/exit` ends the session it is typed into), type `/exit`, then `Close` on
    its ended bar. When step 3's branch was taken, the session is ended already: only `Close`, if
    the ended bar shows; and when the list still shows a row for `skydeck-try` as running in another
-   terminal, write that down. The shortcut stays off, on purpose. Sessions you
+   terminal (look with `a` too), write that down. The shortcut stays off, on purpose. Sessions you
    started before step 1 keep it until you start them again (`/exit`, then resume them).
 
 To put the shortcut back on (not part of the check): in Claude Code, `/config`, the option "← opens
@@ -2664,19 +2668,25 @@ and the Claude Code version (`claude --version`).
    opens; if it does not, `claude agents`). Wait 10 seconds. Expected: the window still shows ONE
    row with that title — no second one under Open or Recent, without a reload. In another terminal,
    `skydeck ls --all`: when Claude Code made a copy, a second row with that title and the marks
-   `continued,empty-copy`; write down its short id (none: write that down, and the check ends here).
-   `skydeck ls` does not list it.
-3. **Shown with `a`.** In the window, Ctrl+Shift+L (`Focus: list`) and `a`. Expected: the copy is
+   `continued,empty-copy`; write down its short id. `skydeck ls` does not list it. Then, for the
+   copy (or, when there is none, for a second row with that title that has no such mark),
+   `skydeck show <its short id>`: write down whether its `holder:` line says `(scripted run)`, and
+   with that line's pid `tr '\0' ' ' </proc/<pid>/cmdline; echo`: write down the flags it prints,
+   leaving out the value after `--resume` (a path). No copy and no second row: write that down,
+   and the check ends here.
+3. **Shown with `a`.** In the window, press Ctrl+Shift+L until the key bar says `Focus: list`, then
+   `a`. Expected: the copy is
    listed, marked `empty copy`; hovering the mark shows `an empty copy of "<the title>" made by Claude
    Code; it shows by itself once it has a first message`. Press `a` again: it is hidden again.
 4. **Its first prompt.** In agent view, open the background session and give it `Reply with the
    single word ok, in this chat, with no tool and no file.` Expected: within a few seconds, without a
    reload, the copy appears in the window by itself, marked `continued`; hovering the mark shows `it
    began as a copy of "<the title>"`. `skydeck show <its short id>` prints `continues:` with the
-   throwaway session's id and a line `link:     copy <that short id> -> <its short id> at …`.
+   throwaway session's id, and a `link:` line `copy <that short id> -> <its short id> at …`.
 5. **The end of the check.** Stop the background session in agent view as Claude Code's own help
-   there says, and `/exit` the throwaway session if it still runs. In the window, mark both done
-   (`d` on each, after looking at the header's short id).
+   there says, and `/exit` the throwaway session if it still runs. In the window, for each of the
+   two: click its row and look at the header's short id (the one you wrote down), press
+   Ctrl+Shift+L until the key bar says `Focus: list`, and `d`.
 
 Write down: the time of the setup and the Claude Code version; for each step whether it went as
 expected; in step 2, whether a second row ever showed without `a` and for how long, and what `skydeck
