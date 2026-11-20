@@ -6,3 +6,4 @@ coverage/
 __pycache__/
 # The check kit's key-test server writes the key presses of its test page here (docs/manual-checks.md, W2).
 docs/check-kit/keylog.jsonl
+/.mac-port-scratch/

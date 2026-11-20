@@ -4,7 +4,8 @@
 // one) and checks what the plan promises the person: the run's flags, that the outer session's
 // markers are not passed on, that the hook's files hold only names, yes/no answers, words from fixed
 // lists and one masked start time (no value, no free text), that nothing is written outside the
-// run's folder, and that a second run refuses.
+// plan's scratch folder at the clone's root (never under .git, a protected path), and that a
+// second run refuses.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
@@ -77,12 +78,13 @@ function setUp(t: TestContext) {
   const clone = join(home, 'skydeck');
   const marks = join(s.root, 'marks');
   mkdirSync(join(clone, '.git'), { recursive: true });
+  writeFileSync(join(clone, '.git', 'HEAD'), 'ref: refs/heads/mac-m1\n');
   mkdirSync(marks);
-  // `git rev-parse --absolute-git-dir` as git answers it in the clone.
+  // `git rev-parse --show-toplevel` as git answers it in the clone.
   standIn(
     s.bin,
     'git',
-    `if [ "$1 $2" = "rev-parse --absolute-git-dir" ]; then echo '${join(clone, '.git')}'; else exit 1; fi`,
+    `if [ "$1 $2" = "rev-parse --show-toplevel" ]; then echo '${clone}'; else exit 1; fi`,
   );
   // A stand-in `claude`: records its arguments and whether the outer markers reached it, then runs
   // the hooks of its --settings file as Claude Code would, with personal values in their input.
@@ -132,7 +134,7 @@ describe("the plan's scripted Claude Code run (part 4.2), with a stand-in claude
     assert.equal(ran.status, 0, ran.stderr);
     assert.match(ran.stdout, /^claude ended with 0$/m);
     const args = readFileSync(join(marks, 'args'), 'utf8').split('\n');
-    const facts = join(clone, '.git', 'skydeck-facts');
+    const facts = join(clone, '.mac-port-scratch', 'facts');
     assert.deepEqual(args.slice(0, 3), ['-p', 'Reply with the single word ok.', '--settings']);
     assert.equal(args[3], join(facts, 'settings.json'));
     for (const [flag, value] of [
@@ -164,12 +166,13 @@ describe("the plan's scripted Claude Code run (part 4.2), with a stand-in claude
     const before = tree(s.root);
     const ran = runBlock(clone, env);
     assert.equal(ran.status, 0, ran.stderr);
-    const facts = join(clone, '.git', 'skydeck-facts');
+    const facts = join(clone, '.mac-port-scratch', 'facts');
     const after = tree(s.root);
     for (const path of after.keys()) {
       if (!before.has(path)) {
         assert.ok(
-          path.startsWith(facts) || path.startsWith(join(s.root, 'marks')),
+          path.startsWith(join(clone, '.mac-port-scratch')) ||
+            path.startsWith(join(s.root, 'marks')),
           `the block wrote ${path}`,
         );
       }
@@ -201,12 +204,21 @@ describe("the plan's scripted Claude Code run (part 4.2), with a stand-in claude
     }
   });
 
+  test('the scratch folder the plan writes into is one the repository’s .gitignore names', () => {
+    const ignore = readFileSync(join(import.meta.dirname, '..', '.gitignore'), 'utf8').split('\n');
+    assert.ok(
+      ignore.includes('/.mac-port-scratch/'),
+      '.gitignore does not name /.mac-port-scratch/',
+    );
+    assert.match(PLAN, /`\.mac-port-scratch\/`/);
+  });
+
   test('a second run refuses while the first one’s folder is there', (t) => {
     const { clone, marks, env } = setUp(t);
     assert.equal(runBlock(clone, env).status, 0);
     const again = runBlock(clone, env);
     assert.equal(again.status, 1);
-    assert.match(again.stdout, /skydeck-facts is there already: stop$/m);
+    assert.match(again.stdout, /\.mac-port-scratch\/facts is there already: stop$/m);
     assert.equal(existsSync(join(marks, 'args')), true);
   });
 });

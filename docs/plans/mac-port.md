@@ -6,10 +6,9 @@ Follow it literally; where it is silent, do the safe thing named in part 10 (sto
 it into the status file, go on with what does not depend on it).
 
 Every file, function and constant this plan names was checked against the code of `main` at commit
-8e0184b. Names and lines drift: find each by searching
-for its name (your search tool, or `grep -rn "<name>" src bin web test`; `rg` may not be installed
-on a Mac). Where the code at your commit says something else, the code wins: write the difference
-into the status file and go on.
+8e0184b. Names and lines drift: find each by searching for its name (your search tool, or `grep -rn
+"<name>" src bin web test`; `rg` may not be installed on a Mac). Where the code at your commit says
+something else, the code wins: write the difference into the status file and go on.
 
 Two words are used with care. **KNOWN**: read in the code, or a stable, documented property of
 macOS. **EXPECTED**: believed, but never seen on a Mac. Step 0 (part 4) or a test on the Mac
@@ -136,11 +135,15 @@ in the final report what stayed unchecked.
 On your human's machine (it holds their real Claude Code sessions and their work):
 
 - Work only inside this clone (switch branches in it; no worktree) and the suite's sandboxes
-  (`test/helpers/`). Your own scratch files (the fact run's folder of part 4.2, a pull request's
-  body) go under the clone's `.git/` folder, which git never tracks, and you remove them when done.
-  The one exception is the check clone of part 9, `~/skydeck-mac-check`, made once at the end. (The
-  caches `npm` and Playwright keep, and `gh`'s own settings, are theirs to write.) Reason:
-  everything else is your human's.
+  (`test/helpers/`). Every scratch file of yours that is not to be committed (the fact run's folder
+  of part 4.2, a pull request's body, notes) goes into ONE folder at the clone's root,
+  `.mac-port-scratch/`, which the repository's `.gitignore` names; you remove what you no longer
+  need. Nothing goes under `.git/` (Claude Code treats it as a protected path: a write there asks
+  for a yes, or is refused, whatever your human allowed, so it would stop you while you are alone),
+  nor under the home folder or `/tmp`. The one exception is the check clone of part 9,
+  `~/skydeck-mac-check`, made once at the end. The status file is not scratch: it is a tracked file
+  of the branch (part 7). (The caches `npm` and Playwright keep, and `gh`'s own settings, are theirs
+  to write.) Reason: everything else is your human's.
 - Run code only through the suite (`npm test`, `npm run test:page`, single test files, the commands
   of part 8), the probe and the fact run of part 4. Never run `bin/skydeck` or `node src/...`
   outside a test, not even with `--help`: the launcher writes a cache into `~/.cache/skydeck`, most
@@ -168,9 +171,10 @@ On your human's machine (it holds their real Claude Code sessions and their work
   human's user name, home folder, machine name and host name (`whoami`, `$HOME`, `scutil --get
   ComputerName`, `hostname`): `git diff origin/main...HEAD | grep -i "<each>"`, the same over the
   commit messages (`git log origin/main..HEAD --format=%B`) and over the body's file must print
-  nothing. Before the first push, look at the commits' author too (`git log -1 --format='%an
-  <%ae>'`): it must be the identity your human chose in 2.2, set for this clone only; you set
-  nothing globally.
+  nothing; and `git diff origin/main...HEAD --name-only | grep '^\.mac-port-scratch/'` must print
+  nothing either (never `git add -f` there). Before the first push, look at the commits' author too
+  (`git log -1 --format='%an <%ae>'`): it must be the identity your human chose in 2.2, set for this
+  clone only; you set nothing globally.
 - The status file holds forms, yes/no answers, counts and plain words only, never a pasted output of
   `doctor`, `ls`, the probe's unmasked parts or the fact run (they hold paths, titles and names).
 - Once your human has installed skydeck from the check clone (part 9), never change that clone: the
@@ -248,9 +252,13 @@ login and settings, as any session of theirs does:
   `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`): a hook inherits Claude Code's environment, so without
   this the hook could show your session's values instead of what the scripted run sets. Nothing of
   the login, the provider or the settings is removed.
-- At most two minutes (`perl -e 'alarm 120; exec @ARGV'`), in a folder of its own inside the clone,
-  `.git/skydeck-facts` (git never tracks anything under `.git`). Claude Code reads the clone's
-  `CLAUDE.md` there, as in any session started inside the clone: a few more words of prompt.
+- At most two minutes (`perl -e 'alarm 120; exec @ARGV'`), in a folder of its own,
+  `.mac-port-scratch/facts` at the clone's root (part 3). Claude Code reads the clone's `CLAUDE.md`
+  there, as in any session started inside the clone: a few more words of prompt.
+- Whether a `claude -p` started from inside a Claude Code session is let through is not documented
+  (EXPECTED: yes; Claude Code has a guard against running inside itself, which lets non-interactive
+  commands through). If the one run is refused for that reason, it is not retried in another form:
+  the facts move to the hands-on check.
 
 Never use `--restricted`, `--bare`, `env -i` or another `CLAUDE_CONFIG_DIR` for it: your human's
 login or provider settings would be lost. First check that `claude --help` lists each of
@@ -261,7 +269,8 @@ login or provider settings would be lost. First check that `claude --help` lists
 Make the folder, the hook, the settings file and the run script, and run it (one block, as it is):
 
 ```sh
-facts="$(git rev-parse --absolute-git-dir)/skydeck-facts"
+facts="$(git rev-parse --show-toplevel)/.mac-port-scratch/facts"
+mkdir -p "$(dirname "$facts")" || exit 1
 mkdir "$facts" || { echo "$facts is there already: stop"; exit 1; }
 cat >"$facts/hook.sh" <<'EOF'
 #!/bin/sh
@@ -311,14 +320,14 @@ EOF
 sh "$facts/run.sh" "$facts"
 ```
 
-Then read `.git/skydeck-facts/SessionStart.txt` and `SessionEnd.txt` (not `answer.txt`: it is Claude
-Code's answer or its error, which may name the account; read only whether it is the word `ok`).
-Write the facts, as forms and yes/no, into "Facts found on a Mac" below (in the M1 branch). Then
-check what the run left:
+Then read `.mac-port-scratch/facts/SessionStart.txt` and `SessionEnd.txt` (not `answer.txt`: it is
+Claude Code's answer or its error, which may name the account; read only whether it is the word
+`ok`). Write the facts, as forms and yes/no, into "Facts found on a Mac" below (in the M1 branch).
+Then check what the run left:
 
-- its folder: remove it (`rm -r .git/skydeck-facts`, from the clone's top folder);
+- its folder: remove it (`rm -r .mac-port-scratch/facts`, from the clone's top folder);
 - whether Claude Code kept a transcript after all: list the names only, `ls -d
-  "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*skydeck-facts*`. Whatever this or anything else
+  "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*mac-port-scratch*`. Whatever this or anything else
   shows in your human's real folders is REPORTED to them (in the status file and at the end), never
   read and never deleted.
 
@@ -582,9 +591,9 @@ does:
   out); if the probe says it is missing, stop this item and write it down.
 - `main` calls `prctl(PR_SET_DUMPABLE, 0)`, which a Mac does not have (today it only logs
   "dumpable"): on a Mac set the keeper's own core limit to 0 (`resource.setrlimit`) instead.
-- What the keeper says does not change, so neither does its version (`KEEPER_VERSION`, 3 at
-  8e0184b; `docs/design-step-2.md` 7.7): the Mac path changes how it reads facts, not its messages.
-  Its hang-up `E` (SIGHUP, then SIGCONT, to its own program) is plain POSIX and works on a Mac
+- What the keeper says does not change, so neither does its version (`KEEPER_VERSION`, 3 at 8e0184b;
+  `docs/design-step-2.md` 7.7): the Mac path changes how it reads facts, not its messages. Its
+  hang-up `E` (SIGHUP, then SIGCONT, to its own program) is plain POSIX and works on a Mac
   (EXPECTED; the keeper tests show it).
 
 Tests first: on Linux with `SKYDECK_TEST_PROC` and stand-ins of `ps` and `sysctl`, the keeper's pid
@@ -817,9 +826,8 @@ one: stop THAT task, write it into the status file, go on with what does not dep
   it again; open the pull request only when it is green (Linux, and macOS once M1 task 9 is done).
   If the fork's Actions cannot be switched on (a no to question 2, or `gh workflow run` refuses),
   open the pull requests without it and say so in each.
-- **Pull requests.** One per stage against `main`, opened when the stage is done, with its body in a
-  file inside the clone that git never tracks (`body="$(git rev-parse
-  --absolute-git-dir)/skydeck-pr-body.md"`; remove it after):
+- **Pull requests.** One per stage against `main`, opened when the stage is done, with its body in
+  the scratch folder (`body="$(git rev-parse --show-toplevel)/.mac-port-scratch/pr-body.md"`):
 
   ```sh
   upstream=$(git remote get-url origin | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')
