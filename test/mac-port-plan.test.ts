@@ -1,8 +1,10 @@
 // docs/plans/mac-port.md is followed literally by an AI agent on a person's Mac. Its part 4.2 holds
 // one block of shell that starts Claude Code once, scripted, with a throwaway hook. This file runs
 // that block, as the plan prints it, in the suite's sandbox with a stand-in `claude` (never the real
-// one) and checks what the plan promises the person: the run's flags, that the outer session's
-// markers are not passed on, that the hook's files hold only names, yes/no answers, words from fixed
+// one) and checks what the plan promises the person: the run's flags (with and without a
+// `--max-turns` in `claude --help`), that `CLAUDECODE` reaches claude as it is (Claude Code's guard
+// against a session inside a session looks at it) while the outer session's other three markers do
+// not, that the hook's files hold only names, yes/no answers, words from fixed
 // lists and one masked start time (no value, no free text), that nothing is written outside the
 // plan's scratch folder at the clone's root (never under .git, a protected path), and that a
 // second run refuses.
@@ -74,9 +76,9 @@ function tree(root: string): Map<string, string> {
   return found;
 }
 
-function setUp(t: TestContext) {
+function setUp(t: TestContext, options: { maxTurns?: boolean; claude?: boolean } = {}) {
   const s = sandbox(t);
-  s.link('sh', 'cat', 'mkdir', 'awk', 'sort', 'perl', 'sed', 'ps', 'env', 'dirname');
+  s.link('sh', 'cat', 'mkdir', 'awk', 'sort', 'perl', 'sed', 'ps', 'env', 'dirname', 'grep');
   const home = join(s.root, 'Users', USER);
   const clone = join(home, 'skydeck');
   const marks = join(s.root, 'marks');
@@ -89,26 +91,41 @@ function setUp(t: TestContext) {
     'git',
     `if [ "$1 $2" = "rev-parse --show-toplevel" ]; then echo '${clone}'; else exit 1; fi`,
   );
-  // A stand-in `claude`: records its arguments and whether the outer markers reached it, then runs
-  // the hooks of its --settings file as Claude Code would, with personal values in their input.
-  standIn(
-    s.bin,
-    'claude',
-    [
-      `printf '%s\\n' "$@" > '${join(marks, 'args')}'`,
-      `for v in CLAUDECODE CLAUDE_PID CLAUDE_CODE_SESSION_ID CLAUDE_CODE_ENTRYPOINT; do`,
-      `  eval "set_=\\\${$v+set}"; echo "$v $set_" >> '${join(marks, 'inherited')}'`,
-      'done',
-      'settings=',
-      'for a in "$@"; do if [ "$prev" = --settings ]; then settings=$a; fi; prev=$a; done',
-      'for ev in SessionStart SessionEnd; do',
-      `  cmd=$(perl -MJSON::PP -e 'local $/; my $j = decode_json(<STDIN>); print $j->{hooks}{$ARGV[0]}[0]{hooks}[0]{command}' "$ev" < "$settings")`,
-      `  printf '{"session_id":"${INNER_SESSION}","transcript_path":"/Users/${USER}/.claude/projects/acme/${INNER_SESSION}.jsonl","cwd":"/Users/${USER}/acme-payroll","hook_event_name":"%s","source":"startup"}' "$ev" |`,
-      `    CLAUDE_PID=$$ CLAUDE_CODE_SESSION_ID=${INNER_SESSION} CLAUDE_CODE_ENTRYPOINT=sdk-cli sh -c "$cmd"`,
-      'done',
-      'echo ok',
-    ].join('\n'),
-  );
+  // A stand-in `claude`: `--help` lists its flags (`--max-turns` only when asked to); a run records
+  // its arguments and which outer markers reached it, then runs the hooks of its --settings file as
+  // Claude Code would, with personal values in their input.
+  const help = [
+    '-p, --print',
+    '--settings <file-or-json>',
+    '--tools <tools...>',
+    '--disallowedTools <tools...>',
+    '--strict-mcp-config',
+    '--mcp-config <configs...>',
+    ...(options.maxTurns === false ? [] : ['--max-turns <turns>']),
+    '--max-budget-usd <amount>',
+    '--no-session-persistence',
+    '--model <model>',
+  ];
+  if (options.claude !== false)
+    standIn(
+      s.bin,
+      'claude',
+      [
+        `if [ "$1" = --help ]; then printf '  %s\\n' ${help.map((h) => `'${h}'`).join(' ')}; exit 0; fi`,
+        `printf '%s\\n' "$@" > '${join(marks, 'args')}'`,
+        `for v in CLAUDECODE CLAUDE_PID CLAUDE_CODE_SESSION_ID CLAUDE_CODE_ENTRYPOINT; do`,
+        `  eval "set_=\\\${$v+set}"; echo "$v $set_" >> '${join(marks, 'inherited')}'`,
+        'done',
+        'settings=',
+        'for a in "$@"; do if [ "$prev" = --settings ]; then settings=$a; fi; prev=$a; done',
+        'for ev in SessionStart SessionEnd; do',
+        `  cmd=$(perl -MJSON::PP -e 'local $/; my $j = decode_json(<STDIN>); print $j->{hooks}{$ARGV[0]}[0]{hooks}[0]{command}' "$ev" < "$settings")`,
+        `  printf '{"session_id":"${INNER_SESSION}","transcript_path":"/Users/${USER}/.claude/projects/acme/${INNER_SESSION}.jsonl","cwd":"/Users/${USER}/acme-payroll","hook_event_name":"%s","source":"startup"}' "$ev" |`,
+        `    CLAUDE_PID=$$ CLAUDE_CODE_SESSION_ID=${INNER_SESSION} CLAUDE_CODE_ENTRYPOINT=sdk-cli sh -c "$cmd"`,
+        'done',
+        'echo ok',
+      ].join('\n'),
+    );
   const env = s.env({
     HOME: home,
     CLAUDE_CONFIG_DIR: undefined,
@@ -131,7 +148,7 @@ function runBlock(clone: string, env: Record<string, string>) {
 }
 
 describe("the plan's scripted Claude Code run (part 4.2), with a stand-in claude", () => {
-  test('starts claude once with the plan’s flags and none of the outer session’s markers', (t) => {
+  test('starts claude once with the plan’s flags, CLAUDECODE as it is and none of the other outer markers', (t) => {
     const { clone, marks, env } = setUp(t);
     const ran = runBlock(clone, env);
     assert.equal(ran.status, 0, ran.stderr);
@@ -159,9 +176,27 @@ describe("the plan's scripted Claude Code run (part 4.2), with a stand-in claude
     }
     assert.equal(
       readFileSync(join(marks, 'inherited'), 'utf8'),
-      'CLAUDECODE \nCLAUDE_PID \nCLAUDE_CODE_SESSION_ID \nCLAUDE_CODE_ENTRYPOINT \n',
-      'an outer session marker reached claude',
+      'CLAUDECODE set\nCLAUDE_PID \nCLAUDE_CODE_SESSION_ID \nCLAUDE_CODE_ENTRYPOINT \n',
+      'CLAUDECODE did not reach claude, or another outer marker did',
     );
+    assert.match(readFileSync(join(facts, 'pid.txt'), 'utf8'), /^[0-9]+\n$/);
+  });
+
+  test('where claude --help does not list --max-turns, the run goes without it', (t) => {
+    const { clone, marks, env } = setUp(t, { maxTurns: false });
+    const ran = runBlock(clone, env);
+    assert.equal(ran.status, 0, ran.stderr);
+    const args = readFileSync(join(marks, 'args'), 'utf8').split('\n');
+    assert.equal(args.includes('--max-turns'), false);
+    assert.ok(args.includes('--no-session-persistence'));
+    assert.equal(args[args.indexOf('--max-budget-usd') + 1], '0.05');
+  });
+
+  test('a claude that cannot be started ends the run with 127', (t) => {
+    const { clone, env } = setUp(t, { claude: false });
+    const ran = runBlock(clone, env);
+    assert.equal(ran.status, 0, ran.stderr);
+    assert.match(ran.stdout, /^claude ended with 127$/m);
   });
 
   test('the hook’s files hold only names, yes/no, words from fixed lists and a masked start; nothing is written elsewhere', (t) => {
@@ -198,12 +233,11 @@ describe("the plan's scripted Claude Code run (part 4.2), with a stand-in claude
       assert.match(text, /^event: /m);
       assert.match(text, /^ {2}CLAUDE_PID$/m);
       assert.match(text, /^ {2}CLAUDE_CODE_OAUTH_TOKEN$/m);
-      assert.doesNotMatch(text, /^ {2}CLAUDECODE$/m);
+      assert.match(text, /^ {2}CLAUDECODE$/m);
       assert.match(text, /^ {2}session_id$/m);
       assert.match(text, /^CLAUDE_CODE_SESSION_ID equals session_id: yes$/m);
       assert.match(text, /^CLAUDE_CODE_ENTRYPOINT: sdk-cli$/m);
       assert.match(text, /^CLAUDE_PID is a number: yes$/m);
-      assert.match(text, /^command name of CLAUDE_PID: claude$/m);
     }
   });
 

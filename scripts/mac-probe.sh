@@ -360,11 +360,12 @@ my %words = (
   nameSource => { map { $_ => 1 } qw(user auto) },
 );
 sub word { my ($k, $s) = @_; return $words{$k}{$s} ? $s : "(other)"; }
-# What ps says of a process, read in UTC (as skydeck reads it) or, with "local", in the local time.
+# What ps says of a process: read in English and UTC (as skydeck reads it); with "local", in
+# English and the local time; with "own", in the language and local time of this Mac.
 sub ps {
-  my ($what, $pid, $local) = @_;
-  my $zone = $local ? "" : "TZ=UTC ";
-  my $o = `LC_ALL=C ${zone}ps -ww -o $what= -p $pid 2>/dev/null`;
+  my ($what, $pid, $how) = @_;
+  my $env = !defined $how ? "LC_ALL=C TZ=UTC " : $how eq "local" ? "LC_ALL=C " : "";
+  my $o = `${env}ps -ww -o $what= -p $pid 2>/dev/null`;
   $o = "" if !defined $o;
   $o =~ s/^\s+|\s+$//g;
   return $o;
@@ -421,7 +422,8 @@ for my $f (@files) {
   print "  ps lstart of its process: [", mask($start), "]\n";
   if (defined $j->{procStart} && !ref($j->{procStart})) {
     print "  procStart equals ps lstart: ", ($j->{procStart} eq $start ? "YES" : "NO"), "\n";
-    print "  procStart equals ps lstart in local time: ", ($j->{procStart} eq ps("lstart", $pid, 1) ? "YES" : "NO"), "\n";
+    print "  procStart equals ps lstart in local time: ", ($j->{procStart} eq ps("lstart", $pid, "local") ? "YES" : "NO"), "\n";
+    print "  procStart equals ps lstart in the language and zone of this Mac: ", ($j->{procStart} eq ps("lstart", $pid, "own") ? "YES" : "NO"), "\n";
   }
   my $comm = ps("comm", $pid); $comm =~ s{.*/}{};
   my @words = split(/\s+/, ps("command", $pid));

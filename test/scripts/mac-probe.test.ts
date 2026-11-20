@@ -136,6 +136,8 @@ function mac(
       // In UTC (TZ=UTC, as skydeck asks) and in the made-up Mac's own time, an hour later.
       `  ${OTHER_PID}) ppid=1 start='Wed Nov  4 08:01:02 2026' tty=ttys009 comm=node`,
       `    if [ "\${TZ-}" != UTC ]; then start='Wed Nov  4 09:01:02 2026'; fi`,
+      // In the made-up Mac's own language (no LC_ALL=C), the day's name is German.
+      `    if [ "\${LC_ALL-}" != C ]; then start='Mi Nov  4 09:01:02 2026'; fi`,
       `    command="node ${localBin}/claude --resume ${OTHER_SESSION}" ;;`,
       `  *) ppid=${options.parentOf} start='Fri Nov 20 10:00:01 2026' tty=ttys004 comm=sh`,
       `    command="sh /Users/${USER}/skydeck/scripts/mac-probe.sh" ;;`,
@@ -407,6 +409,10 @@ describe('scripts/mac-probe.sh', () => {
       assert.match(ran.stdout, /^ {2}procStart equals ps lstart in local time: YES$/m);
       assert.match(
         ran.stdout,
+        /^ {2}procStart equals ps lstart in the language and zone of this Mac: YES$/m,
+      );
+      assert.match(
+        ran.stdout,
         /^vm_stat: Mach Virtual Memory Statistics: \(page size of 99999 bytes\)$/m,
       );
       assert.match(ran.stdout, /^vm_stat: Pages free: +999999\.$/m);
@@ -455,7 +461,7 @@ describe('scripts/mac-probe.sh', () => {
     // The other session's file holds its start in local time: told apart from UTC.
     assert.match(
       ran.stdout,
-      /^ {2}procStart equals ps lstart: NO\n {2}procStart equals ps lstart in local time: YES$/m,
+      /^ {2}procStart equals ps lstart: NO\n {2}procStart equals ps lstart in local time: YES\n {2}procStart equals ps lstart in the language and zone of this Mac: NO$/m,
     );
     assert.match(ran.stdout, /^ {2}status \(text\): \[\(other\)\]$/m);
     assert.match(ran.stdout, /^ {2}nameSource \(text\): \[\(other\)\]$/m);
