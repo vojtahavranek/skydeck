@@ -20,6 +20,8 @@ import { S1 } from '../helpers/platform.ts';
 import { startRunning, writeTranscript } from '../helpers/session-files.ts';
 
 const PID = 4242;
+/** A session id no event names. */
+const OTHER = '1c6d4e2f-9e3b-4a7c-8d4e-3f2a1b0c9d8e';
 
 /**
  * The live-session file of `PID` (which `startRunning` wrote from the busy fixture, `kind`
@@ -107,6 +109,8 @@ test('F34: every other live file reads as a session in another terminal, as befo
     ['a file that is not JSON', '{"kind":"bg",'],
     ['a file of another process that had the pid (untrusted)', { kind: 'bg', procStart: '7' }],
     ['a file without a process start (untrusted)', { kind: 'bg', procStart: undefined }],
+    // The process's file is of `kind` `bg` but names another session than the one it holds.
+    ['a file naming another session', { kind: 'bg', sessionId: OTHER }],
   ];
   for (const [what, change] of cases) {
     await t.test(what, (t) => {

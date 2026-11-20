@@ -1996,7 +1996,8 @@ install would leave).
    session itself, without a terminal. skydeck cannot show it here. To see it or end it, run claude
    agents in a terminal. Once it has ended it can be resumed in the window.` When the row says
    `running in another terminal` instead, write that down: Claude Code did not mark it as a
-   background session in the way skydeck reads.
+   background session in the way skydeck reads. Then click the row of the window's terminal, the
+   one with its slot number (1–9) in front, so that the right side shows that terminal again.
    End it now: look that the terminal shows the throwaway session (the header's short id, and
    `skydeck-try` as its folder) and has the keyboard (`Focus: terminal`), then type `/stop` ("To end
    a session from inside it, run /stop"). When Esc did not go back (agent view's table is still in

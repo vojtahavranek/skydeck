@@ -93,8 +93,9 @@ The list has three sections:
 
 A running session's second line says what it does: `working` (Claude Code is busy), `waiting` (it
 waits for you, at its prompt or on a question such as a permission) or `running` (it runs and
-reports nothing more); one that runs in another terminal says `running in another terminal`. A
-hollow ring marks a session that does not run; a red diamond and the mark `crashed` (or `crashed
+reports nothing more); one that runs in another terminal says `running in another terminal`, and
+one that Claude Code runs in its background says `running in Claude Code's background`. A hollow
+ring marks a session that does not run; a red diamond and the mark `crashed` (or `crashed
 mid-turn`), one that ended unexpectedly. Point at a mark to read what it means. Two or more
 sessions of one group sit together in a block: click the group's name to close or open it. The
 title bar counts the sessions in each state.

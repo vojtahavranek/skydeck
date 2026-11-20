@@ -788,8 +788,10 @@ effect.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
   terminal shows a card instead: it cannot be shown in the window. Once you `/exit` it there, it
   can be resumed here. A session sent to Claude Code's background (with ← or `/bg`) has no
-  terminal at all: its row says `running in Claude Code's background`, and its card says to run
-  `claude agents` in a terminal to see it or end it. Once it has ended it can be resumed here too.
+  terminal at all. When Claude Code marks it as a background session in the file it keeps for
+  each running session (it did for ←), its row says `running in Claude Code's background`, and
+  its card says to run `claude agents` in a terminal to see it or end it; otherwise it reads as
+  `running in another terminal`. Once it has ended it can be resumed here too.
 - **A new session**: Ctrl+Shift+N (in a browser tab the browser keeps Ctrl+Shift+N for itself:
   use the `+ New` button there), with its directory,
   label, group and `claude` flags. Flags you use often can be favourites: the ★ at the end of the
@@ -1691,8 +1693,9 @@ without a terminal of the window shows nothing on the right then, no card (only 
 selected session shows here.` while the list holds no session at all). `Done` in the header
 of such a session asks first while it runs in a terminal of the window that can end it (as `d`
 does, "Done." above); for another one that runs or starts it says `Marked done. skydeck cannot end
-this one: end it in its terminal. Hidden once it stops.`, else `Marked done: hidden from the list.
-It comes back on new activity.` The new form (Ctrl+Shift+N) starts in its directory while a terminal of the window
+this one: end it in its terminal. Hidden once it stops.` (for one in Claude Code's background
+`Marked done. It runs in Claude Code's background: end it in claude agents. Hidden once it
+stops.`), else `Marked done: hidden from the list. It comes back on new activity.` The new form (Ctrl+Shift+N) starts in its directory while a terminal of the window
 holds it. When the list shows the session again (the filter cleared), it is selected again.
 
 #### The icon (stage E)
@@ -2417,7 +2420,7 @@ file.
 | `skydeck: not started through bin/skydeck` | A `--here` start needs the launcher. Run skydeck as `~/.local/bin/skydeck` or `bin/skydeck`, not as `node bin/bootstrap.mjs`. |
 | `doctor`: `no SessionStart hook entry ...` | Run `skydeck install`. Claude Code may have rewritten its settings file. |
 | A session you expect is not in `skydeck ls` | A session that is not running and never received a prompt has no transcript and is not listed. One marked done needs `--all`. A scripted run (print mode, an SDK host, an editor extension) is not a session of its own and is not listed (`doctor` counts what it drops), and neither is a session whose transcript says it was not started by the interactive `claude` (its entry point is not `cli`). Run `skydeck doctor`. |
-| `skydeck: <id> is running (pid <n>)` when you resume | The session runs in another terminal. skydeck never resumes a session twice (exit 4). |
+| `skydeck: <id> is running (pid <n>)` when you resume | The session runs in another terminal, or in Claude Code's background (`skydeck show <ref>` then says `(in Claude Code's background)` next to the holder; `claude agents` shows it). skydeck never resumes a session twice (exit 4). |
 | What you type into a window terminal shows up on another row, "running in Claude Code's background" | ← on the terminal's empty prompt sent its session to the background (Claude Code's agent view). `skydeck doctor` says whether that shortcut is on; `skydeck install` offers to turn it off (Install, step 3). |
 | The same, but you see no such terminal | A scripted run (print mode such as `claude -p --resume <id>`, an SDK host, an editor extension) holds that session. skydeck shows it as `running`, `skydeck show <ref>` says `(scripted run)` next to the holder, and `resume` is refused until that process ends. |
 | `skydeck: <id> is being resumed (<n> s ago); try again in <m> s` | A resume of that session started less than a minute ago. When skydeck printed a command for you to run, the same hold applies for that minute. |
