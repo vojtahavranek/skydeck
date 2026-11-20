@@ -4,8 +4,9 @@
  * open unless the page closed the block. An open block is drawn as a card of its rows; a closed one
  * as its caption alone, none of its rows drawn (F9). Pure.
  *
- * Which rows reach this rule is the caller's (`build.ts`): a section's rows, and none while
- * filtering (S2 12.8: a filter flattens every block; the caller then gives every row `stack: null`).
+ * Which rows reach this rule is the caller's (`build.ts`): a section's rows (under chips alone the
+ * rows they leave, F35), and none during a typed search (S2 12.8: a word flattens every block; the
+ * caller then gives every row `stack: null`).
  * A view without `closed` closes nothing: the page and the server are one build, and an open block
  * hides no row.
  *

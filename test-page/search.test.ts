@@ -1043,6 +1043,11 @@ test('search and stacks in the list', async (t) => {
       await clickShowDone(page);
       await untilRows(page, [S1, S2], 'the switch shows them');
       assert.equal(await showDone(), 'true');
+      // The switch is no chip: no chip is drawn pressed by it, `Done` neither.
+      assert.deepEqual(
+        (await chips(page)).map(([, pressed]) => pressed),
+        ['false', 'false', 'false', 'false'],
+      );
       assert.equal(
         await page
           .locator('#list .list-switch .list-switch-box')
@@ -1121,6 +1126,12 @@ test('search and stacks in the list', async (t) => {
         (await showDoneSwitch(page)).tip,
         'the Done filter lists done sessions by itself',
       );
+      assert.deepEqual(await chips(page), [
+        ['Running', 'false'],
+        ['Open PR', 'false'],
+        ['Has note', 'false'],
+        ['Done', 'true'],
+      ]);
       assert.deepEqual((await lastView(page))['chips'], ['done']);
       assert.equal((await lastView(page))['showDone'], false);
       assert.equal(await keyboardOn(page), 'the list');
@@ -1136,6 +1147,11 @@ test('search and stacks in the list', async (t) => {
       // Done off: the switch as the user left it (on), no longer dimmed: every session listed.
       await clickChip(page, 'Done');
       await untilShowDone(page, true, false);
+      assert.deepEqual(
+        (await chips(page)).map(([, pressed]) => pressed),
+        ['false', 'false', 'false', 'false'],
+        'Done drawn off, the switch on',
+      );
       assert.equal((await showDoneSwitch(page)).tip, 'also list sessions marked done (a)');
       await untilShape(page, [`*${S1}`, OPEN('ORB-7'), S2, S3, S4], 'done ones shown');
       await showsText(page, '#list .list-footer', /^done sessions shown · hide$/);
@@ -1219,6 +1235,142 @@ test('search and stacks in the list', async (t) => {
       await untilShape(page, [S1], 'one of ORB-1 left: a row, no caption');
       await showsText(page, '#list .list-footer', /^2 done hidden · show$/);
       await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
+    'the line of a filter that leaves no session listed (F35, as ruled): chips alone that match only done sessions, Show done off → `Only done sessions match the filter.` with the footer `1 done hidden · show` under it; nothing matching at all, `Done` with no done session matching, or a typed word → `No session matches the filter.` and no footer',
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S1, 1n * MIN, 'alpha plain');
+      session(d, S2, 2n * MIN, 'beta noted');
+      setNote(d.deck, S2, 'a done note');
+      markDone(d.deck, S2);
+      await untilRows(page, [S1], 'the done one hidden');
+      const empty = async (): Promise<string> => shownText(page, '#list .list-empty');
+      const footer = async (): Promise<string> => shownText(page, '#list .list-footer');
+      const order = async (): Promise<boolean> =>
+        readPage(
+          page,
+          () => {
+            const line = document.querySelector('#list .list-empty');
+            const foot = document.querySelector('#list .list-footer');
+            return (
+              line !== null &&
+              foot !== null &&
+              (line.compareDocumentPosition(foot) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 &&
+              line.getBoundingClientRect().bottom <= foot.getBoundingClientRect().top
+            );
+          },
+          null,
+        );
+
+      await toZone(page, 'list');
+      await clickChip(page, 'Has note');
+      await showsText(page, '#list .list-empty', /^Only done sessions match the filter\.$/);
+      assert.deepEqual(await rowIds(page), []);
+      await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
+      assert.equal(await order(), true, 'the footer under the line');
+      // Its `show` lists the done one: the line goes.
+      await page.locator('#list .footer-action', { hasText: 'show' }).click();
+      await untilRows(page, [S2], 'the done one with a note');
+      assert.equal(await empty(), '');
+      await clickShowDone(page);
+      await showsText(page, '#list .list-empty', /^Only done sessions match the filter\.$/);
+
+      // Nothing matching at all: Running (nothing runs, no done one either).
+      await clickChip(page, 'Has note');
+      await untilRows(page, [S1], 'no chip');
+      await clickChip(page, 'Running');
+      await showsText(page, '#list .list-empty', /^No session matches the filter\.$/);
+      assert.equal(await footer(), '');
+      // Done with no done session that runs: the same line, no footer.
+      await clickChip(page, 'Done');
+      await showsText(page, '#list .list-empty', /^No session matches the filter\.$/);
+      assert.equal(await footer(), '');
+      await clickChip(page, 'Running');
+      await untilRows(page, [S2], 'Done alone: the done one');
+      await clickChip(page, 'Done');
+      await untilRows(page, [S1], 'no chip again');
+
+      // A typed word lists done ones: no word that matches nothing is ever "only done ones".
+      await page.keyboard.press('/');
+      await page.keyboard.type('zzz');
+      await showsText(page, '#list .list-empty', /^No session matches the filter\.$/);
+      assert.equal(await footer(), '');
+      await page.keyboard.press('Escape');
+      await untilRows(page, [S1], 'the word cleared');
+      await clickChip(page, 'Has note');
+      await showsText(page, '#list .list-empty', /^Only done sessions match the filter\.$/);
+      await page.keyboard.press('/');
+      await page.keyboard.type('zzz');
+      await showsText(page, '#list .list-empty', /^No session matches the filter\.$/);
+      assert.equal(await footer(), '');
+      await page.keyboard.press('Escape');
+      await showsText(page, '#list .list-empty', /^Only done sessions match the filter\.$/);
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
+    'a list without `searching` (a server before F35) is read by `filtering`: filtering, it is a typed search — no footer, → unfolds nothing —; with `searching: false` the footer is shown and → unfolds Earlier',
+    async (t) => {
+      const rows = [{ id: S1, terminal: null, slot: null, title: 'one' }];
+      const make = (searching: boolean | undefined) => (): Record<string, unknown> => {
+        const base = scriptedList(rows, []) as {
+          sections: Record<string, unknown>[];
+        } & Record<string, unknown>;
+        return {
+          ...base,
+          filtering: true,
+          ...(searching === undefined ? {} : { searching }),
+          doneHidden: 2,
+          sections: [
+            ...base.sections,
+            {
+              name: 'earlier',
+              folded: true,
+              firstNs: '1793000000000000000',
+              lastNs: '1793000000000000000',
+              count: 1,
+              rows: [],
+              closedStacks: [],
+            },
+          ],
+        };
+      };
+      const { page, world, problems } = await scriptedPage(t, chromium, () => make(undefined));
+      await untilRows(page, [S1], 'the one row');
+      assert.equal(await earlierFolded(page), 'true');
+      const unfolds = (): number =>
+        world.sent.filter(
+          (message) =>
+            message['t'] === 'view' && JSON.stringify(message['unfolded']) === '["earlier"]',
+        ).length;
+      await page.locator(`#list [data-id="${S1}"]`).click();
+      await untilSelected(page, S1);
+      await toZone(page, 'list');
+      await sleep(300);
+      assert.equal(await shownText(page, '#list .list-footer'), '', 'absent: no footer');
+      await page.keyboard.press('ArrowRight');
+      await sleep(300);
+      assert.equal(unfolds(), 0, 'absent: → unfolds nothing');
+
+      world.list(make(false));
+      await showsText(page, '#list .list-footer', /^2 done hidden · show$/);
+      await page.keyboard.press('ArrowRight');
+      const deadline = performance.now() + 5000;
+      while (unfolds() === 0 && performance.now() < deadline) await sleep(50);
+      assert.equal(unfolds(), 1, '`searching: false`: → unfolds Earlier');
+
+      world.list(make(true));
+      await page.waitForFunction(
+        () => document.querySelector('#list .list-footer')?.closest('[hidden]') !== null,
+        null,
+        { timeout: PAGE_WAIT_MS },
+      );
+      assert.deepEqual(problems, []);
     },
   );
 

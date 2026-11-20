@@ -17,7 +17,7 @@
 // alone (`data-open="false"`, no row: the server sends none of its rows, `section.closedStacks`),
 // with ` · 1 needs you` in the needs-you colour while sessions it hides need you. A CLOSED caption
 // can hold the selection (app.js's `caption`: no session is selected then); an open one cannot. ←
-// and → on a block, and done sessions while filtering. The list keeps the chips and the blocks the
+// and → on a block, and done sessions during a typed search. The list keeps the chips and the blocks the
 // user closed as it keeps `showDone`: its own state, sent whole in the page's `view` (`closed`,
 // each entry a section and a group; a block is open unless named there). Which rows match, which
 // form a block, and whether the list is filtering are the server's (`list.filtering`); the page
@@ -47,6 +47,7 @@ import {
   footerText,
   holdsNoSession,
   NO_SESSION,
+  noMatchText,
   rowText,
   sanitize,
   sectionText,
@@ -383,8 +384,9 @@ export function createList(root, hooks) {
   });
 
   const body = element('list-body', 'div');
+  // A filter that leaves no session listed: its line (`noMatchText`, set at each render).
   const empty = element('list-empty', 'div');
-  empty.textContent = 'No session matches the filter.';
+  empty.textContent = noMatchText(0);
   // F22: the note while the list holds no session at all, under the Open band. A note, not a
   // control: no listener, never in the tab order. Of `here`, style.css shows the line that fits
   // the page (app-only, tab-only).
@@ -855,6 +857,12 @@ export function createList(root, hooks) {
     const now = nowNs();
     const sections = list?.sections ?? [];
     const nothing = filtering() && sections.every((section) => section.count === 0);
+    // During a typed search, and while the chip `Done` is on, the footer of done sessions is not
+    // shown (S2 12.8, E5, F35): they are listed. Under other chips alone it counts the done ones
+    // they match (the server's `doneHidden`), and a filter that leaves no row says so when only
+    // done ones match (F35, ruled).
+    const footShown = list !== null && !searching() && !chips.includes('done');
+    setText(empty, noMatchText(footShown ? list.doneHidden : 0));
     const noSession = holdsNoSession(list, filter.value);
     /** @type {HTMLElement[]} */
     const lines = [];
@@ -984,13 +992,7 @@ export function createList(root, hooks) {
       place(block.root, block.kids);
     }
 
-    // During a typed search, and while the chip `Done` is on, the footer of done sessions is not
-    // shown (S2 12.8, E5, F35): they are listed. Under other chips alone it counts the done ones
-    // they match (the server's `doneHidden`).
-    const foot =
-      list === null || searching() || chips.includes('done')
-        ? null
-        : footerText(list.doneHidden, showDone);
+    const foot = footShown ? footerText(list.doneHidden, showDone) : null;
     footer.hidden = foot === null;
     setText(footerLine, foot?.text ?? '');
     setText(footerAction, foot?.action ?? '');

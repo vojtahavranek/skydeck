@@ -108,7 +108,8 @@ export function paneFor(selected, rows, terminals, newOpen, selectedRow = null) 
  * F9: the block of `group` in the section `section` as `list` draws it — its closed caption
  * (`closedStacks`), or the rows of its open card (each with a `stack` of that group) —, as the
  * number of its sessions and how many of them need you; null when the section draws neither (no
- * such block, the section folded, or a filter set: no block then). The group card of the pane and
+ * such block, the section folded, or a word typed: no block then; F35: under chips alone the
+ * blocks are drawn). The group card of the pane and
  * the list's rule for a selected caption read it.
  * @param {ListMessage | null} list
  * @param {string} section

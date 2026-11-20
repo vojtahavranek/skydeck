@@ -161,9 +161,9 @@ or when you name a program that reads it (the guide's
 Press `/` (with the keyboard in the list) or click the filter at the top of the list, and type.
 Every word must match: the title, the group, the note, the folder, a pull request, the ticket, or
 the start of the short id (at least 4 characters). The chips under it narrow the list: **Running**,
-**Open PR**, **Has note**, **Done** (only the done sessions). A chip lists no done session unless
-**Show done**, the switch at the end of their row, is on; typed words find done sessions too. Esc
-clears the words.
+**Open PR**, **Has note**, **Done**. The first three list no done session unless **Show done**,
+the switch at the end of their row, is on; **Done** lists only the done ones; typed words find done
+sessions too. Esc clears the words.
 
 **Ctrl+Shift+P**, or **Switch…** in the title bar, opens the quick switcher over every session,
 done ones too. Type a few letters, move with ↑ ↓ and press Enter: it switches to a running session,

@@ -1538,7 +1538,9 @@ terminal.
   is unfolded and every block flat (below); the footer `17 done hidden · show` is not shown; and
   nothing folds: ← and → do nothing, nor does a click on Earlier's header. The chips below do none
   of that. A filter — a word or a chip — that leaves no session says `No session matches the
-  filter.` A text of white space only is no filter. The title bar's counts, the `need you` count
+  filter.`; chips that match only done sessions while `Show done` is off say `Only done sessions
+  match the filter.`, with the footer `2 done hidden · show` under it. A text of white space only
+  is no filter. The title bar's counts, the `need you` count
   and `(3) skydeck` do not change with the filter or the chips: they count what the list lists
   without them.
 
@@ -1632,7 +1634,7 @@ the sessions the chips leave in it, and a closed one stays closed.
 - `d` on a session of an open block marks that session only: the others stay a card, or the last one
   stands alone as a plain row, and the selection goes to the row after it (stage D's rule). With
   done sessions shown the session stays listed and stays selected.
-- While filtering, every session stands alone.
+- While a word is typed, every session stands alone; under chips alone the cards stay.
 
 (Until 2026-11-16 only Recent and Earlier stacked, closed by default, and running sessions never
 did; the owner asked for blocks in every section, open by default. Until 2026-11-17 the first
@@ -1921,6 +1923,9 @@ of the window between light and dark: after one, start or resume the session aga
   too few for each such session.
 - **`d` while a word is typed.** The toast says `Marked done: hidden from the list. It comes back
   on new activity.` while the filter still lists the session, with its `done` mark.
+- **`d` under `Done`.** It takes a session's mark away, so the session leaves the list (`Done`
+  lists done ones only) as any session a filter stops matching ("A selected session the list does
+  not show" above): no row is selected, and ↑ and ↓ start again from the first line.
 - **Blocks the window cannot close.** A block whose group is over 1,024 bytes (of UTF-8) cannot
   be closed: ← on a session of it and a click on its caption do nothing, and it stays open. A
   window remembers at most 64 closed blocks: closing another opens the one closed first again

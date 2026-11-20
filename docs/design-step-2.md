@@ -2330,8 +2330,8 @@ stronger than the cards, in the dark scheme too, and adds next to no height (hal
 three). Its words stay at least 4.5 : 1 against the band and Open's bar at least 3 : 1, in both
 schemes (`test/web/section-band.test.ts`).
 
-Done sessions are hidden (design 7.1), with a footer "17 done hidden · show". Filtering and the
-switcher search done ones too (12.8).
+Done sessions are hidden (design 7.1), with a footer "17 done hidden · show". A typed search, the
+chip Done and the switcher search done ones too; a chip alone does not (12.8, follow-up F35).
 
 **An empty copy** (follow-up F33). A copy Claude Code's background feature made of a session
 (design 5.3 "Copies": its process was started with `--fork-session --resume <the original>`)
@@ -2360,7 +2360,8 @@ it starts.`, `Or start one here with Ctrl+Shift+N.` (in a browser tab, where the
 key, `Or start one here with + New in the key bar.`: the page's app-only and tab-only rule picks
 the line) and `Ctrl+Shift+H shows every key.`. It is a note (`role="note"`), no control and not in
 the tab order, and it wraps inside the list's width. A filter or a chip that hides every session
-keeps its own line, `No session matches the filter.` (12.8). It comes and goes with the lists, with
+keeps its own line, `No session matches the filter.`, or `Only done sessions match the filter.`
+while chips alone match only done sessions that are hidden (12.8). It comes and goes with the lists, with
 no reload: it goes when the first session is listed and comes back when the last one is done or
 gone (the footer then says how many are done). With sessions it is not in the list at all, so
 nothing of a list with sessions moves. The right side, blank before while nothing is selected
@@ -3287,7 +3288,9 @@ written without quote marks (`> restore`).
   name and address, F18, and the text of its status, F19), directory, short id; several words must
   all match; while a word is typed it includes done sessions, unfolds
   every section and flattens every block (12.2: flat rows, each with its group, no card). A filter that leaves no row says so: `No session matches the filter.`
-  (ruled by the plan owner, plan task 27).
+  (ruled by the plan owner, plan task 27); chips alone that leave no row while done sessions they
+  match are hidden say `Only done sessions match the filter.`, the footer under it counting them
+  (follow-up F35, ruled).
 - Chips: Running, Open PR, Has note, Done; at the end of their row, apart from them, the switch
   Show done (follow-up F35).
 - Ctrl+Shift+P opens the quick switcher over all sessions, ranked: needs you, open (by slot), not
@@ -3325,7 +3328,9 @@ One rule matches for the filter and for the switcher:
   the blocks are formed by 12.2's rule, a closed one's caption counting the rows left, and setting
   or clearing a chip folds, unfolds, opens and closes nothing; the footer of done sessions is shown
   and counts the done sessions the chips match (`2 done hidden · show`; its `show` turns Show done
-  on); with Done set no footer is shown, since no done session is hidden.
+  on), and when they leave no row the list says `Only done sessions match the filter.` above it
+  (ruled; `No session matches the filter.` when no done one matches either); with Done set no
+  footer is shown, since no done session is hidden.
 - **Show done** is the view's `showDone`, the same state as the list key `a` and the footer's
   `show`. It adds sessions where the chips narrow, so since follow-up F35 it is no chip: it is a
   switch at the end of the chips' row, apart from them, drawn as a labelled check box (a button with
@@ -3470,8 +3475,8 @@ request, `d` done, `a` show done; new in the window, Home, End, PgUp, PgDn, ← 
 Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also
 clears the field), so from the field the terminal is one more Esc away (ruled by the plan owner,
 plan task 27). Folding Earlier (← or a click on its header) with the selection inside it first
-selects the line above it that can hold the selection — a row, or a closed caption (12.2) —; while a
-filter is set nothing folds. On a block (12.2; stage E, plan E7 as ruled on 2026-11-16; as cards
+selects the line above it that can hold the selection — a row, or a closed caption (12.2) —; during
+a typed search nothing folds (under chips alone Earlier folds, follow-up F35). On a block (12.2; stage E, plan E7 as ruled on 2026-11-16; as cards
 since follow-up F9, 2026-11-17): ↑ ↓ (`j` `k`, Home, End, PgUp, PgDn) move through the rows and the
 closed captions in the list's order, over open captions, and with nothing selected they start at the
 first of them. ← on any session of an open card closes the block and selects its caption, as folding

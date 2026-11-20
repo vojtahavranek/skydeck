@@ -15,6 +15,7 @@ import {
   chipText,
   countsText,
   footerText,
+  noMatchText,
   rowText,
   sanitize,
   sectionText,
@@ -766,6 +767,21 @@ describe('footerText (S2 12.1: "17 done hidden · show")', () => {
   });
   test('none hidden and none shown: no footer', () => {
     assert.equal(footerText(0, false), null);
+  });
+});
+
+describe('noMatchText (S2 12.8, F35 as ruled): the line of a filter that leaves no session listed', () => {
+  test('done sessions it matches are hidden (chips alone, Show done off): only done ones match', () => {
+    assert.equal(noMatchText(1), 'Only done sessions match the filter.');
+    assert.equal(noMatchText(17), 'Only done sessions match the filter.');
+  });
+  test('none hidden: no session matches', () => {
+    assert.equal(noMatchText(0), 'No session matches the filter.');
+  });
+  test('a count that is no whole number above 0 is none', () => {
+    for (const odd of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.equal(noMatchText(odd), 'No session matches the filter.', String(odd));
+    }
   });
 });
 

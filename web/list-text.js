@@ -530,9 +530,24 @@ export function footerText(doneHidden, showDone) {
 }
 
 /**
+ * S2 12.8 (follow-up F35, as ruled): the list's line while a filter — a word or a chip — leaves
+ * no session listed: `Only done sessions match the filter.` while done sessions it matches are
+ * hidden (chips alone with Show done off: the footer under it counts them), else `No session
+ * matches the filter.`.
+ * @param {number} doneHidden the done sessions the footer counts as hidden (the list's
+ *   `doneHidden` while the footer is shown, else 0)
+ * @returns {string}
+ */
+export function noMatchText(doneHidden) {
+  return Number.isInteger(doneHidden) && doneHidden > 0
+    ? 'Only done sessions match the filter.'
+    : 'No session matches the filter.';
+}
+
+/**
  * Follow-up F22: whether `list` holds no session at all — no session in any section (a folded
  * Earlier counts its own; done sessions hidden count for none) and no filter or chip set: a filter
- * that hides every session keeps its own line, "No session matches the filter.". Whether the view
+ * that hides every session keeps its own line (`noMatchText`). Whether the view
  * filters is the server's (`list.filtering`, E5); a list without it, stage A's rule, the field's
  * text. False before the first list (nothing is known yet). The list's note and the right side's
  * line both follow it.
