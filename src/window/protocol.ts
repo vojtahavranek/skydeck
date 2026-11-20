@@ -299,10 +299,13 @@ export interface RowPayload {
    *  before F33) is none. */
   copyOf?: RowCopyPayload | null;
 }
-/** Follow-up F33: what a copy's row names of its original. */
+/** Follow-up F33: what a copy's row names of its original, and whether the list hides it. */
 export interface RowCopyPayload {
   id: string;
   title: string | null;
+  /** The list shows it only with done sessions shown or a filter: an empty copy the user did not
+   *  keep that no terminal of the window shows (`isHiddenCopy`). Absent is true. */
+  hiddenWhileEmpty?: boolean;
 }
 /** Follow-up F19: a row's ticket status — the ticket's short name, the status' text (at most 40
  *  characters, sanitised) and its category (one of the six words), null for none. */

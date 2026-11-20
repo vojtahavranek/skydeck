@@ -535,7 +535,7 @@ function checkLeftArrow({ platform, places }: Facts, report: Report): void {
         'info',
         "Claude Code's ← shortcut is on: ← on an empty prompt sends a window terminal's session to " +
           'the background, and the list then shows it running in another terminal once it has a ' +
-          "message (the window's a shows it before); to turn it off: " +
+          'message (before that, a in the window shows it); to turn it off: ' +
           `skydeck install asks, or ${how}`,
       );
       return;

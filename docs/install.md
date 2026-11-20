@@ -792,15 +792,17 @@ effect.
 - **A copy made by Claude Code's background feature.** Agent view and `/bg` can start a copy of a
   session (`claude --fork-session --resume …`): a new session that holds only the title of the one
   it copies, running in Claude Code's background. While it has no message and sits idle the list
-  does not show it as a second row of that session: `a` shows it, as it shows done sessions,
-  marked `empty copy` (its tooltip names the session it copies), and so does `skydeck ls --all`;
-  restore never offers it. Once you give it a prompt (in agent view) it is listed by itself,
-  without a reload, marked `continued`, its tooltip naming the session it began as a copy of; so
-  is one that is working or asks you something, and one you gave a label, a group, a note, a
-  ticket or a pull request. A copy that a terminal of the window shows is always listed. A copy
+  does not show it as a second row of that session: `a` shows it, as it shows done sessions, marked
+  `empty copy` (its tooltip names the session it copies), and so does `skydeck ls --all`; restore
+  never offers it. Once you give it a prompt (in agent view) it is listed by itself, without a
+  reload, marked `continued`, its tooltip naming the session it began as a copy of. One that is
+  working or asks you something is listed at once too, and so is one you gave a label, a group, a
+  note, a ticket or a pull request you attached yourself (marked `empty copy` while it has no
+  message; a pull request skydeck attached by itself, from a link Claude Code may have copied with
+  the title, does not count). A copy that a terminal of the window shows is always listed. A copy
   you start yourself with `--fork-session` in a terminal of your own is the same to skydeck: it
-  shows once it has a first message, and `a` shows it before. skydeck does not stop a copy: it
-  runs in Claude Code's background as before.
+  shows once it has a first message, and `a` shows it before. skydeck does not stop a copy: it runs
+  in Claude Code's background as before.
 - **A new session**: Ctrl+Shift+N (in a browser tab the browser keeps Ctrl+Shift+N for itself:
   use the `+ New` button there), with its directory,
   label, group and `claude` flags. Flags you use often can be favourites: the ★ at the end of the
@@ -1998,7 +2000,7 @@ broken installation.
 | scripted runs dropped | `info`: how many events of scripted runs (print mode, SDK hosts, editor extensions) were dropped; they are not sessions a person works in. A scripted run that holds a session skydeck knows is not dropped (see "If something goes wrong"). |
 | last refresh | Something was skipped at the last command: a hook file, a process, or a transcript folder or file that could not be read. The line says what and why. |
 | Claude Code's folders | `<claudeHome>/sessions` or something under `<claudeHome>/projects` cannot be read. A folder that does not exist yet is only `info`. |
-| Claude Code's ← shortcut | Never a problem: it is your choice. `ok       Claude Code's ← shortcut is off (<file>)`; while it is on, `info     Claude Code's ← shortcut is on: ← on an empty prompt sends a window terminal's session to the background, and the list then shows it running in another terminal once it has a message (the window's a shows it before); to turn it off: skydeck install asks, or /config in Claude Code ("← opens agents")`; when the file cannot tell, `info     Claude Code's ← shortcut: cannot tell from <file> (<reason>); skydeck leaves it alone; to turn it off: /config in Claude Code ("← opens agents")`, with the reasons of install's line (Install, step 3). It shows nothing else of the file. After you turned the shortcut off, an `on` here means the key is `true` or gone again: you turned it on in `/config`, or a session that was running wrote its older copy of the file back (then turn it off again once that session has ended). |
+| Claude Code's ← shortcut | Never a problem: it is your choice. `ok       Claude Code's ← shortcut is off (<file>)`; while it is on, `info     Claude Code's ← shortcut is on: ← on an empty prompt sends a window terminal's session to the background, and the list then shows it running in another terminal once it has a message (before that, a in the window shows it); to turn it off: skydeck install asks, or /config in Claude Code ("← opens agents")`; when the file cannot tell, `info     Claude Code's ← shortcut: cannot tell from <file> (<reason>); skydeck leaves it alone; to turn it off: /config in Claude Code ("← opens agents")`, with the reasons of install's line (Install, step 3). It shows nothing else of the file. After you turned the shortcut off, an `on` here means the key is `true` or gone again: you turned it on in `/config`, or a session that was running wrote its older copy of the file back (then turn it off again once that session has ended). |
 | `gh` | `gh` is not installed, or not logged in, or GitHub cannot be reached. Run `gh auth status`. |
 | terminal | With `"terminal": "wezterm"`: `wezterm cli --no-auto-start list` failed. Is a WezTerm window open? With `"here"` the line is `ok`, and with `"window"` too: `terminal: window (sessions start in the skydeck window; resume, new and restore need skydeck window to run)`; whether the server runs is the window's server line. |
 

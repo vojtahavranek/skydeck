@@ -68,11 +68,15 @@ export interface TicketStatusView {
 
 /**
  * Follow-up F33: the session a row began as a copy of (design 5.3 "Copies"): its id, and its title
- * as the list shows it (sanitised), null when skydeck has no row for it.
+ * as the list shows it (sanitised), null when skydeck has no row for it; and whether the user set
+ * on the copy something that only the user can set (ruled: a label, a group, a note, a ticket, or
+ * a pull request attached by hand — not one skydeck attached by itself from a `pr-link` record,
+ * which Claude Code may have copied with the title), which keeps it listed while it is empty.
  */
 export interface CopyView {
   id: string;
   title: string | null;
+  keptByUser: boolean;
 }
 
 export interface ListRow {
@@ -250,7 +254,8 @@ function attachedPrs(
  * error of each pull request. The store gives no order, so pull requests are sorted here. The
  * ticket's name is worked out with `ticketUrl` (F18, ticketOf). F19: `ticketStatus` gives the
  * configured rules and the cached statuses; without it no row has a ticket status. F33: a copy's
- * row names its original (`copyOf`) with the title of the original's row.
+ * row names its original (`copyOf`) with the title of the original's row, and says whether the user
+ * kept it (`CopyView.keptByUser`).
  */
 export function buildRows(input: {
   sessions: readonly DerivedSession[];
@@ -263,6 +268,12 @@ export function buildRows(input: {
 }): ListRow[] {
   const metaOf = new Map(input.metas.map((meta) => [meta.sessionId, meta]));
   const prsOf = attachedPrs(input.prs, input.sessionPrs);
+  // F33: the sessions with a pull request the user attached by hand (and did not detach).
+  const attachedByHand = new Set(
+    input.sessionPrs
+      .filter((link) => link.origin === 'manual' && link.detachedAtNs === null)
+      .map((link) => link.sessionId),
+  );
   const groupPattern = new RegExp(input.groupPattern);
   const statuses = input.ticketStatus;
   const cache = new Map((statuses?.rows ?? []).map((row) => [row.url, row]));
@@ -323,9 +334,16 @@ export function buildRows(input: {
   const titles = new Map(built.map((row) => [row.id, row.title]));
   return built.map((row) => {
     const original = row.session.copyOf;
-    return original === undefined
-      ? row
-      : { ...row, copyOf: { id: original, title: titles.get(original) ?? null } };
+    if (original === undefined) {
+      return row;
+    }
+    const keptByUser =
+      row.label !== null ||
+      row.groupSource === 'meta' ||
+      row.hasNote ||
+      row.ticket !== null ||
+      attachedByHand.has(row.id);
+    return { ...row, copyOf: { id: original, title: titles.get(original) ?? null, keptByUser } };
   });
 }
 
@@ -346,16 +364,16 @@ function nothingAttached(row: ListRow): boolean {
 
 /**
  * F33 (7.2): a row that `isListed` hides as an empty copy unless it shows done ones: marked
- * `empty-copy` (6.3: no message yet, neither working nor asking) and carrying nothing the user
- * attached (`nothingAttached`). The window keeps it listed while a terminal of the window shows it.
+ * `empty-copy` (6.3: no message yet, neither working nor asking) and not kept by the user
+ * (`CopyView.keptByUser`). The window keeps it listed while a terminal of the window shows it.
  */
 export function isHiddenCopy(row: ListRow): boolean {
-  return row.marks.includes('empty-copy') && nothingAttached(row);
+  return row.marks.includes('empty-copy') && row.copyOf?.keptByUser !== true;
 }
 
 /**
  * 7.2: entrypoint other than cli → false; not running and no transcript → false (D27, also with
- * showAll); done (unless showAll) → false; an empty copy that carries nothing of the user's (F33,
+ * showAll); done (unless showAll) → false; an empty copy the user did not keep (F33,
  * `isHiddenCopy`) unless showAll or a terminal of the window shows it (`inWindow`, the window's
  * own knowledge) → false, running or not; expired with nothing the user attached
  * (`nothingAttached`) → false.

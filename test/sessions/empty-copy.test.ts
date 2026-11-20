@@ -236,7 +236,7 @@ describe('derive (ruled): a copy that works or asks is in use, whatever its tran
   });
 });
 
-describe('list (ruled): an empty copy that carries something of the user’s is listed as any', () => {
+describe('list (ruled): an empty copy that carries what only the user can set is listed as any', () => {
   const copy = (): DerivedSession => one(copyOf(TITLE_ONLY), COPY);
   const pr = prRow('acme/web', 7);
   const cases: [string, Parameters<typeof rows>[1]][] = [
@@ -244,17 +244,47 @@ describe('list (ruled): an empty copy that carries something of the user’s is 
     ['a group the user set', { metas: [meta(COPY, { group: 'mine' })] }],
     ['a note', { metas: [meta(COPY, { note: 'remember this' })] }],
     ['a ticket', { metas: [meta(COPY, { ticket: 'https://example.com/browse/ABC-123' })] }],
-    ['a pull request', { prs: [pr], sessionPrs: [attached(COPY, pr)] }],
+    [
+      'a pull request attached by hand',
+      { prs: [pr], sessionPrs: [attached(COPY, pr, { origin: 'manual' })] },
+    ],
   ];
   for (const [what, extra] of cases) {
     test(`${what}: listed without showAll, its marks kept`, () => {
       const [row] = rows([copy()], extra);
       assert.ok(row);
+      assert.equal(row.copyOf?.keptByUser, true);
       assert.equal(isHiddenCopy(row), false);
       assert.equal(isListed(row, false), true);
       assert.deepEqual(row.marks, ['continued', 'empty-copy']);
     });
   }
+
+  test('a pull request skydeck attached by itself from a pr-link record (maybe copied with the title): hidden', () => {
+    const [row] = rows([copy()], { prs: [pr], sessionPrs: [attached(COPY, pr)] });
+    assert.ok(row);
+    assert.equal(row.prs.length, 1, 'attached, with its chip');
+    assert.equal(row.copyOf?.keptByUser, false);
+    assert.equal(isHiddenCopy(row), true);
+    assert.equal(isListed(row, false), false);
+    assert.equal(isListed(row, true), true);
+  });
+
+  test('a pull request attached by hand and detached again keeps nothing: hidden', () => {
+    const [row] = rows([copy()], {
+      prs: [pr],
+      sessionPrs: [attached(COPY, pr, { origin: 'manual', detachedAtNs: T0 })],
+    });
+    assert.equal(row === undefined ? null : isListed(row, false), false);
+  });
+
+  test('an expired session keeps its rule: an auto pull request still keeps it listed', () => {
+    const [row] = rows([ds({ id: S3, marks: ['expired'], transcript: { missingSinceNs: T0 } })], {
+      prs: [pr],
+      sessionPrs: [attached(S3, pr)],
+    });
+    assert.equal(row === undefined ? null : isListed(row, false), true);
+  });
 
   test('a group the title gives (a ticket key copied with the title) is not the user’s: hidden', () => {
     const [row] = rows([
@@ -327,7 +357,7 @@ describe('list: an empty copy is listed where done sessions are', () => {
   test('the row names its original: id and title; the title null for an original skydeck does not know', () => {
     const listRows = rows(copyOf(TITLE_ONLY));
     const copy = listRows.find((row) => row.id === COPY);
-    assert.deepEqual(copy?.copyOf, { id: ORIGINAL, title: 'made-up title' });
+    assert.deepEqual(copy?.copyOf, { id: ORIGINAL, title: 'made-up title', keptByUser: false });
     assert.equal(Object.hasOwn(listRows.find((row) => row.id === ORIGINAL) ?? {}, 'copyOf'), false);
 
     const [orphan] = rows([
@@ -340,7 +370,7 @@ describe('list: an empty copy is listed where done sessions are', () => {
         COPY,
       ),
     ]);
-    assert.deepEqual(orphan?.copyOf, { id: S3, title: null });
+    assert.deepEqual(orphan?.copyOf, { id: S3, title: null, keptByUser: false });
   });
 });
 

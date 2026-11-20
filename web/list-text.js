@@ -128,7 +128,9 @@ function originalOf(row) {
 /**
  * Follow-up F33 (S2 12.2): a copy's mark in the place of `continued` — `empty copy` while the
  * server marks it `empty-copy`, else `continued` naming the original it began as a copy of; null
- * for a row that is no copy, whose `continued` keeps its words.
+ * for a row that is no copy, whose `continued` keeps its words. The empty copy's tooltip says it
+ * shows by itself once it has a first message while the list hides it (`hiddenWhileEmpty`, absent
+ * counts as hidden), else that it has no message yet (the user kept it, or a terminal shows it).
  * @param {RowPayload} row
  * @param {readonly string[]} marks
  * @returns {MarkText | null}
@@ -136,10 +138,12 @@ function originalOf(row) {
 function copyMark(row, marks) {
   const original = originalOf(row);
   if (marks.includes('empty-copy')) {
+    const shown = row.copyOf?.hiddenWhileEmpty === false;
+    const then = shown ? 'it has no message yet' : 'it shows by itself once it has a first message';
     return {
       kind: 'continued',
       text: 'empty copy',
-      tip: `an empty copy of ${original ?? 'another session'} made by Claude Code; it shows by itself once it has a first message`,
+      tip: `an empty copy of ${original ?? 'another session'} made by Claude Code; ${then}`,
     };
   }
   return original === null

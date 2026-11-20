@@ -2,14 +2,14 @@
  * The window's view model (S2 12, stage A): the rows step 1 loads, the window's terminals and one
  * page's view state become that page's `list` message. Pure: it needs nothing but its input.
  *
- * Imports (S2 4.3, plan A8): types of `sessions`, step 1's `isListed` (and F33's `isHiddenCopy`),
- * the window's message and hub types, and `text`. Stage B adds attention (`./attention.ts`, plan B 2.4): each row's, and the
+ * Imports (S2 4.3, plan A8): types of `sessions`, step 1's `isListed`, the window's message and hub
+ * types, and `text`. Stage B adds attention (`./attention.ts`, plan B 2.4): each row's, and the
  * page's `needYou`. Stage E adds search (`./search/`, plan E1): the filter's words and chips, the
  * stacks and the switcher's ranking; design 7.4's `matchesFilter` stays for `ls` and the
  * interactive list.
  */
 import type { Ns } from '../../platform/types.ts';
-import { isHiddenCopy, isListed } from '../../sessions/list.ts';
+import { isListed } from '../../sessions/list.ts';
 import type { ListRow } from '../../sessions/list.ts';
 import type { DerivedSession } from '../../sessions/types.ts';
 import { sanitize } from '../../text/sanitize.ts';
@@ -389,10 +389,10 @@ export function buildListMessage(
       selectedRow = payload;
     }
     const open = payload.starting || row.state !== 'not-running';
-    // F33: an empty copy (that carries nothing of the user's) that no terminal of the window
-    // shows is listed as a done one is, only with done ones shown, open or not; one a terminal of
-    // the window shows is never hidden.
-    const hiddenCopy = terminal === null && isHiddenCopy(row);
+    // F33: an empty copy the user did not keep that no terminal of the window shows (the row's
+    // `hiddenWhileEmpty`, sections.ts) is listed as a done one is, only with done ones shown, open
+    // or not; one a terminal of the window shows is never hidden.
+    const hiddenCopy = payload.copyOf?.hiddenWhileEmpty === true;
     // Listed without the filter (stage A's rule with the view's showDone): the counts' rows.
     const listed =
       isListed(row, (open && !hiddenCopy) || view.showDone, terminal !== null) ||

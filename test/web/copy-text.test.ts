@@ -68,6 +68,30 @@ describe('the marks of a copy', () => {
     );
   });
 
+  test('empty but listed anyway (the user kept it, or a terminal of the window shows it): "it has no message yet"', () => {
+    assert.deepEqual(
+      marksOf({
+        marks: ['continued', 'empty-copy'],
+        copyOf: { id: ORIGINAL, title: 'A made-up title', hiddenWhileEmpty: false },
+      }),
+      [
+        {
+          kind: 'continued',
+          text: 'empty copy',
+          tip: 'an empty copy of "A made-up title" made by Claude Code; it has no message yet',
+        },
+      ],
+    );
+    assert.deepEqual(
+      marksOf({
+        marks: ['continued', 'empty-copy'],
+        copyOf: { id: ORIGINAL, title: 'A made-up title', hiddenWhileEmpty: true },
+      }).map((mark) => mark.tip),
+      [EMPTY_TIP],
+      'shown only by `a` or a search: the long form',
+    );
+  });
+
   test('an original skydeck does not know: named by its short id', () => {
     assert.deepEqual(
       marksOf({ marks: ['continued', 'empty-copy'], copyOf: { id: ORIGINAL, title: null } }),

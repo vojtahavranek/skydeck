@@ -129,7 +129,7 @@ describe('the window: an empty copy no terminal of the window shows', () => {
     const row = rowIn(message, COPY);
     assert.equal(section(message, 'open').rows[0]?.id, COPY);
     assert.deepEqual(row.marks, ['continued', 'empty-copy']);
-    assert.deepEqual(row.copyOf, { id: ORIGINAL, title: TITLE });
+    assert.deepEqual(row.copyOf, { id: ORIGINAL, title: TITLE, hiddenWhileEmpty: true });
     assert.equal(row.elsewhere?.pid, 9000);
   });
 
@@ -172,6 +172,7 @@ describe('the window: what keeps an empty copy listed', () => {
     const message = buildListMessage(input({ terminals: [terminal()], elsewhere: new Map() }));
     assert.deepEqual(shownIds(message), [ORIGINAL, COPY].sort());
     assert.equal(rowIn(message, COPY).terminal, '000000000001');
+    assert.equal(rowIn(message, COPY).copyOf?.hiddenWhileEmpty, false);
     assert.equal(message.counts.running, 1);
   });
 
@@ -219,6 +220,7 @@ describe('the window: what keeps an empty copy listed', () => {
     assert.deepEqual(shownIds(message), [ORIGINAL, COPY].sort());
     assert.equal(section(message, 'open').rows[0]?.id, COPY);
     assert.deepEqual(rowIn(message, COPY).marks, ['continued', 'empty-copy']);
+    assert.equal(rowIn(message, COPY).copyOf?.hiddenWhileEmpty, false);
     assert.equal(message.counts.elsewhere, 1);
     const items = buildListMessage(
       input({
@@ -227,6 +229,21 @@ describe('the window: what keeps an empty copy listed', () => {
       }),
     ).switcher?.items.map((item) => item.row.id);
     assert.deepEqual(items?.sort(), [ORIGINAL, COPY].sort());
+  });
+
+  test('… labelled, marked done and running in the background: under Open with its done mark', () => {
+    const message = buildListMessage(
+      input({
+        rows: rows(sessions({ doneAtNs: T0, hidden: true }), {
+          metas: [meta(COPY, { label: 'mine', doneAtNs: T0 })],
+        }),
+      }),
+    );
+    assert.deepEqual(
+      section(message, 'open').rows.map((row) => [row.id, row.done]),
+      [[COPY, true]],
+    );
+    assert.equal(message.doneHidden, 0);
   });
 
   test('its first turn or input: listed by the usual rules, marked continued only', () => {
@@ -240,7 +257,7 @@ describe('the window: what keeps an empty copy listed', () => {
     assert.deepEqual(shownIds(message), [ORIGINAL, COPY].sort());
     const row = rowIn(message, COPY);
     assert.deepEqual(row.marks, ['continued']);
-    assert.deepEqual(row.copyOf, { id: ORIGINAL, title: TITLE });
+    assert.deepEqual(row.copyOf, { id: ORIGINAL, title: TITLE, hiddenWhileEmpty: false });
     assert.equal(message.counts.elsewhere, 1);
   });
 

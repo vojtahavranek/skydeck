@@ -15,7 +15,12 @@ import { testDeck } from '../../helpers/deck.ts';
 import type { TestDeck } from '../../helpers/deck.ts';
 import { S1, S2, S3, SEC, T0, statLine } from '../../helpers/platform.ts';
 import { hookInput, spoolName, spoolText } from '../../helpers/spool.ts';
-import { appendRecord, userRecord, writeTranscript } from '../../helpers/session-files.ts';
+import {
+  appendRecord,
+  prLinkRecord,
+  userRecord,
+  writeTranscript,
+} from '../../helpers/session-files.ts';
 
 const COPY = S1;
 const ORIGINAL = S2;
@@ -164,6 +169,23 @@ describe('skydeck ls and show on an empty copy', () => {
       assert.equal(copy?.continuedFrom, ORIGINAL);
     });
   }
+
+  test('a pr-link record copied with the title: the pull request is attached, the copy stays hidden', async (t) => {
+    const d = copyDeck(t, true);
+    const url = 'https://github.com/example/repo/pull/7';
+    writeTranscript(d, COPY, [titleRecord(COPY), prLinkRecord(COPY, url, T0 - 25n * SEC)]);
+    assert.deepEqual(
+      (await listed(d)).map((session) => session.id),
+      [ORIGINAL],
+    );
+    const shown = await run(d, ['show', COPY.slice(0, 8), '--json']);
+    const json = JSON.parse(shown.out) as { marks: string[]; prs: { url: string }[] };
+    assert.deepEqual(json.marks, ['continued', 'empty-copy']);
+    assert.deepEqual(
+      json.prs.map((pr) => pr.url),
+      [url],
+    );
+  });
 
   test('its first message: in ls by the usual rules, marked continued', async (t) => {
     const d = copyDeck(t, true);

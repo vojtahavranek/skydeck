@@ -2676,9 +2676,10 @@ and the Claude Code version (`claude --version`).
    leaving out the value after `--resume` (a path). No copy and no second row: write that down,
    and the check ends here.
 3. **Shown with `a`.** In the window, press Ctrl+Shift+L until the key bar says `Focus: list`, then
-   `a`. Expected: the copy is
-   listed, marked `empty copy`; hovering the mark shows `an empty copy of "<the title>" made by Claude
-   Code; it shows by itself once it has a first message`. Press `a` again: it is hidden again.
+   `a`. Expected: the copy is listed, marked `empty copy`; hovering the mark shows `an empty copy of
+   "<the title>" made by Claude Code; it shows by itself once it has a first message`. Write down
+   whether its row shows a pull-request chip (Claude Code may copy the original's pull request with
+   its title). Press `a` again: it is hidden again.
 4. **Its first prompt.** In agent view, open the background session and give it `Reply with the
    single word ok, in this chat, with no tool and no file.` Expected: within a few seconds, without a
    reload, the copy appears in the window by itself, marked `continued`; hovering the mark shows `it
