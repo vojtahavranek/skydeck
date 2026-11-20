@@ -218,8 +218,10 @@ for tool in sysctl ps vm_stat lsof open; do
   fi
 done
 if have vm_stat; then
-  # The form of its first lines, for a reading of the memory that is free.
-  limited vm_stat 2>/dev/null </dev/null | head -n 3 | mask | sed 's/^/vm_stat, masked: /'
+  # Its lines with every digit as 9: the names of its counts are the system's own words. A line
+  # with any other character than letters, digits, spaces and . : ( ) " - is masked whole.
+  limited vm_stat 2>/dev/null </dev/null | head -n 30 |
+    LC_ALL=C sed -e 's/[^ -~]/?/g' -e 's/[0-9]/9/g' -e '/[^A-Za-z9 .:()"-]/s/[A-Za-z]/a/g' -e 's/^/vm_stat: /'
 fi
 
 section "time"

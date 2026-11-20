@@ -157,7 +157,8 @@ function mac(
   standIn(
     s.bin,
     'vm_stat',
-    'echo "Mach Virtual Memory Statistics: (page size of 16384 bytes)"; echo "Pages free:      123456."; echo "Pages active:    7890."; echo "Pages inactive:  4242."',
+    // A line with an unexpected character (here a quote) is masked whole.
+    `echo "Mach Virtual Memory Statistics: (page size of 16384 bytes)"; echo "Pages free:      123456."; echo "Pages active:    7890."; echo "Pages of ${USER}'s cache:  4242."`,
   );
   for (const name of ['lsof', 'open']) {
     standIn(s.bin, name, 'exit 0');
@@ -402,9 +403,10 @@ describe('scripts/mac-probe.sh', () => {
       assert.match(ran.stdout, /^ {2}procStart equals ps lstart in local time: YES$/m);
       assert.match(
         ran.stdout,
-        /^vm_stat, masked: Aaaa Aaaaaaa Aaaaaa Aaaaaaaaaa: \(aaaa aaaa aa 99999 aaaaa\)$/m,
+        /^vm_stat: Mach Virtual Memory Statistics: \(page size of 99999 bytes\)$/m,
       );
-      assert.match(ran.stdout, /^vm_stat, masked: Aaaaa aaaa: +999999\.$/m);
+      assert.match(ran.stdout, /^vm_stat: Pages free: +999999\.$/m);
+      assert.match(ran.stdout, /^vm_stat: aaaaa aa aaaaa-aaaaaaa'a aaaaa: +9999\.$/m);
       assert.match(ran.stdout, /^ {2}CLAUDE_PID is its process number: YES$/m);
       assert.match(
         ran.stdout,
