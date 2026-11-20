@@ -371,7 +371,7 @@ describe('F32: the bug, and each level alone', () => {
     assert.equal(prLevel(rowOf(result)), 'review-required');
   });
 
-  test('ruled, from real answers: a decision GitHub gives wins over the count of the rules', () => {
+  test('ruled: a decision GitHub gives is its own count and wins over ours; only a null decision is decided by the rules', () => {
     const one = merge({ rules: [reviewRule(2)], reviews: ['APPROVED'] });
     const approved = parseOne(answer(basics('APPROVED', 'SUCCESS'), one));
     assert.equal(approved.ok && approved.review, 'approved');
@@ -573,6 +573,22 @@ describe('F32: approved, green only with a real approval', () => {
     const result = parseOne(answer(basics('SOMETHING_NEW', 'SUCCESS'), merge()));
     assert.equal(result.ok && result.review, null);
     assert.equal(prLevel(rowOf(result)), 'approved-green');
+  });
+
+  test('ruled: a decision not known here is a decision too: the count of the rules does not decide it', () => {
+    const none = merge({ rules: [reviewRule(2)], reviews: [] });
+    const two = merge({ rules: [reviewRule(2)], reviews: ['APPROVED', 'APPROVED'] });
+    for (const q of [none, two]) {
+      const result = parseOne(answer(basics('SOMETHING_NEW', 'SUCCESS'), q));
+      assert.equal(result.ok && result.review, null);
+    }
+    const blocked = merge({ rules: [reviewRule(2)], mergeState: 'BLOCKED' });
+    assert.equal(levelOf(basics('SOMETHING_NEW', 'SUCCESS'), blocked), 'blocked');
+  });
+
+  test('ruled: APPROVED that GitHub still will not merge shows as blocked, through the merge state', () => {
+    const q = merge({ rules: [reviewRule(2)], reviews: ['APPROVED'], mergeState: 'BLOCKED' });
+    assert.equal(levelOf(basics('APPROVED', 'SUCCESS'), q), 'blocked');
   });
 });
 

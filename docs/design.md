@@ -433,16 +433,17 @@ never received a prompt has no transcript (14).
     started can stay so for days, so it ranks after the review, below);
   - the review is the first that applies of: changes requested (the decision, or a writer's latest
     review while the decision is not approved); review required (the decision, or, when there is
-    none, the rules need more approvals than the writers gave: the largest count among the rules,
-    0 for none; ruled from real answers: a decision GitHub gives wins over the count);
-    unresolved comments (the rules ask for resolved conversations and a thread is not resolved);
-    blocked (GitHub's merge state is `BLOCKED` while the checks pass or there are none and it is no
-    draft: GitHub will not let it be merged now for a reason skydeck does not read, such as code
-    owners, a rule on who may merge, or a deployment; ruled: a merge state of `UNKNOWN`, which
-    GitHub answers while it has not worked the state out, keeps what was stored about blocked,
-    and every other state decides anew); approved (the decision, or the rules need N of at least
-    1 and N writers approved); not required (no decision, and no rule needs an approval); else the
-    decision.
+    none, the rules need more approvals than the writers gave: the largest count among the rules, 0
+    for none; ruled: a decision GitHub gives is its own count and takes rulesets into account, ours
+    of the writers' latest reviews is an approximation, so only a null decision is decided by the
+    rules and the count); unresolved comments (the rules ask for resolved conversations and a thread
+    is not resolved); blocked (GitHub's merge state is `BLOCKED` while the checks pass or there are
+    none and it is no draft: GitHub will not let it be merged now for a reason skydeck does not
+    read, such as code owners, a rule on who may merge, or a deployment; ruled: a merge state of
+    `UNKNOWN`, which GitHub answers while it has not worked the state out, keeps what was stored
+    about blocked, and every other state decides anew); approved (the decision, or, with no
+    decision, the rules need N of at least 1 and N writers approved); not required (no decision, and
+    no rule needs an approval); else the decision.
   - Each part is optional. One that is missing, malformed, cut short (more than were asked for) or
     that an error of the answer lies under is not used, and the pull request is read from the
     rest, exactly as before F32 where nothing better is known: none of them makes it "can't read".

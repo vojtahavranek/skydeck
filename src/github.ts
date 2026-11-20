@@ -510,15 +510,18 @@ function checksWith(rollup: PrChecks | null, merge: MergeFacts | null): PrChecks
 }
 
 /**
- * The stored review (design 7.3, F32): the first that applies of —
- * changes requested (the decision, or a writer's latest review while the decision is not
- * APPROVED); review required (the decision, or, without one, the rules need more approvals than
- * the writers gave: ruled from real answers, a decision GitHub gives wins over the count); unresolved comments (the rules ask for resolved conversations and a thread is not);
- * blocked (GitHub's merge state is BLOCKED while the checks pass or there are none, and it is no
- * draft: a reason not modelled here, code owners, a merge queue, a deployment); approved (the
- * decision, or the rules need N ≥ 1 and N writers approved, every rule seen); not required (no
- * decision and every rule seen needs no approval); else the decision as before F32 (null when
- * nothing better is known). Without the q<i> part, the decision alone, as before.
+ * The stored review (design 7.3, F32): the first that applies of — changes requested (the
+ * decision, or a writer's latest review while the decision is not APPROVED); review required (the
+ * decision, or, with no decision, the rules need more approvals than the writers gave); unresolved
+ * comments (the rules ask for resolved conversations and a thread is not); blocked (GitHub's merge
+ * state is BLOCKED while the checks pass or there are none, and it is no draft: a reason not
+ * modelled here, code owners, a rule on who may merge, a deployment); approved (the decision, or,
+ * with no decision, the rules need N ≥ 1 and N writers approved, every rule seen); not required
+ * (no decision and every rule seen needs no approval); else the decision as before F32 (null when
+ * nothing better is known). Ruled: a decision GitHub gives is its own count, which takes rulesets
+ * into account, where ours of the writers' latest reviews is an approximation; so only a null
+ * decision is decided by the rules and the count. Without the q<i> part, the decision alone, as
+ * before.
  */
 function reviewWith(
   decision: unknown,
@@ -539,7 +542,7 @@ function reviewWith(
   }
   if (
     classic === 'review-required' ||
-    (classic === null &&
+    (decision === null &&
       rules !== null &&
       reviews?.complete === true &&
       reviews.approved < rules.approvals)
@@ -556,6 +559,7 @@ function reviewWith(
     return 'approved';
   }
   if (
+    decision === null &&
     rules?.complete === true &&
     rules.approvals > 0 &&
     reviews !== null &&
