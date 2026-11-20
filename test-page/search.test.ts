@@ -649,9 +649,73 @@ async function chips(page: Page): Promise<[string, string][]> {
   );
 }
 
-/** A click on the chip named `name` (`Running`, `Open PR`, `Has note`, `Show done`). */
+/** A click on the chip named `name` (`Running`, `Open PR`, `Has note`, `Done`). */
 async function clickChip(page: Page, name: string): Promise<void> {
-  await page.locator('#list .list-chips button', { hasText: name }).click();
+  await page
+    .locator('#list .list-chips button', { hasText: new RegExp(`^${escape(name)}$`) })
+    .click();
+}
+
+/** The switch `Show done` at the end of the chips' row (F35): checked, dimmed, its tooltip. */
+async function showDoneSwitch(
+  page: Page,
+): Promise<{ text: string; role: string; checked: string; dimmed: string; tip: string }> {
+  return readPage(
+    page,
+    () => {
+      const toggle = document.querySelector('#list .list-chiprow > .list-switch');
+      return {
+        text: toggle?.textContent ?? '',
+        role: toggle?.getAttribute('role') ?? '',
+        checked: toggle?.getAttribute('aria-checked') ?? '',
+        dimmed: toggle instanceof HTMLElement ? (toggle.dataset['dimmed'] ?? '') : '',
+        tip: toggle?.getAttribute('title') ?? '',
+      };
+    },
+    null,
+  );
+}
+
+/** A click on the switch `Show done` (F35). */
+async function clickShowDone(page: Page): Promise<void> {
+  await page.locator('#list .list-switch').click();
+}
+
+/** Waits until the switch `Show done` reads `checked` and `dimmed`. */
+async function untilShowDone(page: Page, checked: boolean, dimmed: boolean): Promise<void> {
+  await page.waitForFunction(
+    ([checked, dimmed]) => {
+      const toggle = document.querySelector('#list .list-switch');
+      return (
+        toggle instanceof HTMLElement &&
+        toggle.getAttribute('aria-checked') === checked &&
+        toggle.dataset['dimmed'] === dimmed
+      );
+    },
+    [String(checked), String(dimmed)],
+    { timeout: PAGE_WAIT_MS },
+  );
+}
+
+/** Whether Earlier's band is drawn folded (`true`, `false`), or '' when it is not drawn. */
+async function earlierFolded(page: Page): Promise<string> {
+  return readPage(
+    page,
+    () =>
+      document
+        .querySelector('#list .list-section[data-section="earlier"]')
+        ?.getAttribute('data-folded') ?? '',
+    null,
+  );
+}
+
+/** The `unfolded` and `closed` of each view the page sent from the `from`-th on, once each
+ *  (a view is sent whole: a chip's click that moved no fold leaves one entry). */
+async function foldsSent(page: Page, from: number): Promise<string[]> {
+  const sent = (await sentViews(page))
+    .slice(from)
+    .map((view) => JSON.stringify([view['unfolded'], view['closed']]));
+  return [...new Set(sent)];
 }
 
 /**
@@ -837,7 +901,7 @@ test('search and stacks in the list', async (t) => {
   );
 
   await t.test(
-    'the chips: Running, Open PR, Has note and Show done under the filter field; each pressed → aria-pressed and the rows the server sent, every chip set holding, the keyboard where it was; a chip that matches nothing → `No session matches the filter.`; nothing folds while a chip is set',
+    'the chips: Running, Open PR, Has note and Done under the filter field, the switch Show done at the end of their row (F35); each chip pressed → aria-pressed and the rows the server sent, every chip set holding, the keyboard where it was; a chip that matches nothing → `No session matches the filter.`; a chip lists no done session, folds nothing and unfolds nothing, and Earlier folds and unfolds under it',
     async (t) => {
       const l = await launchedWithViews(t, chromium);
       const { page, d } = l;
@@ -846,18 +910,41 @@ test('search and stacks in the list', async (t) => {
       session(d, S3, 4n * MIN, 'with a note'); // note
       session(d, S4, 5n * MIN, 'plain'); // nothing
       session(d, S5, 20n * DAY, 'old with a note'); // Earlier, note
+      session(d, S6, 6n * MIN, 'done with a note'); // done, note
       pullRequest(d, S1, 1, 'open');
       setNote(d.deck, S1, 'the open one');
       pullRequest(d, S2, 2, 'merged');
       setNote(d.deck, S3, 'only a note');
       setNote(d.deck, S5, 'an old note');
+      setNote(d.deck, S6, 'a done note');
+      markDone(d.deck, S6);
       await untilRows(page, [S1, S2, S3, S4], 'Recent, Earlier folded');
       assert.deepEqual(await chips(page), [
         ['Running', 'false'],
         ['Open PR', 'false'],
         ['Has note', 'false'],
-        ['Show done', 'false'],
+        ['Done', 'false'],
       ]);
+      assert.deepEqual(await showDoneSwitch(page), {
+        text: 'Show done',
+        role: 'checkbox',
+        checked: 'false',
+        dimmed: 'false',
+        tip: 'also list sessions marked done (a)',
+      });
+      assert.deepEqual(
+        await page
+          .locator('#list .list-chips button')
+          .evaluateAll((buttons) => buttons.map((b) => b.getAttribute('title'))),
+        [
+          'only the sessions under Open',
+          'only the sessions with a pull request that is not merged or closed',
+          'only the sessions with a note',
+          'only sessions marked done',
+        ],
+      );
+      await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
+      const viewsBefore = (await sentViews(page)).length;
 
       // Running with nothing running: the list says so; the keyboard stays on the list.
       await toZone(page, 'list');
@@ -870,6 +957,7 @@ test('search and stacks in the list', async (t) => {
         ['true', 'false', 'false', 'false'],
       );
       assert.deepEqual((await lastView(page))['chips'], ['running']);
+      assert.equal(await shownText(page, '#list .list-footer'), '', 'no done one runs');
       await clickChip(page, 'Running');
       await untilRows(page, [S1, S2, S3, S4], 'Running off');
 
@@ -884,34 +972,46 @@ test('search and stacks in the list', async (t) => {
       await untilRows(page, [S1], 'Open PR and Has note');
       assert.deepEqual((await lastView(page))['chips'], ['open-pr', 'note']);
       await clickChip(page, 'Open PR');
-      // Has note alone: Earlier is unfolded while a chip is set.
-      const noted = await untilRows(page, [S1, S3, S5], 'Has note');
+      // Has note alone: no done session (the footer counts the one it matches), Earlier folded
+      // as it was, its band counting the one it holds.
+      const noted = await untilRows(page, [S1, S3], 'Has note');
       assert.deepEqual(
         noted.map((line) => line.section),
-        ['week', 'week', 'earlier'],
+        ['week', 'week'],
       );
+      assert.equal(await earlierFolded(page), 'true');
+      await showsText(page, '#list .list-section[data-section="earlier"] .section-count', /^1$/);
+      await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
       assert.equal(await keyboardOn(page), 'the filter');
       assert.deepEqual(
         (await chips(page)).map(([, pressed]) => pressed),
         ['false', 'false', 'true', 'false'],
       );
+      assert.deepEqual(await foldsSent(page, viewsBefore), [JSON.stringify([[], []])]);
 
-      // Nothing folds while a chip is set: neither ← on Earlier's row nor a click on its header.
+      // Under a chip Earlier folds and unfolds as without one: a click on its band, ← and →.
       await page.keyboard.press('Enter'); // the keyboard back to the list
-      await page.locator(`#list [data-id="${S5}"]`).click();
-      await untilSelected(page, S5);
-      await sleep(300);
-      const before = (await sentViews(page)).length;
-      await page.keyboard.press('ArrowLeft');
       await page.locator('#list .list-section[data-section="earlier"]').click();
-      await sleep(500);
-      assert.deepEqual(await rowIds(page), [S1, S3, S5], 'Earlier stays unfolded');
-      assert.equal(await selectedRow(page), S5, 'and the selection on its row');
-      assert.equal((await sentViews(page)).length, before, 'no view: nothing folded');
+      await untilRows(page, [S1, S3, S5], 'Earlier unfolded under Has note');
+      await page.locator(`#list [data-id="${S3}"]`).click();
+      await untilSelected(page, S3);
+      await page.keyboard.press('ArrowLeft');
+      await untilRows(page, [S1, S3], '← folds it');
+      await page.keyboard.press('ArrowRight');
+      await untilRows(page, [S1, S3, S5], '→ unfolds it');
+      // Clearing and setting the chip moves no fold.
+      const viewsUnfolded = (await sentViews(page)).length;
       await clickChip(page, 'Has note');
-      await untilRows(page, [S1, S2, S3, S4], 'no chip: Earlier folded as before');
+      await untilRows(page, [S1, S2, S3, S4, S5], 'no chip: Earlier still unfolded');
+      await clickChip(page, 'Has note');
+      await untilRows(page, [S1, S3, S5], 'Has note again: Earlier still unfolded');
+      assert.deepEqual(await foldsSent(page, viewsUnfolded), [JSON.stringify([['earlier'], []])]);
+      await clickChip(page, 'Has note');
+      await untilRows(page, [S1, S2, S3, S4, S5], 'no chip');
 
       // Running, once a session runs: from the terminal the keyboard stays in the terminal.
+      await page.locator('#list .list-section[data-section="earlier"]').click();
+      await untilRows(page, [S1, S2, S3, S4], 'Earlier folded again');
       await resumeFromList(page, S4);
       assert.equal(await keyboardOn(page), 'the terminal');
       await clickChip(page, 'Running');
@@ -928,7 +1028,7 @@ test('search and stacks in the list', async (t) => {
   );
 
   await t.test(
-    "`Show done`, the list key `a` and the footer's `show` are one state: each turns the others on, and off",
+    "`Show done`, the list key `a` and the footer's `show` are one state: each turns the others on, and off; the switch is a labelled check box, checked while done sessions are shown",
     async (t) => {
       const l = await launchedWithViews(t, chromium);
       const { page, d } = l;
@@ -937,13 +1037,19 @@ test('search and stacks in the list', async (t) => {
       markDone(d.deck, S2);
       await untilRows(page, [S1], 'the done session hidden');
       await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
-      const showDone = async (): Promise<string | undefined> =>
-        (await chips(page)).find(([name]) => name === 'Show done')?.[1];
+      const showDone = async (): Promise<string> => (await showDoneSwitch(page)).checked;
 
       await toZone(page, 'list');
-      await clickChip(page, 'Show done');
-      await untilRows(page, [S1, S2], 'the chip shows them');
+      await clickShowDone(page);
+      await untilRows(page, [S1, S2], 'the switch shows them');
       assert.equal(await showDone(), 'true');
+      assert.equal(
+        await page
+          .locator('#list .list-switch .list-switch-box')
+          .evaluate((box) => getComputedStyle(box, '::after').content),
+        '"✓"',
+        'checked: a ✓ in its box',
+      );
       await showsText(page, '#list .list-footer', /^done sessions shown · hide$/);
       assert.equal(await keyboardOn(page), 'the list');
 
@@ -975,10 +1081,326 @@ test('search and stacks in the list', async (t) => {
       await page.keyboard.press('Escape');
       await showsText(page, '#list .list-footer', /^done sessions shown · hide$/);
 
-      await clickChip(page, 'Show done');
-      await untilRows(page, [S1], 'the chip hides them');
+      await clickShowDone(page);
+      await untilRows(page, [S1], 'the switch hides them');
       await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
       assert.equal((await lastView(page))['showDone'], false);
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
+    'the chip Done (F35): only the done sessions, in their sections — Earlier folded as it was — and in their blocks; no footer while it is on; the switch keeps its state, drawn dimmed with the tooltip `the Done filter lists done sessions by itself`, and a click on it still turns it on and off; under Has note alone the footer counts the done ones it matches and its `show` lists them',
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S1, 1n * MIN, 'plain with a note');
+      session(d, S2, 2n * MIN, 'ORB-7 one');
+      session(d, S3, 3n * MIN, 'ORB-7 two');
+      session(d, S4, 4n * MIN, 'ORB-7 three');
+      session(d, S5, 20n * DAY, 'old one');
+      setNote(d.deck, S1, 'a note');
+      setNote(d.deck, S2, 'a done note');
+      markDone(d.deck, S2);
+      markDone(d.deck, S3);
+      markDone(d.deck, S5);
+      await untilShape(page, [`*${S1}`, S4], 'two not done; ORB-7 alone is no card');
+      await showsText(page, '#list .list-footer', /^3 done hidden · show$/);
+
+      await toZone(page, 'list');
+      await clickChip(page, 'Done');
+      const done = await untilShape(page, [OPEN('ORB-7'), S2, S3], 'the done ones, a card');
+      assert.deepEqual(
+        done.filter((line) => line.kind === 'row').map((line) => line.marks),
+        [['done'], ['done']],
+      );
+      assert.equal(await earlierFolded(page), 'true', 'Earlier folded: its done one in it');
+      assert.equal(await shownText(page, '#list .list-footer'), '', 'no footer under Done');
+      await untilShowDone(page, false, true);
+      assert.equal(
+        (await showDoneSwitch(page)).tip,
+        'the Done filter lists done sessions by itself',
+      );
+      assert.deepEqual((await lastView(page))['chips'], ['done']);
+      assert.equal((await lastView(page))['showDone'], false);
+      assert.equal(await keyboardOn(page), 'the list');
+
+      // The dimmed switch still turns on and off; the list does not change while Done is on.
+      await clickShowDone(page);
+      await untilShowDone(page, true, true);
+      assert.equal((await lastView(page))['showDone'], true);
+      await sleep(300);
+      assert.deepEqual(shapeOf(await lines(page)), [OPEN('ORB-7'), S2, S3]);
+      assert.equal(await shownText(page, '#list .list-footer'), '');
+
+      // Done off: the switch as the user left it (on), no longer dimmed: every session listed.
+      await clickChip(page, 'Done');
+      await untilShowDone(page, true, false);
+      assert.equal((await showDoneSwitch(page)).tip, 'also list sessions marked done (a)');
+      await untilShape(page, [`*${S1}`, OPEN('ORB-7'), S2, S3, S4], 'done ones shown');
+      await showsText(page, '#list .list-footer', /^done sessions shown · hide$/);
+      await clickShowDone(page);
+      await untilShape(page, [`*${S1}`, S4], 'done ones hidden again');
+
+      // Has note alone: the done one with a note is hidden, and counted; `show` lists it.
+      await clickChip(page, 'Has note');
+      await untilShape(page, [`*${S1}`], 'Has note: no done session');
+      await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
+      await page.locator('#list .footer-action', { hasText: 'show' }).click();
+      await untilShape(page, [`*${S1}`, S2], 'show: the done one with a note');
+      await untilShowDone(page, true, false);
+      await showsText(page, '#list .list-footer', /^done sessions shown · hide$/);
+      // A word lists the done ones as before, with no footer.
+      await clickShowDone(page);
+      await untilShape(page, [`*${S1}`], 'Has note again without done ones');
+      await page.keyboard.press('/');
+      await page.keyboard.type('note');
+      await untilShape(page, [`*${S1}`, S2], 'a typed word: the done one with a note');
+      assert.equal(await shownText(page, '#list .list-footer'), '');
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
+    "under chips alone the blocks stay (F35): a card's caption counts the sessions that remain, a closed block stays closed and its caption counts them, a block left with one session is a row; setting and clearing a chip opens and closes no block and sends no `closed`; Has note that leaves no session says `No session matches the filter.` with the footer counting the done ones it matches",
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S1, 1n * MIN, 'ORB-1 first');
+      session(d, S2, 2n * MIN, 'ORB-1 second');
+      session(d, S3, 3n * MIN, 'ORB-1 third');
+      session(d, S4, 4n * MIN, 'plain');
+      session(d, S5, 5n * MIN, 'ORB-1 done');
+      setNote(d.deck, S1, 'n');
+      setNote(d.deck, S2, 'n');
+      setNote(d.deck, S5, 'n');
+      markDone(d.deck, S5);
+      await untilShape(page, [OPEN('ORB-1'), `*${S1}`, S2, S3, S4], 'an open card of three');
+
+      await toZone(page, 'list');
+      await clickChip(page, 'Has note');
+      const noted = await untilShape(page, [OPEN('ORB-1'), `*${S1}`, S2], 'the card of two');
+      assert.equal(noted[0]?.count, '2');
+      await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
+      await clickChip(page, 'Has note');
+      await untilShape(page, [OPEN('ORB-1'), `*${S1}`, S2, S3, S4], 'the card of three again');
+
+      // Closed, the block stays closed under a chip; its caption counts what remains.
+      await page.keyboard.press('ArrowDown');
+      await untilSelected(page, S2);
+      await page.keyboard.press('ArrowLeft');
+      await untilShape(page, [`*${CLOSED('ORB-1')}`, S4], 'closed, its caption selected');
+      await untilClosed(page, shut('week', 'ORB-1'));
+      const viewsClosed = (await sentViews(page)).length;
+      await clickChip(page, 'Has note');
+      const closedNoted = await untilShape(
+        page,
+        [`*${CLOSED('ORB-1')}`],
+        'closed under Has note, its caption still selected',
+      );
+      assert.equal(closedNoted[0]?.count, '2');
+      await clickChip(page, 'Has note');
+      const closedPlain = await untilShape(page, [`*${CLOSED('ORB-1')}`, S4], 'closed as before');
+      assert.equal(closedPlain[0]?.count, '3');
+      assert.deepEqual(await foldsSent(page, viewsClosed), [
+        JSON.stringify([[], shut('week', 'ORB-1')]),
+      ]);
+
+      // Open PR leaves no session: the list says so (no done one has one: no footer). The
+      // selected caption's block is gone, so nothing stays selected (ruled (a)).
+      await clickChip(page, 'Open PR');
+      await showsText(page, '#list .list-empty', /^No session matches the filter\.$/);
+      assert.equal(await shownText(page, '#list .list-footer'), '');
+      await clickChip(page, 'Open PR');
+      await untilShape(page, [CLOSED('ORB-1'), S4], 'back, closed, nothing selected');
+      // A block left with one session is a row: only S1 of ORB-1 under Has note once S2 is done.
+      markDone(d.deck, S2);
+      await clickChip(page, 'Has note');
+      await untilShape(page, [S1], 'one of ORB-1 left: a row, no caption');
+      await showsText(page, '#list .list-footer', /^2 done hidden · show$/);
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
+    'the chips and the switch from the keyboard (F35): Tab from the filter field reaches Running, Open PR, Has note, Done, then Show done; Enter and Space press each, no list key acts while one has the keyboard; in a narrow list the row wraps inside it, the switch on a line of its own at the right',
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S1, 1n * MIN, 'alpha');
+      session(d, S2, 2n * MIN, 'beta done');
+      markDone(d.deck, S2);
+      await untilRows(page, [S1], 'the done one hidden');
+      await toZone(page, 'list');
+      await page.keyboard.press('/');
+      const focused = async (): Promise<string> =>
+        readPage(
+          page,
+          () => {
+            const element = document.activeElement;
+            if (!(element instanceof HTMLElement)) return '';
+            return element.classList.contains('list-switch')
+              ? 'switch'
+              : (element.dataset['chip'] ?? element.className);
+          },
+          null,
+        );
+      for (const want of ['running', 'open-pr', 'note', 'done', 'switch']) {
+        await page.keyboard.press('Tab');
+        assert.equal(await focused(), want);
+      }
+      // Enter on the switch turns it on; `a` and `j` act on no list row while it has the keyboard.
+      await page.keyboard.press('Enter');
+      await untilShowDone(page, true, false);
+      await untilRows(page, [S1, S2], 'Enter on the switch');
+      const views = (await sentViews(page)).length;
+      await page.keyboard.press('a');
+      await page.keyboard.press('j');
+      await sleep(300);
+      assert.equal((await sentViews(page)).length, views, 'no list key acted');
+      assert.equal(await focused(), 'switch');
+      await page.keyboard.press('Space');
+      await untilShowDone(page, false, false);
+      await untilRows(page, [S1], 'Space on the switch');
+      // Back to Done: Space presses it; the switch is dimmed, its state unchanged.
+      await page.keyboard.press('Shift+Tab');
+      assert.equal(await focused(), 'done');
+      await page.keyboard.press('Space');
+      await untilRows(page, [S2], 'Space on Done');
+      await untilShowDone(page, false, true);
+      await page.keyboard.press('Enter');
+      await untilRows(page, [S1], 'Enter on Done again');
+      await untilShowDone(page, false, false);
+
+      // The row in the list's width, and in a narrow list (the column made narrow for the test).
+      const place = async () =>
+        readPage(
+          page,
+          () => {
+            const box = (selector: string) => {
+              const found = document.querySelector(selector)?.getBoundingClientRect();
+              return found === undefined
+                ? null
+                : { left: found.left, right: found.right, top: found.top };
+            };
+            const chips = [...document.querySelectorAll('#list .list-chips .list-chip')].map(
+              (chip) => chip.getBoundingClientRect(),
+            );
+            return {
+              list: box('#list'),
+              row: box('#list .list-chiprow'),
+              toggle: box('#list .list-switch'),
+              chipTops: chips.map((chip) => chip.top),
+              chipRight: Math.max(...chips.map((chip) => chip.right)),
+            };
+          },
+          null,
+        );
+      const wide = await place();
+      assert.ok(wide.list !== null && wide.row !== null && wide.toggle !== null);
+      assert.equal(new Set(wide.chipTops).size, 1, 'the chips on one line');
+      assert.ok(Math.abs(wide.toggle.top - (wide.chipTops[0] ?? 0)) < 4, 'the switch on it too');
+      assert.ok(wide.toggle.left > wide.chipRight + 8, 'apart from the chips');
+      assert.ok(Math.abs(wide.toggle.right - wide.row.right) < 1, 'at the end of the row');
+      await page.addStyleTag({ content: '.main { grid-template-columns: 200px 1fr !important; }' });
+      await sleep(100);
+      const narrow = await place();
+      assert.ok(narrow.list !== null && narrow.row !== null && narrow.toggle !== null);
+      assert.ok(narrow.toggle.top > Math.min(...narrow.chipTops) + 4, 'the switch below');
+      assert.ok(Math.abs(narrow.toggle.right - narrow.row.right) < 1, 'at the right');
+      assert.ok(narrow.row.right <= narrow.list.right, 'inside the list');
+      assert.ok(narrow.chipRight <= narrow.row.right, 'the chips wrap inside the list');
+      await healthy(page, l.problems);
+    },
+  );
+
+  await t.test(
+    'the chip row in every colour scheme and theme (F35): each chip’s text, a pressed chip’s, the switch’s and the dimmed switch’s, and its ✓, at least 4.5 : 1 against what they stand on',
+    async (t) => {
+      const l = await launchedWithViews(t, chromium);
+      const { page, d } = l;
+      session(d, S1, 1n * MIN, 'alpha');
+      await untilRows(page, [S1], 'a session');
+      const measure = async () =>
+        readPage(
+          page,
+          () => {
+            const colour = (element: Element | null, property: 'color' | 'backgroundColor') =>
+              element === null ? '' : getComputedStyle(element)[property];
+            const list = document.querySelector('.list-zone');
+            const plain = document.querySelector('#list .list-chip[aria-pressed="false"]');
+            const pressed = document.querySelector('#list .list-chip[aria-pressed="true"]');
+            const toggle = document.querySelector('#list .list-switch');
+            const box = document.querySelector('#list .list-switch .list-switch-box');
+            return {
+              ground: colour(list, 'backgroundColor'),
+              chip: colour(plain, 'color'),
+              pressed: colour(pressed, 'color'),
+              pressedGround: colour(pressed, 'backgroundColor'),
+              toggle: colour(toggle, 'color'),
+              check: colour(box, 'color'),
+              dimmed: toggle instanceof HTMLElement ? toggle.dataset['dimmed'] : '',
+            };
+          },
+          null,
+        );
+      const rgb = (text: string): number[] => {
+        const found = /^rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)$/.exec(text);
+        assert.ok(found !== null, `a colour: ${text}`);
+        assert.ok(found[4] === undefined || found[4] === '1', `opaque: ${text}`);
+        return [found[1], found[2], found[3]].map(Number);
+      };
+      const ratio = (a: string, b: string): number => {
+        const luminance = (c: number[]) =>
+          c
+            .map((v) => v / 255)
+            .map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+            .reduce((sum, v, i) => sum + v * ([0.2126, 0.7152, 0.0722][i] ?? 0), 0);
+        const [hi, lo] = [luminance(rgb(a)), luminance(rgb(b))].sort((x, y) => y - x) as [
+          number,
+          number,
+        ];
+        return (hi + 0.05) / (lo + 0.05);
+      };
+      await clickShowDone(page);
+      await untilShowDone(page, true, false);
+      for (const [scheme, palette] of [
+        ['light', ''],
+        ['light', 'iris'],
+        ['dark', ''],
+        ['dark', 'iris'],
+        ['dark', 'pleiades'],
+      ] as const) {
+        await page.evaluate(
+          ([scheme, palette]) => {
+            const root = document.documentElement;
+            root.dataset['theme'] = scheme;
+            delete root.dataset['paletteLight'];
+            delete root.dataset['paletteDark'];
+            if (palette !== '') {
+              root.dataset[scheme === 'light' ? 'paletteLight' : 'paletteDark'] = palette;
+            }
+          },
+          [scheme, palette],
+        );
+        const name = `${scheme} ${palette || 'default'}`;
+        for (const doneChip of [false, true]) {
+          await clickChip(page, doneChip ? 'Done' : 'Running');
+          await untilShowDone(page, true, doneChip);
+          const m = await measure();
+          const checks: [string, string, string][] = [
+            ['a chip', m.chip, m.ground],
+            ['a pressed chip', m.pressed, m.pressedGround],
+            [doneChip ? 'the dimmed switch' : 'the switch', m.toggle, m.ground],
+            [doneChip ? 'the dimmed ✓' : 'the ✓', m.check, m.ground],
+          ];
+          for (const [what, ink, ground] of checks) {
+            const r = ratio(ink, ground);
+            assert.ok(r >= 4.5, `${name}: ${what} ${r.toFixed(2)} : 1 (${ink} on ${ground})`);
+          }
+          await clickChip(page, doneChip ? 'Done' : 'Running');
+        }
+      }
       await healthy(page, l.problems);
     },
   );

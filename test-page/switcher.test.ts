@@ -1326,6 +1326,39 @@ async function pickCases(t: TestContext, chromium: Browser): Promise<void> {
   );
 
   await t.test(
+    'F35: Enter on a done session the chip Has note matches → Show done turned on by one view that changes only that; the chip stays on, and the session is listed under it',
+    async (t) => {
+      const l = await launchedSent(t, chromium);
+      const { page, d } = l;
+      session(d, S1, 1n * MIN, 'alpha work');
+      session(d, S2, 2n * MIN, 'beta finished');
+      setNote(d.deck, S1, 'a note');
+      setNote(d.deck, S2, 'a done note');
+      markDone(d.deck, S2);
+      await untilRows(page, [S1], 'the done session hidden');
+      await page.locator('#list .list-chips button', { hasText: 'Has note' }).click();
+      await showsText(page, '#list .list-footer', /^1 done hidden · show$/);
+      const count = (await viewsOf(page)).length;
+
+      await openSwitcher(page);
+      await page.keyboard.type('finished');
+      await untilAnswer(page, 'finished', (v) => idsOf(v).join() === S2, 'the done session');
+      await page.keyboard.press('Enter');
+      await untilTerminalOf(page, S2);
+      const { baseline, views } = await viewsSince(page, count);
+      assert.deepEqual(
+        transitions(baseline, views).map((change) => change.field),
+        ['showDone'],
+        'one view, and it changes only showDone: the chip is not cleared',
+      );
+      assert.deepEqual((await lastView(page))['chips'], ['note']);
+      const listed = (await listRows(page)).find((r) => r.id === S2);
+      assert.equal(listed?.section, 'open');
+      await healthy(l);
+    },
+  );
+
+  await t.test(
     'Enter on a session in a folded Earlier → Earlier unfolded by one view that changes only that, the row selected (and resumed)',
     async (t) => {
       const l = await launchedSent(t, chromium);

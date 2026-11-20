@@ -21,7 +21,10 @@
 // user closed as it keeps `showDone`: its own state, sent whole in the page's `view` (`closed`,
 // each entry a section and a group; a block is open unless named there). Which rows match, which
 // form a block, and whether the list is filtering are the server's (`list.filtering`); the page
-// decides no rule.
+// decides no rule. Follow-up F35: the fourth chip `Done`, and `Show done` a switch at the end of
+// the chips' row (web/chips.js); only a typed search (`list.searching`) makes the rows flat, keeps
+// Earlier unfolded and hides the footer of done sessions — under chips alone the list folds, forms
+// its blocks and shows the footer as without them (and no footer while `Done` lists them).
 //
 // Follow-up F22: while the list holds no session at all (list-text.js's `holdsNoSession`) it shows
 // a short note under the Open band (`.list-none`, `role="note"`): no session here yet, and the ways
@@ -79,8 +82,9 @@ const MARK_KINDS = ['crashed', 'continued', 'expired', 'expiring', 'duplicate', 
 const AGE_TICK_MS = 1000;
 /** A row's height when none is drawn to measure (PgUp and PgDn move by a page). */
 const ROW_PX = 28;
-/** E4: the chips that narrow the list, in the order a view names them (`Show done` is `showDone`). */
-const SEARCH_CHIPS = /** @type {const} */ (['running', 'open-pr', 'note']);
+/** E4: the chips that narrow the list, in the order a view names them; F35's `done` the fourth
+ *  (`Show done` is `showDone`, no chip). */
+const SEARCH_CHIPS = /** @type {const} */ (['running', 'open-pr', 'note', 'done']);
 /** E6: the most entries a view's `closed` holds (the parser's MAX_CLOSED; web/ imports only types
  *  from src/, so the page holds the number itself). */
 const MAX_CLOSED = 64;
@@ -340,15 +344,17 @@ export function createList(root, hooks) {
   filter.autocomplete = 'off';
   filter.spellcheck = false;
   filter.setAttribute('aria-label', 'Filter the list');
-  // The chips under the field (S2 12.8, E4): the list's own state, as `showDone` is.
-  const chipsRow = element('list-chips', 'div');
+  // The chips under the field and the switch `Show done` at the end of their row (S2 12.8, E4,
+  // F35): the list's own state, as `showDone` is.
+  const chipsRow = element('list-chiprow', 'div');
   filterBar.append(filter, chipsRow);
   /** E4: the chips set, in SEARCH_CHIPS's order. @type {SearchChip[]} */
   let chips = [];
   /** E6: the blocks the user closed, the oldest first. @type {ClosedBlock[]} */
   let closed = [];
   const chipsView = createChips(chipsRow, {
-    toggle: (chip) => (chip === 'done' ? toggleDone() : toggleChip(chip)),
+    toggle: (chip) => toggleChip(chip),
+    showDone: () => toggleDone(),
   });
   filter.addEventListener('input', () => hooks.view({ filter: filter.value }));
   /** The Enter or Esc that ended the entry, until it is released ('' when none). */
@@ -525,6 +531,10 @@ export function createList(root, hooks) {
   /** Whether the list is filtering (E5): the server's answer; a list without it, stage A's rule. */
   const filtering = () =>
     typeof current?.filtering === 'boolean' ? current.filtering : filter.value !== '';
+  /** F35: whether a word is typed (a typed search: the rows flat, no block, nothing folded, done
+   *  sessions listed): the server's answer; a list without it (a server before F35), `filtering`. */
+  const searching = () =>
+    typeof current?.searching === 'boolean' ? current.searching : filtering();
 
   /**
    * Whether the user closed the block of `group` in `section` (E6).
@@ -843,9 +853,8 @@ export function createList(root, hooks) {
     selected = selectedId;
     selectedCaption = caption === null ? null : { section: caption.section, group: caption.group };
     const now = nowNs();
-    const searching = filtering();
     const sections = list?.sections ?? [];
-    const nothing = searching && sections.every((section) => section.count === 0);
+    const nothing = filtering() && sections.every((section) => section.count === 0);
     const noSession = holdsNoSession(list, filter.value);
     /** @type {HTMLElement[]} */
     const lines = [];
@@ -975,8 +984,13 @@ export function createList(root, hooks) {
       place(block.root, block.kids);
     }
 
-    // While filtering the footer of done sessions is not shown (S2 12.8, E5): they are listed.
-    const foot = list === null || searching ? null : footerText(list.doneHidden, showDone);
+    // During a typed search, and while the chip `Done` is on, the footer of done sessions is not
+    // shown (S2 12.8, E5, F35): they are listed. Under other chips alone it counts the done ones
+    // they match (the server's `doneHidden`).
+    const foot =
+      list === null || searching() || chips.includes('done')
+        ? null
+        : footerText(list.doneHidden, showDone);
     footer.hidden = foot === null;
     setText(footerLine, foot?.text ?? '');
     setText(footerAction, foot?.action ?? '');
@@ -1008,18 +1022,19 @@ export function createList(root, hooks) {
 
   /**
    * F9 (ruled (a), (b)): whether the selected caption `caption` can stay selected after this
-   * render: while filtering, yes (as a selected session the filter hides stays selected); else only
+   * render: during a typed search, yes (as a selected session the filter hides stays selected;
+   * F35: under chips alone the blocks are drawn, and the rule below holds); else only
    * while the page still names its block closed and the list draws that block (closed, or still
    * open right after ←). app.js selects nothing when it cannot: its block was opened without a key
    * (an unreported terminal of a session starting into it, the 65th closed block dropping it) or is
    * gone (fewer than two sessions of its group left in the section). @param {Caption} caption
    */
   const holds = (caption) =>
-    filtering() ||
+    searching() ||
     (isClosed(caption.section, caption.group) &&
       blockInfo(current, caption.section, caption.group) !== null);
 
-  /** `a`, the footer's `show` / `hide` and the chip `Show done`: one state (E4). */
+  /** `a`, the footer's `show` / `hide` and the switch `Show done`: one state (E4, F35). */
   const toggleDone = () => {
     showDone = !showDone;
     chipsView.render(chips, showDone);
@@ -1040,7 +1055,7 @@ export function createList(root, hooks) {
   /**
    * F9: what the list's keys move through, in the list's order: every row drawn and every CLOSED
    * caption (an open card's caption holds no selection, K3), with the session id of its first row
-   * (`head`; '' for the still-open card of ruling 2). While filtering there is no caption.
+   * (`head`; '' for the still-open card of ruling 2). During a typed search there is no caption.
    * @typedef {{ kind: 'row', section: SectionPayload['name'], id: string }
    *   | { kind: 'caption', section: SectionPayload['name'], group: string, head: string }} Stop
    * @returns {Stop[]}
@@ -1121,9 +1136,9 @@ export function createList(root, hooks) {
    */
   const fold = (folded) => {
     const earlier = current?.sections.find((section) => section.name === 'earlier');
-    // While filtering (a word or a chip) every section is unfolded (S2 12.8, E5): nothing folds,
-    // and the selection stays on its row, which stays shown.
-    if (earlier === undefined || filtering()) {
+    // During a typed search every section is unfolded (S2 12.8, E5): nothing folds, and the
+    // selection stays on its row, which stays shown. Chips alone fold as without them (F35).
+    if (earlier === undefined || searching()) {
       return;
     }
     const inside =

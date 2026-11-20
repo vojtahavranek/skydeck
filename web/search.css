@@ -3,12 +3,21 @@
    title bar's `Switch…`. Colours are style.css's. Only the elements stage E adds are styled here,
    so that a page whose list is another module (the page shell's pinned one) looks as before. */
 
-/* The chips: Running, Open PR, Has note, Show done; a pressed one is drawn as selected. */
+/* The row under the field (F35): the chips Running, Open PR, Has note and Done, a pressed one
+   drawn as selected; and at its end, apart from them, the switch Show done, a labelled check box.
+   In a narrow list the chips wrap, and the switch goes to a line of its own, at the right. */
+.list-chiprow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px 12px;
+  margin-top: 6px;
+}
 .list-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  margin-top: 6px;
 }
 .list-chip {
   padding: 1px 8px;
@@ -27,6 +36,47 @@
   border-color: var(--selline);
   background: var(--sel);
   color: var(--text);
+}
+.list-switch {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 1px 2px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.list-switch-box {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--dim);
+  border-radius: 3px;
+  font-size: 9px;
+  line-height: 1;
+}
+.list-switch[aria-checked='true'] .list-switch-box {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.list-switch[aria-checked='true'] .list-switch-box::after {
+  content: '✓';
+}
+/* While the chip Done is on the switch keeps its state and is drawn dimmed (its tooltip says why):
+   its text and its check as an unpressed chip's text, its box's edge in the quiet line colour. */
+.list-switch[data-dimmed='true'] {
+  color: var(--dim);
+}
+.list-switch[data-dimmed='true'] .list-switch-box {
+  border-color: var(--line2);
+  color: var(--dim);
 }
 
 /* The title bar's `Switch…` (S2 12.8): it opens the switcher, as Ctrl+Shift+P does. */
