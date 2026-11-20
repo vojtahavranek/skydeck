@@ -5,10 +5,11 @@ human said "read `docs/plans/mac-port.md` and start working on it". This file is
 Follow it literally; where it is silent, do the safe thing named in part 10 (stop that task, write
 it into the status file, go on with what does not depend on it).
 
-The plan was written against `main` at commit a9d6f06. Every file, function and constant it names
-was checked there. Names and lines drift: find each by searching for its name (your search tool, or
-`grep -rn "<name>" src bin web test`; `rg` may not be installed on a Mac). Where the code at your
-commit says something else, the code wins: write the difference into the status file and go on.
+Every file, function and constant this plan names was checked against the code of `main` at commit
+a9d6f06, the commit just before the plan was added. Names and lines drift: find each by searching
+for its name (your search tool, or `grep -rn "<name>" src bin web test`; `rg` may not be installed
+on a Mac). Where the code at your commit says something else, the code wins: write the difference
+into the status file and go on.
 
 Two words are used with care. **KNOWN**: read in the code, or a stable, documented property of
 macOS. **EXPECTED**: believed, but never seen on a Mac. Step 0 (part 4) or a test on the Mac
@@ -52,10 +53,13 @@ says so (tell your human what is missing and the command that fixes it; never ru
 yourself):
 
 - `this is a Mac: yes`. Otherwise STOP: this plan is for a Mac.
+- `macOS:` a version. Node.js 24 needs macOS 13.5 or newer (EXPECTED, from Node.js's list of
+  supported systems): older, STOP. The `node` line below shows whether it runs at all.
 - `developer tools: found`, and `python3` and `git` show a version. STOP when they say "only Apple's
   stub": the suite runs `/usr/bin/python3` and `/usr/bin/git`, which would then open the install
   window. Print for your human: `xcode-select --install`.
-- `python3` 3.9 or newer, from the developer tools or Homebrew. The window's terminals need it.
+- `python3` 3.9 or newer, from the developer tools or Homebrew. Older or missing: STOP (the window's
+  terminals and the suite's keeper tests need it).
 - `node` 24.12 or newer. Otherwise STOP and print for your human: install Node.js 24 from
   nodejs.org, or `brew install node@24` if they use Homebrew.
 - `claude` shows a version. Otherwise the fact run of part 4.2 is left to the hands-on check; go on.
@@ -63,6 +67,10 @@ yourself):
   scopes `repo` and `workflow` (GitHub refuses a push that changes `.github/workflows/` without
   `workflow`, and M1's last task does). Otherwise STOP and print `gh auth login`, or `gh auth
   refresh -s workflow`, for your human.
+- The account can fork this repository: `gh api repos/<owner>/<name of origin> --jq .allow_forking`
+  prints `true`, and `gh api user --jq .login` prints a login. Whether that account already has a
+  fork of it: `gh repo view <login>/<name>` (an error means none). Some company accounts may not
+  fork outside their company: if `gh repo fork` refuses later, STOP and tell your human.
 - A Chromium-family browser is found (`Google Chrome: in /Applications` is the default this port
   uses). Without one, M1 and M2a go on; tell your human that M2b's hands-on check needs Chrome.
 
@@ -84,54 +92,64 @@ until part 9 or part 10 tells you to.
    your login and your GitHub no-reply address (`git config user.name "<login>"`, `git config
    user.email "<id>+<login>@users.noreply.github.com"`), or do you want your own?" (Take `<login>`
    and `<id>` from `gh api user --jq '.login, .id'`. Set them before the first commit; never commit
-   without both set, or git makes up an address from the user and machine names.) If `gh repo fork`
-   refuses later (some company accounts may not fork), STOP and tell your human.
-2. **Many hours.** "May I work unattended for up to 20 hours? Please keep the Mac plugged in with
-   the lid open, and run `caffeinate -i` in a terminal tab of your own (Ctrl+C ends it), so that it
-   does not sleep. If Claude Code asks you to allow each command, I cannot work unattended: please
-   allow, for this session, edits of files in this clone and commands that start with these: `sh
-   scripts/mac-probe.sh`, `npm ci`, `npm test`, `npm run`, `npx playwright install chromium` (it
-   downloads about 150 MB into `~/Library/Caches/ms-playwright`), `node --test`, `TMPDIR=/tmp`, `git
-   status`, `git diff`, `git log`, `git show`, `git branch`, `git remote`, `git config user.`, `git
-   add`, `git commit`, `git switch`, `git merge`, `git fetch`, `git push fork`, `gh auth status`,
-   `gh api user`, `gh repo fork`, `gh pr create`, `gh pr checks`, `gh pr view`, `perl -e 'alarm`,
-   `ps`, `kill` (only for process ids the suite left, M1 task 1), `grep`, `sed`, `cat`, `ls`,
-   `whoami`, `hostname`, `claude --help`, and the block of part 4.2 as it is (`mktemp -d
-   /tmp/skydeck-facts.`, `sh /tmp/skydeck-facts.`, `rm -r /tmp/skydeck-facts.`). If Claude Code
-   stops for a usage limit, tell me 'go on' when it is back: I resume from my status file."
-3. **The facts only your Claude Code can show** (part 4.2). "May I start Claude Code once, scripted
-   (`claude -p`, at most twice in all: once now, once near the end), in a throwaway folder, with a
-   throwaway hook that records only the NAMES of what a hook receives? Each run costs one tiny
-   prompt to the smallest model (a cent or less), takes at most two minutes, reads none of your
-   settings files and starts none of your own hooks (hooks an administrator set through managed
-   settings, if any, run as on every start). It leaves nothing behind but what Claude Code writes on
-   every start, such as its own state file `~/.claude.json`."
-4. **The end.** "At the end, will you do a hands-on check of about fifteen minutes with me (install
-   skydeck for real, open its window, press some keys, and once restart the Mac)? Without it the
-   window's look and keys stay unchecked."
+   without both set, or git makes up an address from the user and machine names.)
+2. **Checks on the fork.** "Once the fork exists, please switch GitHub Actions on for it (on the
+   fork's page: Actions, then the button that enables its workflows). I start the checks there
+   myself, on each branch, and read them before I open a pull request against the original."
+3. **Many hours, and permissions.** "May I work unattended for up to 20 hours? Please keep the Mac
+   plugged in with the lid open, and run `caffeinate -i` in a terminal tab of your own (Ctrl+C ends
+   it), so that it does not sleep. I edit files only inside this clone. The commands the work needs
+   are these families: `sh` (the probe, the fact run's script); `git` (status, diff, log, show,
+   branch, remote, `config user.*`, fetch, add, commit, switch, merge, push to your fork, and one
+   `git clone` for the check at the end); `gh` (auth status, api, repo fork, repo view, pr create,
+   pr view, pr checks, pr comment, workflow run, run list, run view, run watch); `npm` (ci, test,
+   run), `npx playwright install chromium` (it downloads about 150 MB into
+   `~/Library/Caches/ms-playwright`), `node`; `python3`; `perl` (to bound a command's time); `ps`,
+   `sysctl`, `sw_vers`, `vm_stat`, `lsof`, `uname`, `xcode-select -p`; `mktemp`, and `rm` only
+   inside this clone, the suite's sandboxes and the folders I make under `/tmp`; `kill` only for
+   process ids the suite left behind; `grep`, `sed`, `awk`, `sort`, `head`, `tr`, `cat`, `ls`,
+   `date`, `env`, `whoami`, `hostname`, `scutil --get ComputerName`; `shellcheck` if you have it;
+   `claude --help`, and the one `claude -p` of question 4. How you let them run without a question
+   each time is your choice; I never change my own permissions or settings. If the session stops for
+   any reason (a usage limit, a closed lid, a restart), start Claude Code again in this clone and
+   say 'read docs/plans/mac-port.md and go on': I resume from my status file."
+4. **The facts only your Claude Code can show** (part 4.2). Show them the `claude -p …` line of part
+   4.2 as it is, and say: "May I run this once? It starts Claude Code scripted, in a throwaway
+   folder, with a throwaway hook that records only the NAMES of what a hook receives. It costs one
+   tiny prompt to the cheapest model (a cent or less) and takes at most two minutes. It runs with
+   your own login and settings, so your own hooks, and any an administrator set, run as in any
+   session of yours, and Claude Code may write its own `~/.claude.json` as at any session start. I
+   run it once, never again if it fails."
+5. **The end.** "At the end, will you do a hands-on check of about fifteen minutes with me: install
+   skydeck for real from a second clone I prepare at `~/skydeck-mac-check` (not from this one, where
+   I work), open its window, press some keys, and once restart the Mac? Without it the window's look
+   and keys stay unchecked."
 
-A no to 1 or 2: STOP (you cannot deliver). A no to 3: leave the hook facts to the hands-on check
-(part 9). A no to 4: say in the final report what stayed unchecked.
+A no to 1 or 3: STOP (you cannot deliver). A no to 2: open the pull requests without the fork's run
+and say so in each. A no to 4: leave the hook facts to the hands-on check (part 9). A no to 5: say
+in the final report what stayed unchecked.
 
 ## 3. Hard rules
 
 On your human's machine (it holds their real Claude Code sessions and their work):
 
-- Work only inside this clone (switch branches in it; no second checkout), the suite's sandboxes
+- Work only inside this clone (switch branches in it; no worktree), the suite's sandboxes
   (`test/helpers/`), and folders you make with `mktemp -d` under `/tmp` (the fact run of part 4.2, a
-  pull request's body), which you remove when done. (The caches `npm` and Playwright keep, and
-  `gh`'s own settings, are theirs to write.) Reason: everything else is your human's.
+  pull request's body), which you remove when done. The one exception is the check clone of part 9,
+  `~/skydeck-mac-check`, made once at the end. (The caches `npm` and Playwright keep, and `gh`'s own
+  settings, are theirs to write.) Reason: everything else is your human's.
 - Run code only through the suite (`npm test`, `npm run test:page`, single test files, the commands
   of part 8), the probe and the fact run of part 4. Never run `bin/skydeck` or `node src/...`
   outside a test, not even with `--help`: the launcher writes a cache into `~/.cache/skydeck`, most
   commands read the real `~/.claude`, and `install`, `window`, `update` and `uninstall` change the
   real installation. Reason: a test's sandbox has its own home; your human's does not.
 - Never edit Claude Code's settings files (`~/.claude/settings*.json`, `.claude/settings*.json` of a
-  project) or `~/.claude.json`, and never read a transcript (`~/.claude/projects/`). Reason: they
-  hold your human's settings and conversations.
-- Never start, stop or signal a Claude Code session, except the scripted runs of part 4.2 (at most
-  two). Never `kill`, `pkill` or `killall` by name or pattern; signal only process ids you started
-  yourself. Reason: your human's sessions run under the same user.
+  project) or `~/.claude.json`, and never read a transcript (`~/.claude/projects/`). Never change
+  your own permissions or settings. Reason: they hold your human's settings and conversations, and
+  their choices.
+- Never start, stop or signal a Claude Code session, except the one scripted run of part 4.2. Never
+  `kill`, `pkill` or `killall` by name or pattern; signal only process ids you started yourself.
+  Reason: your human's sessions run under the same user.
 - Never start a program with a window: not Chrome, not `open`, not `skydeck window`. The page tests
   use Playwright's headless Chromium, which is fine. Reason: an unattended window or browser tab on
   your human's screen is a surprise, and can act on their real profile.
@@ -140,39 +158,41 @@ On your human's machine (it holds their real Claude Code sessions and their work
 - Never push to `main`, never force-push, never merge a pull request, never delete a branch you did
   not create. Push only to your fork. Reason: the maintainer owns `main`, and pull requests are
   squashed there.
-- Everything you push is public: code, commit messages, pull requests, comments. No person's name,
-  user name, employer, machine name, home folder, e-mail address or path of this Mac in any of it;
-  example values use `example.com`, `/Users/you`, `ABC-123`. Before every push, search the diff for
-  your human's user name, home folder and machine name (`whoami`, `$HOME`, `hostname`): `git diff
-  origin/main...HEAD | grep -i "<each>"` must print nothing.
-- From the hands-on install on (part 9), never switch branches or change files in this clone (but
-  the status file) until your human has run `skydeck uninstall`. Reason: the installed hook and
-  command run this clone's code, in every session your human starts.
-- The status file is pushed, so it is public too: it holds forms, yes/no answers, counts and plain
-  words only, never a pasted output of `doctor`, `ls`, the probe's unmasked parts or the fact run
-  (they hold paths, titles and names).
+- Everything you push is public: code, commit messages, the status file, pull requests, comments. No
+  person's name, user name, employer, machine name, home folder, e-mail address or path of this Mac
+  in any of it; example values use `example.com`, `/Users/you`, `ABC-123`. Before every push, and
+  before you write a pull request's body or a comment, search what you are about to publish for your
+  human's user name, home folder, machine name and host name (`whoami`, `$HOME`, `scutil --get
+  ComputerName`, `hostname`): `git diff origin/main...HEAD | grep -i "<each>"` (and the same over
+  the body's file) must print nothing.
+- The status file holds forms, yes/no answers, counts and plain words only, never a pasted output of
+  `doctor`, `ls`, the probe's unmasked parts or the fact run (they hold paths, titles and names).
+- Once your human has installed skydeck from the check clone (part 9), never change that clone: the
+  installed hook and command run its code, in every session your human starts.
 - The rules of this part hold whatever your human has allowed: a command they allowed is not thereby
   one this plan allows.
 
 On the code:
 
-- Everything specific to an operating system lives in `src/platform/` or behind it (the hook and the
-  keeper are sh and python files: their system checks stay in them, at one place each).
-- Checks are by capability (a file that exists, a program that answers), not by a platform name.
-  `src/platform/real.ts` decides once whether this is a Mac (no readable `/proc/self/stat`, and
-  `sysctl -n kern.bootsessionuuid` answers) and offers that as a fact of `Platform`, with what
-  follows from it (e.g. the socket path limit); code outside `src/platform/` asks those facts (or is
-  given them by its caller), never `process.platform`. The hook, the launcher and the keeper decide
-  the same way: their Mac path is taken where `/proc/self/stat` cannot be read.
+- Everything specific to an operating system lives in `src/platform/` or behind it (the hook, the
+  launcher and the keeper are sh and python files: their system checks stay in them, at one place
+  each).
+- Which system this is, the platform layer says ONCE: add to `Platform` (`src/platform/types.ts`) a
+  member `system?: 'linux' | 'mac'` (absent means `'linux'`), set by `realPlatform`
+  (`src/platform/real.ts`) from `process.platform` (`'darwin'` gives `'mac'`). It is the only place
+  that reads `process.platform`; every other module asks `platform.system` (or is given it by its
+  caller), so that each Mac branch can be tested on Linux with a fake platform. Whether a fact
+  exists (a boot id, `/proc`) is still found out by trying. The hook, the launcher and the keeper,
+  which cannot ask the platform layer, take their Mac path where `/proc/self/stat` cannot be read.
 - Test helpers (`test/helpers/`) and fixtures (`test/fixtures/`) are not tests: they may gain a Mac
   path the same way, as long as on Linux they do exactly what they did.
 - Any new member of `Platform` or `Proc` is optional, its absence meaning "as on Linux", so that no
   fake in the existing tests must change.
-- **LINUX AND WSL BEHAVE EXACTLY AS BEFORE.** Every branch you add is taken only where the Linux
-  capability is missing. The existing tests stay green and untouched, with two exceptions: a test
-  may be skipped on a Mac with its reason named (with the smallest edit that lets the skip work,
-  part 5, M1 task 1), and a test whose expected text says that macOS is not supported changes with
-  that text.
+- **LINUX AND WSL BEHAVE EXACTLY AS BEFORE.** Every branch you add is taken only on a Mac. The
+  existing tests stay green and untouched, with three exceptions: a case (or a `describe` group) may
+  be skipped on a Mac with its reason named; a file that cannot even load on a Mac may get one guard
+  at its top that skips the whole file on a Mac with its reason (part 5, M1 task 1); and a test
+  whose expected text says that macOS is not supported changes with that text.
 - No runtime dependency (Node.js's own modules only); Node.js 24.12 or newer; python3 3.9 or newer
   (the developer tools' python3 is 3.9). No new dependency of any kind.
 - The words a user reads are plain, and true on the system they read them on.
@@ -196,28 +216,35 @@ newest three files instead (still masked): note that in the facts.
 
 ### 4.2 What a hook receives: one bounded run of Claude Code
 
-Only with a yes to question 3 of 2.2. The probe cannot see a hook's environment; one scripted run of
-Claude Code shows it. The run is bounded so that it cannot touch your human's settings or sessions:
+Only with a yes to question 4 of 2.2, and ONCE in the whole plan (never in a loop, never in the test
+suite, never again if it fails). The probe cannot see a hook's environment; one scripted run of
+Claude Code shows it. It runs with your human's own login and settings, as any session of theirs
+does:
 
-- `--restricted` (Claude Code 2.1.248 or newer; documented in Claude Code's CLI reference): Claude
-  Code reads only managed settings and the `--settings` file, so neither your human's settings files
-  nor their own hooks are used, and the tools that run commands are removed; `--tools ""` removes
-  the others. `--strict-mcp-config` with an empty `--mcp-config` starts no MCP server.
 - `--settings <file>`: a throwaway settings file whose only content is a `SessionStart` and a
-  `SessionEnd` hook, a script that writes the NAMES of what it receives into the run's folder.
-- `--no-session-persistence`: no transcript is saved. `--max-turns 1`, `--max-budget-usd 0.05`,
-  `--model haiku`: one short answer from the smallest model, a cent or less.
-- `env -i` with only `HOME`, `USER`, `LOGNAME`, `SHELL`, `PATH`, `TMPDIR`, `LANG` (and
-  `CLAUDE_CONFIG_DIR` when it is set): the run does not inherit your own session's `CLAUDE*`
-  variables, which a hook would otherwise see too (a hook inherits Claude Code's environment).
+  `SessionEnd` hook, a script that writes only NAMES (of environment variables, of the input's
+  fields) and yes/no answers into the run's folder. Hooks of all levels merge (EXPECTED: not
+  documented), so your human's own hooks, and any set by an administrator, run too, as in any
+  session of theirs.
+- `--tools ""` and `--disallowedTools "mcp__*"`: no built-in tool and no MCP tool;
+  `--strict-mcp-config` with an empty `--mcp-config`: no MCP server is started.
+- `--no-session-persistence`: the session is not saved to disk (documented); whether a `-p` run
+  writes anything else is not documented (EXPECTED: no more than Claude Code's own `~/.claude.json`,
+  as at any session start). `--max-turns 1`, `--max-budget-usd 0.05`, `--model haiku`: one short
+  answer from the cheapest model, a cent or less.
+- `env -u` of your own session's four markers (`CLAUDECODE`, `CLAUDE_CODE_ENTRYPOINT`,
+  `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PID`): a hook inherits Claude Code's environment, so without
+  this the hook could show your session's values instead of what the scripted run sets. Nothing of
+  the login, the provider or the settings is removed.
 - At most two minutes (`perl -e 'alarm 120; exec @ARGV'`), in a folder of its own under `/tmp`.
 
-First check that `claude --help` lists `--restricted`, `--settings`, `--strict-mcp-config`,
-`--tools`, `--max-turns`, `--max-budget-usd` and `--no-session-persistence`. If one is missing, do
-not run anything: leave the hook facts to the hands-on check (part 9) and write why into the status
-file.
+Never use `--restricted`, `--bare`, `env -i` or another `CLAUDE_CONFIG_DIR` for it: your human's
+login or provider settings would be lost. First check that `claude --help` lists each of
+`--settings`, `--tools`, `--disallowedTools`, `--strict-mcp-config`, `--mcp-config`, `--max-turns`,
+`--max-budget-usd`, `--no-session-persistence` and `--model`. If one is missing, STOP the fact run
+(not the port): the facts move to the hands-on check (part 9).
 
-Make the folder, the hook, the settings file and the run script (one block, as it is):
+Make the folder, the hook, the settings file and the run script, and run it (one block, as it is):
 
 ```sh
 facts=$(mktemp -d /tmp/skydeck-facts.XXXXXX)
@@ -235,6 +262,8 @@ cat >"$facts/hook.sh" <<'EOF'
     print "CLAUDE_CODE_SESSION_ID equals session_id: ", (defined $s && $s eq ($j->{session_id} // "") ? "yes" : "no"), "\n";
     my $e = $ENV{CLAUDE_CODE_ENTRYPOINT} // "(not set)";
     print "CLAUDE_CODE_ENTRYPOINT: ", ($e =~ /\A[a-z-]{1,20}\z/ ? $e : "(other)"), "\n";'
+  case ":$PATH:" in *:/usr/sbin:*) echo "PATH holds /usr/sbin: yes" ;; *) echo "PATH holds /usr/sbin: no" ;; esac
+  case ":$PATH:" in *:/bin:*) echo "PATH holds /bin: yes" ;; *) echo "PATH holds /bin: no" ;; esac
   pid=${CLAUDE_PID-}
   case $pid in
     '' | *[!0-9]*) echo "CLAUDE_PID is a number: no"; pid=0 ;;
@@ -255,13 +284,11 @@ printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"sh %s/h
 cat >"$facts/run.sh" <<'EOF'
 #!/bin/sh
 cd "$1" || exit 1
-set --
-if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then set -- CLAUDE_CONFIG_DIR="$CLAUDE_CONFIG_DIR"; fi
-env -i HOME="$HOME" USER="$USER" LOGNAME="$LOGNAME" SHELL="$SHELL" PATH="$PATH" TMPDIR="$TMPDIR" \
-  LANG="${LANG:-en_US.UTF-8}" "$@" perl -e 'alarm 120; exec @ARGV' \
-  claude -p "Reply with the single word ok." --restricted --settings "$PWD/settings.json" \
-  --strict-mcp-config --mcp-config '{"mcpServers":{}}' --tools "" --max-turns 1 \
-  --max-budget-usd 0.05 --no-session-persistence --model haiku </dev/null >answer.txt 2>&1
+env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_SESSION_ID -u CLAUDE_PID \
+  perl -e 'alarm 120; exec @ARGV' \
+  claude -p "Reply with the single word ok." --settings "$PWD/settings.json" \
+  --tools "" --disallowedTools "mcp__*" --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
+  --max-turns 1 --max-budget-usd 0.05 --no-session-persistence --model haiku </dev/null >answer.txt 2>&1
 echo "claude ended with $?"
 EOF
 sh "$facts/run.sh" "$facts"
@@ -271,36 +298,36 @@ echo "$facts"
 A shell variable does not outlive one command of yours: use the folder by the path the last line
 printed. Read its `SessionStart.txt` and `SessionEnd.txt` (not `answer.txt`: it is Claude Code's
 answer or its error, which may name the account; read only whether it is the word `ok`). Write the
-facts, as forms and yes/no in the shape of "Facts found on a Mac" below, into the status file; then
-remove the folder (`rm -r /tmp/skydeck-facts.<…>`).
+facts, as forms and yes/no, into "Facts found on a Mac" below (in the M1 branch). Then check what
+the run left:
 
-- What it starts: one `claude -p` that answers once and exits, and the two hook runs. No MCP server,
-  no tool, nothing of your human's settings.
-- What it leaves: nothing of its own once the folder is removed. Claude Code may update its own state
-  in `~/.claude.json` and `~/.claude/` as it does on every run (EXPECTED); you never edit them.
-- If Claude Code cannot log in this way (some logins live in the user settings that `--restricted`
-  leaves out), the run fails after the `SessionStart` hook has run (EXPECTED): `SessionStart.txt`
-  alone settles most facts. Do not retry with the user settings.
-- If `SessionStart.txt` is missing, the hooks did not run in this mode: write that down and leave
-  the hook facts to the hands-on check.
+- its folder: remove it (`rm -r /tmp/skydeck-facts.<…>`);
+- whether Claude Code kept a transcript after all: list the names only, `ls -d
+  "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*skydeck-facts*`. Whatever this or anything else
+  shows in your human's real folders is REPORTED to them (in the status file and at the end), never
+  read and never deleted.
+
+If the run failed, or `SessionStart.txt` is missing (the hooks did not fire), try nothing else: the
+facts move to the hands-on check, where your human's real install shows them at its first session.
 
 What it settles: whether `CLAUDE_PID`, `CLAUDE_CODE_SESSION_ID` and `CLAUDE_CODE_ENTRYPOINT` are set
-in a hook on a Mac (the hook relies on all three: `bin/skydeck-hook`), whether `CLAUDE_PID` is the
-`claude` process, the input's field names, and that the hook's parent is a shell. In M3 you run it
-once more, with one line added to the hook (M3, task 2).
+in a hook on a Mac (the hook relies on all three: `bin/skydeck-hook`; `CLAUDE_PID` is documented
+from Claude Code 2.1.214, `CLAUDE_CODE_ENTRYPOINT` is not documented: EXPECTED), whether
+`CLAUDE_PID` is the `claude` process, the input's field names, that the hook's parent is a shell,
+and whether a hook's `PATH` holds `/usr/sbin` (where `sysctl` is) and `/bin`.
 
 ### 4.3 How each open question is settled
 
 | Open question | Settled by |
 |---|---|
-| The form of `procStart` in Claude Code's live-session file on a Mac (EXPECTED: the text of `ps -o lstart=` under `LC_ALL=C TZ=UTC`, like `Thu Nov  5 09:12:33 2026`, two spaces before a one-digit day) | the probe: `procStart (text): [...]` and `procStart equals ps lstart` |
-| `CLAUDE_PID`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_ENTRYPOINT` in a hook on a Mac | the fact run (4.2); else the hands-on check |
+| The form of `procStart` in Claude Code's live-session file on a Mac (EXPECTED: the text of `ps -o lstart=` under `LC_ALL=C TZ=UTC`, like `Thu Nov  5 09:12:33 2026`, two spaces before a one-digit day; else the same text in the Mac's local time) | the probe: `procStart (text): [...]`, `procStart equals ps lstart` (UTC) and `… in local time` |
+| `CLAUDE_PID`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_ENTRYPOINT` in a hook on a Mac; whether a hook's `PATH` holds `/usr/sbin` | the fact run (4.2); else the hands-on check |
 | `kern.bootsessionuuid`: present, a UUID, its case (EXPECTED: upper case) | the probe |
 | BSD `date +%s%N` (EXPECTED: no nanoseconds; prints a literal `N`) | the probe: `date +%s%N: [9999999999A]` means no |
 | The cost of `ps` | the probe: `ps cost`, `ps snapshot cost` |
 | python3's `SO_PEERCRED` (EXPECTED: missing), `getpeereid`, `sysctlbyname` | the probe |
 | How many tests fail on a Mac, and why | M1 task 1 |
-| Exact arguments of a running process (EXPECTED: through `sysctl` `KERN_PROCARGS2`) | M3 task 2, with the fact run |
+| Exact arguments of a running process (EXPECTED: through `sysctl` `KERN_PROCARGS2`) | M3 task 2, with a stand-in program (never with Claude Code) |
 | Chrome's Ctrl+click, Ctrl+Tab, Cmd shortcuts in an app window; Option on your human's layout; notifications; the Dock icon and title | the hands-on check (part 9); misses go into the report |
 | Whether `kern.bootsessionuuid` changes with a restart (EXPECTED: yes) and not with a logout | the hands-on check (restart); logout is a known limit (6.7) |
 | Whether macOS asks for permissions when a session in the window works in `~/Documents` or `~/Desktop` | the hands-on check; report what appeared |
@@ -312,8 +339,8 @@ versions; the probe's answers for `date`, `kern.bootsessionuuid`, `ps lstart`, t
 `vm_stat`, the `ps` costs; the field names and forms of the live-session file and both `procStart
 equals ps lstart` answers; from the fact run, whether `CLAUDE_PID`, `CLAUDE_CODE_SESSION_ID`,
 `CLAUDE_CODE_ENTRYPOINT` and `CLAUDECODE` are set (not the whole list of names, which can tell about
-your human's setup), the input's field names and the yes/no answers. Nothing personal: no path, no
-name, no value.)
+your human's setup), the input's field names and the yes/no answers, and what the run left. Nothing
+personal: no path, no name, no value.)
 
 ## 5. The stages
 
@@ -356,11 +383,10 @@ Rules for skips, so that they hide nothing:
   your new tests that need a real Mac ("needs a Mac" elsewhere, `false` on a Mac). It is the only
   place a test names the platform. On Linux every `onMac` skip is `false`: the Linux counts stay
   those of `main` plus your new tests (part 8).
-- Skip single cases, or one `describe` group whose cases all fail for the same reason, not files,
-  unless a file cannot even load on a Mac (then the whole file, with the reason). A file that reads
-  `/proc` when it loads (the top of `test/bin/keepalive.test.ts` reads the boot id) needs the
-  smallest edit that lets a skip work: move that read into a function its cases call. Nothing else
-  of an existing test changes.
+- Skip single cases, or one `describe` group whose cases all fail for the same reason, not files. A
+  file that cannot even load on a Mac (the top of `test/bin/keepalive.test.ts` reads `/proc`'s boot
+  id when it loads) may get one guard at its top that skips the whole file on a Mac, with the
+  reason. Nothing else of an existing test file changes.
 - Every skip is listed in the status file: file, case, kind, reason, the stage that takes it out.
   `grep -rn "onMac(" test test-page` and the list must agree.
 - At the end of every stage, take out each "port: until <this stage>" skip; the case must pass.
@@ -372,35 +398,47 @@ Rules for skips, so that they hide nothing:
 Done when the suite on the Mac is green with every failure skipped and listed, and the facts of part
 4 are in "Facts found on a Mac".
 
-**Task 2: one parser of a Mac process start.** In `src/claude/procstat.ts` (pure, beside
-`procStartFromStat`), add `procStartFromLstart(text: string): number | null`: the text of `ps -o
-lstart=` under `LC_ALL=C TZ=UTC` (`Www Mmm dd hh:mm:ss yyyy`, a one-digit day after two spaces,
-trimmed at both ends) to whole seconds since 1970, read as UTC; null for anything else, including a
-weekday that does not match the date. It is the ONLY place that reads this text (decision 6.1).
-Tests first (they run on Linux too): a one-digit and a two-digit day, the end of a year, 29
-February, every month name, a wrong weekday, extra words, an empty text, a time out of range.
+**Task 2: one parser of a process start's text.** In `src/claude/procstat.ts` (pure, beside
+`procStartFromStat`), add `procStartFromLstart(text: string, zone: 'utc' | 'local'): number | null`:
+the text of `ps -o lstart=` (`Www Mmm dd hh:mm:ss yyyy` in the C locale's English names, a one-digit
+day after two spaces, trimmed at both ends) to whole seconds since 1970, read as UTC or as the
+machine's local time; null for anything else, including a weekday that does not match the date. It
+is the ONLY place that reads this text (decision 6.1): skydeck's own readings always ask `ps` under
+`LC_ALL=C TZ=UTC` and use `'utc'`. Tests first (they run on Linux too): a one-digit and a two-digit
+day, the end of a year, 29 February, every month name, a wrong weekday, extra words, an empty text,
+a time out of range; and the local form in a child process with a set `TZ` (one with summer time),
+including the hour that comes twice when the clocks go back, which reads as the earlier of the two.
 
 **Task 3: a live-session file's `procStart` on a Mac.** In `src/claude/live.ts`, `procStartOf`
-accepts that text too, through `procStartFromLstart`; the digits of Linux stay as they are. Tests
-first in `test/claude/live.test.ts`: a made-up Mac live-session file (the form from the facts, made
-up values) gives the seconds; every existing case is unchanged.
+accepts that text too, through `procStartFromLstart`, in the form the facts found (`'utc'` expected;
+`'local'` if the probe said YES only in local time); the digits of Linux stay as they are. If the
+form is local time, `docs/install.md` gets the known limit: a session started in the hour that comes
+twice in autumn may show as not running. Tests first in `test/claude/live.test.ts`: a made-up Mac
+live-session file (the form from the facts, made-up values) gives the seconds; every existing case
+is unchanged. Done when the parse of the probe's masked form, filled with made-up digits, gives the
+expected number.
 
 **Task 4: the process facts on a Mac.** `Proc` (`src/platform/types.ts`) is synchronous and its
 Linux implementation `realProc` (`src/platform/real.ts`) reads `/proc`. Add a second implementation
 beside it, built on a function that runs a program synchronously (`spawnSync`, a time limit of two
 seconds, absolute paths `/bin/ps` and `/usr/sbin/sysctl` (where a Mac keeps them; the probe's `ps`
-and `sysctl` lines show it), `LC_ALL=C TZ=UTC`), and choose it in `realPlatform` by capability:
-`realProc` when `/proc/self/stat` can be read (Linux, unchanged), the new one when it cannot and
-`sysctl` answers `kern.bootsessionuuid`, `realProc` as today otherwise. Shape its answers like
-Linux's (decision 6.1):
+and `sysctl` lines show it), `LC_ALL=C TZ=UTC`), and let `realPlatform` use it where `system` is
+`'mac'` (part 3). Shape its answers like Linux's (decision 6.1):
 
 - `bootId()`: `sysctl -n kern.bootsessionuuid`, trimmed, in lower case, read once per process.
-- `stat(pid)`: `ps -o ppid=,lstart= -p <pid>`; no such process gives null; otherwise a line shaped
-  like `/proc/<pid>/stat` whose field 4 is the parent and field 22 is `procStartFromLstart` of the
-  start (`procStartFromStat` and `parentPidFromStat` read only those two fields: check with `grep
-  -rnE "procStartFromStat|parentPidFromStat|proc\.stat\(" src` before you rely on it). `ps -p <pid>`
-  for a process that does not exist exits 1 and prints nothing (EXPECTED; a test on the Mac shows
-  it): that alone is "no such process". No `ps`, a time-out or any other answer throws.
+- `stat(pid)`: a line shaped like `/proc/<pid>/stat` whose field 4 is the parent and field 22 is
+  `procStartFromLstart(start, 'utc')` (`procStartFromStat` and `parentPidFromStat` read only those
+  two fields: check with `grep -rnE "procStartFromStat|parentPidFromStat|proc\.stat\(" src` before
+  you rely on it). The answers come from one snapshot of all processes, `ps -A -o
+  pid=,ppid=,lstart=`, taken at most once a second (once per window tick). A pid the snapshot does
+  not hold is asked once by itself (`ps -o ppid=,lstart= -p <pid>`; that is as good as a new
+  snapshot and cheaper) before the answer is "no such process", so that a process started after the
+  snapshot is never taken for dead. `ps -p` for a process that does not exist exits 1 and prints
+  nothing (EXPECTED; a test on the Mac shows it): only that is "no such process". No `ps`, a
+  time-out or any other failure throws (an error, never "no process").
+- The resume guard reads uncached: the Mac `Proc` gets an optional method that drops its snapshot,
+  and the code that loads the rows `checkResumable` (`src/sessions/resume.ts`) judges, for `resume`,
+  `new`, `restore` and the window's starts, calls it first.
 - `cmdline`: null in M1 (decision 6.3). `memAvailableMb`, `fdTarget`, `tcpListening`: null until M3;
   each already degrades: restore counts unknown memory as enough, the window shows no tty, and
   doctor says what holds the port is not known.
@@ -408,19 +446,15 @@ Linux's (decision 6.1):
 - Keep `Proc`'s contract (its comment in `types.ts`): `bootId` and `stat` return null only when the
   fact does not exist (no such process), and throw any other failure.
 
-Measure the cost: the window's tick asks `stat` for every session every second
-(`src/window/tick.ts`; `holderPlace` in `src/window/mapping.ts` walks up to eight parents, two
-`stat` calls each), and a synchronous call holds the server's event loop while it runs. Use one `ps`
-per call first. If the probe's cost times the calls of one tick with twenty sessions is more than
-about 200 ms, answer from one snapshot of all processes (`ps -A -o pid=,ppid=,lstart=`) taken at
-most once a second, inside the new `Proc` only; a pid the snapshot does not hold is asked by itself
-(`ps -p`) before it counts as gone, so that a process started after the snapshot is never taken for
-dead.
+Measure and report the cost: the probe's `ps snapshot cost`, and one tick of the window with twenty
+sessions (`src/window/tick.ts`; `holderPlace` in `src/window/mapping.ts` walks up to eight parents,
+two `stat` calls each); a synchronous call holds the server's event loop while it runs.
 
-Tests first: with a made-up runner on Linux (every answer shape: a process, none, a `ps` that fails,
-a `sysctl` that is missing); and on the Mac with the real programs, for the test's own process (its
-parent is `process.ppid`; its start is within the last day; two calls agree) and a pid that does not
-exist.
+Tests first: with a made-up runner on Linux (every answer shape: a process, none, a pid missing from
+the snapshot but found when asked alone, a `ps` that fails, a `sysctl` that is missing, the snapshot
+dropped); and on the Mac with the real programs, for the test's own process (its parent is
+`process.ppid`; its start is within the last day; two calls agree) and a pid that does not exist.
+Done when both pass, and Linux still runs `realProc`.
 
 **Task 5: the hook on a Mac.** `bin/skydeck-hook` reads `/proc` and `date +%s%N`. Give it a second
 path, taken only when `/proc/self/stat` cannot be read (with `SKYDECK_TEST_PROC`, below, unset,
@@ -435,9 +469,10 @@ Linux runs exactly today's commands):
 - the boot id: `sysctl -n kern.bootsessionuuid`, as it is;
 - no `argv_b64` (decision 6.3).
 
-On this path the hook calls `ps`, `sysctl` and `perl` by name, with `/bin:/usr/sbin:/usr/bin`
-appended to its `PATH` (so that they are found even where a user's `PATH` lacks `/usr/sbin`, and so
-that a test's stand-ins, first on the sandbox's `PATH`, are the ones it runs).
+On this path the hook calls `ps`, `sysctl` and `perl` by name, as it calls `date` and `cat` today
+(no absolute path, so that the suite's stand-ins replace them). If the fact run showed that a hook's
+`PATH` lacks `/usr/sbin` (where `sysctl` is), the Mac path appends `/usr/sbin` to `PATH` first
+(stand-ins on the sandbox's `PATH` still come first); say so in the hook's header and the design.
 
 In `src/claude/hookinput.ts` (`parseSpoolFile`), read `lstart` through `procStartFromLstart` when
 `stat` is empty (the hook always writes the `stat=` line), and take the boot id in lower case (on
@@ -458,11 +493,13 @@ when it starts, so every test that starts it fails on a Mac), `test/fixtures/fak
 `ps` and `procStartFromLstart`; no limits file on a Mac), Linux unchanged. Then: with tasks 2 to 5,
 a session's start from the hook, from its live-session file and from `Proc.stat` must be the same
 number, or every session shows as not running (`isAlive`, `isLiveFileTrusted` in
-`src/claude/live.ts`). Test it on the Mac end to end: the real hook (Mac path) with `CLAUDE_PID` set
-to a process the test started, ingest, then `isAlive` true; and a made-up live-session file with
-that process's real `ps` text, then `isLiveFileTrusted` true. Also: a reboot is seen (a second boot
-id), `checkResumable` (`src/sessions/resume.ts`) refuses a session that runs. Done when `skydeck ls
---json` in a test sandbox shows the right states for stand-in sessions.
+`src/claude/live.ts`). This is M1's gate: skydeck's reading of a running session's start equals the
+live file's. Test it on the Mac end to end: the real hook (Mac path) with `CLAUDE_PID` set to a
+process the test started, ingest, then `isAlive` true; and a made-up live-session file with that
+process's real `ps` text, then `isLiveFileTrusted` true. Also: a reboot is seen (a second boot id),
+`checkResumable` (`src/sessions/resume.ts`) refuses a session that runs. Done when `skydeck ls
+--json` in a test sandbox shows the right states for stand-in sessions; the gate is seen for real
+only in part 9, step 2.
 
 **Task 7: install and doctor on a Mac.** `skydeck install` refuses where there is no boot id
 (`hasBootId`, `NO_BOOT_ID` in `src/cli/commands/install.ts`): with task 4 it stops refusing on a Mac
@@ -479,23 +516,25 @@ error of `hasBootId`, "cannot read the boot id (/proc/…)" in `restorePlan`); t
 and M2b's (e.g. `PYTHON_MISSING` in `src/window/terminals.ts`, "its /proc entry" in
 `src/cli/window-checks.ts` and `src/window/lifecycle.ts`). Tests first: the refusal's new text where
 there is no boot id; a Mac's `system:` line with a made-up `SystemVersion.plist`; the Linux line
-unchanged (its existing tests in `test/cli/commands/doctor-versions.test.ts` stay as they are).
+unchanged (its existing tests in `test/cli/commands/doctor-versions.test.ts` stay as they are). Done
+when they pass, and each text the search found is true on a Mac or listed for M2a or M2b.
 
 **Task 8: the documents.** `README.md` ("What you need": the command line works on a Mac; the window
 follows), `docs/install.md` ("Prerequisites", and that zsh users put `~/.local/bin` on PATH in
 `~/.zshrc`), `docs/design.md` (3: the words "boot" and "process"; 5.1; 5.5: a start on a Mac is
-whole seconds from `ps`; 8: install no longer refuses on a Mac; 14: the Mac's `procStart`; 16: macOS
-is no longer left out of the command line), `AGENTS.md` part 1, step 1 (its `Darwin` line; keep the
-file's length: change words, add no lines; `test/agents-md.test.ts` checks every command it names).
-Done when each says what is true at the end of M1 (the window not yet on a Mac) and the suite is
-still green.
+whole seconds from `ps`; 8: install no longer refuses on a Mac (its sentence on macOS); 14: the
+Mac's `procStart`; 16: macOS is no longer left out of the command line), `AGENTS.md` part 1, step 1
+(its `Darwin` line; keep the file's length: change words, add no lines; `test/agents-md.test.ts`
+checks every command it names). Done when each says what is true at the end of M1 (the window not
+yet on a Mac) and the suite is still green.
 
 **Task 9 (last): a macOS job in the checks.** In `.github/workflows/ci.yml`, add a job `unit
 (macos)` on `macos-latest`: `npm ci`, then `npm test` with `TMPDIR: /tmp`. Either unsharded (no
 `shard` list, no `NODE_OPTIONS` line) or with its own `shard: ['1/n', …]` list and one
 `NODE_OPTIONS: --test-shard=${{ matrix.shard }}` line: the lint job's step "Check the shard lists"
 fails on anything else, and on any `include:` or `exclude:`. Give the test step a `timeout-minutes`
-of its own (a step that reaches it fails the job). The page suite on macOS is M2a's.
+of its own (a step that reaches it fails the job). The page suite on macOS is M2a's. Done when the
+fork's run (part 7) shows the job green beside the Linux jobs.
 
 M1 is done when the suite is green on the Mac with no "until M1" skip left, and the tests of tasks 2
 to 7 pass on the Mac and (with stand-ins) on Linux.
@@ -507,64 +546,79 @@ Chrome, it shows the sessions and their terminals, and sessions can be started, 
 into there. Read `docs/design-step-2.md` 4 (processes), 7.1 (the keeper), 7.4 (a terminal's
 environment), 8.1 (server and keeper).
 
-**Task 1: the keeper on a Mac** (`bin/skydeck-keeper`, python3 3.9). Each change is taken only where
-the Linux way is missing:
+**Task 1: the keeper on a Mac** (`bin/skydeck-keeper`, python3 3.9). Its Mac path is taken where
+`/proc/self/stat` cannot be read; for tests on Linux it takes its `/proc` folder from
+`SKYDECK_TEST_PROC`, as the hook does (M1 task 5). It calls `ps` and `sysctl` by name, as the hook
+does:
 
-- `proc_start(pid)` reads `/proc/<pid>/stat`: on a Mac, the same number as task 4 of M1 gives
-  (decision 6.1): through `sysctl` (`CTL_KERN`, `KERN_PROC`, `KERN_PROC_PID`) with `ctypes`, the
-  seconds of `p_starttime` (EXPECTED: the first field of `struct kinfo_proc`, and what `ps lstart`
-  prints). For a pid that does not exist, `sysctl` answers with no data (EXPECTED), which must raise
-  as the Linux read does ("no such process"). A test on the Mac compares the number with
-  `procStartFromLstart` of `ps` for the same process; until it passes, no keeper uses it (a wrong
-  number makes every keeper look dead to the server, which then removes its files).
-- `boot_id()`: `sysctlbyname("kern.bootsessionuuid")` through `ctypes`, in lower case.
+- `proc_start(pid)` reads `/proc/<pid>/stat`: on a Mac it runs `ps -o lstart= -p <pid>` under
+  `LC_ALL=C TZ=UTC` (the same text Node and the hook read) and turns it into whole seconds with
+  `calendar.timegm(time.strptime(text, "%a %b %d %H:%M:%S %Y"))`, never through `ctypes` and
+  structure offsets (a wrong offset would make live keepers look dead). `ps` exiting 1 with no
+  output means no such process and raises as the Linux read does; any other failure raises too.
+- `boot_id()`: `sysctl -n kern.bootsessionuuid`, in lower case.
 - `Keeper.accept` checks the peer with `socket.SO_PEERCRED`, which python on a Mac does not have
   (EXPECTED; the probe says): the `AttributeError` is not caught today and ends the keeper. On a Mac
-  use `getpeereid` from libc through `ctypes`.
+  use libc's `getpeereid` through `ctypes` (a function with two integer results, no structure to lay
+  out); if the probe says it is missing, stop this item and write it down.
 - `main` calls `prctl(PR_SET_DUMPABLE, 0)`, which a Mac does not have (today it only logs
   "dumpable"): on a Mac set the keeper's own core limit to 0 (`resource.setrlimit`) instead.
 
-Tests: the keeper tests (`test/keeper/`) run on the Mac for real; on Linux they keep testing the
-Linux path. Keep `python3 -m py_compile bin/skydeck-keeper` clean (CI's lint runs it).
+Tests first: on Linux with `SKYDECK_TEST_PROC` and stand-ins of `ps` and `sysctl`, the keeper's pid
+line carries the seconds `procStartFromLstart(text, 'utc')` gives for the stand-in's text and the
+lower-case boot id; on the Mac the keeper tests (`test/keeper/`) run for real, and one compares the
+keeper's number for a process with `procStartFromLstart` of `ps` for the same one. Keep `python3 -m
+py_compile bin/skydeck-keeper` clean (CI's lint runs it). Done when the keeper tests pass on the Mac
+and nothing changed for them on Linux.
 
 **Task 2: the socket path limit.** `SOCKET_PATH_LIMIT` is 108 in two places
 (`src/window/runtime.ts`, `src/window/terminals.ts`), and doctor's `checkRuntimeDir` judges by it. A
-Mac allows 103 bytes (its `sun_path` is 104 with the final zero; KNOWN). Make it one fact of the
-platform, following from the Mac fact (part 3): 104 on a Mac and 108 elsewhere, in the same "refused
-when at least the limit" sense.
+Mac allows 103 bytes (its `sun_path` is 104 with the final zero; KNOWN). Make it one value that
+follows from `platform.system` (part 3): 104 on a Mac and 108 elsewhere, in the same "refused when
+at least the limit" sense. Tests first: with a fake platform whose `system` is `'mac'`, a 104-byte
+path is refused by `prepareRuntimeDir`, by the terminals and by doctor, and a 103-byte one is taken;
+with none, every existing case is unchanged. Done when they pass on Linux and on the Mac.
 
 **Task 3: the launcher's `serve` on a Mac.** `bin/skydeck` starts `serve` through `/usr/bin/python3`
 to set a one-byte core limit (the reason is WSL's crash collector, in its comment). On a Mac no core
 file is written by default (the soft limit is 0; EXPECTED), so where `/proc/self/stat` cannot be
-read start node directly, unset `SKYDECK_CORE_SOFT`, and write no log line about python. doctor's
-`checkCoreLimit` (`src/cli/window-checks.ts`) says on a Mac that none is needed. The launcher's
-tests of the python path (`needsUsrBinPython3` in `test/bin/launcher.test.ts`) test the Linux path:
-from this task on, skip them on a Mac with that reason, and test the Mac path beside them.
+read (with the same `SKYDECK_TEST_PROC` for tests) start node directly, unset `SKYDECK_CORE_SOFT`,
+and write no log line about python. doctor's `checkCoreLimit` (`src/cli/window-checks.ts`) says on a
+Mac that none is needed. The launcher's tests of the python path (`needsUsrBinPython3` in
+`test/bin/launcher.test.ts`) test the Linux path: from this task on, skip them on a Mac with that
+reason. Tests first, beside them: the Mac path on Linux (`SKYDECK_TEST_PROC` at an empty folder:
+node is started directly, no python runs, nothing is logged) and on the Mac for real. Done when both
+pass.
 
 **Task 4: no keep-alive, no interop on a Mac** (decision 6.6). `createKeepAlive`
-(`src/window/keepalive.ts`) gives state `failed` ("WSL_DISTRO_NAME is not set…") without WSL, and
-the page then shows "WSL is not kept running" in its title bar for good. On a Mac (the Mac fact of
-part 3) make it `off` with nothing shown. The interop link (`src/window/interop.ts`) finds nothing
-on a Mac and removes its link: harmless; leave it.
+(`src/window/keepalive.ts`) knows two ways today: mode `off`, and WSL; without `WSL_DISTRO_NAME` it
+gives state `failed` ("WSL_DISTRO_NAME is not set…"), and the page then shows "WSL is not kept
+running" in its title bar for good. Add a third branch: where `platform.system` is `'mac'`, the
+state is `off`, nothing is started, and the page shows nothing; doctor's `checkKeepAlive` says that
+a Mac needs no keep-alive (that line is M2b task 5's). The interop link (`src/window/interop.ts`)
+finds nothing on a Mac and removes its link: harmless; leave it. Tests first: `createKeepAlive` with
+a fake Mac platform gives `off` and starts no program, whatever `window.keepAlive` says; every
+existing case unchanged. Done when they pass.
 
 **Task 5: a terminal's environment.** `programEnvironment` (`src/window/env.ts`) drops the variables
 of the terminal that started the server (`TERMINAL_VARIABLES`, `TERMINAL_PREFIXES`). Mac terminals
 also set `TERM_SESSION_ID`, `LC_TERMINAL`, `LC_TERMINAL_VERSION`, `ITERM_PROFILE`,
 `__CFBundleIdentifier` and `GHOSTTY_*`: drop them on a Mac only (on Linux a Ghostty user has
 `GHOSTTY_*` too: whether Linux should drop them is a question for the report, not this port).
-`programEnvironment` is pure: its caller gives it the Mac fact.
+`programEnvironment` is pure: its caller gives it `platform.system`. Tests first: with `'mac'` each
+of them is dropped; without it, each is kept as today. Done when they pass.
 
 **Task 6: the window's words.** The texts of the window and its server that name Linux things must
 be true on a Mac and stay as they are on Linux: `PYTHON_MISSING` in `src/window/terminals.ts` ("sudo
 apt install python3"; on a Mac name the developer tools), "its /proc entry" in
 `src/window/lifecycle.ts`, and those you find with `grep -rnE "/proc|apt install|WSL" src/window
-web`. Tests first, for each text on a Mac and on Linux.
+web`. Tests first, for each text on a Mac and on Linux. Done when they pass.
 
 **Task 7 (last): the page suite on macOS in CI.** A job `page (macos)`: `npx playwright install
 chromium` (no `--with-deps` on a Mac), `npm run test:page` with `TMPDIR: /tmp`. The page job's step
 that reads `/etc/os-release` for its cache key does not work on a Mac, and Playwright keeps its
 browsers in `~/Library/Caches/ms-playwright` there, not `~/.cache/ms-playwright`: use `sw_vers
--productVersion` and that folder, or no cache.
+-productVersion` and that folder, or no cache. Done when the fork's run shows the job green.
 
 M2a is done when the window and keeper tests and the page suite pass on the Mac with no "until M2a"
 skip left. (You never open the real window: part 9 does.)
@@ -580,17 +634,21 @@ programs while `SKYDECK_TEST_NO_WINDOWS=1` (the "Windows guard" in `src/platform
 sandbox sets it). Make it refuse `/usr/bin/open` and any program whose path holds `/Applications/`
 (the system's or a home's) too, judged after the `PATH` lookup as the Windows guard judges programs
 under `/mnt/`, with a test. Every test of this stage uses stand-ins (as `test/fixtures/fake-edge/`
-stands in for Edge).
+stands in for Edge). Done when the test shows both refused while the guard is on, and every existing
+case of the guard is unchanged.
 
 **Task 2: `window.browser`** (decision 6.4). In `src/platform/config.ts` (`WindowConfig`,
-`DEFAULT_CONFIG`, the `window` case of `parseConfig`): a new key, an absolute path to a
-Chromium-family browser, valid on every system. Both `window.browser` and `window.edge` in one file
-is an error that names both (`window.edge` has a default, so `parseConfig` must tell a key the file
-sets from a default). On WSL, `window.edge` and every Edge rule work exactly as today. On a Mac the
-browser is `window.browser`, else Google Chrome at `/Applications/Google
-Chrome.app/Contents/MacOS/Google Chrome`; a `window.edge` in a Mac's file is an error that names
-`window.browser`. `window.profileDir` keeps its rule on WSL; on a Mac it may be null (skydeck's own
-folder, `<state folder>/browser-profile`) or an absolute path.
+`DEFAULT_CONFIG`, the `window` case of `parseConfig`, which its caller gives `platform.system`): a
+new key, an absolute path to a Chromium-family browser, valid on every system. Both `window.browser`
+and `window.edge` in one file is an error that names both (`window.edge` has a default, so
+`parseConfig` must tell a key the file sets from a default). On WSL, `window.edge` and every Edge
+rule work exactly as today. On a Mac the browser is `window.browser`, else Google Chrome at
+`/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`; a `window.edge` in a Mac's file is
+an error that names `window.browser`. `window.profileDir` keeps its rule on WSL; on a Mac it may be
+null (skydeck's own folder, `<state folder>/browser-profile`) or an absolute path. Tests first, in
+`test/platform/config.test.ts` (its table of bad values): `window.browser` relative or not a string;
+both keys; on a Mac `window.edge` set, `window.profileDir` absolute and relative; the defaults on
+each system. Done when they pass and every existing case is unchanged.
 
 **Task 3: starting the browser on a Mac.** `launchWindow` (`src/cli/window-open.ts`) calls
 `startEdge` (`src/window/edge.ts`), which starts the program through `startWindowsProgram` with the
@@ -601,22 +659,30 @@ four arguments (`--app=…`, `--user-data-dir=<profile folder>`, `--no-first-run
 browser, not Edge: the launch errors in `edge.ts`, "Edge was started, but no window connected…" in
 `window-open.ts`, `skydeck window --help` (`src/cli/commands/window.ts`), and uninstall's line
 naming the profile folder (`showProfileFolder` in `src/cli/commands/uninstall.ts`, which reads only
-`C:\…` paths today). On WSL every text stays as it is.
+`C:\…` paths today). On WSL every text stays as it is. Tests first, with a stand-in browser (a
+script like `test/fixtures/fake-edge/` that records its arguments and folder): the arguments, the
+folder, the profile folder made under the state folder, a missing browser named in the error, and
+uninstall naming the Mac folder. Done when they pass, on Linux with a fake Mac platform and on the
+Mac.
 
 **Task 4: links** (decision 6.6). `openLink` (`src/window/edge.ts`) uses `rundll32.exe` or Edge. On
 a Mac: `/usr/bin/open <link>` (the link is already limited to http and https by `linkToOpen` in
 `src/text/link.ts`, so it never starts with `-`). `window.links: "edge"` on a Mac is an error that
-names `"default"`.
+names `"default"`. Tests first: with a fake Mac platform, the program and arguments `openLink`
+starts (a stand-in, never the real `open`: task 1), and the error. Done when they pass.
 
 **Task 5: doctor's window checks on a Mac.** `WINDOW_CHECKS` (`src/cli/window-checks.ts`):
 `checkDrive`, `checkEdge`, `checkProfileFolder`, `checkKeepAlive`, `checkInterop` and
 `checkCoreLimit` are about WSL and Windows, and on a Mac report problems that are not true. On a
 Mac: no C: drive or interop line; the browser check names the browser and its config key; the
 profile check names the Mac folder; the keep-alive says none is needed on a Mac; the port check
-stays `info` until M3. On Linux and WSL every line stays byte for byte the same.
+stays `info` until M3. On Linux and WSL every line stays byte for byte the same. Tests first, beside
+`test/cli/commands/doctor-window.test.ts`: the lines on a fake Mac platform, word for word; its
+existing cases unchanged. Done when they pass.
 
 **Task 6: the documents.** `docs/install.md` (the window on a Mac, `window.browser`, the config
-table), `docs/design-step-2.md` (5.3, 5.4, 16.3, 16.4), `README.md`.
+table), `docs/design-step-2.md` (5.3, 5.4, 16.3, 16.4), `README.md`. Done when each says what is
+true at the end of M2b.
 
 M2b is done when every test of the stage passes on the Mac and on Linux, no "until M2b" skip is
 left, and the hands-on items for the window are written down for part 9.
@@ -631,30 +697,34 @@ its flags where they could be read; memory, tty and port are known on a Mac as t
 once M1 does. Prove it with tests (two boot ids through the Mac `Proc`, a lower-case boot id the
 banner and the page accept: `BOOT_ID` in `src/window/protocol.ts`, `banner.ts`, `web/app.js`). After
 a logout without a restart the boot id stays, so no offer comes: write that into `docs/install.md`
-as a known limit (decision 6.7); do not build anything for it.
+as a known limit (decision 6.7); do not build anything for it. Done when the tests pass on Linux (a
+fake Mac platform) and on the Mac.
 
 **Task 2: exact arguments** (decision 6.3). Read a process's arguments through `sysctl`
 `KERN_PROCARGS2` (python3 and `ctypes`; Node has no `sysctl`; the python3 found on `PATH`, as the
 keepers use it, which the probe showed is a real one). Prove that it is exact before you store
-anything: a test starts a stand-in with hard arguments (spaces, an empty one, a newline, non-ASCII,
-`=`) and compares; and once with the real `claude`, by the fact run (4.2) with one line added to the
-hook that compares the arguments it reads with the ones the run gave (when `claude` runs as `node
-<script>`, those after the script) and prints only `exact arguments: yes` or `no`. Only if both are
-exact: `Proc.cmdline` on a Mac returns them as `/proc/<pid>/cmdline` would (each argument followed
-by a zero byte), and `reconcile` (`src/sessions/reconcile.ts`) stores the launch command as on
-Linux. Otherwise `cmdline` stays null, and the report says so.
+anything, and without Claude Code: a test starts a stand-in program with awkward arguments (spaces,
+quotes, an empty one, a newline, non-ASCII, `=`), reads them back this way and compares them byte
+for byte; no scripted run of Claude Code is made for it. Only if that is exact: `Proc.cmdline` on a
+Mac returns them as `/proc/<pid>/cmdline` would (each argument followed by a zero byte), and
+`reconcile` (`src/sessions/reconcile.ts`) stores the launch command as on Linux; a python3 run per
+call costs time, so `reconcile` asks once per process (its pid and start). Otherwise `cmdline` stays
+null, and the report says so. Whether Claude Code changes what its own process shows (EXPECTED: not)
+is seen in part 9, step 2. Done when the test passes on the Mac (it needs a Mac).
 
 **Task 3: memory, tty, port.** In the Mac `Proc`: `memAvailableMb` from `vm_stat` (free, inactive,
 speculative and purgeable pages times the page size its first line names; the probe showed the
 form); `fdTarget(pid, 0)` as `/dev/<tty>` from `ps -o tty=`; `tcpListening(port)` from `lsof -nP
 -iTCP:<port> -sTCP:LISTEN`. Each null when its program fails. Tests first with recorded answers
-(Linux) and real ones (Mac).
+(Linux) and real ones (Mac). Done when both pass and doctor's port line on a Mac is no longer
+`info`.
 
 **Task 4: fixtures and the guide.** A Mac live-session file and a Mac spool file in
 `test/fixtures/claude/` (made-up values in the forms of "Facts found on a Mac"); `docs/install.md`
 gets a part for the Mac (install, PATH, the window in Chrome, restore after a restart, the logout
 limit, no keep-alive needed); the hands-on list of part 9 goes into `docs/manual-checks.md` as Mac
-items.
+items. Done when existing fixture tests read the new fixtures as the Mac forms, and the guide's Mac
+part names nothing this port did not build.
 
 M3 is done when no "port: until" skip is left anywhere and the tests of its tasks pass on the Mac;
 what only a person can see (the restore offer after a real restart) is part 9's.
@@ -664,10 +734,15 @@ what only a person can see (the restore offer after a real restart) is part 9's.
 The maintainer made these, so that you do not stop for them. If a fact found on the Mac contradicts
 one: stop THAT task, write it into the status file, go on with what does not depend on it.
 
-- **6.1 Process identity.** A process's start on a Mac is whole seconds, parsed from the text of `ps
-  -o lstart=` under `LC_ALL=C TZ=UTC`, in ONE function in TypeScript that is tested on Linux; the
-  hook gives that text, the keeper the same number. First the Mac's facts are shaped like the Linux
-  ones the code already reads (no wide refactor); a cleaner interface is a later, separate change.
+- **6.1 Process identity.** A process's identity on a Mac is its start in whole seconds since 1970.
+  skydeck's OWN readings (Node, the hook, the keeper) always take the text of `ps -o lstart=` under
+  `LC_ALL=C TZ=UTC`: the hook writes that text, the keeper gives the same number. The text in Claude
+  Code's live-session file is parsed in the form step 0 finds: UTC expected; if it is the Mac's
+  local time, it is parsed as local time, and the one hour a year that comes twice when the clocks
+  go back is written into the guide as a known limit. Both forms are read in ONE function in
+  TypeScript, tested on Linux. First the Mac's facts are shaped like the Linux ones the code already
+  reads (no wide refactor); a cleaner interface is a later, separate change. M1's gate is that
+  skydeck's reading of a running session's start equals the live file's, not one line of the probe.
   Reason: Claude Code itself writes this text (EXPECTED), so it is what all sides can agree on;
   seconds fit the existing integer column, and the code only compares starts for equality and order.
 - **6.2 Boot identity** is `kern.bootsessionuuid`, in lower case. Reason: every boot-id check in the
@@ -698,6 +773,27 @@ one: stop THAT task, write it into the status file, go on with what does not dep
   `mac-m2a` from `mac-m1`, `mac-m2b` from `mac-m2a`, `mac-m3` from `mac-m2b`. Fork once: `gh repo
   fork --remote --remote-name fork` (adds the remote `fork`, keeps `origin`). Push with `git push -u
   fork <branch>`. Work in this clone and switch branches (`git switch`).
+- **Checks on the fork first.** The workflow (`.github/workflows/ci.yml`) runs on `pull_request`, on
+  a push to `main`, and when started by hand (`workflow_dispatch`); a push to a stage branch of the
+  fork starts nothing by itself. So, once your human has switched Actions on for the fork (2.2,
+  question 2), start it by hand on the branch you pushed, and read it before you open or update the
+  pull request:
+
+  ```sh
+  upstream=$(git remote get-url origin | sed -E 's#^(https://github\.com/|git@github\.com:)##; s#\.git$##')
+  fork="$(gh api user --jq .login)/${upstream#*/}"
+  gh workflow run ci.yml --repo "$fork" --ref <branch>
+  gh run list --repo "$fork" --workflow ci.yml --branch <branch> --limit 1 --json databaseId,status,conclusion
+  perl -e 'alarm 570; exec @ARGV' gh run watch <id> --repo "$fork" --exit-status
+  gh run view <id> --repo "$fork" --log-failed
+  ```
+
+  The run appears a few seconds after `gh workflow run`: list again until the newest one for the
+  branch is the one you started. A run started by hand runs every job, the oldest Node version's too
+  (the workflow's comments say why). Watch again while it runs; fix what it shows, push, and start
+  it again; open the pull request only when it is green (Linux, and macOS once M1 task 9 is done).
+  If the fork's Actions cannot be switched on (a no to question 2, or `gh workflow run` refuses),
+  open the pull requests without it and say so in each.
 - **Pull requests.** One per stage against `main`, opened when the stage is done, with its body in a
   file under `/tmp`:
 
@@ -730,9 +826,9 @@ one: stop THAT task, write it into the status file, go on with what does not dep
   context). Give it: this plan's parts 3, 5 (the stage) and 6, the diff (`git diff <base
   branch>...HEAD`), and the suite's counts; tell it to change nothing, run no full suite and report
   back. It must check: every task's "done" of the stage, test first; that Linux and WSL run exactly
-  the code they ran before (each new branch is taken only where the Linux capability is missing, and
-  no existing test was changed beyond the two exceptions of part 3); every skip and its reason; the
-  hard rules; public words. Fix every real finding, then run part 8 again.
+  the code they ran before (each new branch is taken only on a Mac, and no existing test file was
+  changed beyond the three exceptions of part 3); every skip and its reason; the hard rules; public
+  words. Fix every real finding, then run part 8 again.
 
 ## 8. Before every pull request and every push to it
 
@@ -753,29 +849,42 @@ pull request). If `shellcheck` is on PATH, run it on every shell file you change
 job does. The pull request says the commands and the counts (tests, passed, skipped). A full `npm
 test` can take longer than one command of yours may run: run it in the background and wait for its
 end, or in shards that each end in time (`TMPDIR=/tmp NODE_OPTIONS=--test-shard=1/6 npm test`, then
-2/6 to 6/6: together they are the whole suite, as in CI). Then read GitHub's checks, bounded (macOS
-has no `timeout`): `perl -e 'alarm 570; exec @ARGV' gh pr checks <n> --repo "$upstream" --watch`
-(with `upstream` set as in part 7), again while they run. A pull request from a fork may wait for
-the maintainer's approval before its first run: go on meanwhile. On Linux the number of tests run
-and skipped must be that of `main` plus your new tests (yours skipped there only with "needs a
-Mac"); fix whatever the checks show.
+2/6 to 6/6: together they are the whole suite, as in CI). Then push the branch to the fork and read
+the fork's own run there (part 7, "Checks on the fork first") before you open or update the pull
+request. On Linux the number of tests run and skipped must be that of `main` plus your new tests
+(yours skipped there only with "needs a Mac"); fix whatever the checks show. After the pull request
+is open, read its checks too, bounded (macOS has no `timeout`): `perl -e 'alarm 570; exec @ARGV' gh
+pr checks <n> --repo "$upstream" --watch` (with `upstream` set as in part 7), again while they run.
+A pull request from a fork may wait for the maintainer's approval before its first run there: go on
+meanwhile.
 
 ## 9. The hands-on check, at the end (about fifteen minutes)
 
-When every stage you could do is done, tell your human that the hands-on check is ready. Before step
-1, check read-only that skydeck is not installed already (`command -v skydeck`, `ls -l
-~/.local/bin/skydeck`): if it is, from another clone, STOP and ask. They do it in a terminal of
-their own (not inside Claude Code); you say each step, they tell you what they see, and you write
-each result into the status file at once. First switch the clone to the newest stage branch (`git
-switch mac-m3`, or the last one done): install links to this clone, so it must stay on that branch
-while skydeck is installed.
+When every stage you could do is done, prepare the check clone and tell your human that the hands-on
+check is ready. skydeck is never installed from the clone you work in: install links the hook and
+the command into the checkout it is run from, so a later `git switch` there would change the code
+your human's real sessions run. So:
 
-1. `bin/skydeck install` (they answer its questions; tell them first what each does, as `AGENTS.md`
-   part 1 step 4 says). In a new terminal, `skydeck` must be found; if not, they add `export
-   PATH="$HOME/.local/bin:$PATH"` to their `~/.zshrc` themselves. Then `skydeck doctor`: every line
-   true on a Mac, no `problem` but those it explains.
-2. In a scratch folder, `claude`: `skydeck ls` shows it running; a prompt makes it busy (working); a
-   permission question makes it waiting; after the answer it is idle.
+- Check read-only that skydeck is not installed already (`command -v skydeck`, `ls -l
+  ~/.local/bin/skydeck`) and that `~/skydeck-mac-check` does not exist; if either is there, STOP and
+  ask.
+- Make the check clone, a second clone (not a worktree of this one) at the newest stage branch: `git
+  clone https://github.com/<login>/<name>.git ~/skydeck-mac-check`, then `git -C ~/skydeck-mac-check
+  switch <newest stage branch>`. After your human has installed from it, never change it (part 3).
+
+Your human does each step in a terminal of their own (not inside Claude Code); you say the step,
+they tell you what they see, and you write each result into the status file of the clone you work in
+(as plain words and yes/no, part 3).
+
+1. `cd ~/skydeck-mac-check && bin/skydeck install` (they answer its questions; tell them first what
+   each does, as `AGENTS.md` part 1 step 4 says). In a new terminal, `skydeck` must be found; if
+   not, they add `export PATH="$HOME/.local/bin:$PATH"` to their `~/.zshrc` themselves. Then
+   `skydeck doctor`: every line true on a Mac, no `problem` but those it explains.
+2. In a scratch folder, `claude --verbose` (one flag, to be seen later): `skydeck ls` shows it
+   running; a prompt makes it busy (working); a permission question makes it waiting; after the
+   answer it is idle (this is M1's gate, seen for real). `skydeck show <its label or id prefix>`
+   prints a line `holder: pid <n> since …` (without one, the hook got no `CLAUDE_PID` on this Mac:
+   report it), and, if M3 task 2 stores arguments, `launch:` names `--verbose`.
 3. `skydeck window`: a Chrome app window opens; its title is `skydeck`, its Dock icon; the session's
    terminal works; `skydeck window --print-url` opened in Chrome works too.
 4. Keys: Ctrl+Shift with a letter (the window's keys), Ctrl+Tab, Cmd+C and Cmd+V in the terminal,
@@ -785,15 +894,13 @@ while skydeck is installed.
    allow notifications for Chrome.)
 6. Last, because it ends this session too: with two sessions open in the window, restart the Mac.
    Before they do, write "hands-on: step 6 next" into the status file and commit it. After the
-   restart they start Claude Code in the clone again and say "read `docs/plans/mac-port.md` and go
-   on"; you read the status file and ask them to run `skydeck window`: the restore offer appears,
-   and restoring brings the sessions back.
-7. Then `skydeck uninstall`, or keep skydeck: their choice. Only after an uninstall may you switch
-   branches or change files in this clone again (part 3).
-
-If there was no fact run (part 4.2): in step 2, `skydeck show <the new session's label or id
-prefix>` must print a line `holder: pid <n> since …`; without one, the hook got no `CLAUDE_PID` on
-this Mac: report it.
+   restart they start Claude Code in the clone you work in and say "read `docs/plans/mac-port.md`
+   and go on"; you read the status file and ask them to run `skydeck window`: the restore offer
+   appears, and restoring brings the sessions back.
+7. Their choice: keep skydeck installed from the check clone (it stays as it is), or `skydeck
+   uninstall` (then the check clone may be deleted). Later, once the port is merged, they clone the
+   maintainer's repository (its `main`) and run `bin/skydeck install` there: install points the hook
+   and the links at that clone and keeps skydeck's data; then the check clone may be deleted.
 
 ## 10. When to stop, and the final report
 
@@ -801,11 +908,11 @@ Stop and tell your human at once (then go on with what does not depend on it, if
 
 - anything you are about to do would break a rule of part 3;
 - a fact found on the Mac makes a stage impossible, or contradicts a decision of part 6. The one to
-  watch: `procStart equals ps lstart: NO` (or a `procStart` that is digits, a number or missing on a
-  Mac: also against 6.1). If it says YES in local time only, Claude Code writes local time, against
-  6.1: stop M1's tasks 2 to 6, write it down, and go on with what does not depend on them (task 1,
-  the parts of tasks 7 to 9 that do not need a process start); the maintainer decides. If both say
-  NO, the identity cannot be read this way: M1 cannot work, and nothing after it;
+  watch: if neither `procStart equals ps lstart` line of the probe says YES (UTC or local time), or
+  `procStart` is digits, a number or missing on a Mac, skydeck cannot read a running session's start
+  this way: stop M1's tasks 2 to 6 and all that needs them (M2a, M2b, M3), write it down, finish
+  what does not (task 1, the texts of tasks 7 and 8, task 9); the maintainer decides. A YES in local
+  time only is no stop: 6.1 says how to read it;
 - the suite is red on Linux (GitHub's checks) through the port's fault and you cannot fix it;
 - a command asks for a password, a login or a `sudo`.
 

@@ -416,7 +416,8 @@ describe('scripts/mac-probe.sh', () => {
         ran.stdout,
         /^ {2}its arguments as ps shows them: 12 words; options: \[--append-system-prompt --model\]; other words: 9$/m,
       );
-      assert.equal(line(ran.stdout, 'Google Chrome'), 'in ~/Applications');
+      // On a real Mac with Chrome in /Applications the probe finds that one first.
+      assert.match(line(ran.stdout, 'Google Chrome'), /^in (\/Applications|~\/Applications)$/);
       assert.match(ran.stdout, /=== end\. Nothing was changed\./);
     });
   }
