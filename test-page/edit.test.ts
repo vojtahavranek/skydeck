@@ -43,7 +43,9 @@ const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
 /** The stand-in's `nowNs` (scriptedList's). */
 const NOW_NS = 1794474000000000000n;
 const DONE_WORDS = 'Marked done: hidden from the list. It comes back on new activity.';
-const DONE_RUNNING_WORDS = 'Marked done. Stays under Open while it runs; hidden once it stops.';
+/** F30: the words for a running session the window cannot end (these rows carry no `endable`). */
+const DONE_RUNNING_WORDS =
+  'Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.';
 const LOST = "skydeck's server stopped answering; the action may or may not have been done";
 
 /** A row of a list (S2 8.2.3) for `id`, not running, with `more` over its fields. */

@@ -48,9 +48,11 @@ section first.
 5. **Resume by id, with the session's own launch command.** Never by name (names are not unique).
    skydeck never adds a permission flag that the session was not started with.
 6. **Nothing is destroyed or moved automatically.** "Done" only hides. Notes never move from one
-   session to another. skydeck never stops a process. This is about the user's data (sessions,
-   labels, groups, notes), not skydeck's own transient files (5.3). The one exception is the label
-   and group skydeck itself has just stored for a `new` session that never started (7.7).
+   session to another. skydeck never stops a process by itself; the window ends a session's
+   program only when the user asks for it there, in its dialog, each time (design-step-2.md 2,
+   12.5). This is about the user's data (sessions, labels, groups, notes), not skydeck's own
+   transient files (5.3). The one exception is the label and group skydeck itself has just stored
+   for a `new` session that never started (7.7).
 7. **Never resume one session twice.** Two processes on one session interleave one transcript.
 8. **Local only.** No network service, no account, no telemetry. The only network use is the
    `gh` command line for pull-request status.
@@ -336,7 +338,7 @@ Marks are shown next to the state.
 
 | Mark | Rule |
 |---|---|
-| `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. The latest holding is decided per process, not by the latest event: of the holdings of the processes that held the session, the one that ended last. A holding ends at the process's `end` for the session, or at the process's first event naming another session (it moved on; when that event is an `observed` one, reconcile noticed the move only then, so the holding counts as ended at the process's last event for the session); a process that is gone without either ended when it was last seen — its last event, or the last write of the live-session file it left naming the session, whichever is later. So after two holders, one that exited deliberately does not hide one killed after it — when anything shows the killed one alive after that exit. A live-session file is not rewritten while its session is idle, so a holder killed while idle since before the other holder's exit cannot be told from one that died first: its holding counts as ended when it was last seen, before the exit, and the session gets no mark (a known limit). A scripted run's holding (5.3) is never the latest holding: when it ends or is killed it leaves no mark, and the session keeps what its last interactive holding says, so restore never offers a session because of a scripted run. |
+| `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. The latest holding is decided per process, not by the latest event: of the holdings of the processes that held the session, the one that ended last. A holding ends at the process's `end` for the session, or at the process's first event naming another session (it moved on; when that event is an `observed` one, reconcile noticed the move only then, so the holding counts as ended at the process's last event for the session); a process that is gone without either ended when it was last seen — its last event, or the last write of the live-session file it left naming the session, whichever is later. So after two holders, one that exited deliberately does not hide one killed after it — when anything shows the killed one alive after that exit. A live-session file is not rewritten while its session is idle, so a holder killed while idle since before the other holder's exit cannot be told from one that died first: its holding counts as ended when it was last seen, before the exit, and the session gets no mark (a known limit). A scripted run's holding (5.3) is never the latest holding: when it ends or is killed it leaves no mark, and the session keeps what its last interactive holding says, so restore never offers a session because of a scripted run. A holding the user ended in the window (design-step-2.md 12.5) is a deliberate exit: once its program has exited, the window's server stores an `end` of detail `exit` for each of its holders, with no spool file and the raw detail `skydeck-window`, and a process that has one for the session ended its holding by that exit, whatever other `end` Claude Code's own hook sends for it before or after (its hang-up reports `other`, 14). |
 | `was-working` | `ended-unexpectedly`, and a turn was in progress: either a leftover live-session file of that dead process (same pid and process start) says `status` `busy`, or the last `assistant` record or `user` turn (5.6) of its transcript is a `user` record. (Closing a terminal removes the live-session file, so the transcript is what covers that case.) |
 | `continued` | The session is the target of a `clear` or `fork` link. `show` names the session it continues. |
 | `expired` | Its transcript is missing. It cannot be resumed. |
@@ -382,7 +384,9 @@ Marks are shown next to the state.
   A ticket can have a **status** (follow-up F19): a GitHub issue's, or the one a configured program
   prints; it is shown beside the ticket, never in its place, and cached by its address (7.3;
   design-step-2.md 10.2, 12.5).
-- **Done.** Hides the session. It never stops a process. A done session is shown again when it
+- **Done.** Hides the session. It never stops a process (the one exception: the window's dialog
+  "Mark done" for a session running in its terminal, whose `End session and mark done` ends it on
+  the user's word, design-step-2.md 12.5). A done session is shown again when it
   has activity after the done time: `user` input (5.6) in its transcript, or a `start` event with
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the
   transcript is not activity.

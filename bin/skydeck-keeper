@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-KEEPER_VERSION = "2"
+KEEPER_VERSION = "3"
 PROTOCOL = 1
 # skydeck keeper: owns one terminal's pty and program (design-step-2 7.1, 7.8, 8.1; plan task 9).
 #
@@ -9,7 +9,8 @@ PROTOCOL = 1
 # Only G from the connection that claimed it (C), before the spec's startBy, starts the program in
 # a new pty; N, or the deadline, ends the terminal as not started. It keeps every chunk the program
 # writes and every resize as a numbered record, the snapshot a server parked, and the records since;
-# it never interprets them. It writes only its own errors to stderr, one line each,
+# it never interprets them. E (version 3) sends SIGHUP and SIGCONT to the program it started, as a
+# terminal's closed window would, and changes nothing else. It writes only its own errors to stderr, one line each,
 # "keeper <id>: <kind>": never output, input, or a message that could quote them (S2 2).
 #
 # Standard library only, nothing newer than python3 3.9. For tests only (plan A31):
@@ -60,8 +61,8 @@ MAX_WAIT = 3600.0
 INT64_MAX = 2**63 - 1
 PR_SET_DUMPABLE = 4
 HEX = "0123456789abcdef"
-ALL_TYPES = b"CHGTNSDRXIZPA"
-SERVER_TYPES = b"GNIZPA"  # after the claim; a second C is refused too
+ALL_TYPES = b"CHGTNSDRXIZPAE"
+SERVER_TYPES = b"GNIZPAE"  # after the claim; a second C is refused too
 DEADLINE_PASSED = "the start deadline passed"
 REFUSED = "the server refused the start"
 CANNOT_START = "the program could not be started"
@@ -702,6 +703,22 @@ class Keeper:
         elif kind == b"A":
             if self.exit is not None:
                 self.done = True
+        elif kind == b"E":
+            self.hang_up()
+
+    def hang_up(self):
+        """E: SIGHUP and then SIGCONT to the program, what the kernel sends the leader of a session
+        whose terminal's other end was closed (a stopped program goes on and gets its SIGHUP); only
+        while this keeper is its parent and has not reaped it (its pid cannot belong to another
+        process then), never to a pid it was told. Its payload is never read. The keeper goes on as
+        before: it reads the output, reaps the program and sends X as for any end."""
+        if self.pid is None or self.status is not None or self.exit is not None:
+            return
+        try:
+            os.kill(self.pid, signal.SIGHUP)
+            os.kill(self.pid, signal.SIGCONT)
+        except OSError:
+            log("hang-up-failed")
 
     # The loop.
     def wait_seconds(self):

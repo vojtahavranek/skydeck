@@ -3,6 +3,7 @@
 import type { LiveFile, ProcessKey } from '../claude/live.ts';
 import { NS_PER_DAY } from '../platform/time.ts';
 import type { Ns } from '../platform/types.ts';
+import { ENDED_IN_WINDOW } from '../store/types.ts';
 import type { EndDetail, EventRow, LinkRow, SessionMeta, TranscriptRow } from '../store/types.ts';
 import { MARK_ORDER } from './types.ts';
 import type { DerivedSession, Holder, LastHolding, Mark, State } from './types.ts';
@@ -288,8 +289,10 @@ function holdingOf(
 ): { holding: LastHolding; rank: HoldingRank } {
   const process = processOf(last);
   if (last.kind === 'end') {
+    // F30: a holding the user ended in the window is an exit, whichever of its ends came last.
+    const detail = endedInWindow(last.sessionId, processEvents) ? 'exit' : endDetailOf(last);
     return {
-      holding: { process, alive, endedAtNs: last.timeNs, endDetail: endDetailOf(last) },
+      holding: { process, alive, endedAtNs: last.timeNs, endDetail: detail },
       rank: { goesOn: false, atNs: last.timeNs, eventId: last.id },
     };
   }
@@ -328,6 +331,22 @@ function activityAfter(
       event.kind === 'start' &&
       (event.detail === 'startup' || event.detail === 'resume') &&
       event.timeNs > doneAtNs,
+  );
+}
+
+/**
+ * F30: whether the process's events hold the end the window records for `sessionId` once the
+ * user's end of it there has exited (ENDED_IN_WINDOW): the hang-up made Claude Code end the
+ * session as a closed terminal does (its hook's reason `other`, design 14), which would read as an
+ * unexpected end.
+ */
+function endedInWindow(sessionId: string, processEvents: readonly EventRow[]): boolean {
+  return processEvents.some(
+    (event) =>
+      event.kind === 'end' &&
+      event.sessionId === sessionId &&
+      event.detail === 'exit' &&
+      event.rawDetail === ENDED_IN_WINDOW,
   );
 }
 

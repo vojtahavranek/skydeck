@@ -10,6 +10,7 @@ import {
   encodeResize,
   encodeSnapshot,
   frameReader,
+  keeperEnds,
   parseExit,
   parseHello,
   parseResize,
@@ -527,4 +528,31 @@ describe('parseResize (R)', () => {
       refused(parseResize(payload));
     });
   }
+});
+
+test('F30 keeperEnds: a keeper of version 3 or later takes E; an older one, or a version that is no whole number, does not', () => {
+  const cases: [string, boolean][] = [
+    ['3', true],
+    ['4', true],
+    ['10', true],
+    ['999999', true],
+    ['2', false],
+    ['1', false],
+    ['0', false],
+    ['03', false],
+    ['3x', false],
+    ['3.0', false],
+    [' 3', false],
+    ['', false],
+    ['1000000', false],
+  ];
+  for (const [version, expected] of cases) {
+    assert.equal(keeperEnds(version), expected, JSON.stringify(version));
+  }
+});
+
+test("F30: E is a type of the codec, so a server's frame reader reads it (a keeper never sends one)", () => {
+  assert.deepEqual(frameReader().push(encodeFrame('E')), [
+    { type: 'E', payload: new Uint8Array(0) },
+  ]);
 });

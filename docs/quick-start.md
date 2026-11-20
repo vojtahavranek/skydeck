@@ -134,8 +134,10 @@ next start. The group is, by default, the ticket key at the start of the title, 
 ### Mark it done, and find it again
 
 Press `d`, or **Done** in the header. The session leaves the list (a running one stays under Open
-until it ends), and a message with **Undo** shows for 5 seconds. Done stops nothing and deletes
-nothing. The list's footer counts the hidden ones (`2 done hidden · show`): **show**, `a` or the
+until it ends), and a message with **Undo** shows for 5 seconds. Done deletes nothing. For a
+session running in the window it asks first: **End session and mark done** ends that `claude` as
+closing its terminal would, **Mark done, keep it running** (where the keyboard starts) only
+marks it done. The list's footer counts the hidden ones (`2 done hidden · show`): **show**, `a` or the
 chip **Show done** lists them again, and `d` (or **Undone** in the header) on one of them takes
 the mark away. A done session that gets new activity comes back by itself.
 
@@ -213,7 +215,8 @@ there).
 - **label**: your name for a session, shown as its title.
 - **group**: a ticket key or a topic, by default the ticket key at the start of the title.
 - **note**: free text on one session, kept on this machine.
-- **done**: a mark that hides a session from the list; it stops nothing.
+- **done**: a mark that hides a session from the list; it stops nothing (unless you choose **End
+  session and mark done** for a session running in the window).
 - **ticket**: one link per session, to its ticket, which can show the ticket's status.
 - **pull-request chip**: the status of a session's open pull requests, read with `gh`.
 - **restore**: bringing back, after a restart, the sessions that were open before it.

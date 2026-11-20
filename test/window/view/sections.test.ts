@@ -119,6 +119,7 @@ test('rowPayload: has exactly the fields of RowPayload — no note text, no sess
     'attention',
     'stack',
     'ticketStatus', // F19: the ticket's status while one is known, else null
+    'endable', // F30: the session can be ended from the window
   ];
   assert.deepEqual(Object.keys(rowPayload(row, NONE)).sort(), [...keys].sort());
 });
@@ -410,4 +411,21 @@ test('projectDirs: does not depend on whether a session is running or done', () 
     ds({ id: S2, dir: '/home/dev/done', hidden: true, doneAtNs: T0 }),
   ]);
   assert.deepEqual(projectDirs(list), ['/home/dev/running', '/home/dev/done']);
+});
+
+test('F30 rowPayload endable: only a running session in its own terminal of the window that can be ended', () => {
+  const running = rowOf(ds({ id: S1, state: 'working' }));
+  const stopped = rowOf(ds({ id: S1 }));
+  const cases: [string, ReturnType<typeof rowOf>, TerminalInfo | null, boolean][] = [
+    ['a terminal that can be ended, the session running', running, term({ endable: true }), true],
+    ['no terminal of the window', running, null, false],
+    ['a terminal that cannot be ended (an older keeper)', running, term({ endable: false }), false],
+    ['a terminal that says nothing (absent is false)', running, term(), false],
+    ['the terminal shows another session', running, term({ endable: true, sessionId: S2 }), false],
+    ['the terminal holds no session yet', running, term({ endable: true, sessionId: null }), false],
+    ['the session is not running', stopped, term({ endable: true }), false],
+  ];
+  for (const [what, row, terminal, expected] of cases) {
+    assert.equal(rowPayload(row, { terminal, elsewhere: null }).endable, expected, what);
+  }
 });
