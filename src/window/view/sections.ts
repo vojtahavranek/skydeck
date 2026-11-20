@@ -96,10 +96,10 @@ function noteHead(note: string | null): string[] {
  * window's own: `terminal` and `slot` from the terminal the row is shown with, `elsewhere` with the
  * holder's pid, its terminal device (sanitised: it is read from /proc), the row's directory
  * (S2 7.9) and (F34) `background`, true while that holder's trusted live-session file says Claude
- * Code runs the session in its background (`LiveFile.background`), and `starting` when that terminal's program
- * holds no session yet and may still come to (S2 7.5) while the session is not running. Each pull
- * request carries its level and its last successful read (`okAtNs`); the chip is the window's
- * (S2 12.3, `windowChip`), not design 7.3's of `ls`. Stage A has no attention and no stacks.
+ * Code runs the session in its background (`LiveFile.background`), and `starting` when that
+ * terminal's program holds no session yet and may still come to (S2 7.5) while the session is
+ * not running. Each pull request carries its level and its last successful read (`okAtNs`); the
+ * chip is the window's (S2 12.3, `windowChip`), not design 7.3's of `ls`. Stage A has no attention and no stacks.
  * F19: `ticketStatus` is the session's ticket status while one is known — its name, its text and
  * its category —, else null (the row's chip is not drawn). F30: `endable` while the session runs in
  * the row's terminal of the window and that terminal can be ended (`TerminalInfo.endable`).

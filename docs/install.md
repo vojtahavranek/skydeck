@@ -240,10 +240,10 @@ sends the session to the background and opens Claude Code's agent view. In skyde
 closes a group in the list, so a ← meant for the list but typed into a terminal sends that
 terminal's session away: the conversation goes on in a background session that the window lists
 as "running in Claude Code's background", and what you type in the terminal then goes to a
-background session. Claude Code keeps the switch, `leftArrowOpensAgents`, in its global config file (not in
-`settings.json`): `~/.claude.json`, or the `.claude.json` inside `CLAUDE_CONFIG_DIR` when that is
-set (inside `claudeHome` when `config.json` sets it to anything but the default `~/.claude`). When
-the shortcut is on, install says so and asks (on stderr):
+background session. Claude Code keeps the switch, `leftArrowOpensAgents`, in its global config
+file (not in `settings.json`): `~/.claude.json`, or the `.claude.json` inside `CLAUDE_CONFIG_DIR`
+when that is set (inside `claudeHome` when `config.json` sets it to anything but the default
+`~/.claude`). When the shortcut is on, install says so and asks (on stderr):
 
 ```
 Claude Code's ← shortcut is on: ← on an empty prompt sends the session to the background and opens agent view.
@@ -908,8 +908,8 @@ skydeck was updated to a version that can end sessions, or one whose terminal is
 `Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.`, and for
 one that runs in Claude Code's background `Marked done. It runs in Claude Code's background: end it
 in claude agents. Hidden once it stops.` — such a row stays under Open with a `done` mark until
-the session stops. `Undo` marks it undone again: a
-click presses it, or Tab until it has the keyboard and then Enter.
+the session stops. `Undo` marks it undone again: a click presses it, or Tab until it has the
+keyboard and then Enter.
 
 For a session that runs in a terminal of the window, `d` or `Done` first asks, in a dialog over the
 window: `Mark done: <its title>` and `This session is still running.`, with `End session and mark

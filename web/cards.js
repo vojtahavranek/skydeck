@@ -5,8 +5,8 @@
 // comes from, the short id and (F16) the flags the session was started with; (F18) the ticket's
 // chip, the window's chip (S2 12.3), the open pull requests and the buttons of the ticket's and
 // the pull-request dialogs; the note's first line —, the resume card, the card of a session
-// running in another terminal (or, F34, in Claude Code's background), the ended bar, the new form and (F9) the small card of a group whose
-// closed caption is selected in the list. Its interface is contract 2.9's with plan D 2.4's
+// running in another terminal (or, F34, in Claude Code's background), the ended bar, the new form
+// and (F9) the small card of a group whose closed caption is selected in the list. Its interface is contract 2.9's with plan D 2.4's
 // changes. Every server string reaches the DOM through textContent or a tooltip.
 //
 // How app.js calls it: on a change of what the right side shows, `hide()` (every card and the

@@ -1215,13 +1215,15 @@ service, "without a terminal attached"; agent view (`claude agents`) lists it, o
 and stops it (Ctrl+X). It has no terminal of the user's, so "another terminal" is not true of it.
 When the live-session file of the holder the mapping names (7.5: the first holder outside every
 terminal) is trusted (design.md 5.5) and has `kind` `bg` (design.md 14), the row says so
-(`elsewhere.background`, 8.2.3) and the window uses these words instead of 7.9's:
+(`elsewhere.background`, 8.2.3) and the window uses these words instead of the ones above:
+
 - the row's second line and the header's state: `running in Claude Code's background`;
 - the card: the title `Running in Claude Code's background`, the holder's pid and the directory
   (no terminal device: the program has none of the user's), and `Claude Code runs this session
   itself, without a terminal. skydeck cannot show it here. To see it or end it, run claude agents
   in a terminal. Once it has ended it can be resumed in the window.`;
 - `d`'s toast (12.10) and `show`'s holder line (design.md 7.5).
+
 Any other `kind`, none, a file that cannot be read or is not trusted, or a server before F34 (no
 field): the words of a session in another terminal, unchanged. The title bar still counts such a
 session among those `in another terminal` (12.1). skydeck ends no such session and never tells

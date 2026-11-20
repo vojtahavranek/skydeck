@@ -2012,8 +2012,9 @@ install would leave).
    at the short id, since `/exit` ends the session it is typed into), type `/exit`, then `Close` on
    its ended bar. When step 3's branch was taken, the session is ended already: only `Close`, if
    the ended bar shows; and when the list still shows a row for `skydeck-try` as running in Claude
-   Code's background (or in another terminal), write that down. The shortcut stays off, on purpose. Sessions you
-   started before step 1 keep it until you start them again (`/exit`, then resume them).
+   Code's background (or in another terminal), write that down. The shortcut stays off, on
+   purpose. Sessions you started before step 1 keep it until you start them again (`/exit`, then
+   resume them).
 
 To put the shortcut back on (not part of the check): in Claude Code, `/config`, the option "← opens
 agents"; or set `leftArrowOpensAgents` to `true` in `~/.claude.json` (or remove the key) and start
