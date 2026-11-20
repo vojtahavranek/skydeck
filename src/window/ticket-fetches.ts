@@ -41,7 +41,9 @@ export function createTicketFetches(deps: {
 }): TicketFetches {
   const { deck, signal, log } = deps;
   const { runner, clock, env, homeDir } = deck.platform;
-  const statusDeps: StatusDeps = {
+  // Made for each run: F36's settings screen changes `ticketUrl` while the server runs (AT ONCE);
+  // `ticketStatus` only at the server's start.
+  const statusDeps = (): StatusDeps => ({
     runner,
     clock,
     env,
@@ -49,7 +51,7 @@ export function createTicketFetches(deps: {
     homeDir,
     rules: deck.config.ticketStatus,
     ticketUrl: deck.config.ticketUrl,
-  };
+  });
 
   /** The addresses asked for at once that wait for the running run; null when none waits. */
   let waiting: Set<string> | null = null;
@@ -76,7 +78,7 @@ export function createTicketFetches(deps: {
           )
         : urls;
       if (chosen.length === 0) return;
-      const { fetched, failed } = await fetchTicketStatuses(statusDeps, chosen, {
+      const { fetched, failed } = await fetchTicketStatuses(statusDeps(), chosen, {
         signal,
         saved: tell,
         ...(automatic ? { maxCommands: COMMANDS_PER_ROUND } : {}),

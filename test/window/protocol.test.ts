@@ -34,6 +34,9 @@ import type {
   RowPayload,
   SelectedPayload,
   ServerMessage,
+  SettingPayload,
+  SettingsMessage,
+  SettingsPayload,
   SizeMessage,
   SnapMessage,
   StartMessage,
@@ -1344,5 +1347,121 @@ describe('parsePageMessage: the theme message (follow-up F13)', () => {
     refused(page({ t: 'theme' }));
     refused(page({ t: 'theme', fg: '#ffffff', bg: '#000000' }));
     refused(page({ ...theme, focused: true }));
+  });
+});
+
+describe("parsePageMessage: F36's acts (S2 12.13)", () => {
+  const ACTS: Record<string, PageMessage> = {
+    'act settings': { t: 'act', id: 1, kind: 'settings' },
+    'act setting-set, a number': {
+      t: 'act',
+      id: 2,
+      kind: 'setting-set',
+      key: 'prRefreshMinutes',
+      value: 9,
+    },
+    'act setting-set, a text': {
+      t: 'act',
+      id: 3,
+      kind: 'setting-set',
+      key: 'groupPattern',
+      value: '^[a-z]+-[0-9]+',
+    },
+    'act setting-set, null': {
+      t: 'act',
+      id: 4,
+      kind: 'setting-set',
+      key: 'ticketUrl',
+      value: null,
+    },
+    'act setting-default': { t: 'act', id: 5, kind: 'setting-default', key: 'window.links' },
+  };
+  for (const [name, message] of Object.entries(ACTS)) {
+    test(`${name} → ok and equal`, () => {
+      assert.deepEqual(parsePageMessage(JSON.stringify(message)), { ok: true, value: message });
+    });
+    test(`${name} with an unknown field → refused`, () => {
+      refused(page({ ...message, [MARKER]: 1 }));
+    });
+    for (const field of Object.keys(message)) {
+      test(`${name} without ${field} → refused`, () => {
+        const copy: Record<string, unknown> = { ...message };
+        delete copy[field];
+        refused(page(copy));
+      });
+    }
+  }
+
+  test('setting-set: the value is a string, a number or null — never a whole configuration, a list or a boolean', () => {
+    const set = { t: 'act', id: 1, kind: 'setting-set', key: 'groupPattern' };
+    for (const value of [
+      { groupPattern: 'x', [MARKER]: 1 },
+      { window: { links: 'edge' } },
+      ['x'],
+      [],
+      true,
+      false,
+    ]) {
+      refused(page({ ...set, value }));
+    }
+    for (const value of ['', 'x', 0, -1, 1.5, 1e300, null]) {
+      assert.equal(page({ ...set, value }).ok, true, JSON.stringify(value));
+    }
+  });
+
+  test('setting-set: a text value is held to 4,096 bytes of UTF-8 and must be well formed; the key to 1,024', () => {
+    const set = { t: 'act', id: 1, kind: 'setting-set', key: 'ticketUrl' };
+    assert.equal(page({ ...set, value: 'a'.repeat(4096) }).ok, true);
+    refused(page({ ...set, value: 'a'.repeat(4097) }));
+    assert.equal(page({ ...set, value: 'é'.repeat(2048) }).ok, true);
+    refused(page({ ...set, value: 'é'.repeat(2049) }));
+    refused(page({ ...set, value: '\ud800' }));
+    assert.equal(page({ ...set, key: 'k'.repeat(1024), value: 1 }).ok, true);
+    refused(page({ ...set, key: 'k'.repeat(1025), value: 1 }));
+    refused(page({ ...set, key: 7, value: 1 }));
+    refused(page({ t: 'act', id: 1, kind: 'setting-default', key: 'k'.repeat(1025) }));
+    refused(page({ t: 'act', id: 1, kind: 'setting-default', key: null }));
+  });
+
+  test('the settings messages compile (typecheck)', () => {
+    const payload: SettingsPayload = {
+      path: '/home/u/.config/skydeck/config.json',
+      backup: '/home/u/.config/skydeck/config.json.skydeck-backup',
+      exists: true,
+      problem: null,
+      settings: [
+        {
+          key: 'prRefreshMinutes',
+          group: 'Pull requests',
+          meaning: 'The least time between two automatic reads of a pull request’s status.',
+          kind: 'change',
+          names: null,
+          control: 'number',
+          choices: [],
+          nullable: false,
+          applies: 'now',
+          default: 5,
+          defaultText: '5',
+          inFile: true,
+          value: 9,
+          valueText: '9',
+          pending: false,
+          runningText: null,
+        } satisfies SettingPayload,
+      ],
+    };
+    const messages: ServerMessage[] = [
+      { t: 'settings', settings: payload } satisfies SettingsMessage,
+      {
+        t: 'result',
+        id: 1,
+        ok: true,
+        lines: [],
+        error: null,
+        sessionId: null,
+        settings: payload,
+      } satisfies ResultMessage,
+    ];
+    assert.deepEqual(JSON.parse(JSON.stringify(messages)), messages);
   });
 });

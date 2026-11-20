@@ -26,6 +26,7 @@ import type { KeeperHello } from '../../src/window/frames.ts';
 import type { PageInfo, TerminalInfo } from '../../src/window/hub.ts';
 import { createLaunches } from '../../src/window/launches.ts';
 import type { ActMessage, NoticeMessage } from '../../src/window/protocol.ts';
+import { createSettings } from '../../src/window/settings.ts';
 import { createTick } from '../../src/window/tick.ts';
 import type { Tick, TickDeps } from '../../src/window/tick.ts';
 import { windowTerminal } from '../../src/window/window-terminal.ts';
@@ -1419,6 +1420,32 @@ describe('pull requests (design 7.3)', () => {
       ['n0=1'],
       'only the pull request of the listed session',
     );
+  });
+
+  test("F36: prRefreshMinutes changed in the window is the next automatic refresh's, without a restart", async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    attachManualPr(d.deck, S1, 'https://github.com/o/r/pull/1');
+    const f = fixture(t, { d });
+    const asked = (): number => d.runner.calls.filter((call) => call.command === 'gh').length;
+    const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20));
+    f.tick.listed([S1]);
+    await ticks(f, 2);
+    await settle();
+    assert.equal(asked(), 1, 'never read: asked at once');
+    d.clock.advanceMs(3 * 60_000);
+    f.tick.listed([S1]);
+    await ticks(f, 2);
+    await settle();
+    assert.equal(asked(), 1, 'tried 3 minutes ago: not due at 5');
+    assert.equal(
+      createSettings({ deck: d.deck, log: () => {} }).set('prRefreshMinutes', 2).ok,
+      true,
+    );
+    f.tick.listed([S1]);
+    await ticks(f, 2);
+    await f.tick.stop(); // waits for the fetch
+    assert.equal(asked(), 2, 'due at 2 minutes');
   });
 });
 

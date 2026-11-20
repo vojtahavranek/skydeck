@@ -150,7 +150,13 @@ export interface ResizeMessage {
  *  F30: `end-session` is the dialog's `End session and mark done` for the session `sessionId`
  *  that the window's terminal `term` holds: the server marks it done and hangs its program up
  *  (src/window/end-session.ts); its `result` comes once the program has ended (`ended` true) or
- *  the wait is over (`ended` false). */
+ *  the wait is over (`ended` false).
+ *
+ *  F36 (S2 12.13): `settings` asks for the settings screen's payload (the result's `settings`);
+ *  `setting-set` sets ONE setting `key` (a text) of config.json to `value` — a string of at most
+ *  4,096 bytes, a number or null, never an object or a list —, `setting-default` removes it from
+ *  the file (back to its default). Which keys may be changed, and what a value may be, is the
+ *  server's table and config.json's own rules (src/window/settings.ts). */
 export type ActMessage =
   | { t: 'act'; id: number; kind: 'resume'; sessionId: string; cols: number; rows: number }
   | {
@@ -180,7 +186,10 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'dismiss-restore'; bootId: string }
   | { t: 'act'; id: number; kind: 'favourite-add'; text: string; at?: number }
   | { t: 'act'; id: number; kind: 'favourite-remove'; text: string }
-  | { t: 'act'; id: number; kind: 'end-session'; term: string; sessionId: string };
+  | { t: 'act'; id: number; kind: 'end-session'; term: string; sessionId: string }
+  | { t: 'act'; id: number; kind: 'settings' }
+  | { t: 'act'; id: number; kind: 'setting-set'; key: string; value: string | number | null }
+  | { t: 'act'; id: number; kind: 'setting-default'; key: string };
 /** Follow-up F13: the page's colours changed while it is open — the title bar's theme switch was
  *  clicked here or in another window of the profile, or the system's scheme changed while the page
  *  follows it. The same colours as `start.theme`, checked the same way; the server answers OSC 10
@@ -521,6 +530,9 @@ export interface SwitcherPayload {
   more: number;
   /** E12: switcherPayload gives null; the server's listFor sets it (task 98). */
   restore: RestoreOffer | null;
+  /** F36: the command `> settings` is offered (the text in command form names a start of it).
+   *  Absent, as from a server before F36, is false. */
+  settings?: boolean;
 }
 /** One session the banner offers (design 7.8's entry). */
 export interface BannerEntryPayload {
@@ -596,6 +608,67 @@ export interface ResultMessage {
   /** F30, `end-session` only: with `ok` (the session was marked done, its program hung up),
    *  whether the program ended within the wait. Absent for every other kind and a refusal. */
   ended?: boolean;
+  /** F36, `settings`, `setting-set` and `setting-default` only, also with a refusal: the settings
+   *  screen as the file and the running server are now. Absent for every other kind. */
+  settings?: SettingsPayload;
+}
+/** F36 (S2 12.13): a JSON value, as config.json holds one. */
+export type SettingValue =
+  string | number | boolean | null | SettingValue[] | { [key: string]: SettingValue };
+/** F36: when a change of a setting takes effect. `now`: the running server uses it from its next
+ *  use; `restart`: the server reads it at its start only; `commands`: only the commands read it,
+ *  at each run; `install`: only `skydeck install` reads it. */
+export type SettingApplies = 'now' | 'restart' | 'commands' | 'install';
+/** F36: one setting of the screen, in the server's table's order (src/window/settings.ts). */
+export interface SettingPayload {
+  /** Its name as in the file: `prRefreshMinutes`, `window.links`. */
+  key: string;
+  /** The heading it is listed under (the guide's order). */
+  group: string;
+  /** Its meaning in one plain line. */
+  meaning: string;
+  /** `change`: changed in the window; `show`: shown, changed in the file only. */
+  kind: 'change' | 'show';
+  /** For a shown one, what it names: a program, a folder or the port; null for a changeable one. */
+  names: 'program' | 'folder' | 'port' | null;
+  /** The control that fits its type; `choices` for `choice`, else []. */
+  control: 'number' | 'text' | 'choice';
+  choices: string[];
+  /** A text whose empty field means null (`ticketUrl`, `wezterm.domain`). */
+  nullable: boolean;
+  applies: SettingApplies;
+  /** The default, and its text as the screen shows it (JSON, sanitised). */
+  default: SettingValue;
+  defaultText: string;
+  /** Whether the file sets it (false while the file cannot be read). */
+  inFile: boolean;
+  /** The file's value, else its default; the running server's while the file cannot be read. Sent
+   *  exactly, for a control's value only; `valueText` is the text to show (JSON, sanitised). */
+  value: SettingValue;
+  valueText: string;
+  /** The running server uses another value than the file holds (a hand edit, or a key read only
+   *  at the server's start that was just changed): `applies after the window restarts`. Never for
+   *  a key the server does not read. `runningText`: the value it uses (JSON, sanitised), else null. */
+  pending: boolean;
+  runningText: string | null;
+}
+/** F36: the settings screen. */
+export interface SettingsPayload {
+  /** config.json's path (sanitised). */
+  path: string;
+  /** Where the copy kept before a server's first change goes (sanitised). */
+  backup: string;
+  /** Whether the file exists. */
+  exists: boolean;
+  /** Why the window changes nothing in the file until it is mended by hand (doctor's line for a
+   *  file that cannot be parsed, or a path that is not a regular file), sanitised; else null. */
+  problem: string | null;
+  settings: SettingPayload[];
+}
+/** F36: a setting was changed in some window: every page's screen follows. */
+export interface SettingsMessage {
+  t: 'settings';
+  settings: SettingsPayload;
 }
 /** `term`: the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the
  *  keep-alive, tick and restore notices. `restore-progress` (plan C6): `text` is one report line of
@@ -638,7 +711,8 @@ export type ServerMessage =
   | ResultMessage
   | NoticeMessage
   | ByeMessage
-  | NotifyMessage;
+  | NotifyMessage
+  | SettingsMessage;
 
 /** Output frames (S2 8.2.3): byte 1, the channel as 4-byte big-endian, the record's bytes.
  *  RangeError for a channel that is not a whole number 0–2³²−1. */
@@ -859,6 +933,14 @@ const CLOSED: Check = (value, where) => {
   return null;
 };
 
+/** F36: a setting's value — a string held to the path limit (a ticket link of 2,048 characters is
+ *  sent whole), a number, or null; never an object, a list or a boolean (no setting the window
+ *  changes is one: a whole configuration is never sent). */
+const SETTING_VALUE: Check = (value, where) => {
+  if (value === null || typeof value === 'number') return null;
+  return typeof value === 'string' ? PATH(value, where) : `${where}: wrong type`;
+};
+
 const AREA = object({ cols: SIZE, rows: SIZE });
 /** A page's colours (`start.theme`, and follow-up F13's `theme`): exactly fg and bg, each a text. */
 const THEME = object({ fg: TEXT, bg: TEXT });
@@ -903,6 +985,10 @@ const ACTS: Readonly<Record<string, Check>> = {
   'favourite-remove': object({ t: ANY, id: COUNT, kind: ANY, text: TEXT }),
   // F30: the dialog's `End session and mark done`.
   'end-session': object({ t: ANY, id: COUNT, kind: ANY, term: TERM, sessionId: SESSION }),
+  // F36 (S2 12.13): the settings screen. The key is a text; the table decides which it may be.
+  settings: object({ t: ANY, id: COUNT, kind: ANY }),
+  'setting-set': object({ t: ANY, id: COUNT, kind: ANY, key: TEXT, value: SETTING_VALUE }),
+  'setting-default': object({ t: ANY, id: COUNT, kind: ANY, key: TEXT }),
 };
 
 const INPUT_SHAPE = object({ t: ANY, term: TERM, data: STRING, binary: TRUE }, ['binary']);

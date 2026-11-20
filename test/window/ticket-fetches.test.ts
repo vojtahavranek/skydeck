@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 
 import type { Deck } from '../../src/sessions/deck.ts';
+import { createSettings } from '../../src/window/settings.ts';
 import { createTicketFetches } from '../../src/window/ticket-fetches.ts';
 import type { TicketFetches } from '../../src/window/ticket-fetches.ts';
 import { testDeck } from '../helpers/deck.ts';
@@ -208,3 +209,53 @@ test('the stop aborts the running read: nothing more is saved or started', LIMIT
   await f.tickets.idle();
   assert.equal(f.calls.length, 1);
 });
+
+test(
+  "F36: ticketRefreshMinutes changed in the window is the next round's, without a restart",
+  LIMIT,
+  async (t) => {
+    const f = fixture(t);
+    f.tickets.fetch([url(1)]);
+    await f.tickets.idle();
+    f.d.clock.advanceMs(5 * 60_000);
+    assert.equal(f.tickets.round([url(1)]), true);
+    await f.tickets.idle();
+    assert.equal(f.calls.length, 1, 'read 5 minutes ago: not due at 10 minutes');
+    const settings = createSettings({ deck: f.d.deck, log: () => {} });
+    assert.equal(settings.set('ticketRefreshMinutes', 2).ok, true);
+    assert.equal(f.tickets.round([url(1)]), true);
+    await f.tickets.idle();
+    assert.equal(f.calls.length, 2, 'due at 2 minutes');
+  },
+);
+
+test(
+  'F36: ticketUrl changed in the window gives the next read its {key}, without a restart',
+  LIMIT,
+  async (t) => {
+    const d = testDeck(t, {
+      config: { ticketStatus: [{ match: MATCH, command: ['status', '{key}'] }] },
+    });
+    const runner = fakeRunner(async () => runResult({ stdout: 'In Progress\ndoing\n' }));
+    const deck: Deck = { ...d.deck, platform: { ...d.deck.platform, runner } };
+    const tickets = createTicketFetches({
+      deck,
+      signal: new AbortController().signal,
+      changed() {},
+      log: () => {},
+    });
+    // Only ticketUrl's `{key}` finds the key here: no /browse/KEY, and its last part is no key.
+    const address = `${MATCH}i/ABC-12/~view`;
+    tickets.fetch([address]);
+    await tickets.idle();
+    assert.equal(runner.calls.length, 0, 'without ticketUrl the address gives no key');
+    const settings = createSettings({ deck, log: () => {} });
+    assert.equal(settings.set('ticketUrl', `${MATCH}i/{key}/~view`).ok, true);
+    tickets.fetch([address]);
+    await tickets.idle();
+    assert.deepEqual(
+      runner.calls.map((call) => [call.command, ...call.args]),
+      [['status', 'ABC-12']],
+    );
+  },
+);

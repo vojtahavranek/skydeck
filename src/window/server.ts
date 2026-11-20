@@ -73,6 +73,7 @@ import {
 } from './runtime.ts';
 import type { RuntimeFiles, ServerJson } from './runtime.ts';
 import { createSeen } from './seen.ts';
+import { createSettings } from './settings.ts';
 import type { Seen } from './seen.ts';
 import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
@@ -554,6 +555,8 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       changed: () => tick?.reloadNow(),
       log,
     });
+    // F36 (S2 12.13): the settings screen; one per server, whose first change keeps the copy.
+    const settings = createSettings({ deck, log });
     const acting = createActions({
       deck,
       hub: created,
@@ -569,6 +572,10 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         return started.ok ? { ok: true } : { ok: false, error: started.error };
       },
       dismissRestore: (bootId) => restorer.dismiss(bootId),
+      settings,
+      settingsChanged: (payload) => {
+        pages.settings(payload);
+      },
     });
     // Plan C7, S2 8.2.6: what a terminal the server opens for a command or a restore starts at —
     // the area the page that had focus last reported, read when the terminal is opened.

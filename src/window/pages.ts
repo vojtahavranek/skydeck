@@ -67,6 +67,7 @@ import type {
   PageMessage,
   ResultMessage,
   ServerMessage,
+  SettingsPayload,
   ThemePayload,
   ViewMessage,
   WelcomeMessage,
@@ -119,6 +120,8 @@ export interface Pages {
   /** Sends `list` to every page whose list differs from the last one it got, at most once a second each. */
   pushList(): void;
   notice(kind: NoticeMessage['kind'], text: string): void;
+  /** F36: a setting was changed: `settings` to every open page (its screen follows). */
+  settings(payload: SettingsPayload): void;
   /** S2 13: while no page has focus, `message` to the page that had focus last; false when it was
    *  not sent (a page has focus, or none is open — none is once `bye` has run: nothing follows a
    *  `bye`). */
@@ -899,6 +902,11 @@ export function createPages(deps: PagesDeps): Pages {
     notice(kind, text) {
       for (const conn of open) {
         guard(conn, () => send(conn, { t: 'notice', kind, term: null, text }));
+      }
+    },
+    settings(payload) {
+      for (const conn of open) {
+        guard(conn, () => send(conn, { t: 'settings', settings: payload }));
       }
     },
     notify(message) {

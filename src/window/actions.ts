@@ -43,7 +43,8 @@ import type { Launched } from './launches.ts';
 import type { PrFetches } from './pr-fetches.ts';
 import type { TicketFetches } from './ticket-fetches.ts';
 import { parsePageMessage } from './protocol.ts';
-import type { ActMessage, ResultMessage } from './protocol.ts';
+import type { ActMessage, ResultMessage, SettingsPayload } from './protocol.ts';
+import type { Settings } from './settings.ts';
 import { linkToOpen } from './windows.ts';
 
 export interface ActionDeps {
@@ -71,6 +72,11 @@ export interface ActionDeps {
   restore?(sessionIds: readonly string[]): { ok: true } | { ok: false; error: string };
   /** Plan C 2.3, C9: `act dismiss-restore`. Absent: as `restore`. */
   dismissRestore?(bootId: string): { ok: true } | { ok: false; error: string };
+  /** F36: the settings screen (settings.ts, one per server). Absent: its kinds answer "skydeck
+   *  cannot do that action". */
+  settings?: Settings;
+  /** F36: a setting was changed: every page's screen follows (the server's `pages.settings`). */
+  settingsChanged?(payload: SettingsPayload): void;
 }
 
 /** A result without its `t` and `id`, which `act` adds. */
@@ -204,7 +210,11 @@ function orNone(text: string): string | null {
  * action`, nothing done. F15's kinds (S2 12.6): `favourite-add` → addFavourite (the refusal's words,
  * or `ok` once the lists were told), `favourite-remove` → removeFavourite (`ok`; the lists told
  * only when it removed one). F30's `end-session` → `endings.end` (end-session.ts): its refusal,
- * or `ok` with `ended` once the program ended or the wait is over.
+ * or `ok` with `ended` once the program ended or the wait is over. F36's `settings` → the screen's
+ * payload; `setting-set` and `setting-default` → `settings.set` / `settings.reset` (settings.ts: the
+ * table, config.json's rules, the file written whole), answered with the screen as it is then — a
+ * refusal too —; after a change the lists follow (`changed()`, for a key the rows are made with)
+ * and every page's screen (`settingsChanged`), a refusal tells nobody.
  *
  * Never rejects (2.5): an action that is not well formed is refused with one log line (the
  * parser's kind), and an unexpected error is answered `ok: false` and logged by kind (failureKind)
@@ -419,7 +429,34 @@ export function createActions(deps: ActionDeps): ActionHandler {
         const outcome = await endings.end(action.term, action.sessionId);
         return outcome.ok ? { ...DONE, ended: outcome.ended } : refusal(outcome.error);
       }
+      case 'settings':
+        return deps.settings === undefined
+          ? refusal(NOT_AN_ACTION)
+          : { ...DONE, settings: deps.settings.payload() };
+      case 'setting-set':
+      case 'setting-default':
+        return changeSetting(action);
     }
+  }
+
+  /** F36: one setting changed through settings.ts; after a change every list and screen follows. */
+  function changeSetting(
+    action: Extract<ActMessage, { kind: 'setting-set' | 'setting-default' }>,
+  ): Answer {
+    const settings = deps.settings;
+    if (settings === undefined) return refusal(NOT_AN_ACTION);
+    const outcome =
+      action.kind === 'setting-set'
+        ? settings.set(action.key, action.value)
+        : settings.reset(action.key);
+    if (!outcome.ok) return { ...refusal(outcome.error), settings: outcome.payload };
+    tell(action.kind);
+    try {
+      deps.settingsChanged?.(outcome.payload);
+    } catch (error) {
+      log(`act ${action.kind}: the screens were not told (${failureKind(error)})`);
+    }
+    return { ...DONE, settings: outcome.payload };
   }
 
   async function answer(given: ActMessage): Promise<Answer> {
@@ -446,7 +483,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
 
   return {
     async act(_page, given) {
-      const { ok, lines, error, sessionId, ended } = await answer(given);
+      const { ok, lines, error, sessionId, ended, settings } = await answer(given);
       // Every text of a result passes the sanitiser step 1 prints with (ruled, review 2 of task
       // 32): whatever a message quotes, no escape sequence or line break reaches the page.
       return {
@@ -457,6 +494,8 @@ export function createActions(deps: ActionDeps): ActionHandler {
         error: error === null ? null : sanitize(error),
         sessionId,
         ...(ended === undefined ? {} : { ended }),
+        // F36: its texts are sanitised by settings.ts; a control's `value` is sent exactly.
+        ...(settings === undefined ? {} : { settings }),
       };
     },
   };
