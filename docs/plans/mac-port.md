@@ -6,7 +6,7 @@ Follow it literally; where it is silent, do the safe thing named in part 10 (sto
 it into the status file, go on with what does not depend on it).
 
 Every file, function and constant this plan names was checked against the code of `main` at commit
-a9d6f06, the commit just before the plan was added. Names and lines drift: find each by searching
+8e0184b. Names and lines drift: find each by searching
 for its name (your search tool, or `grep -rn "<name>" src bin web test`; `rg` may not be installed
 on a Mac). Where the code at your commit says something else, the code wins: write the difference
 into the status file and go on.
@@ -582,6 +582,10 @@ does:
   out); if the probe says it is missing, stop this item and write it down.
 - `main` calls `prctl(PR_SET_DUMPABLE, 0)`, which a Mac does not have (today it only logs
   "dumpable"): on a Mac set the keeper's own core limit to 0 (`resource.setrlimit`) instead.
+- What the keeper says does not change, so neither does its version (`KEEPER_VERSION`, 3 at
+  8e0184b; `docs/design-step-2.md` 7.7): the Mac path changes how it reads facts, not its messages.
+  Its hang-up `E` (SIGHUP, then SIGCONT, to its own program) is plain POSIX and works on a Mac
+  (EXPECTED; the keeper tests show it).
 
 Tests first: on Linux with `SKYDECK_TEST_PROC` and stand-ins of `ps` and `sysctl`, the keeper's pid
 line carries the seconds `procStartFromLstart(text, 'utc')` gives for the stand-in's text and the
