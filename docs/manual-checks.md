@@ -1994,7 +1994,7 @@ install would leave).
    and press Esc, which goes back to the conversation. That does not end it: "Detaching never stops
    a background session", and the row is made "even when the conversation has no messages yet", so
    until it is ended the window may list a row for `skydeck-try` as running in another terminal
-(only with done sessions shown, `a`, while it has no message: F33).
+   (only with done sessions shown, `a`, while it has no message: F33).
    End it now: look that the terminal shows the throwaway session (the header's short id, and
    `skydeck-try` as its folder) and has the keyboard (`Focus: terminal`), then type `/stop` ("To end
    a session from inside it, run /stop"). When Esc did not go back (agent view's table is still in
