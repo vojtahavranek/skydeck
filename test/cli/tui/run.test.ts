@@ -400,6 +400,27 @@ test('R on a running session shows that it is running and stays in the list', as
   assert.equal(d.stderr(), '');
 });
 
+test('F34: the list and its detail show a session in Claude Code’s background exactly as one in another terminal (they name no terminal)', async (t) => {
+  const shown: string[][] = [];
+  for (const kind of ['interactive', 'bg']) {
+    const d = listDeck(t, ['\r', 'q']);
+    startRunning(d, S1, 4242);
+    const path = join(d.deck.places.claudeHome, 'sessions', '4242.json');
+    const record = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    writeFileSync(path, JSON.stringify({ ...record, kind }));
+    assert.equal(await main([], d.ctx), 0);
+    const all = frames(d);
+    const list = all.find((frame) => frame.some((line) => line.includes(short(S1))));
+    const detail = all.find((frame) => frame.some((line) => line.startsWith('state: working')));
+    assert.ok(list !== undefined && detail !== undefined, all.join('\n---\n'));
+    shown.push([...list, '---', ...detail]);
+  }
+  assert.deepEqual(shown[1], shown[0]);
+  for (const line of shown[1] ?? []) {
+    assert.doesNotMatch(line, /background|terminal/, line);
+  }
+});
+
 test('R with a tab adapter opens a tab and stays in the list', async (t) => {
   const runner = fakeRunner(() => runResult({}));
   const d = listDeck(t, ['R', 'q'], { config: { terminal: 'wezterm' } });

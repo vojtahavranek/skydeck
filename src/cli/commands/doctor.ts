@@ -534,7 +534,7 @@ function checkLeftArrow({ platform, places }: Facts, report: Report): void {
       report(
         'info',
         "Claude Code's ← shortcut is on: ← on an empty prompt sends a window terminal's session to " +
-          'the background, and the list then shows it running in another terminal; to turn it off: ' +
+          "the background, and the list then shows it running in Claude Code's background; to turn it off: " +
           `skydeck install asks, or ${how}`,
       );
       return;

@@ -94,8 +94,9 @@ function noteHead(note: string | null): string[] {
  * One row as the page receives it (S2 8.2.3): the list row's display fields (its strings were
  * sanitised when the list model was built; the note is sanitised here, line by line), and the
  * window's own: `terminal` and `slot` from the terminal the row is shown with, `elsewhere` with the
- * holder's pid, its terminal device (sanitised: it is read from /proc) and the row's directory
- * (S2 7.9), and `starting` when that terminal's program
+ * holder's pid, its terminal device (sanitised: it is read from /proc), the row's directory
+ * (S2 7.9) and (F34) `background`, true while that holder's trusted live-session file says Claude
+ * Code runs the session in its background (`LiveFile.background`), and `starting` when that terminal's program
  * holds no session yet and may still come to (S2 7.5) while the session is not running. Each pull
  * request carries its level and its last successful read (`okAtNs`); the chip is the window's
  * (S2 12.3, `windowChip`), not design 7.3's of `ls`. Stage A has no attention and no stacks.
@@ -144,6 +145,9 @@ export function rowPayload(
             pid: elsewhere.pid,
             tty: elsewhere.tty === null ? null : sanitize(elsewhere.tty),
             dir: row.dir,
+            background: row.session.holders.some(
+              (holder) => holder.process.pid === elsewhere.pid && holder.live?.background === true,
+            ),
           },
     starting:
       terminal !== null &&

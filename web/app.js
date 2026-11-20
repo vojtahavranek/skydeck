@@ -43,7 +43,7 @@ import { createCards } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
 import { createEndDialog } from './end-dialog.js';
-import { asksFirst, END_TEXTS } from './end-text.js';
+import { asksFirst, cannotEndText, END_TEXTS } from './end-text.js';
 import { serverNow } from './format.js';
 import { createHelp } from './help.js';
 import { cancels, listKey, switcherKey, windowChord } from './keys.js';
@@ -1116,7 +1116,8 @@ function placeOf(sessionId) {
  * selection (`leaveDone`); the Done button leaves it to the main rule. The row is `sessionRow`'s:
  * the header's Done also marks a session the list does not show (E13). F30: a session not marked
  * done that the window can end (`asksFirst`) is marked nothing yet: the dialog "Mark done" asks
- * first (`openEnder`); a running one it cannot end gets its own toast (`END_TEXTS.cannotEnd`).
+ * first (`openEnder`); a running one it cannot end gets its own toast (`cannotEndText`: F34's
+ * words for a session in Claude Code's background, else `END_TEXTS.cannotEnd`).
  * @param {string} sessionId
  * @param {boolean} fromList
  */
@@ -1133,7 +1134,7 @@ function markDone(sessionId, fromList) {
     openEnder(row, fromList);
     return;
   }
-  sendDone(sessionId, fromList, END_TEXTS.cannotEnd);
+  sendDone(sessionId, fromList, cannotEndText(row));
 }
 
 /**

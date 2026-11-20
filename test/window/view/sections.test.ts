@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { NS_PER_DAY } from '../../../src/platform/time.ts';
+import type { Holder } from '../../../src/sessions/types.ts';
 import type { TerminalInfo } from '../../../src/window/hub.ts';
 import type { RowPayload } from '../../../src/window/protocol.ts';
 import { windowChip } from '../../../src/window/view/chip.ts';
@@ -290,10 +291,64 @@ test("rowPayload: elsewhere carries the holder's pid and tty and the row's direc
     pid: 777,
     tty: '/dev/pts/4',
     dir: '/home/dev/projects/demo',
+    background: false,
   });
   const noTty = rowPayload(row, { terminal: null, elsewhere: { pid: 777, tty: null } });
-  assert.deepEqual(noTty.elsewhere, { pid: 777, tty: null, dir: '/home/dev/projects/demo' });
+  assert.deepEqual(noTty.elsewhere, {
+    pid: 777,
+    tty: null,
+    dir: '/home/dev/projects/demo',
+    background: false,
+  });
   assert.equal(rowPayload(row, NONE).elsewhere, null);
+});
+
+/** A holder of the current boot with process `pid`, and its trusted live file when `live` says so. */
+function holderOf(pid: number, live: 'bg' | 'interactive' | null): Holder {
+  const process = { bootId: BOOT_A, pid, procStart: 100 + pid };
+  return {
+    process,
+    sinceNs: T0,
+    live:
+      live === null
+        ? null
+        : {
+            pid,
+            sessionId: S1,
+            cwd: null,
+            procStart: process.procStart,
+            entrypoint: 'cli',
+            name: null,
+            status: 'idle',
+            waitingFor: null,
+            updatedAtNs: null,
+            statusUpdatedAtNs: null,
+            background: live === 'bg',
+            mtimeNs: T0,
+          },
+    scripted: false,
+  };
+}
+
+test('F34: elsewhere says background while the holder it names has a trusted live file of Claude Code’s background', () => {
+  const at = (holders: Holder[], pid: number) =>
+    rowPayload(rowOf(ds({ id: S1, state: 'running', holders })), {
+      terminal: null,
+      elsewhere: { pid, tty: '/dev/pts/9' },
+    }).elsewhere;
+  assert.deepEqual(at([holderOf(777, 'bg')], 777), {
+    pid: 777,
+    tty: '/dev/pts/9',
+    dir: '/home/dev/projects/demo',
+    background: true,
+  });
+  // A session in another terminal; a holder without a trusted live file (derive leaves out an
+  // untrusted one); the background holder is not the one the mapping named.
+  assert.equal(at([holderOf(777, 'interactive')], 777)?.background, false);
+  assert.equal(at([holderOf(777, null)], 777)?.background, false);
+  assert.equal(at([holderOf(778, 'bg'), holderOf(777, 'interactive')], 777)?.background, false);
+  assert.equal(at([holderOf(778, 'bg'), holderOf(777, 'bg')], 777)?.background, true);
+  assert.equal(at([], 777)?.background, false, 'a pid the row no longer has a holder for');
 });
 
 test("rowPayload: the elsewhere holder's terminal device is sanitised", () => {

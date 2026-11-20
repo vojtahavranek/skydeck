@@ -176,6 +176,21 @@ describe('rowText: a running row has two lines', () => {
     assert.equal(text.stateLine, 'running in another terminal');
   });
 
+  test('F34: a row Claude Code runs in its background: "running in Claude Code\'s background"; `background` false or absent is another terminal\'s', () => {
+    const where = (elsewhere: RowPayload['elsewhere']) =>
+      rowText(row({ state: 'working', elsewhere }), now, null);
+    const background = where({ pid: 4242, tty: null, dir: null, background: true });
+    assert.equal(background.stateLine, "running in Claude Code's background");
+    assert.equal(background.icon, 'working', 'the icon of its state, as another terminal’s');
+    assert.equal(background.slot, '');
+    for (const elsewhere of [
+      { pid: 4242, tty: '/dev/pts/3', dir: null, background: false },
+      { pid: 4242, tty: '/dev/pts/3', dir: null },
+    ]) {
+      assert.equal(where(elsewhere).stateLine, 'running in another terminal');
+    }
+  });
+
   test('a running session marked done keeps its two lines and has the mark `done` (S2 12.10)', () => {
     const text = rowText(row({ state: 'working', sinceNs: ago(MIN), done: true }), now, null);
     assert.equal(text.stateLine, 'working 1m');

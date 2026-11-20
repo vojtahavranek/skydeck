@@ -215,6 +215,17 @@ test('the right side', async (t) => {
           'running in another terminal',
           '',
         ],
+        // F34: a session Claude Code runs in its background; `false` is another terminal's.
+        [
+          { state: 'running', elsewhere: { pid: 77, tty: null, dir: null, background: true } },
+          "running in Claude Code's background",
+          '',
+        ],
+        [
+          { state: 'running', elsewhere: { pid: 77, tty: null, dir: null, background: false } },
+          'running in another terminal',
+          '',
+        ],
         [{ state: 'not-running', starting: true }, 'starting…', ''],
       ] as const) {
         s.serve(
@@ -691,6 +702,157 @@ test('the right side', async (t) => {
       assert.match(text, /\/home\/u\/far/);
       assert.match(text, /cannot be shown here/);
       assert.equal(await s.page.locator('#cards .card button').count(), 0, 'nothing to press');
+    },
+  );
+
+  await t.test(
+    "F34: a session in Claude Code's background: its own title and words, its pid and directory, no terminal device; one in another terminal keeps its card word for word",
+    async (t) => {
+      const s = await scripted(t, chromium);
+      const serve = (background: boolean | undefined): void => {
+        const elsewhere: Row = { pid: 4321, tty: '/dev/pts/7', dir: '/home/u/far' };
+        if (background !== undefined) elsewhere['background'] = background;
+        s.serve(
+          listWith([[{ id: S1, terminal: null, slot: null }], []], {
+            rows: { [S1]: { state: 'running', dir: '/home/u/far', elsewhere } },
+          }),
+        );
+      };
+      const card = async (): Promise<Row> => ({
+        kind: await s.page.getAttribute('#cards .card', 'data-card'),
+        title: await texts(s.page, '.card-title'),
+        facts: await texts(s.page, '.card-fact'),
+        why: await texts(s.page, '.card-why'),
+        code: await texts(s.page, '.card-why code'),
+        buttons: await s.page.locator('#cards .card button').count(),
+      });
+      const background = {
+        kind: 'elsewhere',
+        title: ["Running in Claude Code's background"],
+        facts: ['Processpid 4321', 'Directory/home/u/far'],
+        why: [
+          'Claude Code runs this session itself, without a terminal. skydeck cannot show it here. To see it or end it, run claude agents in a terminal. Once it has ended it can be resumed in the window.',
+        ],
+        code: ['claude agents'],
+        buttons: 0,
+      };
+      const other = {
+        kind: 'elsewhere',
+        title: ['Running in another terminal'],
+        facts: ['Processpid 4321 · /dev/pts/7', 'Directory/home/u/far'],
+        why: [
+          'It cannot be shown here: its terminal belongs to another program, and skydeck never takes it over. Once it has ended it can be resumed in the window.',
+        ],
+        code: [],
+        buttons: 0,
+      };
+      serve(true);
+      await clickRow(s.page, S1);
+      await showsText(s.page, '#cards .card-title', /background/);
+      assert.deepEqual(await card(), background);
+      // The same session said to run in another terminal: that card, as before F34.
+      serve(false);
+      await showsText(s.page, '#cards .card-title', /another terminal/);
+      assert.deepEqual(await card(), other);
+      // Back, then a row without the field (a server before F34): another terminal's again.
+      serve(true);
+      await showsText(s.page, '#cards .card-title', /background/);
+      serve(undefined);
+      await showsText(s.page, '#cards .card-title', /another terminal/);
+      assert.deepEqual(await card(), other);
+    },
+  );
+
+  await t.test(
+    "F34: light, dark and the forced themes: the card and the row of a session in Claude Code's background are drawn as another terminal's",
+    async (t) => {
+      const s = await scripted(t, chromium);
+      s.serve(
+        listWith(
+          [
+            [
+              { id: S1, terminal: null, slot: null },
+              { id: S2, terminal: null, slot: null },
+            ],
+            [],
+          ],
+          {
+            rows: {
+              [S1]: {
+                state: 'running',
+                elsewhere: { pid: 41, tty: '/dev/pts/1', dir: null, background: true },
+              },
+              [S2]: { state: 'running', elsewhere: { pid: 42, tty: '/dev/pts/2', dir: null } },
+            },
+          },
+        ),
+      );
+      /** The colours and sizes of the selected session's card and of its row's second line. */
+      const drawn = (id: string): Promise<Row> =>
+        s.page.evaluate((id) => {
+          const style = (selector: string): string[] => {
+            const element = document.querySelector(selector);
+            if (!(element instanceof HTMLElement)) return ['missing'];
+            const computed = getComputedStyle(element);
+            return [computed.color, computed.backgroundColor, computed.fontSize];
+          };
+          return {
+            card: style('#cards .card'),
+            title: style('#cards .card-title'),
+            fact: style('#cards .card-fact'),
+            why: style('#cards .card-why'),
+            row: style(`#list [data-id="${id}"] .row-state`),
+          };
+        }, id);
+      const scheme = async (value: 'light' | 'dark'): Promise<void> => {
+        await s.page.emulateMedia({ colorScheme: value });
+        await s.page.waitForFunction(
+          (dark) => matchMedia('(prefers-color-scheme: dark)').matches === dark,
+          value === 'dark',
+        );
+      };
+      const force = (value: string | null) =>
+        s.page.evaluate((theme) => {
+          if (theme === null) delete document.documentElement.dataset['theme'];
+          else document.documentElement.dataset['theme'] = theme;
+        }, value);
+      const both = async (): Promise<Row[]> => {
+        const seen: Row[] = [];
+        for (const [id, title] of [
+          [S1, /background/],
+          [S2, /another terminal/],
+        ] as const) {
+          await clickRow(s.page, id);
+          await showsText(s.page, '#cards .card-title', title);
+          seen.push(await drawn(id));
+        }
+        return seen;
+      };
+      await showsText(s.page, `#list [data-id="${S2}"] .row-state`, /./);
+      assert.deepEqual(
+        await s.page.evaluate(() =>
+          [...document.querySelectorAll('#list [data-id] .row-state')].map((e) => e.textContent),
+        ),
+        ["running in Claude Code's background", 'running in another terminal'],
+        "the rows' second lines",
+      );
+      const themes: Record<string, Row[]> = {};
+      await scheme('light');
+      themes['light'] = await both();
+      await scheme('dark');
+      themes['dark'] = await both();
+      await force('light');
+      themes['forced light'] = await both();
+      await scheme('light');
+      await force('dark');
+      themes['forced dark'] = await both();
+      await force(null);
+      for (const [name, [inBackground, inOther]] of Object.entries(themes)) {
+        assert.deepEqual(inBackground, inOther, name);
+      }
+      assert.notDeepEqual(themes['light'], themes['dark'], 'the schemes differ');
+      assert.deepEqual(themes['forced light'], themes['light']);
+      assert.deepEqual(themes['forced dark'], themes['dark']);
     },
   );
 

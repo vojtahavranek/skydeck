@@ -26,6 +26,10 @@ export const END_TEXTS = {
   /** The toast of `d` on a session that runs and cannot be ended from the window (E4). */
   cannotEnd:
     'Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.',
+  /** F34: that toast for a session Claude Code runs in its background (`cannotEndText`): it has
+   *  no terminal of the user's, and it is never ended from outside (Claude Code may restart it). */
+  cannotEndBackground:
+    "Marked done. It runs in Claude Code's background: end it in claude agents. Hidden once it stops.",
   /** The toasts of a dialog that closed by itself: nothing was done. */
   stopped: 'It stopped by itself: nothing was marked done.',
   doneElsewhere: 'It was marked done in another window: nothing was ended.',
@@ -39,6 +43,16 @@ export const END_TEXTS = {
  */
 export function asksFirst(row) {
   return !row.done && row.endable === true && typeof row.terminal === 'string';
+}
+
+/**
+ * The toast of `d` on a running session the window cannot end: F34's for a session Claude Code
+ * runs in its background, else `cannotEnd`.
+ * @param {RowPayload} row
+ * @returns {string}
+ */
+export function cannotEndText(row) {
+  return row.elsewhere?.background === true ? END_TEXTS.cannotEndBackground : END_TEXTS.cannotEnd;
 }
 
 /**

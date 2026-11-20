@@ -35,6 +35,8 @@ const DONE_WORDS = 'Marked done: hidden from the list. It comes back on new acti
 const DONE_RUNNING_WORDS = 'Marked done. Stays under Open while it runs; hidden once it stops.';
 const CANNOT_WORDS =
   'Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.';
+const BACKGROUND_WORDS =
+  "Marked done. It runs in Claude Code's background: end it in claude agents. Hidden once it stops.";
 const END = 'End session and mark done';
 const KEEP = 'Mark done, keep it running';
 const CANCEL = 'Cancel';
@@ -293,6 +295,37 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
       assert.deepEqual(actsAfter(w, 3), [{ kind: 'undone', sessionId: S1 }]);
       w.answer(undone, { ok: true });
       assert.equal((await ender(page)).shown, false);
+    },
+  );
+
+  await t.test(
+    "F34: `d` on a session in Claude Code's background marks it done at once, no dialog; its toast says where to end it; one in another terminal keeps its toast",
+    async (t) => {
+      const { page, w } = await deck(t, chromium, {
+        sections: {
+          open: [
+            row(S1, {
+              state: 'running',
+              elsewhere: { pid: 4242, tty: null, dir: null, background: true },
+            }),
+            row(S2, {
+              state: 'working',
+              elsewhere: { pid: 4243, tty: '/dev/pts/3', dir: null, background: false },
+            }),
+          ],
+        },
+      });
+      for (const [n, id, words] of [
+        [1, S1, BACKGROUND_WORDS],
+        [2, S2, CANNOT_WORDS],
+      ] as const) {
+        await dFrom(page, id);
+        const done = await w.act(n);
+        assert.deepEqual(actsAfter(w, n - 1), [{ kind: 'done', sessionId: id }]);
+        assert.equal((await ender(page)).shown, false, 'no dialog');
+        w.answer(done, { ok: true });
+        await toastIs(page, words, true);
+      }
     },
   );
 

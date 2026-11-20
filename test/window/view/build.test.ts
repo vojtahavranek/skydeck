@@ -389,7 +389,12 @@ test('open order: a session running elsewhere is not placed by an ended terminal
   const row = rowIn(message, S1);
   assert.equal(row.terminal, null);
   assert.equal(row.slot, null);
-  assert.deepEqual(row.elsewhere, { pid: 5000, tty: '/dev/pts/9', dir: '/home/dev/projects/demo' });
+  assert.deepEqual(row.elsewhere, {
+    pid: 5000,
+    tty: '/dev/pts/9',
+    dir: '/home/dev/projects/demo',
+    background: false,
+  });
   assert.equal(message.counts.elsewhere, 2);
 });
 
@@ -471,6 +476,7 @@ test('rows: elsewhere carries the pid and tty from the mapping', () => {
     pid: 9000,
     tty: '/dev/pts/7',
     dir: '/home/dev/projects/demo',
+    background: false,
   });
   assert.equal(rowIn(message, S1).terminal, null);
 });

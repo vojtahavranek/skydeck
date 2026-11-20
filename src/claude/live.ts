@@ -27,6 +27,8 @@ export interface LiveFile {
   waitingFor: string | null;
   updatedAtNs: Ns | null; // from epoch ms
   statusUpdatedAtNs: Ns | null; // from epoch ms
+  /** F34: `kind` is `bg`: Claude Code runs the session in its background (design 14); anything else, absent included, is false. */
+  background: boolean;
   mtimeNs: Ns; // of the file
 }
 
@@ -139,6 +141,7 @@ export function readLiveFiles(files: Files, claudeHome: string): LiveFile[] {
       waitingFor: stringOrNull(parsed.waitingFor),
       updatedAtNs: nsFromEpochMs(parsed.updatedAt),
       statusUpdatedAtNs: nsFromEpochMs(parsed.statusUpdatedAt),
+      background: parsed.kind === 'bg',
       mtimeNs: read.mtimeNs,
     });
   }

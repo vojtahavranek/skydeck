@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
@@ -489,6 +489,58 @@ test('show of a session held outside the window prints its holder line as before
   assert.ok(d.stdout().includes('\nholder:    pid 4242 since '), d.stdout());
   assert.doesNotMatch(d.stdout(), /skydeck window/);
   assert.equal(existsSync(join(d.sandbox.skydeckHome, 'run')), false);
+});
+
+/** F34: S1 held by pid 4242 outside the window, its live file's fields changed by `fields`. */
+function runningWith(t: Parameters<typeof twoSessions>[0], fields: Record<string, unknown>) {
+  const d = twoSessions(t);
+  startRunning(d, S1, 4242);
+  const path = join(d.deck.places.claudeHome, 'sessions', '4242.json');
+  const record = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+  writeFileSync(path, JSON.stringify({ ...record, ...fields }));
+  return d;
+}
+
+const holderLines = (text: string): string[] =>
+  text.split('\n').filter((line) => line.startsWith('holder:'));
+
+test('F34: show says a holder runs in Claude Code’s background when its trusted live file says so; show --json is unchanged', async (t) => {
+  const d = runningWith(t, { kind: 'bg' });
+  assert.equal(await main(['show', '0b5f'], d.ctx), EXIT.ok);
+  const lines = holderLines(d.stdout());
+  assert.equal(lines.length, 1, d.stdout());
+  assert.match(lines[0] ?? '', /^holder: {4}pid 4242 since \S+Z \(in Claude Code's background\)$/);
+  assert.doesNotMatch(d.stdout(), /terminal/);
+
+  const before = d.stdout().length;
+  assert.equal(await main(['show', '0b5f', '--json'], d.ctx), EXIT.ok);
+  const json = JSON.parse(d.stdout().slice(before)) as ShowJson;
+  assert.deepEqual(Object.keys(json.holders[0] ?? {}).sort(), [
+    'bootId',
+    'pid',
+    'procStart',
+    'scripted',
+    'since',
+  ]);
+  assert.doesNotMatch(d.stdout().slice(before), /background/);
+});
+
+test('F34: show prints any other holder as before: another terminal, no kind, another value, an untrusted file', async (t) => {
+  for (const [what, fields] of [
+    ['kind interactive', {}],
+    ['no kind', { kind: undefined }],
+    ['another value', { kind: 'background' }],
+    ['a file of another process that had the pid', { kind: 'bg', procStart: '7' }],
+  ] as const) {
+    await t.test(what, async (t) => {
+      const d = runningWith(t, fields);
+      assert.equal(await main(['show', '0b5f'], d.ctx), EXIT.ok);
+      assert.equal(d.stdout(), formatShow(rowOf(d), d.deck.store.links(), T0));
+      const lines = holderLines(d.stdout());
+      assert.equal(lines.length, 1, d.stdout());
+      assert.match(lines[0] ?? '', /^holder: {4}pid 4242 since \S+Z$/);
+    });
+  }
 });
 
 /** F32: `gh` answers an approved pull request with passing checks that GitHub will not merge (q<i>: BLOCKED). */

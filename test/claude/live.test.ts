@@ -93,9 +93,39 @@ test('readLiveFiles normalises a busy live-session file', (t) => {
       waitingFor: null,
       updatedAtNs: T0 + 30n * SEC,
       statusUpdatedAtNs: T0 + 30n * SEC,
+      background: false,
       mtimeNs: mtimeOf(path),
     },
   ]);
+});
+
+test('F34: readLiveFiles says the session runs in Claude Code’s background only for `kind` `bg`', (t) => {
+  const { platform, places } = testPlatform(t);
+  // The fixture's own `kind` is `interactive`, the value of every session started in a terminal.
+  putVariant(places.claudeHome, '1.json', { kind: 'bg' });
+  putVariant(places.claudeHome, '2.json', {});
+  putVariant(places.claudeHome, '3.json', { kind: undefined });
+  const others: unknown[] = ['BG', ' bg', 'bg ', 'background', '', true, 1, null, ['bg'], {}];
+  others.forEach((kind, i) => {
+    putVariant(places.claudeHome, `${i + 10}.json`, { kind });
+  });
+  const read = readLiveFiles(platform.files, places.claudeHome);
+  assert.equal(read.length, 3 + others.length, 'the field never makes a file unreadable');
+  assert.deepEqual(
+    read.map((f) => [f.pid, f.background]),
+    [[1, true], [2, false], [3, false], ...others.map((_kind, i) => [i + 10, false])],
+  );
+});
+
+test('F34: a file that says `kind` `bg` but is broken or names no session is skipped as before', (t) => {
+  const { platform, places } = testPlatform(t);
+  const dir = join(places.claudeHome, 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, '4244.json'), `{"kind":"bg","pid":4244,"sessionId":"${S1}"`);
+  writeFileSync(join(dir, '4250.json'), '["bg"]');
+  putVariant(places.claudeHome, '4245.json', { kind: 'bg', sessionId: undefined });
+  putVariant(places.claudeHome, '4246.json', { kind: 'bg', pid: 4247 });
+  assert.deepEqual(readLiveFiles(platform.files, places.claudeHome), []);
 });
 
 test('readLiveFiles reads idle, waiting and shell files as found', (t) => {

@@ -89,6 +89,7 @@ function live(
     waitingFor: null,
     updatedAtNs: null,
     statusUpdatedAtNs: null,
+    background: false,
     mtimeNs: T0,
     ...extra,
   };

@@ -9,7 +9,14 @@ import type {
   SectionPayload,
   TerminalPayload,
 } from '../../src/window/protocol.ts';
-import { asksFirst, cutTitle, dialogFollows, END_TEXTS, TITLE_MAX } from '../../web/end-text.js';
+import {
+  asksFirst,
+  cannotEndText,
+  cutTitle,
+  dialogFollows,
+  END_TEXTS,
+  TITLE_MAX,
+} from '../../web/end-text.js';
 import { sessionRow } from '../../web/pane.js';
 import { S1, S2 } from '../helpers/platform.ts';
 
@@ -191,8 +198,48 @@ test('the words of the dialog and its toasts', () => {
     notEnded: 'Marked done. It has not ended yet: end it inside claude if it stays open.',
     cannotEnd:
       'Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.',
+    cannotEndBackground:
+      "Marked done. It runs in Claude Code's background: end it in claude agents. Hidden once it stops.",
     stopped: 'It stopped by itself: nothing was marked done.',
     doneElsewhere: 'It was marked done in another window: nothing was ended.',
     gone: 'It left the list: nothing was marked done.',
   });
+});
+
+test('F34: cannotEndText: the background toast only for a session Claude Code runs in its background', () => {
+  const cases: [string, RowPayload, string][] = [
+    [
+      "in Claude Code's background",
+      row(S1, {
+        terminal: null,
+        slot: null,
+        elsewhere: { pid: 1, tty: null, dir: null, background: true },
+      }),
+      END_TEXTS.cannotEndBackground,
+    ],
+    [
+      'in another terminal',
+      row(S1, {
+        terminal: null,
+        slot: null,
+        elsewhere: { pid: 1, tty: '/dev/pts/2', dir: null, background: false },
+      }),
+      END_TEXTS.cannotEnd,
+    ],
+    [
+      'in another terminal, a server before F34',
+      row(S1, { terminal: null, slot: null, elsewhere: { pid: 1, tty: null, dir: null } }),
+      END_TEXTS.cannotEnd,
+    ],
+    ['in a terminal of the window it cannot end', row(S1, { endable: false }), END_TEXTS.cannotEnd],
+  ];
+  for (const [what, given, text] of cases) {
+    assert.equal(cannotEndText(given), text, what);
+  }
+});
+
+test('F34: no word of the page tells a user to kill a process or names a signal', () => {
+  for (const [name, text] of Object.entries(END_TEXTS)) {
+    assert.doesNotMatch(text, /kill|signal|\bSIG|pkill|ctrl\+c/i, name);
+  }
 });

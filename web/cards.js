@@ -5,7 +5,7 @@
 // comes from, the short id and (F16) the flags the session was started with; (F18) the ticket's
 // chip, the window's chip (S2 12.3), the open pull requests and the buttons of the ticket's and
 // the pull-request dialogs; the note's first line —, the resume card, the card of a session
-// running in another terminal, the ended bar, the new form and (F9) the small card of a group whose
+// running in another terminal (or, F34, in Claude Code's background), the ended bar, the new form and (F9) the small card of a group whose
 // closed caption is selected in the list. Its interface is contract 2.9's with plan D 2.4's
 // changes. Every server string reaches the DOM through textContent or a tooltip.
 //
@@ -44,7 +44,7 @@ import {
   timesText,
   titleSourceText,
 } from './header-text.js';
-import { rowText } from './list-text.js';
+import { elsewhereText, rowText } from './list-text.js';
 import { groupCardText } from './search-text.js';
 
 /**
@@ -174,7 +174,8 @@ function exitTimeOf(ns) {
 
 /**
  * The header's state pill (S2 19: states only until stage B): "starting…", "running in another
- * terminal", or the row's state with its detail in brackets (design 7.4).
+ * terminal" (or F34's "running in Claude Code's background": `elsewhereText`), or the row's state
+ * with its detail in brackets (design 7.4).
  * @param {RowPayload} row
  */
 function stateOf(row) {
@@ -182,7 +183,7 @@ function stateOf(row) {
     return 'starting…';
   }
   if (row.elsewhere !== null) {
-    return 'running in another terminal';
+    return elsewhereText(row.elsewhere);
   }
   const state = row.state === 'not-running' ? 'not running' : row.state;
   const detail = row.stateDetail ?? '';
@@ -708,22 +709,32 @@ export function createCards(root, deps) {
     };
   }
 
-  /** @param {RowPayload} _row */
-  function buildElsewhere(_row) {
+  /**
+   * The card of a session no terminal of the window shows (S2 7.9): the holder's pid and terminal
+   * device, the directory, and why it cannot be shown here. F34: for a session Claude Code runs in
+   * its background (`background`), its own title and words, and no terminal device: it has none of
+   * the user's.
+   * @param {boolean} background
+   */
+  function buildElsewhere(background) {
     const where = fact('Process', 'card-where');
     const place = fact('Directory', 'card-dir');
+    let title = 'Running in another terminal';
     const why = element(
       'div',
       'card-why',
       'It cannot be shown here: its terminal belongs to another program, and skydeck never takes it over. Once it has ended it can be resumed in the window.',
     );
+    if (background) {
+      title = "Running in Claude Code's background";
+      why.replaceChildren(
+        'Claude Code runs this session itself, without a terminal. skydeck cannot show it here. To see it or end it, run ',
+        element('code', '', 'claude agents'),
+        ' in a terminal. Once it has ended it can be resumed in the window.',
+      );
+    }
     return {
-      parts: [
-        element('div', 'card-title', 'Running in another terminal'),
-        where.line,
-        place.line,
-        why,
-      ],
+      parts: [element('div', 'card-title', title), where.line, place.line, why],
       /** @param {RowPayload} row */
       fill(row) {
         /** @type {ElsewherePayload | null} */
@@ -732,7 +743,7 @@ export function createCards(root, deps) {
           where.value,
           other === null
             ? 'not known'
-            : `pid ${other.pid}${other.tty === null ? '' : ` · ${other.tty}`}`,
+            : `pid ${other.pid}${background || other.tty === null ? '' : ` · ${other.tty}`}`,
         );
         setText(place.value, other?.dir ?? row.dir ?? 'not known');
       },
@@ -936,7 +947,13 @@ export function createCards(root, deps) {
     /** @param {RowPayload} row */
     elsewhere(row) {
       card.dataset['card'] = 'elsewhere';
-      showCard(`elsewhere:${row.id}`, () => buildElsewhere(row), [row]);
+      // F34: built again when the session is said to run in Claude Code's background, or no longer.
+      const background = row.elsewhere?.background === true;
+      showCard(
+        `elsewhere:${background ? 'background' : 'terminal'}:${row.id}`,
+        () => buildElsewhere(background),
+        [row],
+      );
     },
     /**
      * @param {RowPayload | null} row

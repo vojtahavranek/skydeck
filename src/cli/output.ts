@@ -273,7 +273,8 @@ function doneField(row: ListRow): string[] {
  * is known, and a last read that failed adds a line under it, `status not read: <its words>`.
  * `inWindow` holds the pids of the holders that run in the window (`holdersInWindow`, S2 11.4):
  * their lines end with `(in the skydeck window)`. A row's holders are processes of this boot, so
- * a pid names one of them.
+ * a pid names one of them. F34: a holder whose trusted live-session file says Claude Code runs the
+ * session in its background (`LiveFile.background`) ends with `(in Claude Code's background)`.
  */
 export function formatShow(
   row: ListRow,
@@ -314,7 +315,11 @@ export function formatShow(
   }
   for (const holder of row.session.holders) {
     const what = holder.scripted ? ' (scripted run)' : '';
-    const where = inWindow.has(holder.process.pid) ? ' (in the skydeck window)' : '';
+    const where = inWindow.has(holder.process.pid)
+      ? ' (in the skydeck window)'
+      : holder.live?.background === true
+        ? " (in Claude Code's background)"
+        : '';
     lines.push(
       field(
         'holder:',
