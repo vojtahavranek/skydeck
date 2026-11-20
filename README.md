@@ -15,7 +15,8 @@ AI agents asked to install or change skydeck read [AGENTS.md](AGENTS.md) first.
 - Inside WSL: Node.js 24.12 or newer, `git`, Claude Code (installed inside WSL and started once),
   and python3 3.9 or newer for the window's terminals.
 - `gh`, logged in, only for the status of pull requests and of GitHub issues.
-- On plain Linux the command line works alone, without the window. macOS is not supported yet.
+- On plain Linux the command line works alone, without the window. macOS is not supported yet
+  ([the plan for porting it](docs/plans/mac-port.md)).
 
 ## Install
 
