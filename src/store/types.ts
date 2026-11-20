@@ -8,6 +8,13 @@ import type { Ns } from '../platform/types.ts';
 export type EventKind = 'start' | 'end' | 'observed' | 'scripted' | 'scripted-end';
 export type StartDetail = 'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'unknown';
 export type EndDetail = 'clear' | 'switch' | 'exit' | 'other';
+/**
+ * F30: the `raw_detail` of the `end` event (detail `exit`, no spool file) the window's server
+ * records once the program of a session the user ended in the window has exited: that process's
+ * holding of the session ended by the user's own exit, whatever end Claude Code's hook sends for
+ * it, before or after (design 6.1).
+ */
+export const ENDED_IN_WINDOW = 'skydeck-window';
 
 export interface EventRow {
   id: number;

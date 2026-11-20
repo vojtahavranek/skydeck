@@ -1,0 +1,813 @@
+#!/usr/bin/env python3
+KEEPER_VERSION = "2"
+PROTOCOL = 1
+# skydeck keeper: owns one terminal's pty and program (design-step-2 7.1, 7.8, 8.1; plan task 9).
+#
+# The server starts it as `python3 -I <runtimeDir>/keeper-<build>.py`, detached, with its spec on
+# stdin (one JSON object, plan contract 2.3). It makes itself non-dumpable, listens on the spec's
+# socket (mode 600) and writes terms/<id>.pid ("<pid> <process start> <boot id> <version> 0|1").
+# Only G from the connection that claimed it (C), before the spec's startBy, starts the program in
+# a new pty; N, or the deadline, ends the terminal as not started. It keeps every chunk the program
+# writes and every resize as a numbered record, the snapshot a server parked, and the records since;
+# it never interprets them. It writes only its own errors to stderr, one line each,
+# "keeper <id>: <kind>": never output, input, or a message that could quote them (S2 2).
+#
+# Standard library only, nothing newer than python3 3.9. For tests only (plan A31):
+# SKYDECK_TEST_KEEPER_LINGER_SECONDS, SKYDECK_TEST_KEEPER_TAIL_BYTES, SKYDECK_TEST_KEEPER_SEND_BYTES.
+import os
+import sys
+
+_tag = "-"  # the terminal id in log lines, once the spec has given a valid one
+
+
+def log(kind):
+    try:
+        os.write(2, ("keeper %s: %s\n" % (_tag, kind)).encode("ascii", "replace"))
+    except OSError:
+        pass
+
+
+def _excepthook(kind, value, traceback):
+    # The class name only: a message or a traceback could quote a frame's data or the spec.
+    log(kind.__name__)
+
+
+sys.excepthook = _excepthook
+
+import collections  # noqa: E402  (after the hook, so that a failing import is logged by kind too)
+import ctypes  # noqa: E402
+import fcntl  # noqa: E402
+import json  # noqa: E402
+import pty  # noqa: E402
+import resource  # noqa: E402
+import select  # noqa: E402
+import signal  # noqa: E402
+import socket  # noqa: E402
+import struct  # noqa: E402
+import termios  # noqa: E402
+import time  # noqa: E402
+
+MiB = 1024 * 1024
+MAX_PAYLOAD = 16 * MiB
+INPUT_CAP = 4 * MiB
+READ_SIZE = 65536
+SEND_CHUNK = 256 * 1024
+MAX_PENDING = 8
+MAX_REASON = 1024  # bytes of an N reason (ruled, task 9)
+RECORD_COST = 64  # what each record costs the tail besides its payload
+DRAIN_READS = 64  # reads of what the pty still holds once the program is reaped (it holds ~12 KB)
+MAX_WAIT = 3600.0
+INT64_MAX = 2**63 - 1
+PR_SET_DUMPABLE = 4
+HEX = "0123456789abcdef"
+ALL_TYPES = b"CHGTNSDRXIZPA"
+SERVER_TYPES = b"GNIZPA"  # after the claim; a second C is refused too
+DEADLINE_PASSED = "the start deadline passed"
+REFUSED = "the server refused the start"
+CANNOT_START = "the program could not be started"
+
+LIBC = ctypes.CDLL(None, use_errno=True)
+
+
+def test_number(name, default):
+    """A test setting: a whole number of at least 1 without a leading zero, else the default."""
+    text = os.environ.get(name, "")
+    if text and text[0] != "0" and text.isascii() and text.isdigit():
+        return int(text)
+    return default
+
+
+LINGER = test_number("SKYDECK_TEST_KEEPER_LINGER_SECONDS", 600)
+TAIL_CAP = test_number("SKYDECK_TEST_KEEPER_TAIL_BYTES", 8 * MiB)
+SEND_CAP = test_number("SKYDECK_TEST_KEEPER_SEND_BYTES", 8 * MiB)
+
+
+def frame(kind, payload=b""):
+    return kind + struct.pack(">I", len(payload)) + payload
+
+
+def as_json(value):
+    return json.dumps(value, separators=(",", ":")).encode("ascii")
+
+
+def is_ns(value):
+    return (
+        type(value) is str
+        and 0 < len(value) <= 19  # python's int() refuses more than 4,300 digits
+        and value.isascii()
+        and value.isdigit()
+        and (value == "0" or value[0] != "0")
+        and int(value) <= INT64_MAX
+    )
+
+
+def is_size(value):
+    return type(value) is int and 1 <= value <= 65535
+
+
+def is_text(value):
+    return type(value) is str
+
+
+def is_path(value):
+    """An absolute path the system takes as written: no NUL (bind would cut it there), encodable."""
+    try:
+        return is_text(value) and value.startswith("/") and b"\0" not in os.fsencode(value)
+    except UnicodeEncodeError:
+        return False
+
+
+def is_session_id(value):
+    """Step 1's one rule (src/claude/session-id.ts): a lowercase UUID, 8-4-4-4-12."""
+    return (
+        is_text(value)
+        and len(value) == 36
+        and all((c == "-") if i in (8, 13, 18, 23) else (c in HEX) for i, c in enumerate(value))
+    )
+
+
+META_FIELDS = ("sessionId", "kind", "slot", "openedNs", "build", "label", "dir")
+
+
+def is_meta(meta):
+    """What the codec accepts as a hello's meta (contract 2.3): the keeper echoes it there."""
+    return (
+        type(meta) is dict
+        and is_session_id(meta.get("sessionId"))
+        and meta.get("kind") in ("resume", "new")
+        and "slot" in meta
+        and (meta["slot"] is None or (type(meta["slot"]) is int and 1 <= meta["slot"] <= 9))
+        and is_ns(meta.get("openedNs"))
+        and is_text(meta.get("build"))
+        and "label" in meta
+        and (meta["label"] is None or is_text(meta["label"]))
+        and is_text(meta.get("dir"))
+    )
+
+
+def read_spec():
+    """The spec from stdin (S2 7.1), or None when it is not one; it sets the id of log lines."""
+    global _tag
+    chunks = []
+    try:
+        while True:
+            chunk = os.read(0, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        spec = json.loads(b"".join(chunks))
+    except (OSError, ValueError, RecursionError):
+        return None
+    if type(spec) is not dict:
+        return None
+    ident = spec.get("id")
+    if not (is_text(ident) and len(ident) == 12 and all(c in HEX for c in ident)):
+        return None
+    _tag = ident
+    argv, env, core = spec.get("argv"), spec.get("env"), spec.get("coreSoft")
+    valid = (
+        type(spec.get("protocol")) is int
+        and spec["protocol"] == PROTOCOL
+        and is_path(spec.get("socket"))
+        and is_size(spec.get("cols"))
+        and is_size(spec.get("rows"))
+        and is_text(spec.get("cwd"))
+        and type(argv) is list
+        and len(argv) > 0
+        and all(is_text(arg) for arg in argv)
+        and type(env) is dict
+        and all(is_text(value) for value in env.values())
+        and is_ns(spec.get("startBy"))
+        and "lock" in spec
+        and (spec["lock"] is None or is_text(spec["lock"]))
+        and "coreSoft" in spec
+        and (core is None or core == "unlimited" or (is_text(core) and 0 < len(core) <= 20 and core.isascii() and core.isdigit()))
+        and is_meta(spec.get("meta"))
+    )
+    return spec if valid else None
+
+
+def proc_start(pid):
+    """Field 22 of /proc/<pid>/stat (design 5.5); OSError, ValueError or IndexError otherwise."""
+    with open("/proc/%d/stat" % pid, "rb") as f:
+        stat = f.read()
+    return int(stat[stat.rindex(b")") + 2 :].split(b" ")[19])
+
+
+def boot_id():
+    with open("/proc/sys/kernel/random/boot_id", "rb") as f:
+        text = f.read().decode("ascii").strip()
+    if not text or any(c.isspace() for c in text):
+        raise ValueError("boot id")
+    return text
+
+
+# The second byte of a character whose lead byte allows less than 0x80–0xBF (no overlong form, no
+# surrogate, nothing above U+10FFFF).
+SECOND_BYTE = {0xE0: (0xA0, 0xBF), 0xED: (0x80, 0x9F), 0xF0: (0x90, 0xBF), 0xF4: (0x80, 0x8F)}
+
+
+def utf8_cut(data):
+    """Where the UTF-8 character that `data` ends inside begins (one to three bytes from its end),
+    else len(data): bytes that cannot begin a valid character are never held back (ruled, task 9)."""
+    end = len(data)
+    for back in range(1, min(3, end) + 1):
+        lead = data[end - back]
+        if lead & 0xC0 == 0x80:
+            continue  # a continuation byte: the character begins further back
+        need = 2 if 0xC2 <= lead <= 0xDF else 3 if 0xE0 <= lead <= 0xEF else 4 if 0xF0 <= lead <= 0xF4 else 0
+        if back >= need:
+            return end  # complete, or no lead byte
+        low, high = SECOND_BYTE.get(lead, (0x80, 0xBF))
+        if back >= 2 and not low <= data[end - back + 1] <= high:
+            return end
+        return end - back
+    return end
+
+
+def parse_size(payload):
+    """Z: "<cols> <rows>" in ASCII, each 1–65535 without a leading zero; None otherwise."""
+    parts = payload.split(b" ")
+    if len(parts) != 2 or not all(p.isdigit() and p[:1] != b"0" and len(p) <= 5 for p in parts):
+        return None
+    cols, rows = int(parts[0]), int(parts[1])
+    return (cols, rows) if is_size(cols) and is_size(rows) else None
+
+
+def say(text):
+    """In the child: one line on the pty, which the screen side shows."""
+    try:
+        os.write(1, ("skydeck: %s\n" % text).encode("utf-8", "replace"))
+    except OSError:
+        pass
+
+
+def reason(error):
+    if isinstance(error, OSError) and error.errno:
+        return os.strerror(error.errno)
+    return "invalid argument"
+
+
+def set_core_soft(text):
+    """In the child: the soft core limit the user had (S2 2), within the hard one; else unchanged."""
+    hard = resource.getrlimit(resource.RLIMIT_CORE)[1]
+    soft = resource.RLIM_INFINITY if text == "unlimited" else int(text)
+    try:
+        resource.setrlimit(resource.RLIMIT_CORE, (soft, hard))
+    except (ValueError, OverflowError, OSError):
+        pass  # above the hard limit, or beyond what the system takes
+
+
+def run_program(go_r, spec):
+    """The pty's child: waits for the keeper's go, then becomes the program. Never returns."""
+    try:
+        if os.read(go_r, 1) == b"g":
+            # python3 ignores these two, and an ignored signal stays ignored across exec.
+            signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+            signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
+            try:
+                os.chdir(spec["cwd"])
+            except (OSError, ValueError) as error:
+                say("cannot change to %s: %s" % (spec["cwd"], reason(error)))
+                os._exit(127)
+            if spec["coreSoft"] is not None:
+                set_core_soft(spec["coreSoft"])
+            argv = spec["argv"]
+            try:
+                os.execvpe(argv[0], argv, spec["env"])
+            except (OSError, ValueError) as error:
+                say("cannot run %s: %s" % (argv[0], reason(error)))
+    finally:
+        os._exit(127)
+
+
+class Conn:
+    """A connection: what it sent that is not yet a whole frame, and what waits to go to it."""
+
+    def __init__(self, sock):
+        self.sock = sock
+        self.inbuf = bytearray()
+        self.out = bytearray()
+        self.replay = 0  # bytes of `out` that are the claim's snapshot and tail: not held to SEND_CAP
+        self.waiting = False  # its next frame is input the queue has no room for yet (step 5)
+
+
+class Keeper:
+    def __init__(self, spec, listener, pid_path, line_head):
+        self.spec = spec
+        self.start_by = int(spec["startBy"])
+        self.cols, self.rows = spec["cols"], spec["rows"]
+        self.listener = listener
+        self.pid_path = pid_path
+        self.line_head = line_head  # "<pid> <process start> <boot id>" of the keeper itself
+        self.pending = []  # connections that have not claimed yet
+        self.screen = None  # the connection that claimed: the screen side
+        self.pid = None  # the program's, once started
+        self.proc_start = None
+        self.master = None  # the pty, while it is open
+        self.status = None  # the program's exit, once reaped (os.waitstatus_to_exitcode)
+        self.inq = bytearray()  # input waiting for the pty, at most INPUT_CAP
+        self.held = b""  # the first bytes of a character the program has not finished writing
+        self.deferred = []  # R payloads that wait until that character is whole
+        self.seq = 0  # records so far
+        self.tail = collections.deque()  # (seq, b"D" | b"R", payload)
+        self.tail_bytes = 0  # payloads plus RECORD_COST each
+        self.dropped = 0  # the newest record the tail cap dropped
+        self.snap = None  # the parked P payload, sent back as S
+        self.snap_seq = 0
+        self.exit = None  # the X payload, once the program ended or will never start
+        self.linger_until = None
+        self.done = False
+        self.wake_r, self.wake_w = os.pipe()
+        os.set_blocking(self.wake_r, False)
+        os.set_blocking(self.wake_w, False)
+        signal.set_wakeup_fd(self.wake_w, warn_on_full_buffer=False)
+        signal.signal(signal.SIGCHLD, lambda number, stack: None)
+
+    # The pid line (S2 4.2), through a temporary name and a rename.
+    def write_pid_line(self, started):
+        line = "%s %s %d\n" % (self.line_head, KEEPER_VERSION, 1 if started else 0)
+        tmp = os.path.join(os.path.dirname(self.pid_path), ".%s.%d.tmp" % (_tag, os.getpid()))
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+            try:
+                os.write(fd, line.encode("ascii"))
+            finally:
+                os.close(fd)
+            os.rename(tmp, self.pid_path)
+            return True
+        except OSError:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            return False
+
+    def hello(self):
+        spec = self.spec
+        return {
+            "protocol": PROTOCOL,
+            "keeper": KEEPER_VERSION,
+            "id": spec["id"],
+            "started": self.pid is not None,
+            "startBy": spec["startBy"],
+            "lock": spec["lock"],
+            "pid": self.pid,
+            "procStart": self.proc_start,
+            "cols": self.cols,
+            "rows": self.rows,
+            "seq": self.seq,
+            "snapSeq": self.snap_seq,
+            # the first record the tail holds: after the snapshot, or after what the cap dropped
+            "tailFrom": self.tail[0][0] if self.tail else self.seq + 1,
+            "gap": self.dropped > self.snap_seq,
+            "meta": {name: spec["meta"][name] for name in META_FIELDS},
+            "exited": self.exit,
+        }
+
+    # Sending: never blocks; a connection that lets more than SEND_CAP wait is closed (step 7).
+    def send(self, data):
+        conn = self.screen
+        if conn is None:
+            return
+        conn.out += data
+        if len(conn.out) - conn.replay > SEND_CAP:
+            log("send-queue-full")
+            self.drop_screen()
+
+    def flush(self):
+        conn = self.screen
+        while conn.out:
+            try:
+                sent = conn.sock.send(conn.out[:SEND_CHUNK])
+            except (BlockingIOError, InterruptedError):
+                return
+            except OSError:
+                self.drop_screen()
+                return
+            del conn.out[:sent]
+            conn.replay = max(0, conn.replay - sent)
+
+    def close(self, conn):
+        try:
+            conn.sock.close()
+        except OSError:
+            pass
+
+    def drop_screen(self):
+        if self.screen is not None:
+            self.close(self.screen)
+            self.screen = None
+        if self.exit is not None and self.linger_until is None:
+            self.linger_until = time.monotonic() + LINGER
+
+    def refuse(self, kind):
+        log(kind)
+        self.drop_screen()
+
+    # Records: output chunks and resizes, numbered from 1 (steps 4 and 6).
+    def record(self, kind, payload):
+        self.seq += 1
+        self.tail.append((self.seq, kind, payload))
+        self.tail_bytes += len(payload) + RECORD_COST
+        while self.tail_bytes > TAIL_CAP:
+            self.dropped, _, dropped = self.tail.popleft()
+            self.tail_bytes -= len(dropped) + RECORD_COST
+        self.send(frame(kind, payload))
+
+    def park(self, payload):
+        if len(payload) < 12:
+            return False
+        seq, cols, rows = struct.unpack(">QHH", payload[:12])
+        if not self.snap_seq <= seq <= self.seq or cols == 0 or rows == 0:
+            return False
+        try:
+            payload[12:].decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+        self.snap, self.snap_seq = payload, seq
+        while self.tail and self.tail[0][0] <= seq:
+            self.tail_bytes -= len(self.tail.popleft()[2]) + RECORD_COST
+        return True
+
+    def resize(self, cols, rows):
+        if self.exit is not None:
+            return  # nothing follows X
+        self.cols, self.rows = cols, rows
+        if self.master is not None:
+            try:
+                fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+            except OSError:
+                pass
+        payload = as_json({"cols": cols, "rows": rows})
+        if self.held:
+            self.deferred.append(payload)  # never between the two halves of a character
+        else:
+            self.record(b"R", payload)
+
+    def release(self):
+        deferred, self.deferred = self.deferred, []
+        for payload in deferred:
+            self.record(b"R", payload)
+
+    # Starting (steps 1 and 2).
+    def start(self):
+        if self.pid is not None or self.exit is not None:
+            return
+        if time.time_ns() >= self.start_by:
+            self.not_started(DEADLINE_PASSED)
+            return
+        go_r, go_w = os.pipe()
+        try:
+            pid, master = pty.fork()
+        except OSError:
+            os.close(go_r)
+            os.close(go_w)
+            log("fork-failed")
+            self.not_started(CANNOT_START)
+            return
+        if pid == 0:
+            os.close(go_w)
+            run_program(go_r, self.spec)
+        os.close(go_r)
+        try:
+            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", self.rows, self.cols, 0, 0))
+            os.set_blocking(master, False)
+            start = proc_start(pid)
+        except (OSError, ValueError, IndexError):
+            os.close(go_w)  # no go: the child exits 127 without running anything
+            os.waitpid(pid, 0)
+            os.close(master)
+            log("start-failed")
+            self.not_started(CANNOT_START)
+            return
+        self.pid, self.proc_start, self.master = pid, start, master
+        self.send(frame(b"T", as_json({"pid": pid, "procStart": start, "atNs": str(time.time_ns())})))
+        if not self.write_pid_line(True):
+            log("pid-line")
+        try:
+            os.write(go_w, b"g")
+        except OSError:
+            pass
+        os.close(go_w)
+
+    def not_started(self, why):
+        if self.pid is None and self.exit is None:
+            self.finish({"code": None, "signal": None, "atNs": str(time.time_ns()), "notStarted": why})
+
+    def finish(self, exit):
+        self.exit = exit
+        self.inq = bytearray()
+        self.send(frame(b"X", as_json(exit)))
+        if self.screen is None and self.linger_until is None:
+            self.linger_until = time.monotonic() + LINGER
+
+    # The pty.
+    def read_pty(self):
+        """Reads one chunk as a record; False when nothing was there or the pty closed."""
+        try:
+            data = os.read(self.master, READ_SIZE)
+        except (BlockingIOError, InterruptedError):
+            return False
+        except OSError:  # EIO: every holder of the pty's other end has closed it
+            data = b""
+        if not data:
+            self.close_pty()
+            return False
+        # A record never ends inside a UTF-8 character (ruled, task 9): its first bytes wait for
+        # the next read.
+        data = self.held + data
+        cut = utf8_cut(data)
+        self.held = data[cut:]
+        if cut:
+            self.record(b"D", data[:cut])
+        if not self.held:
+            self.release()
+        return True
+
+    def close_pty(self):
+        os.close(self.master)
+        self.master = None
+        self.inq = bytearray()
+        if self.held:
+            self.record(b"D", self.held)  # the program has ended: sent as they are
+            self.held = b""
+        self.release()
+
+    def write_pty(self):
+        try:
+            written = os.write(self.master, self.inq[:READ_SIZE])
+        except (BlockingIOError, InterruptedError):
+            return
+        except OSError:
+            self.inq = bytearray()
+            return
+        del self.inq[:written]
+
+    def reap(self):
+        if self.pid is None or self.status is not None:
+            return
+        try:
+            done, status = os.waitpid(self.pid, os.WNOHANG)
+        except ChildProcessError:
+            return
+        if done:
+            self.status = os.waitstatus_to_exitcode(status)
+
+    def check_exit(self):
+        """Once the program is reaped: what the pty still holds, then X after the last D (S2 7.8)."""
+        if self.status is None or self.exit is not None:
+            return
+        if self.master is not None:
+            for _ in range(DRAIN_READS):
+                if not self.read_pty():
+                    break
+            if self.master is not None:
+                self.close_pty()
+        code = self.status
+        self.finish(
+            {
+                "code": code if code >= 0 else None,
+                "signal": -code if code < 0 else None,
+                "atNs": str(time.time_ns()),
+                "notStarted": None,
+            }
+        )
+
+    # Connections (step 3).
+    def accept(self):
+        for _ in range(MAX_PENDING):
+            try:
+                sock, _ = self.listener.accept()
+            except (BlockingIOError, InterruptedError):
+                return
+            except OSError:
+                return
+            sock.setblocking(False)
+            try:
+                _, uid, _ = struct.unpack(
+                    "3i", sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+                )
+            except OSError:
+                uid = -1
+            if uid != os.getuid():
+                log("peer-refused")
+                sock.close()
+                continue
+            if len(self.pending) >= MAX_PENDING:
+                self.close(self.pending.pop(0))
+            self.pending.append(Conn(sock))
+
+    def read_pending(self, conn):
+        try:
+            data = conn.sock.recv(READ_SIZE)
+        except (BlockingIOError, InterruptedError):
+            return
+        except OSError:
+            data = b""
+        conn.inbuf += data
+        whole = len(conn.inbuf) >= 5
+        length = struct.unpack(">I", conn.inbuf[1:5])[0] if whole else 0
+        if not data or conn.inbuf[:1] != b"C" or length > MAX_PAYLOAD:
+            if data:  # the first frame of every connection must be C (8.1)
+                log("too-long" if conn.inbuf[:1] == b"C" else "not-claimed")
+            self.pending.remove(conn)
+            self.close(conn)
+        elif whole and len(conn.inbuf) >= 5 + length:
+            del conn.inbuf[: 5 + length]
+            self.claim(conn)
+            self.read_frames(conn)
+
+    def claim(self, conn):
+        """C: this connection is the screen side now; it gets hello, snapshot, tail and exit (8.1)."""
+        self.pending.remove(conn)
+        if self.screen is not None:
+            self.close(self.screen)
+        self.screen = conn
+        self.linger_until = None
+        parts = [frame(b"H", as_json(self.hello()))]
+        if self.snap is not None:
+            parts.append(frame(b"S", self.snap))
+        parts.extend(frame(kind, payload) for _, kind, payload in self.tail)
+        if self.exit is not None:
+            parts.append(frame(b"X", as_json(self.exit)))
+        conn.out += b"".join(parts)
+        conn.replay = len(conn.out)
+
+    def read_screen(self):
+        conn = self.screen
+        try:
+            data = conn.sock.recv(READ_SIZE)
+        except (BlockingIOError, InterruptedError):
+            return
+        except OSError:
+            data = b""
+        if not data:
+            self.drop_screen()
+            return
+        conn.inbuf += data
+        self.read_frames(conn)
+
+    def read_frames(self, conn):
+        conn.waiting = False
+        while self.screen is conn and conn.inbuf:
+            kind = bytes(conn.inbuf[:1])
+            if kind not in SERVER_TYPES:
+                self.refuse("wrong-type" if kind in ALL_TYPES else "unknown-type")
+                return
+            if len(conn.inbuf) < 5:
+                return
+            (length,) = struct.unpack(">I", conn.inbuf[1:5])
+            if length > MAX_PAYLOAD:
+                self.refuse("too-long")
+                return
+            if kind == b"I" and length > INPUT_CAP:
+                self.refuse("input-too-long")  # it could never fit
+                return
+            if kind == b"N" and length > MAX_REASON:
+                self.refuse("bad-refusal")
+                return
+            if len(conn.inbuf) < 5 + length:
+                return
+            if kind == b"I" and self.master is not None and self.exit is None:
+                if len(self.inq) + length > INPUT_CAP:
+                    conn.waiting = True  # unread until the program has read enough (step 5)
+                    return
+            payload = bytes(conn.inbuf[5 : 5 + length])
+            del conn.inbuf[: 5 + length]
+            self.handle(kind, payload)
+
+    def handle(self, kind, payload):
+        if kind == b"G":
+            self.start()
+        elif kind == b"N":
+            try:
+                why = payload.decode("utf-8")
+            except UnicodeDecodeError:
+                self.refuse("bad-refusal")
+                return
+            self.not_started(why or REFUSED)
+        elif kind == b"I":
+            if self.master is not None and self.exit is None:
+                self.inq += payload  # before the start and after the end it is dropped
+        elif kind == b"Z":
+            size = parse_size(payload)
+            if size is None:
+                self.refuse("bad-resize")
+            else:
+                self.resize(*size)
+        elif kind == b"P":
+            if not self.park(payload):
+                self.refuse("bad-park")
+        elif kind == b"A":
+            if self.exit is not None:
+                self.done = True
+
+    # The loop.
+    def wait_seconds(self):
+        waits = [MAX_WAIT]
+        if self.pid is None and self.exit is None:
+            waits.append((self.start_by - time.time_ns()) / 1e9)
+        if self.linger_until is not None:
+            waits.append(self.linger_until - time.monotonic())
+        return max(0.0, min(waits))
+
+    def check_timers(self):
+        if self.pid is None and self.exit is None and time.time_ns() >= self.start_by:
+            self.not_started(DEADLINE_PASSED)
+        if self.linger_until is not None and self.screen is None and time.monotonic() >= self.linger_until:
+            self.done = True
+
+    def run(self):
+        while not self.done:
+            screen = self.screen
+            readers = [self.wake_r, self.listener] + [c.sock for c in self.pending]
+            writers = []
+            if screen is not None:
+                if not screen.waiting:  # step 5: a full queue stops reading the server
+                    readers.append(screen.sock)
+                if screen.out:
+                    writers.append(screen.sock)
+            if self.master is not None:
+                readers.append(self.master)
+                if self.inq:
+                    writers.append(self.master)
+            readable, writable, _ = select.select(readers, writers, [], self.wait_seconds())
+            if self.wake_r in readable:
+                try:
+                    while os.read(self.wake_r, 4096):
+                        pass
+                except (BlockingIOError, InterruptedError):
+                    pass
+            self.reap()
+            if self.master is not None and self.master in readable:
+                self.read_pty()
+            if self.master is not None and self.master in writable:
+                self.write_pty()
+            if self.listener in readable:
+                self.accept()
+            for conn in list(self.pending):
+                if conn in self.pending and conn.sock in readable:
+                    self.read_pending(conn)
+            if screen is not None and screen is self.screen and screen.sock in readable:
+                self.read_screen()
+            if self.screen is not None and self.screen.out:
+                self.flush()
+            self.check_exit()
+            self.check_timers()
+            if self.screen is not None and self.screen.waiting:
+                self.read_frames(self.screen)  # the queue may have room now, or input is dropped
+
+    def end(self):
+        for conn in self.pending + ([self.screen] if self.screen is not None else []):
+            self.close(conn)
+        self.listener.close()
+        for path in (self.spec["socket"], self.pid_path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+
+def main():
+    # Before anything holds the spec: no core dump can carry it, piped or not (S2 2).
+    try:
+        undumpable = LIBC.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) == 0
+    except AttributeError:
+        undumpable = False
+    if not undumpable:
+        log("dumpable")
+    spec = read_spec()
+    if spec is None:
+        log("bad-spec")
+        return 2
+    try:
+        head = "%d %d %s" % (os.getpid(), proc_start(os.getpid()), boot_id())
+    except (OSError, ValueError, IndexError):
+        log("no-pid-line")
+        return 1
+    path = spec["socket"]
+    pid_path = os.path.join(os.path.dirname(path), spec["id"] + ".pid")
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    old = os.umask(0o177)  # the socket's mode: 600
+    try:
+        listener.bind(path)
+        listener.listen(MAX_PENDING)
+    except OSError:
+        log("socket")
+        listener.close()
+        return 1
+    finally:
+        os.umask(old)
+    listener.setblocking(False)
+    keeper = Keeper(spec, listener, pid_path, head)
+    if not keeper.write_pid_line(False):
+        log("pid-line")
+        keeper.end()
+        return 1
+    keeper.run()
+    keeper.end()
+    return 0
+
+
+sys.exit(main())
