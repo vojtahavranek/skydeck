@@ -69,8 +69,13 @@ export interface RegistryBox extends KeeperBox {
   /**
    * A registry over the box's runtime directory; `platform` replaces the box's (its net is
    * wrapped). `slowWriteMs`: each write to a screen side's terminal completes that much later.
+   * `keeperFile`: the keeper it spawns, instead of the repository's (F30: an older keeper's).
    */
-  registry(options?: { platform?: Platform; slowWriteMs?: number }): TestRegistry;
+  registry(options?: {
+    platform?: Platform;
+    slowWriteMs?: number;
+    keeperFile?: string;
+  }): TestRegistry;
   /** A spec for the stand-in in this box (argv, env, record), as keeperSandbox makes it. */
   spec(overrides?: Partial<KeeperSpec>): KeeperSpec;
   /**
@@ -122,7 +127,9 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
     }
   };
 
-  const registry = (options: { platform?: Platform; slowWriteMs?: number } = {}): TestRegistry => {
+  const registry = (
+    options: { platform?: Platform; slowWriteMs?: number; keeperFile?: string } = {},
+  ): TestRegistry => {
     const base = options.platform ?? kb.tp.platform;
     const sockets: Socket[] = [];
     const spawned: number[] = [];
@@ -224,7 +231,7 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
       platform,
       files,
       xterm: { ...modules, Terminal: Spy },
-      keeperFile,
+      keeperFile: options.keeperFile ?? keeperFile,
       keepersLog: kb.keepersLog,
       log: (line) => {
         log.push(line);

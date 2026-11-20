@@ -48,7 +48,9 @@ import { promptOf, resumeHere, until, untilScreen } from './helpers/terminal.ts'
 
 const MIN = 60_000_000_000n;
 /** D15's toasts (web/app.js): for a session that runs, and for one that does not. */
-const DONE_RUNNING = 'Marked done. Stays under Open while it runs; hidden once it stops.';
+/** F30: the words for a running session the window cannot end (these rows carry no `endable`). */
+const DONE_RUNNING =
+  'Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.';
 const DONE_HIDDEN = 'Marked done: hidden from the list. It comes back on new activity.';
 
 /** A session last active `agoNs` before now, titled `title` (a `custom-title` record), in the

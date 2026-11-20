@@ -56,7 +56,11 @@ const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
 const S5 = '4f9d7a5c-2b6e-4d0f-9a7b-6c5d4e3f2a1b';
 const S6 = '5a0e8b6d-3c7f-4e1a-8b8c-7d6e5f4a3b2c';
 const DONE_WORDS = 'Marked done: hidden from the list. It comes back on new activity.';
-const DONE_RUNNING_WORDS = 'Marked done. Stays under Open while it runs; hidden once it stops.';
+/** D15's words for a running session, which F30's `Keep it running` keeps. */
+const KEEP_WORDS = 'Marked done. Stays under Open while it runs; hidden once it stops.';
+/** F30: the words for a running session the window cannot end (these rows carry no `endable`). */
+const DONE_RUNNING_WORDS =
+  'Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.';
 const PR7 = 'https://github.com/acme/web/pull/7';
 const PR8 = 'https://github.com/acme/web/pull/8';
 const PR9 = 'https://github.com/acme/web/pull/9';
@@ -1478,7 +1482,7 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
   );
 
   await t.test(
-    'the real server: Done marks the session done, with the toast, and its Undo brings it back; a running session’s Done keeps it under Open marked done, the button then says Undone',
+    'the real server: Done marks the session done, with the toast, and its Undo brings it back; a running session’s Done asks first, and Keep it running keeps it under Open marked done, the button then says Undone',
     async (t) => {
       const l = await withGh(t, chromium);
       l.d.resumable(S1);
@@ -1503,7 +1507,9 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
       await clickRow(l.page, S2);
       await showsText(l.page, '#cards .header-done', /^Done$/);
       await l.page.locator('#cards .header-done').click();
-      await eventually(async () => (await toast(l.page)).text === DONE_RUNNING_WORDS, 'the toast');
+      // F30: a session running in the window's terminal asks first; Keep it running is D15's Done.
+      await l.page.locator('#end-dialog .end-keep').click();
+      await eventually(async () => (await toast(l.page)).text === KEEP_WORDS, 'the toast');
       await showsText(l.page, '#cards .header-done', /^Undone$/);
       assert.deepEqual(await sectionRows(l.page, 'open'), [S2]);
       await showsText(l.page, `#list [data-id="${S2}"]`, /done/);

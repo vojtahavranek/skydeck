@@ -27,6 +27,12 @@ export interface TerminalInfo {
   exit: KeeperExit | null;
   /** S2 7.5: no holder after restoreStartTimeoutSeconds. */
   notReported: boolean;
+  /**
+   * F30: its program can be ended from the window now — it runs, and its keeper knows `E` (a
+   * keeper of version 3 or later) and is connected. Optional for the reader: absent (a terminal a
+   * test made up, a hub without `end`) is false.
+   */
+  endable?: boolean;
 }
 
 export interface StreamSink {
@@ -53,6 +59,13 @@ export interface TerminalHub {
   resize(termId: string, cols: number, rows: number): void;
   /** S2 8.2.3 `close-terminal`: forgets an ended, lost or not-started terminal. */
   close(termId: string): 'ok' | 'running' | 'unknown';
+  /**
+   * F30: tells the terminal's keeper to hang up its program (`E`, SIGHUP, as a closed terminal's
+   * window would) — only while the terminal is `endable`; 'cannot' otherwise (an older keeper, no
+   * connection, a program that is not running), when nothing is sent. Optional: a hub without it
+   * ends nothing (the actions refuse the request).
+   */
+  end?(termId: string): 'ok' | 'cannot' | 'unknown';
   /** The colours the last focused page reported, for OSC 10 and 11 (S2 7.2). Pages calls it when
    *  a page starts focused and when a page reports focus (with the theme of its start, or of its
    *  latest `theme` message; ruled), and when the page that had focus last sends `theme`

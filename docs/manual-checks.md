@@ -992,8 +992,9 @@ Setup:
   the keyboard (the cursor blinks in it). When the key bar says `the … is not here yet; press …
   again` instead (for up to a second right after a save), no dialog opened: type nothing, and
   press that key again. Text typed while the list has the keyboard is list keys: `k` moves to the
-  row above, which may be a real session, `d` marks the selected row done, Enter resumes or shows
-  it.
+  row above, which may be a real session, `d` marks the selected row done (on a session running in
+  the window it opens the dialog `Mark done`, where a following Enter or Space marks it done and
+  keeps it running; nothing is ended), Enter resumes or shows it.
 - No step marks a real session done, edits a real note or closes a window. After `d` the selection
   moves to the next row, which may be a real session: click `Undo` in the toast before the next
   key.
@@ -1166,6 +1167,8 @@ instead of opening its dialog; type nothing then, and press the key again.
 6. In W: `skydeck show <short id>`. Expected: its `label:`, `group:` and `note:` lines are what you
    typed in steps 1 to 3.
 7. Back in the window, Ctrl+Shift+L until the key bar says `Focus: list`, then `d`. Expected:
+   the dialog `Mark done: ` with the session's title, the keyboard on `Mark done, keep it
+   running`. Click `Mark done, keep it running` (never `End session and mark done`). Expected:
    the toast `Marked done. Stays under Open while it runs; hidden once it stops.` with `Undo`;
    the row stays under Open with a `done` mark, and stays selected. Click `Undo` within 5
    seconds: the mark goes.
@@ -1210,7 +1213,7 @@ Setup:
   window at all (after a restart of the PC or of WSL), its resume card shows instead: click `Resume
   here` on the card and wait until it runs. Type nothing otherwise: text typed while the list has
   the keyboard is list keys — `k` moves to the row above, which may be a real session, `n` opens its
-  note, `l` its label, `d` marks it done.
+  note, `l` its label, `d` marks it done (on a session running in the window it opens the dialog `Mark done`, where a following Enter or Space marks it done and keeps it running; nothing is ended).
 - **The other throwaway session**, in a terminal of your own: open one more WSL terminal, **T**, and
   in it `cd ~/skydeck-try && claude`; send it one prompt (`say hello in one word`). In the window
   its row is under Open and says `running in another terminal`; once its answer is written, its
@@ -1409,7 +1412,7 @@ Setup:
   and once you have written it down its short id (on that line, after the directory, the times and
   where the title comes from). Type nothing otherwise: text typed while the list has the keyboard
   is list keys — `k` moves to the row above, which may be a real session, `n` opens its note, `l`
-  its label, `d` marks it done.
+  its label, `d` marks it done (on a session running in the window it opens the dialog `Mark done`, where a following Enter or Space marks it done and keeps it running; nothing is ended).
 - **The story prompt** is `write a story of about 1,500 words about a lighthouse; reply in this
   chat, with no tool and no file`: Claude Code writes for a while, and its row says `working`
   meanwhile. When it asks for anything all the same (to run a command, to write a file), answer
@@ -1595,7 +1598,7 @@ Setup:
   blinks in it (click into it first), the switcher's field while the switcher's panel is shown
   over the window. Type nothing otherwise: text typed while the list has the keyboard is list
   keys — `k` moves to the row above, which may be a real session, `n` opens its note, `l` its
-  label, `d` marks it done —, and text typed while a terminal has it reaches that session's
+  label, `d` marks it done (on a session running in the window it opens the dialog `Mark done`, where a following Enter or Space marks it done and keeps it running; nothing is ended) —, and text typed while a terminal has it reaches that session's
   program. When the field shows no caret, click into it first. In the filter's field press no
   Enter: Enter gives the keyboard to the list, where the next letter is a list key. No step
   presses Enter in the switcher on a session whose short id you have not looked at.
@@ -2302,7 +2305,9 @@ title>` and whose field has the keyboard (the cursor blinks in it); when the key
 ticket is not here yet; press t again` instead, or nothing shows, no dialog opened: type nothing,
 and click the header's `Ticket` (or `+ ticket`) again — or press `t` again only once the key bar
 says `Focus: list` (else first click the throwaway session's row). Typed into the list, `k` would
-move to a real session and `d` mark it done; typed while the terminal has the keyboard, it goes
+move to a real session and `d` mark it done (on a session running in the window it opens the dialog
+`Mark done`, where a following Enter or Space marks it done and keeps it running; nothing is
+ended); typed while the terminal has the keyboard, it goes
 to the throwaway session's prompt.
 
 1. **Set by a link.** Look that the key bar says `Focus: list` (else press Ctrl+Shift+L until it
@@ -2370,7 +2375,9 @@ text only into an open dialog**: after `t` or a click on `+ ticket` / `Ticket`, 
 is there whose heading reads `Ticket — <the throwaway session's title>` and whose field has the
 keyboard (the cursor blinks in it); when the key bar says `the ticket is not here yet; press t
 again` instead, no dialog opened: type nothing, and press `t` again. Typed into the list, `k`
-would move to a real session and `d` mark it done. **The list takes a key only while the key bar
+would move to a real session and `d` mark it done (on a session running in the window it opens the
+dialog `Mark done`, where a following Enter or Space marks it done and keeps it running; nothing is
+ended). **The list takes a key only while the key bar
 says `Focus: list`**; press Ctrl+Shift+L until it does (a click on a running row gives the keyboard
 to its terminal, and what you type would reach Claude Code).
 
@@ -2556,3 +2563,67 @@ Not tried before this check was written: all of it, in Edge. The tests run the h
 the dialog in headless Chromium against a stand-in server, and the server and the commands with
 stand-in programs on test databases; they never ask a real tracker, never call the real `gh` and
 never start `claude`.
+
+## Ending a session from the window
+
+The check of the dialog "Mark done" (follow-up F30; design-step-2.md 12.10; [install.md](install.md),
+"Done."): W39, in your window, on one new throwaway session in `~/skydeck-try` and nothing else. No
+test may start the real `claude`, so only this shows that a real Claude Code ends on the dialog's
+hang-up, how its end is recorded, and that it resumes with its conversation. It ends that throwaway
+session twice and nothing else: before every `d`, every Enter and every click, look at the header's
+short id: it must be the throwaway session's (step 1 writes it down). A session that was already
+running before skydeck was updated runs on an older keeper: `d` on it asks nothing (its toast says
+`skydeck cannot end this one`), which is right and not part of this check.
+
+## W39. Ending a session from the window (real claude)
+
+Setup: skydeck updated to a commit that has follow-up F30 (`skydeck update`, W32), then the window
+open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Write down the time.
+
+1. **A throwaway session.** Press Ctrl+Shift+N, type the throwaway folder's full path into the
+   directory field (`/home/<you>/skydeck-try`), leave the other fields empty and press Enter. Look
+   that it is the new one (a short id you have not seen, its folder ends in `skydeck-try`) and write
+   the short id down. With `Focus: terminal`, type `Reply with the single word ok, in this chat, with
+   no tool and no file.` and Enter, and wait for its reply: the row no longer says working.
+2. **The dialog, and Esc.** Press Ctrl+Shift+L (`Focus: list`; the selected row is the throwaway
+   session's) and `d`. Expected: a dialog over the window, `Mark done: ` and the session's title,
+   `This session is still running.`, no warning, the buttons `End session and mark done`, `Mark
+   done, keep it running`, `Cancel`, the second one outlined. Tab and → move the outline to the next
+   and back to the first after the third; Shift+Tab and ← the other way; a click on the list or the
+   terminal does nothing; Ctrl+Shift+H says `close the dialog first (Esc)`. Press Esc. Expected: the
+   dialog is gone, the row still under Open, not marked done.
+3. **End it.** Look at the short id again, then `d`, ← (`End session and mark done` is outlined
+   now), and Enter. Expected: the toast `Ending the session…`, within a few seconds `Ended and marked
+   done: hidden from the list.` with `Undo`; the row is gone from Open, its slot free, and the right
+   side no longer shows its terminal.
+4. **An ordinary end.** Press `a` (show done). Expected: the throwaway session is listed, marked
+   done, not in the crash colour and with no `ended unexpectedly` (its row, its card's "how it
+   ended"). In a WSL terminal of your own, `skydeck show <short id>`: no `ended-unexpectedly` mark
+   (the mark restore offers a session by).
+5. **Back.** In the window, click the throwaway session's row (it is listed, marked done) and look
+   at the header's short id: it is the one you wrote down. Press Ctrl+Shift+L (`Focus: list`) and `d`
+   (it marks it undone), then `a` again: it is listed under Recent. Click `Resume here` on its card
+   (a click, not Enter). Expected: it runs again in a terminal of the window, the same short id, and
+   scrolling up in its terminal shows the prompt of step 1 and its `ok`.
+6. **While it works.** With `Focus: terminal` and its short id looked at, type `Count slowly from 1 to
+   80, one number per line, with no tool and no file.` and Enter. While it is still counting (the row
+   says working), press Ctrl+Shift+L and `d`. Expected: the dialog also says `It is working: ending it
+   now stops the current turn.`, and `Mark done, keep it running` is outlined. When the count ended
+   before your `d` (no warning), press Esc and ask for a longer count. Press Enter. Expected: the
+   toast `Marked done. Stays under Open while it runs; hidden once it stops.`; it goes on counting.
+7. **The end of the check.** When it has finished, with `Focus: terminal` and its short id looked at,
+   type `/exit` and Enter, and click `Close` on the ended bar. Expected: the row is hidden (it is
+   done). Then press `a` (it is listed, marked done), click its row, look at the short id, and with
+   `Focus: list` press `d`: it is marked undone; press `a` again to hide the done sessions.
+
+Write down: the time of the setup; for each step whether it went as expected; how long step 3's
+`Ending the session…` stayed; whether step 4 showed anything of an unexpected end, and what `skydeck
+show` printed under the mark; whether step 5's terminal showed the earlier conversation; in step 6,
+which button was outlined. If step 3 says `Marked done. It has not ended yet: end it inside claude
+if it stays open.`, the Claude Code version (`claude --version`), and whether the session ended
+later by itself (its row then leaves Open).
+
+Not tried before this check was written: all of it with the real Claude Code. The tests end the
+suite's stand-in program by the same hang-up (it runs its SessionEnd hook with reason `other`, as
+Claude Code does for a closed terminal), and check the dialog's keys and words in headless
+Chromium; they never start `claude`.

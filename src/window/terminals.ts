@@ -21,6 +21,7 @@ import {
   encodeResize,
   encodeSnapshot,
   KEEPER_PROTOCOL,
+  keeperEnds,
   MAX_PAYLOAD,
 } from './frames.ts';
 import { parseExit, parseHello, parseResize, parseStarted } from './frames.ts';
@@ -84,6 +85,8 @@ export interface Registry extends TerminalHub {
   setSession(termId: string, sessionId: string | null, notReported: boolean): void;
   /** S2 5.5: park every terminal, close every connection; keepers keep running. */
   stopAll(): Promise<void>;
+  /** F30: the hub's `end`, which the registry always has: `E` on the claim of an endable terminal. */
+  end(termId: string): 'ok' | 'cannot' | 'unknown';
 }
 
 export class KeeperStartError extends Error {
@@ -292,7 +295,27 @@ export function createRegistry(deps: RegistryDeps): Registry {
     ...term.info,
     program: term.info.program === null ? null : { ...term.info.program },
     exit: term.info.exit === null ? null : { ...term.info.exit },
+    endable: endable(term),
   });
+
+  /**
+   * F30: whether `E` may go to the terminal's keeper now: its program runs (started, no exit, the
+   * state `running`), and the hello of the claim it is connected through names a keeper that knows
+   * `E` (version 3 or later; an older one would close the connection on it).
+   */
+  function endable(term: Term): boolean {
+    const claim = usable(term);
+    return (
+      claim !== null &&
+      claim.hello !== null &&
+      keeperEnds(claim.hello.keeper) &&
+      claim.hello.protocol === KEEPER_PROTOCOL &&
+      term.info.state === 'running' &&
+      term.info.program !== null &&
+      term.info.exit === null &&
+      !term.forgotten
+    );
+  }
 
   /** Calls an event handler; one that throws is logged by name and changes nothing here. */
   function emit(name: string, call: () => void): void {
@@ -1383,6 +1406,14 @@ export function createRegistry(deps: RegistryDeps): Registry {
         }
       }
       return 'ok';
+    },
+    end(termId) {
+      const term = terms.get(termId);
+      if (term === undefined) return 'unknown';
+      const claim = usable(term);
+      if (claim === null || !endable(term)) return 'cannot';
+      log(termId, 'hang-up sent');
+      return claim.link.send('E') ? 'ok' : 'cannot';
     },
     setTheme(next) {
       theme = next;

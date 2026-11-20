@@ -145,7 +145,12 @@ export interface ResizeMessage {
  *  F15 (S2 12.6): `favourite-add` saves `text` (a text field: at most 1,024 bytes) as one more
  *  favourite of the new form, last, or at place `at` (0 to MAX_FAVOURITES − 1; Undo's put-back of
  *  a removed one) when given; `favourite-remove` removes the favourite whose text is exactly
- *  `text`. What a favourite may be is the server's rule (src/window/favourites.ts). */
+ *  `text`. What a favourite may be is the server's rule (src/window/favourites.ts).
+ *
+ *  F30: `end-session` is the dialog's `End session and mark done` for the session `sessionId`
+ *  that the window's terminal `term` holds: the server marks it done and hangs its program up
+ *  (src/window/end-session.ts); its `result` comes once the program has ended (`ended` true) or
+ *  the wait is over (`ended` false). */
 export type ActMessage =
   | { t: 'act'; id: number; kind: 'resume'; sessionId: string; cols: number; rows: number }
   | {
@@ -174,7 +179,8 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'restore'; sessionIds: string[] }
   | { t: 'act'; id: number; kind: 'dismiss-restore'; bootId: string }
   | { t: 'act'; id: number; kind: 'favourite-add'; text: string; at?: number }
-  | { t: 'act'; id: number; kind: 'favourite-remove'; text: string };
+  | { t: 'act'; id: number; kind: 'favourite-remove'; text: string }
+  | { t: 'act'; id: number; kind: 'end-session'; term: string; sessionId: string };
 /** Follow-up F13: the page's colours changed while it is open — the title bar's theme switch was
  *  clicked here or in another window of the profile, or the system's scheme changed while the page
  *  follows it. The same colours as `start.theme`, checked the same way; the server answers OSC 10
@@ -282,6 +288,11 @@ export interface RowPayload {
    *  small chip after the pull requests' chip), null otherwise. Optional for the reader: absent (a
    *  scripted row of the test helpers, a server before F19) is none. */
   ticketStatus?: RowTicketPayload | null;
+  /** Follow-up F30: the session can be ended from the window — it runs in the row's terminal of
+   *  the window, whose keeper knows how and is connected (`TerminalInfo.endable`). The server
+   *  always sends it; optional for the reader: absent (a scripted row, a server before F30) is
+   *  false. */
+  endable?: boolean;
 }
 /** Follow-up F19: a row's ticket status — the ticket's short name, the status' text (at most 40
  *  characters, sanitised) and its category (one of the six words), null for none. */
@@ -552,6 +563,9 @@ export interface ResultMessage {
   lines: string[];
   error: string | null;
   sessionId: string | null;
+  /** F30, `end-session` only: with `ok` (the session was marked done, its program hung up),
+   *  whether the program ended within the wait. Absent for every other kind and a refusal. */
+  ended?: boolean;
 }
 /** `term`: the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the
  *  keep-alive, tick and restore notices. `restore-progress` (plan C6): `text` is one report line of
@@ -852,6 +866,8 @@ const ACTS: Readonly<Record<string, Check>> = {
     ['at'],
   ),
   'favourite-remove': object({ t: ANY, id: COUNT, kind: ANY, text: TEXT }),
+  // F30: the dialog's `End session and mark done`.
+  'end-session': object({ t: ANY, id: COUNT, kind: ANY, term: TERM, sessionId: SESSION }),
 };
 
 const INPUT_SHAPE = object({ t: ANY, term: TERM, data: STRING, binary: TRUE }, ['binary']);

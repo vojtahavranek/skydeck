@@ -11,16 +11,28 @@
  */
 import { isSessionId } from '../claude/session-id.ts';
 
-export type FrameType = 'C' | 'H' | 'G' | 'T' | 'N' | 'S' | 'D' | 'R' | 'X' | 'I' | 'Z' | 'P' | 'A';
+export type FrameType =
+  'C' | 'H' | 'G' | 'T' | 'N' | 'S' | 'D' | 'R' | 'X' | 'I' | 'Z' | 'P' | 'A' | 'E';
 export const MAX_PAYLOAD = 16 * 1024 * 1024;
 export const KEEPER_PROTOCOL = 1;
+/**
+ * F30: the first keeper version (the hello's `keeper`, a decimal whole number) that knows `E`, the
+ * hang-up. A keeper of an older version closes a connection that sends it one (a type it does not
+ * know): the server never sends `E` to such a keeper.
+ */
+export const KEEPER_ENDS_FROM = 3;
+
+/** F30: whether a keeper of this version (the hello's `keeper`) takes `E`. */
+export function keeperEnds(version: string): boolean {
+  return /^[1-9][0-9]{0,5}$/.test(version) && Number(version) >= KEEPER_ENDS_FROM;
+}
 
 export interface Frame {
   type: FrameType;
   payload: Uint8Array;
 }
 
-const TYPES: ReadonlySet<string> = new Set('CHGTNSDRXIZPA');
+const TYPES: ReadonlySet<string> = new Set('CHGTNSDRXIZPAE');
 const HEADER = 5;
 const SNAPSHOT_HEADER = 12;
 const SIZE_MAX = 0xffff;

@@ -8,6 +8,7 @@ import { deriveSessions } from '../../src/sessions/derive.ts';
 import type { DeriveInput } from '../../src/sessions/derive.ts';
 import { MARK_ORDER } from '../../src/sessions/types.ts';
 import type { DerivedSession } from '../../src/sessions/types.ts';
+import { ENDED_IN_WINDOW } from '../../src/store/types.ts';
 import type {
   EndDetail,
   EventRow,
@@ -1620,4 +1621,75 @@ test('every derived session carries the fields of the contract', () => {
     'transcript',
   ]);
   assert.equal(s.transcript?.sessionId, S1);
+});
+
+// F30: the end the window records when the program of a session it ended on the user's word has
+// exited (spool_name NULL, raw_detail ENDED_IN_WINDOW, detail exit): a deliberate exit, whatever
+// end Claude Code's own hook sends for the same process, and whichever comes first.
+const windowEnd = (p: ProcessKey, s: string, t: Ns): EventRow =>
+  event(p, s, t, 'end', 'exit', { spoolName: null, rawDetail: ENDED_IN_WINDOW });
+
+test('F30: a session the window ended is an ordinary ended session, also mid-turn, with or without a hook end', () => {
+  const busy = [live(P1, S1, 'busy')];
+  const cases: [string, EventRow[]][] = [
+    ['no hook end', [start(P1, S1, T0, 'startup'), windowEnd(P1, S1, T0 + 20n * SEC)]],
+    [
+      'the hook end first',
+      [
+        start(P1, S1, T0, 'startup'),
+        end(P1, S1, T0 + 10n * SEC, 'other'),
+        windowEnd(P1, S1, T0 + 20n * SEC),
+      ],
+    ],
+    [
+      'the hook end after it',
+      [
+        start(P1, S1, T0, 'startup'),
+        windowEnd(P1, S1, T0 + 10n * SEC),
+        end(P1, S1, T0 + 20n * SEC, 'other'),
+      ],
+    ],
+  ];
+  for (const [what, events] of cases) {
+    for (const liveFiles of [[], busy]) {
+      const s = session({ events, liveFiles, transcripts: [tr(S1, { lastTurnRole: 'user' })] }, S1);
+      assert.deepEqual(s.marks, [], `${what}, ${liveFiles.length === 0 ? 'idle' : 'working'}`);
+      assert.equal(s.lastHolding?.endDetail, 'exit', what);
+      assert.equal(s.state, 'not-running');
+      assert.equal(s.holders.length, 0);
+    }
+  }
+});
+
+test('F30: the window end changes nothing else: the launch, the directory and done are the session’s', () => {
+  const argv = ['claude', '--model', 'opus'];
+  const events = [
+    start(P1, S1, T0, 'startup', argv, { cwd: '/home/u/project' }),
+    windowEnd(P1, S1, T0 + 20n * SEC),
+    end(P1, S1, T0 + 21n * SEC, 'other'),
+  ];
+  const s = session({ events, metas: [meta(S1, { doneAtNs: T0 + 19n * SEC })] }, S1);
+  assert.deepEqual(s.launch, argv);
+  assert.equal(s.dir, '/home/u/project');
+  assert.equal(s.hidden, true, 'done before the end, and no activity after it');
+});
+
+test('F30: a window end of one session leaves the other sessions of the process as they are', () => {
+  // P1 held S2 until /clear moved it to S1, which the window ended; P2 ended holding S3 unseen.
+  const events = [
+    start(P1, S2, T0, 'startup'),
+    end(P1, S2, T0 + 5n * SEC, 'clear'),
+    start(P1, S1, T0 + 5n * SEC, 'clear'),
+    windowEnd(P1, S1, T0 + 20n * SEC),
+    start(P2, S3, T0, 'startup'),
+  ];
+  assert.deepEqual(session({ events }, S1).marks, []);
+  assert.equal(session({ events }, S2).lastHolding?.endDetail, 'clear', 'its own end, the clear');
+  assert.deepEqual(session({ events }, S3).marks, ['ended-unexpectedly']);
+});
+
+test('F30: an end with detail other but no window end stays unexpected (a closed terminal of its own)', () => {
+  const other = event(P1, S1, T0 + 10n * SEC, 'end', 'other', { rawDetail: 'other' });
+  const s = session({ events: [start(P1, S1, T0, 'startup'), other] }, S1);
+  assert.deepEqual(s.marks, ['ended-unexpectedly']);
 });

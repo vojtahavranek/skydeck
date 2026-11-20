@@ -3,7 +3,8 @@
  * one, close an ended terminal, open a link; from stage D edit a session (S2 12.5): its label,
  * group and note, done and undone, its pull requests; from stage C restore the banner's sessions
  * and dismiss its offer (S2 12.7); since F15 add and remove the new form's favourite flags (S2
- * 12.6); since F18 set or remove the session's ticket (S2 12.5). Every field of an action is the page's — any page that passed the handshake — so each
+ * 12.6); since F18 set or remove the session's ticket (S2 12.5); since F30 end a session's program and
+ * mark it done, on the user's word in the page's dialog (`end-session`, end-session.ts). Every field of an action is the page's — any page that passed the handshake — so each
  * one is checked here again and goes through step 1's own rules: a resume
  * names a session and nothing more (the guard, the lock and the command builder decide the rest,
  * S2 11.1), a new session's directory, label, group and flags are checked as `skydeck new` checks
@@ -33,6 +34,7 @@ import type { Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
 import { isBusy } from './busy.ts';
+import { createEndings } from './end-session.ts';
 import { splitFlags } from './flags.ts';
 import { addFavourite, removeFavourite } from './favourites.ts';
 import type { ActionHandler, TerminalHub } from './hub.ts';
@@ -94,7 +96,7 @@ type EditAction = Extract<
 
 const DONE: Answer = { ok: true, lines: [], error: null, sessionId: null };
 
-/** Principle 6: skydeck never ends a program; the user ends it inside it. */
+/** Principle 6: skydeck never ends a program by itself; `close-terminal` takes only an ended one. */
 const STILL_RUNS = 'the program still runs; end it inside claude';
 const NO_TERMINAL = 'this terminal is no longer there';
 const NOT_A_LINK = 'skydeck opens only http and https links of at most 2,048 characters';
@@ -201,7 +203,8 @@ function orNone(text: string): string | null {
  * `ok` with no lines or its error; without the dep the kind answers `skydeck cannot do that
  * action`, nothing done. F15's kinds (S2 12.6): `favourite-add` → addFavourite (the refusal's words,
  * or `ok` once the lists were told), `favourite-remove` → removeFavourite (`ok`; the lists told
- * only when it removed one).
+ * only when it removed one). F30's `end-session` → `endings.end` (end-session.ts): its refusal,
+ * or `ok` with `ended` once the program ended or the wait is over.
  *
  * Never rejects (2.5): an action that is not well formed is refused with one log line (the
  * parser's kind), and an unexpected error is answered `ok: false` and logged by kind (failureKind)
@@ -219,6 +222,8 @@ export function createActions(deps: ActionDeps): ActionHandler {
     terminalFor: (size) => deps.terminalFor(size),
     log: (line) => log(`act ${line}`),
   });
+  // F30: the one way the window ends a session's program, on the user's word in the dialog.
+  const endings = createEndings({ deck, hub, log, changed: () => deps.changed() });
 
   /**
    * Plan D9: an edit acts only on a session the store knows, a row of loadRows — the id is whole,
@@ -410,6 +415,10 @@ export function createActions(deps: ActionDeps): ActionHandler {
       }
       case 'favourite-remove':
         return removeFavourite(deck.store, action.text) ? wrote(action.kind) : DONE;
+      case 'end-session': {
+        const outcome = await endings.end(action.term, action.sessionId);
+        return outcome.ok ? { ...DONE, ended: outcome.ended } : refusal(outcome.error);
+      }
     }
   }
 
@@ -437,7 +446,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
 
   return {
     async act(_page, given) {
-      const { ok, lines, error, sessionId } = await answer(given);
+      const { ok, lines, error, sessionId, ended } = await answer(given);
       // Every text of a result passes the sanitiser step 1 prints with (ruled, review 2 of task
       // 32): whatever a message quotes, no escape sequence or line break reaches the page.
       return {
@@ -447,6 +456,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
         lines: lines.map(sanitize),
         error: error === null ? null : sanitize(error),
         sessionId,
+        ...(ended === undefined ? {} : { ended }),
       };
     },
   };

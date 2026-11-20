@@ -42,6 +42,8 @@ import { createBanner } from './banner.js';
 import { createCards } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
+import { createEndDialog } from './end-dialog.js';
+import { asksFirst, END_TEXTS } from './end-text.js';
 import { serverNow } from './format.js';
 import { createHelp } from './help.js';
 import { cancels, listKey, switcherKey, windowChord } from './keys.js';
@@ -102,6 +104,7 @@ const dom = {
   keyMessage: byId('key-message'),
   help: byId('help'),
   editor: byId('editor'),
+  endDialog: byId('end-dialog'),
   toast: byId('toast'),
   notifyOn: /** @type {HTMLButtonElement} */ (byId('notify-on')),
   switcher: byId('switcher'),
@@ -205,6 +208,8 @@ const state = {
   /** The key (`code`) whose keydown opened the dialog or the switcher shown, until it is
    *  released: its auto-repeats type nothing into the field. */
   openedBy: '',
+  /** F30: what had the keyboard when the dialog "Mark done" opened: Cancel gives it back. */
+  enderFrom: /** @type {Element | null} */ (null),
 };
 
 /** @type {ReturnType<typeof createConnection> | null} */
@@ -283,6 +288,19 @@ const editor = createEditor(dom.editor, {
   toast: (text, undo) => toast.show(text, undo),
   closed: () => dialogClosed(),
   now: () => listNow(),
+});
+// F30: the dialog "Mark done" of a session the window can end (web/end-dialog.js). Its presses
+// name the session and the terminal it was opened for, never the selection of the moment.
+const ender = createEndDialog(dom.endDialog, {
+  chose: (choice, session) => {
+    if (choice === 'end') {
+      endSession(session.sessionId, session.term, session.fromList);
+    } else {
+      keepRunning(session.sessionId, session.fromList);
+    }
+  },
+  gone: (text) => toast.show(text, null),
+  closed: (choice) => enderClosed(choice),
 });
 // Stage B (B15): a click on a notification passes the gate of a window chord, then selects. A
 // session this page's list does not show (its filter, the folded Earlier) and that has no terminal
@@ -371,9 +389,9 @@ createThemeSwitch(dom.themeButton, {
   },
 });
 
-/** Whether a dialog or the switcher is shown (D2, E11: then the page is modal). */
+/** Whether a dialog or the switcher is shown (D2, E11, F30: then the page is modal). */
 function modal() {
-  return editor.shown() || switcher.shown();
+  return editor.shown() || switcher.shown() || ender.shown();
 }
 
 // --- what the page says -------------------------------------------------------------------------
@@ -1096,7 +1114,9 @@ function placeOf(sessionId) {
  * session at a time, and none while its own act waits. A `done` that the server took shows the
  * Undo toast. `fromList`: this page's `d` in the list, after which S2 12.9's exception moves the
  * selection (`leaveDone`); the Done button leaves it to the main rule. The row is `sessionRow`'s:
- * the header's Done also marks a session the list does not show (E13).
+ * the header's Done also marks a session the list does not show (E13). F30: a session not marked
+ * done that the window can end (`asksFirst`) is marked nothing yet: the dialog "Mark done" asks
+ * first (`openEnder`); a running one it cannot end gets its own toast (`END_TEXTS.cannotEnd`).
  * @param {string} sessionId
  * @param {boolean} fromList
  */
@@ -1107,6 +1127,25 @@ function markDone(sessionId, fromList) {
     return;
   }
   if (state.marking.has(sessionId)) {
+    return;
+  }
+  if (asksFirst(row)) {
+    openEnder(row, fromList);
+    return;
+  }
+  sendDone(sessionId, fromList, END_TEXTS.cannotEnd);
+}
+
+/**
+ * The `done` or `undone` of `markDone` for the session's row as the list has it now; a `done` of a
+ * running session shows `runningText` in the toast (F30: `Keep it running` passes D15's own words).
+ * @param {string} sessionId
+ * @param {boolean} fromList
+ * @param {string} runningText
+ */
+function sendDone(sessionId, fromList, runningText) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null || state.marking.has(sessionId)) {
     return;
   }
   const kind = row.done ? 'undone' : 'done';
@@ -1132,15 +1171,120 @@ function markDone(sessionId, fromList) {
     // rule of Open (`open` in src/window/view/build.ts; ruled 13:05Z).
     const running =
       place !== null ? place.section === 'open' : row.starting || row.state !== 'not-running';
-    toast.show(running ? DONE_RUNNING : DONE_HIDDEN, () => undoDone(sessionId));
-    if (state.leaving?.sessionId === sessionId) {
-      state.leaving.answered = true;
-      if (state.leaving.listed) {
-        leaveDone(); // a list since the act was sent holds the result (ruled 06:38Z, 08:15Z)
-      } else {
-        sendView(); // as M2: the list that holds it comes at once (review 2's S3, ruled)
-      }
+    toast.show(running ? runningText : DONE_HIDDEN, () => undoDone(sessionId));
+    answeredDone(sessionId);
+  });
+}
+
+/** A `done` (or an end) of this page's `d` was answered: S2 12.9's exception, as D15 has it. */
+function answeredDone(/** @type {string} */ sessionId) {
+  if (state.leaving?.sessionId === sessionId) {
+    state.leaving.answered = true;
+    if (state.leaving.listed) {
+      leaveDone(); // a list since the act was sent holds the result (ruled 06:38Z, 08:15Z)
+    } else {
+      sendView(); // as M2: the list that holds it comes at once (review 2's S3, ruled)
     }
+  }
+}
+
+/**
+ * F30: the dialog "Mark done" for `row`, over the page (modal, D2): what had the keyboard is kept
+ * for Cancel.
+ * @param {RowPayload} row
+ * @param {boolean} fromList
+ */
+function openEnder(row, fromList) {
+  if (modal()) {
+    return;
+  }
+  // The key help lies over every dialog: it goes, so that nothing hides this one (as for the
+  // switcher), and while it is shown Ctrl+Shift+H is refused (`windowChordGate`).
+  help.hide();
+  state.enderFrom = document.activeElement;
+  ender.open(row, fromList);
+  appRoot.inert = true;
+}
+
+/**
+ * F30: the dialog closed, whatever closed it: the page is no longer inert; after Cancel the
+ * keyboard goes back where it was, else (and when that is gone) to the zone's holder — or to a
+ * terminal this page's resume brought meanwhile, as after any dialog.
+ * @param {'end' | 'keep' | 'cancel' | 'gone'} choice
+ */
+function enderClosed(choice) {
+  appRoot.inert = false;
+  const from = state.enderFrom;
+  state.enderFrom = null;
+  if (broughtTakesKeyboard()) {
+    return;
+  }
+  if (
+    choice === 'cancel' &&
+    from instanceof HTMLElement &&
+    from !== document.body &&
+    from.isConnected &&
+    from.checkVisibility()
+  ) {
+    from.focus();
+    return;
+  }
+  giveKeyboard();
+}
+
+/**
+ * F30's `Keep it running`: exactly D15's `d` on a running session — marked done, the Undo toast in
+ * its words, the same selection rule.
+ * @param {string} sessionId
+ * @param {boolean} fromList
+ */
+function keepRunning(sessionId, fromList) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null) {
+    toast.show(END_TEXTS.gone, null);
+    return;
+  }
+  if (row.done) {
+    toast.show(END_TEXTS.doneElsewhere, null);
+    return;
+  }
+  sendDone(sessionId, fromList, DONE_RUNNING);
+}
+
+/**
+ * F30's `End session and mark done`: `act end-session` for the session and the terminal the
+ * dialog was opened for. The toast says `Ending the session…` until the answer: ended (Undo marks
+ * it undone; the program does not come back), not ended within the server's wait (still marked
+ * done, as after Keep it running; Undo too), or refused (nothing was done; the server's words).
+ * After `d` in the list the selection follows D15's rule for a row that is gone.
+ * @param {string} sessionId
+ * @param {string} term
+ * @param {boolean} fromList
+ */
+function endSession(sessionId, term, fromList) {
+  if (state.marking.has(sessionId)) {
+    return;
+  }
+  const place = placeOf(sessionId);
+  if (fromList && place !== null) {
+    state.leaving = { sessionId, ...place, listed: false, answered: false };
+    state.undoTo = null;
+  }
+  state.marking.add(sessionId);
+  toast.show(END_TEXTS.ending, null, true);
+  void act({ kind: 'end-session', term, sessionId }).then((result) => {
+    state.marking.delete(sessionId);
+    if (!result.ok) {
+      if (state.leaving?.sessionId === sessionId) {
+        state.leaving = null; // a refused end moves nothing
+      }
+      toast.show(`End session: ${result.error ?? 'skydeck could not do that'}`, null);
+      return;
+    }
+    toast.show(result.ended === true ? END_TEXTS.ended : END_TEXTS.notEnded, () =>
+      undoDone(sessionId),
+    );
+    answeredDone(sessionId);
   });
 }
 
@@ -1360,6 +1504,7 @@ function received(message) {
       if (editor.shown()) {
         editor.update(message); // the dialog's session's row (task 38's list)
       }
+      ender.update(message); // F30: its own session, never the selection's
       // Stage B: the taskbar's count (S2 12.1), and the notifications of sessions that no
       // longer need you closed (B16). A list without `needYou` (stage A's) is none.
       document.title = windowTitle(message.needYou?.count ?? 0);
@@ -1730,9 +1875,10 @@ function xtermHasKeyboard() {
  * While the switcher is shown (E11): Ctrl+Shift+P (`switcher`, which closes it) and the reload keys
  * pass (nothing typed there is worth keeping); everything else, Ctrl+Shift+H too, says `close the
  * switcher first (Esc)` and does nothing else. While a dialog is shown: Ctrl+Shift+H (`help`)
- * passes; a reload passes unless the dialog holds text the user typed and did not save, when the
- * key bar says `save or cancel the edit first`; everything else says `close the edit first (Esc)`
- * and does nothing else.
+ * passes — not while F30's dialog "Mark done" is shown, which the help would cover —; a reload
+ * passes unless the dialog holds text the user typed and did not save, when the key bar says `save
+ * or cancel the edit first`; everything else says `close the edit first (Esc)` (`close the dialog
+ * first (Esc)` for "Mark done") and does nothing else.
  * @param {WindowChord['kind'] | string} kind
  * @returns {boolean} whether it may act
  */
@@ -1744,7 +1890,8 @@ function windowChordGate(kind) {
     say('close the switcher first (Esc)');
     return false;
   }
-  if (!modal() || kind === 'help') {
+  // F30: the key help would lie over the dialog "Mark done" and hide what Enter presses.
+  if (!modal() || (kind === 'help' && !ender.shown())) {
     return true;
   }
   if (kind === 'reload') {
@@ -1754,7 +1901,7 @@ function windowChordGate(kind) {
     say('save or cancel the edit first');
     return false;
   }
-  say('close the edit first (Esc)');
+  say(ender.shown() ? 'close the dialog first (Esc)' : 'close the edit first (Esc)');
   return false;
 }
 
@@ -1942,6 +2089,9 @@ function onKeyDown(event) {
   }
   if (editor.shown() && dialogKey(event)) {
     return;
+  }
+  if (ender.shown() && ender.key(event)) {
+    return; // F30: Esc, Tab, Enter and Space are the dialog's
   }
   const zone = state.zone;
   let handled = false;

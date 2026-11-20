@@ -1130,10 +1130,11 @@ export interface EditWorld {
   /** The page's `n`-th act (1, 2, …), once it has come (fails after PAGE_WAIT_MS). */
   act(n: number): Promise<Record<string, unknown>>;
   /** Answers `act` with a `result` on the connection the page uses now: `ok`, for a refusal its
-   *  `error` (which is also its one line), and the session a resume or new brings. */
+   *  `error` (which is also its one line), the session a resume or new brings, and F30's `ended`
+   *  of an `end-session` (left out when not given). */
   answer(
     act: Record<string, unknown>,
-    result: { ok: boolean; error?: string; sessionId?: string },
+    result: { ok: boolean; error?: string; sessionId?: string; ended?: boolean },
   ): void;
   /** Sends `list` now (unless `send` is false), and as the answer to every later `view`; a
    *  function is given the selection of the page's last `view`. */
@@ -1216,6 +1217,7 @@ export async function editWorld(
         lines: error === null ? [] : [error],
         error,
         sessionId: result.sessionId ?? null,
+        ...(result.ended === undefined ? {} : { ended: result.ended }),
       });
     },
     list(list, options = {}) {

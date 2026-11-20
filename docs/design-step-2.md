@@ -85,10 +85,15 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   file cannot be written); a python3 elsewhere on `PATH` may still run the keepers, so the
   server can open terminals all the same. That a limit of 1 aborts the dump on WSL's
   kernel 6.18 (not read) is **UNVERIFIED** (check W24).
-- **Principle 6 (nothing is destroyed or moved automatically; skydeck never stops a process)** is
-  made precise: skydeck never stops a `claude` process or a keeper (stopping a keeper would end
-  its session). It may stop its own server and its own keep-alive process (6.1). The window has no
-  "kill" action: a session ends when the user ends it inside `claude`.
+- **Principle 6 (nothing is destroyed or moved automatically; skydeck never stops a process by
+  itself)** is made precise: skydeck never stops a `claude` process or a keeper by itself
+  (stopping a keeper would end its session). It may stop its own server and its own keep-alive
+  process (6.1). The window has no "kill" action. It ends a session's program only when the user
+  asks for it, each time, in the dialog "Mark done" of a session running in a terminal of the
+  window (follow-up F30, 12.10): its keeper sends that program SIGHUP and then SIGCONT, what the
+  kernel sends when a terminal's window is closed, and nothing else — never SIGTERM or SIGKILL, and
+  never to a session in another terminal. Every other session ends when the user ends it inside
+  `claude`.
 - **Principle 8 (local only)**: the server listens on the loopback interface only (15). The only
   network use is still `gh`.
 - **Windows programs.** Step 2 is the first time skydeck starts Windows programs by itself, through
@@ -1088,10 +1093,13 @@ until it ends; the tenth and later terminals get none. The slot is part of the k
 
 The keeper file states its version and the protocol version it speaks (`hello`, 8.1). A running
 keeper is never replaced: a new keeper version applies to terminals opened after the server that
-starts them was updated. The server speaks every keeper protocol version that has shipped (they
-are small); it refuses to attach a keeper with a newer protocol than it knows and shows "this
-terminal was started by a newer skydeck; run skydeck window --restart" on it. Its program keeps
-running.
+starts them was updated. Version 2 added the hello's `tailFrom`; version 3 (follow-up F30) the
+hang-up `E`, within protocol 1. The server sends `E` only to a keeper whose hello says version 3 or
+later: a keeper of version 2 would close the connection on a type it does not know, so its terminal
+is served as before and its session cannot be ended from the window (12.10). The server speaks every
+keeper protocol version that has shipped (they are small); it refuses to attach a keeper with a
+newer protocol than it knows and shows "this terminal was started by a newer skydeck; run skydeck
+window --restart" on it. Its program keeps running.
 
 ### 7.8 When the program ends
 
@@ -1225,6 +1233,7 @@ keeper). Protocol version 1:
 | `Z` resize | server → keeper | `"<cols> <rows>"`: sets the pty size, appends an `R` record and sends it back, so the resize takes its place in the stream. |
 | `P` park | server → keeper | 8-byte record number, 2-byte cols, 2-byte rows, snapshot. The keeper keeps it and drops the tail's records up to that number. |
 | `A` acknowledge | server → keeper | The server has the exit; the keeper may end (7.8). |
+| `E` hang up | server → keeper | Empty (a payload is never read). Keeper version 3 (follow-up F30): the keeper sends SIGHUP and then SIGCONT to the program it started — to its pid, which `pty.fork` made the leader of a session of its own whose controlling terminal is the pty, as the kernel signals that leader when a terminal's other end is closed (SIGCONT: a stopped program goes on, and gets its SIGHUP) — while it has not reaped it, and nothing else: it reads the output, reaps the program and sends `X` as for any end. Before the start, after the end, and to a program that ignores SIGHUP, nothing more happens. Each `E` is one hang-up; the server sends one per request (12.10). |
 
 A connection whose first frame is not `C` is closed. The server closes a connection whose keeper
 sends what the codec refuses, a first frame that is not `H`, a `hello` of another terminal, a
@@ -1498,6 +1507,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `ticket` | `sessionId`, `text` (a link or a key as typed; empty removes the ticket) | 12.5 (follow-up F18): the server reads `text` by design 7.1's rule (`readTicket`) and stores the address, replacing the ticket before; a refusal's words are the result's error, nothing stored. `text` is held to the URL limit, so that a link of 2,048 characters is sent whole. Every page's `list` follows. |
 | `ticket-refresh` | `sessionId` | 12.5 (follow-up F19): reads the status of the session's ticket — the one set, else the group's link — now, whatever its age, in the background, answered `ok` at once; every page's `list` follows when the result is saved. Refused with `no status is read for this session's ticket` when no provider takes its address, or the session has none. `ticket` also asks for the read when a provider takes the new address. |
 | `close-terminal` | `term` | Forgets an ended or not-started terminal's last screen (7.8). Refused for a terminal whose program runs (principle 6). |
+| `end-session` | `term`, `sessionId` | Follow-up F30, 12.10: the dialog's `End session and mark done`. Refused, nothing done, unless the window's terminal `term` shows the session, its program runs and its keeper can be ended now (version 3, connected), the store knows the session, it is not marked done, it runs and a holder of it belongs to that terminal (7.5); and while a request for the same terminal waits (`skydeck is ending this session already`: no second signal). Then the session is marked done (as `done`), every page's list follows, and the keeper is sent `E`. The result comes when the program has ended — `ok` with `ended` true; the server records the end (12.10) and closes the terminal as `close-terminal` does — or 10 seconds later, `ok` with `ended` false: the session stays marked done and running, and the server goes on following that terminal until its program exits, then records the end and closes it the same way (it stops when the terminal is lost or forgotten). Once that result came, a new request for the terminal (the session undone and asked again) is taken as the first was. |
 | `open-link` | `url` | 9.6. |
 | `dismiss-restore` | `bootId` (the earlier boot the banner offers, a lower-case UUID: the form of `/proc/sys/kernel/random/boot_id`) | 12.7. |
 | `favourite-add` | `text` (the flags field's whole text), and optional `at` (a whole number from 0 to 11: Undo's old place) | 12.6 (follow-up F15): the text, trimmed, becomes a favourite — last, or at place `at` (past the end: last) — unless 12.6's rule refuses it; the refusal's words are the result's error, nothing saved. Every page's `list` follows. |
@@ -3525,6 +3535,54 @@ A session marked done disappears as in design 7.1, except that a running session
 stays under Open with a `done` mark until it stops (then it is hidden). Marking done shows an Undo
 toast.
 
+**Ending it (follow-up F30).** A row carries `endable` while its session runs in the row's
+terminal of the window and that terminal can be ended: its keeper is of version 3 or later (7.7)
+and connected. `d` or the header's `Done` on such a session, not marked done, marks nothing yet: a
+modal dialog over the list and the terminal asks, in the manner of 12.5's dialogs — `Mark done:
+<title>` (the list's title, cut to 60 characters with `…`, whole in its tooltip, isolated from the
+words around it), `This session is still running.`, and while it works `It is working: ending it
+now stops the current turn.` —, with three buttons: `End session and mark done` (the primary one),
+`Mark done, keep it running`, `Cancel`. Esc is Cancel; Tab and →, Shift+Tab and ←, walk the three
+and stay inside; Enter or Space press the one that has the keyboard, at a fresh press only (the
+`d` that opened it, an auto-repeat, or a key held since before it opened presses nothing). The
+keyboard always starts on the second button, `Mark done, keep it running` (ruled at review: any
+word ending in `d` typed into the list by mistake before Enter or Space must never end a session,
+and no rule about typed characters or a dead time stops that); it comes to the End button only by
+the user's own Tab, Shift+Tab, arrow or click, so `d`, ←, Enter ends a session. When the session
+turns working while the dialog is shown, a keyboard on the End button moves back to the second
+button, and nothing moves it by itself towards the End button. Ctrl+Shift+H is refused while the
+dialog is shown (`close the dialog first (Esc)`), and opening it hides the key help: the help
+would lie over it. The dialog belongs to the session and the
+terminal it opened for: when that session stops running there, is marked done in another window or
+leaves the list, it closes, nothing done, and the toast says why (`It stopped by itself: nothing
+was marked done.`, `It was marked done in another window: nothing was ended.`, `It left the list:
+nothing was marked done.`). Cancel changes nothing and gives the keyboard back where it was. `Mark
+done, keep it running` is `d` as before. `End session and mark done` sends `end-session` (8.2.3);
+the toast says `Ending the session…` until its answer: `Ended and marked done: hidden from the
+list.` with Undo (which marks it undone: it shows under Recent and can be resumed; it does not
+bring the program back), `Marked done. It has not ended yet: end it inside claude if it stays
+open.` with Undo when it has not ended within 10 seconds, or `End session: <why>` for a refusal.
+The terminal is closed by the server once the program ended (also after the 10 seconds), so the row
+leaves Open and, done, is hidden; after `d` in the list the selection follows 12.9's rule for a row
+gone after `d` (a row of Open: nothing else is selected).
+
+A session ended so is an ordinary ended one: once its program has exited the server stores an `end`
+of detail `exit` for each of its holders that belonged to the terminal (no spool file, raw detail
+`skydeck-window`; no change of the schema), and design 6.3 reads that holding as a deliberate exit
+whatever end Claude Code's own hook sends after its hang-up (reason `other`, design 14), before or
+after it — also when the program ends only after the 10 seconds (the server follows the terminal
+until then). So it is never `ended-unexpectedly` or `was-working`, never needs you as an ended
+terminal (12.4), restore never offers it (design 7.8), and it resumes as any other, with its flags.
+A known limit: what the server follows is held in its memory only, so when the server is restarted
+(or stops) while a program it hung up is still ending, the end is not recorded and reads as
+Claude Code's own hook reports it (`other`: ended unexpectedly).
+
+A running session the window cannot end — in another terminal (7.9), or in a terminal of the window
+whose keeper is older, lost or not connected — gets no dialog: `d` marks it done, and the toast says
+`Marked done. skydeck cannot end this one: end it in its terminal. Hidden once it stops.` A session
+that does not run, `d` on a session marked done, `Undone`, `close-terminal` and every command of the
+command line are unchanged; nothing ends a session from the command line.
+
 ### 12.11 The nine picks
 
 Approved with the mockup on 2026-11-13. Picks 5 and 8 cannot be seen in the mockup: they are the
@@ -4497,6 +4555,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (the header's flags, F16, and `skydeck show`); removed with ×, `Undo` puts it back at its place; with a session of the user's in a group selected, the form shows that group's chip, and a click puts the name into the Group field (nothing started). It types no prompt and changes no real session. | F15, F28 | 12.6, 10.2 |
 | W37 | A ticket on a throwaway session (follow-up F18): set by a whole link (`https://example.com/browse/TRY-1`, a host that opens nothing private), the header's third line starts with its chip `TRY-1 ↗`, its tooltip the address, a click opens it where links open (W12); set by a key only while `ticketUrl` is configured (else that step is skipped); removed with an empty text, the chip gone and `+ ticket` back; `skydeck show` prints `ticket:` while one is set. Every step checks the header's short id or the dialog's heading first; at the end the session has no ticket. | F18 | 12.5, 10.2 |
 | W38 | A ticket's status on the throwaway session (follow-up F19), asking no real tracker: a stand-in program the owner writes in a throwaway folder (`~/skydeck-try/status`, its three lines given) answers for a `ticketStatus` rule whose `match` is `https://example.com/try/`; the ticket `https://example.com/try/TRY-1` on the throwaway session shows `TRY-1 · In Progress ↗` in blue in the header and `In Progress` in the row's small chip; the answer changed to each category and ↻ pressed in the ticket dialog: `blocked` red, `review` amber, `doing` blue, `done` green, `todo` and `closed` grey; a failure (the program made not executable) keeps the old status and its tooltip says `status not read: …`; `skydeck show` prints `ticket:` with ` · <status>`. Every step checks the header's short id or the dialog's heading first; at the end the ticket is removed, `config.json` is as it was (restored from a copy), and the stand-in is deleted. | F19 | 12.5, 12.2, 12.3, 10.2 |
+| W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
