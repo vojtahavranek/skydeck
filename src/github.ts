@@ -141,8 +141,9 @@ const CONTEXTS_ASKED = 100;
 /**
  * Follow-up F32: what GitHub needs before it merges, beside its decision and the rollup's state:
  * its merge state, the writers' latest reviews, the review threads, the rules of the base branch
- * (rulesets; never the classic `branchProtectionRule`, which can need more than read access and
- * already shows in `reviewDecision`) and the names of the checks the last commit has reported.
+ * (rulesets, each rule with its ruleset's enforcement; never the classic `branchProtectionRule`,
+ * which can need more than read access and already shows in `reviewDecision`) and the names of the
+ * checks the last commit has reported.
  * Asked under an alias of its own, `q<i>` on p<i>'s variables: `mergeStateStatus` and
  * `reviewThreads` cannot be null in GitHub's schema, so an error inside them nulls the whole
  * `pullRequest` around them — q<i>'s, while p<i> is read exactly as before (`readMerge`).
@@ -151,7 +152,8 @@ const MERGE_FIELDS = [
   'mergeStateStatus',
   `latestOpinionatedReviews(first: ${REVIEWS_ASKED}, writersOnly: true) { totalCount nodes { state } }`,
   `reviewThreads(first: ${THREADS_ASKED}) { totalCount nodes { isResolved } }`,
-  `baseRef { rules(first: ${RULES_ASKED}) { totalCount nodes { type parameters { __typename` +
+  `baseRef { rules(first: ${RULES_ASKED}) { totalCount nodes { type repositoryRuleset { enforcement }` +
+    ' parameters { __typename' +
     ' ... on PullRequestParameters { requiredApprovingReviewCount requiredReviewThreadResolution }' +
     ' ... on RequiredStatusChecksParameters { requiredStatusChecks { context } } } } } }',
   'commits(last: 1) { nodes { commit { statusCheckRollup {' +
@@ -169,6 +171,14 @@ const MERGE_FIELDS = [
  * for no pull request is not valid GraphQL).
  */
 export function batchArgs(keys: readonly PrKey[]): string[] {
+  return queryArgs(keys, true);
+}
+
+/**
+ * batchArgs with (`withMerge`) or without the q<i> aliases; without them it is the query of before
+ * F32, letter for letter, which `fetchBatch` asks once more when GitHub rejects the new one.
+ */
+function queryArgs(keys: readonly PrKey[], withMerge: boolean): string[] {
   if (keys.length < 1 || keys.length > PR_BATCH_SIZE) {
     throw new RangeError(`a batch holds 1 to ${PR_BATCH_SIZE} pull requests, not ${keys.length}`);
   }
@@ -179,7 +189,9 @@ export function batchArgs(keys: readonly PrKey[]): string[] {
     .map(
       (_, i) =>
         `p${i}: repository(owner: $o${i}, name: $r${i}) { pullRequest(number: $n${i}) { ${PULL_REQUEST_FIELDS} } }` +
-        ` q${i}: repository(owner: $o${i}, name: $r${i}) { pullRequest(number: $n${i}) { ${MERGE_FIELDS} } }`,
+        (withMerge
+          ? ` q${i}: repository(owner: $o${i}, name: $r${i}) { pullRequest(number: $n${i}) { ${MERGE_FIELDS} } }`
+          : ''),
     )
     .join(' ');
   const args = [
@@ -337,7 +349,9 @@ function unresolvedThread(value: unknown): boolean {
  * The rules of the base branch (`baseRef.rules`): the largest count of approvals a PULL_REQUEST
  * rule needs, whether one (or a REQUIRED_REVIEW_THREAD_RESOLUTION rule) asks for resolved
  * conversations, the contexts of the REQUIRED_STATUS_CHECKS rules. Rules of other types are
- * passed by. A rule that cannot be read leaves them incomplete; null for no base branch or no list.
+ * passed by, and so is a rule whose ruleset is not enforced (ruled: `EVALUATE` or `DISABLED`); one
+ * whose enforcement cannot be read counts, as GitHub documents the list as the active rules. A rule
+ * that cannot be read leaves them incomplete; null for no base branch or no list.
  */
 function baseRules(baseRef: unknown): Rules | null {
   const seen = isRecord(baseRef) ? connection(baseRef['rules']) : null;
@@ -349,6 +363,11 @@ function baseRules(baseRef: unknown): Rules | null {
     const type = isRecord(node) ? node['type'] : undefined;
     const parameters = isRecord(node) ? node['parameters'] : undefined;
     const params = isRecord(parameters) ? parameters : {};
+    const ruleset = isRecord(node) ? node['repositoryRuleset'] : undefined;
+    const enforcement = isRecord(ruleset) ? ruleset['enforcement'] : undefined;
+    if (enforcement === 'EVALUATE' || enforcement === 'DISABLED') {
+      continue;
+    }
     if (typeof type !== 'string') {
       rules.complete = false;
     } else if (type === 'PULL_REQUEST') {
@@ -421,10 +440,26 @@ function reportedChecks(commits: unknown): ReadonlySet<string> | null {
 }
 
 /**
+ * An error whose path is under one rule's ruleset (q<i>, pullRequest, baseRef, rules, nodes, <n>,
+ * repositoryRuleset, …): `repositoryRuleset` can be null, so the error nulls nothing else, and the
+ * rule counts as one whose enforcement cannot be read.
+ */
+function isEnforcementError(path: readonly unknown[]): boolean {
+  return (
+    path[2] === 'baseRef' &&
+    path[3] === 'rules' &&
+    path[4] === 'nodes' &&
+    typeof path[5] === 'number' &&
+    path[6] === 'repositoryRuleset'
+  );
+}
+
+/**
  * The q<i> part of the answer (MERGE_FIELDS). Null when it is not there (no alias, a null
  * repository or pull request, an error at q<i> or its pull request). A part that an error of the
  * answer lies under (path q<i>, pullRequest, <part>, …) is not used at all: a value GitHub nulled
- * by an error (a rollup, a list) would else read as a fact.
+ * by an error (a rollup, a list) would else read as a fact. An error under a rule's
+ * `repositoryRuleset` only leaves that rule's enforcement unread (`isEnforcementError`).
  */
 function readMerge(
   data: Record<string, unknown>,
@@ -439,7 +474,7 @@ function readMerge(
   const hit = new Set<unknown>();
   for (const entry of Array.isArray(errors) ? (errors as unknown[]) : []) {
     const path = isRecord(entry) ? entry['path'] : undefined;
-    if (Array.isArray(path) && path[0] === alias) {
+    if (Array.isArray(path) && path[0] === alias && !isEnforcementError(path)) {
       if (path.length <= 2) {
         return null;
       }
@@ -683,25 +718,68 @@ function ghEnvironment(env: Env): Record<string, string> {
   return result;
 }
 
-/** One `gh` call for one batch. A runner that rejects (gh not executable, say) fails the batch. */
+/**
+ * F32 (ruled): GitHub rejected the query as a whole. It checks a query before it runs it, so a
+ * field or a type its schema no longer has fails every pull request of the batch: the answer has
+ * no `data`, and its errors name the query (`path` from `query`) or a code of that check
+ * (`extensions.code`). A timeout, a rate limit or GitHub's own failure is none of these.
+ */
+function rejectedQuery(result: RunResult): boolean {
+  if (result.timedOut || result.notFound) {
+    return false;
+  }
+  let answer: unknown;
+  try {
+    answer = JSON.parse(result.stdout);
+  } catch {
+    return false;
+  }
+  const errors = isRecord(answer) ? answer['errors'] : undefined;
+  if (!isRecord(answer) || isRecord(answer['data']) || !Array.isArray(errors)) {
+    return false;
+  }
+  return (errors as unknown[]).some((entry) => {
+    const path = isRecord(entry) ? entry['path'] : undefined;
+    const extensions = isRecord(entry) ? entry['extensions'] : undefined;
+    return (
+      (Array.isArray(path) && path[0] === 'query') ||
+      (isRecord(extensions) && typeof extensions['code'] === 'string')
+    );
+  });
+}
+
+/**
+ * One `gh` call for one batch. A runner that rejects (gh not executable, say) fails the batch.
+ * F32 (ruled), the one second request: when GitHub rejects the query as a whole
+ * (`rejectedQuery`), the batch is asked once more with the query of before F32 (same variables,
+ * timeout and environment) and read as before — never worse than before, after a schema change
+ * too. Not when the signal has fired meanwhile.
+ */
 async function fetchBatch(
   deps: Deps,
   keys: readonly PrKey[],
   signal: AbortSignal | undefined,
 ): Promise<Map<string, PrFetchResult>> {
-  const args = batchArgs(keys);
   const options: RunOptions = { timeoutMs: GH_TIMEOUT_MS, env: ghEnvironment(deps.env) };
   if (signal !== undefined) {
     options.signal = signal;
   }
-  let result: RunResult;
-  try {
-    result = await deps.runner.run('gh', args, options);
-  } catch (error) {
-    const reason = firstLine(error instanceof Error ? error.message : String(error));
-    return failAll(keys, deps.clock.nowNs(), `gh could not be run: ${reason ?? 'unknown error'}`);
+  /** The run's result, or the words of a runner that rejected. */
+  const ask = async (args: string[]): Promise<RunResult | string> => {
+    try {
+      return await deps.runner.run('gh', args, options);
+    } catch (error) {
+      const reason = firstLine(error instanceof Error ? error.message : String(error));
+      return `gh could not be run: ${reason ?? 'unknown error'}`;
+    }
+  };
+  let result = await ask(batchArgs(keys));
+  if (typeof result !== 'string' && rejectedQuery(result) && signal?.aborted !== true) {
+    result = await ask(queryArgs(keys, false));
   }
-  return parseBatch(keys, result, deps.clock.nowNs());
+  return typeof result === 'string'
+    ? failAll(keys, deps.clock.nowNs(), result)
+    : parseBatch(keys, result, deps.clock.nowNs());
 }
 
 /**

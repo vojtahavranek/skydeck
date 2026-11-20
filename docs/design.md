@@ -424,7 +424,9 @@ never received a prompt has no transcript (14).
   the repository ("writers"), the review threads, the rules of the base branch (its rulesets; never
   the classic branch protection, which can need more than read access and shows in the decision)
   and the names of the checks the last commit has reported: at most 50 reviews and 50 rules, 100
-  threads and 100 checks. From them:
+  threads and 100 checks. Only the rules of rulesets that are enforced count: a rule whose ruleset
+  is in evaluate mode or disabled is passed by; one whose ruleset's enforcement cannot be read
+  counts (GitHub documents the list as the active rules). From them:
   - the checks are pending when the rollup says so, or when a check the rules require is not among
     the reported ones (only when every reported one was seen);
   - the review is the first that applies of: changes requested (the decision, or a writer's latest
@@ -440,6 +442,10 @@ never received a prompt has no transcript (14).
     rest, exactly as before F32 where nothing better is known: none of them makes it "can't read".
     No column was added: the review is stored with three more values; a row read before F32 shows
     as before until it is read again.
+  - When GitHub rejects the query as a whole (it checks a query before it runs it: a field or a
+    type its schema no longer has), the batch is asked once more with the query of before F32
+    and read as before. That is the one second request, only after that failure; a timeout, a
+    rate limit or any other failure is not asked again.
 - Merged and closed pull requests are never fetched again. A pull request that no session has
   attached any more (every attachment detached) is not refreshed either, an explicit refresh
   included. The others are refreshed by two rules. An **automatic** refresh (the interactive list

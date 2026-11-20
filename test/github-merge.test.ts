@@ -239,7 +239,7 @@ describe('F32: the one query asks for what GitHub needs before it merges', () =>
       'mergeStateStatus',
       'latestOpinionatedReviews(first: 50, writersOnly: true) { totalCount nodes { state } }',
       'reviewThreads(first: 100) { totalCount nodes { isResolved } }',
-      'baseRef { rules(first: 50) { totalCount nodes { type parameters { __typename',
+      'baseRef { rules(first: 50) { totalCount nodes { type repositoryRuleset { enforcement } parameters { __typename',
       '... on PullRequestParameters { requiredApprovingReviewCount requiredReviewThreadResolution }',
       '... on RequiredStatusChecksParameters { requiredStatusChecks { context } }',
       'statusCheckRollup { contexts(first: 100) { totalCount nodes { __typename ... on CheckRun { name } ... on StatusContext { context } } } }',
@@ -998,5 +998,275 @@ describe('F32: fetchPrs saves the new facts in the columns there are', () => {
       runner.calls.map((call) => call.args.filter((arg) => /^n\d+=/.test(arg)).length),
       [10, 10, 5],
     );
+  });
+});
+
+// --- ruled: only rules of enforced rulesets count -------------------------------------------------
+
+describe('F32: only the rules of rulesets that are enforced count', () => {
+  /** `rule` in a ruleset of `enforcement`; null: the ruleset cannot be read. */
+  const inRuleset = (rule: Record<string, unknown>, enforcement: unknown) => ({
+    ...rule,
+    repositoryRuleset: enforcement === null ? null : { enforcement },
+  });
+
+  test("the query asks each rule for its ruleset's enforcement", () => {
+    const query = (batchArgs([KEY7])[5] ?? '').slice('query='.length);
+    assert.ok(
+      query.includes('nodes { type repositoryRuleset { enforcement } parameters { __typename'),
+      query,
+    );
+  });
+
+  test('a ruleset in evaluate mode that would ask for two approvals asks for none; disabled likewise', () => {
+    for (const enforcement of ['EVALUATE', 'DISABLED']) {
+      const q = merge({ rules: [inRuleset(reviewRule(2, true), enforcement)], threads: [false] });
+      const result = parseOne(answer(basics(null, 'SUCCESS'), q));
+      assert.equal(result.ok && result.review, 'not-required', enforcement);
+      assert.equal(prLevel(rowOf(result)), 'checks-passing', enforcement);
+    }
+    const active = merge({ rules: [inRuleset(reviewRule(2, true), 'ACTIVE')], threads: [false] });
+    assert.equal(levelOf(basics(null, 'SUCCESS'), active), 'review-required');
+  });
+
+  test('required checks and resolved conversations of a ruleset in evaluate mode are not asked for', () => {
+    const checks = merge({
+      rules: [inRuleset(checksRule('deploy'), 'EVALUATE')],
+      contexts: [context('build')],
+    });
+    const result = parseOne(answer(basics(null, 'SUCCESS'), checks));
+    assert.equal(result.ok && result.checks, 'passing');
+    const threads = merge({
+      rules: [
+        inRuleset({ type: 'REQUIRED_REVIEW_THREAD_RESOLUTION', parameters: null }, 'EVALUATE'),
+      ],
+      threads: [false],
+    });
+    assert.equal(levelOf(basics('APPROVED', 'SUCCESS'), threads), 'approved-green');
+  });
+
+  test('an enforced rule beside one in evaluate mode still counts, by its own count', () => {
+    const q = merge({
+      rules: [inRuleset(reviewRule(3), 'EVALUATE'), inRuleset(reviewRule(1), 'ACTIVE')],
+      reviews: ['APPROVED'],
+    });
+    assert.equal(levelOf(basics(null, 'SUCCESS'), q), 'approved-green');
+  });
+
+  test('where the enforcement cannot be read, the rule counts', () => {
+    for (const rule of [
+      reviewRule(2),
+      inRuleset(reviewRule(2), null),
+      inRuleset(reviewRule(2), 7),
+      inRuleset(reviewRule(2), 'SOMETHING_NEW'),
+      { ...reviewRule(2), repositoryRuleset: {} },
+      { ...reviewRule(2), repositoryRuleset: 'x' },
+    ]) {
+      const q = merge({ rules: [rule] });
+      assert.equal(levelOf(basics(null, 'SUCCESS'), q), 'review-required', JSON.stringify(rule));
+    }
+  });
+
+  test("an error under a rule's ruleset leaves the rules read, and that rule counting", () => {
+    const q = merge({ rules: [inRuleset(reviewRule(2), null), checksRule('deploy')] });
+    for (const tail of [['repositoryRuleset'], ['repositoryRuleset', 'enforcement']]) {
+      const errors = [
+        {
+          path: ['q0', 'pullRequest', 'baseRef', 'rules', 'nodes', 0, ...tail],
+          message: 'Resource not accessible by integration',
+        },
+      ];
+      const result = parseOne(answer(basics(null, 'SUCCESS'), q, errors), { code: 1 });
+      assert.deepEqual(result.ok && [result.review, result.checks], ['review-required', 'pending']);
+    }
+  });
+});
+
+// --- ruled: a query GitHub rejects as a whole is asked once more, as before F32 -------------------
+
+describe('F32: a query GitHub rejects as a whole is asked once more with the query of before', () => {
+  /** The query of before F32 for one pull request, exactly as main sent it. */
+  const BEFORE =
+    'query=query($o0: String!, $r0: String!, $n0: Int!) { p0: repository(owner: $o0, name: $r0) { pullRequest(number: $n0) { title state isDraft reviewDecision commits(last: 1) { nodes { commit { statusCheckRollup { state } } } } } } }';
+
+  /** What gh prints when GitHub refuses a query it cannot validate (as seen from GitHub). */
+  function rejected(kind: 'field' | 'type' = 'field'): RunResult {
+    const error =
+      kind === 'field'
+        ? {
+            path: ['query', 'q0', 'pullRequest', 'mergeStateStatus'],
+            extensions: {
+              code: 'undefinedField',
+              typeName: 'PullRequest',
+              fieldName: 'mergeStateStatus',
+            },
+            locations: [{ line: 1, column: 300 }],
+            message: "Field 'mergeStateStatus' doesn't exist on type 'PullRequest'",
+          }
+        : {
+            path: [
+              'query',
+              'q0',
+              'pullRequest',
+              'baseRef',
+              'rules',
+              'nodes',
+              'parameters',
+              '... on PullRequestParameters',
+            ],
+            extensions: { code: 'undefinedType', typeName: 'PullRequestParameters' },
+            locations: [{ line: 1, column: 400 }],
+            message: "No such type PullRequestParameters, so it can't be a fragment condition",
+          };
+    return runResult({
+      code: 1,
+      stdout: JSON.stringify({ errors: [error] }),
+      stderr: `gh: ${error.message}\n`,
+    });
+  }
+
+  function deck(t: TestContext, urls: string[], handler: (call: RunCall) => RunResult) {
+    const store = openStore(join(sandbox(t).root, 'skydeck.db'));
+    t.after(() => {
+      store.close();
+    });
+    store.transaction(() => {
+      for (const url of urls) {
+        const parsed = key(url);
+        store.ensurePr({ url, owner: parsed.owner, repo: parsed.repo, number: parsed.number });
+      }
+    });
+    const runner = fakeRunner(handler);
+    return {
+      store,
+      runner,
+      deps: { runner, clock: fakeClock(T0), store, env: { PATH: '/usr/bin' } },
+    };
+  }
+
+  /** gh's answer of before for every alias of a call: p<i> only. */
+  const before = (call: RunCall): RunResult => {
+    const count = call.args.filter((arg) => /^n\d+=/.test(arg)).length;
+    const data = Object.fromEntries(
+      Array.from({ length: count }, (_, i) => [
+        `p${i}`,
+        { pullRequest: basics('APPROVED', 'SUCCESS') },
+      ]),
+    );
+    return runResult({ stdout: JSON.stringify({ data }) });
+  };
+
+  test('an unknown field: once more with the query of before, on the same variables, read as before', async (t) => {
+    let call = 0;
+    const d = deck(t, [URL7], (c) => (++call === 1 ? rejected() : before(c)));
+    assert.deepEqual(await fetchPrs(d.deps, [URL7]), { fetched: 1, failed: 0 });
+    assert.equal(d.runner.calls.length, 2);
+    const [first, second] = d.runner.calls;
+    assert.ok(first && second);
+    assert.ok(first.args[5]?.includes(' q0: '), 'the first asks the new query');
+    assert.equal(second.args[5], BEFORE);
+    assert.deepEqual(second.args.slice(0, 5), first.args.slice(0, 5));
+    assert.deepEqual(second.args.slice(6), first.args.slice(6));
+    assert.deepEqual(second.options, first.options, 'the same timeout and environment');
+    const row = d.store.prs().find((p) => p.url === URL7);
+    assert.ok(row);
+    assert.deepEqual([row.review, row.checks, row.error], ['approved', 'passing', null]);
+    assert.equal(prLevel(row), 'approved-green');
+  });
+
+  test('an unknown type in a fragment condition is a rejection too', async (t) => {
+    let call = 0;
+    const d = deck(t, [URL7], (c) => (++call === 1 ? rejected('type') : before(c)));
+    assert.deepEqual(await fetchPrs(d.deps, [URL7]), { fetched: 1, failed: 0 });
+    assert.equal(d.runner.calls[1]?.args[5], BEFORE);
+  });
+
+  test('rejected again: the pull requests fail with what the second gh said, as before; no third call', async (t) => {
+    const d = deck(t, [URL7], () => rejected());
+    assert.deepEqual(await fetchPrs(d.deps, [URL7]), { fetched: 0, failed: 1 });
+    assert.equal(d.runner.calls.length, 2);
+    const row = d.store.prs().find((p) => p.url === URL7);
+    assert.equal(row?.error, "gh: Field 'mergeStateStatus' doesn't exist on type 'PullRequest'");
+  });
+
+  test('each batch on its own: only the rejected batch is asked again, for its own pull requests', async (t) => {
+    const urls = Array.from({ length: 15 }, (_, i) => `https://github.com/o/r/pull/${i + 1}`);
+    let call = 0;
+    const d = deck(t, urls, (c) => (++call === 1 ? rejected() : before(c)));
+    assert.deepEqual(await fetchPrs(d.deps, urls), { fetched: 15, failed: 0 });
+    const numbers = (c: RunCall) => c.args.filter((arg) => /^n\d+=/.test(arg));
+    assert.deepEqual(
+      d.runner.calls.map((c) => [numbers(c).length, c.args[5]?.includes(' q0: ')]),
+      [
+        [10, true],
+        [10, false],
+        [5, true],
+      ],
+    );
+    assert.deepEqual(numbers(d.runner.calls[1] as RunCall), numbers(d.runner.calls[0] as RunCall));
+  });
+
+  test('other failures are not asked again', async (t) => {
+    const failures: [string, RunResult][] = [
+      ['a timeout', runResult({ code: null, timedOut: true })],
+      ['gh missing', runResult({ code: null, notFound: true })],
+      ['an HTTP error', runResult({ code: 1, stdout: '', stderr: 'gh: HTTP 502\n' })],
+      ['output that is no JSON', runResult({ code: 0, stdout: 'not json' })],
+      [
+        "GitHub's own error without a path",
+        runResult({
+          code: 1,
+          stdout: JSON.stringify({ data: null, errors: [{ message: 'Something went wrong' }] }),
+          stderr: 'gh: Something went wrong\n',
+        }),
+      ],
+      [
+        'rate limited',
+        runResult({
+          code: 1,
+          stdout: JSON.stringify({
+            errors: [{ type: 'RATE_LIMITED', message: 'API rate limit exceeded' }],
+          }),
+          stderr: 'gh: API rate limit exceeded\n',
+        }),
+      ],
+      [
+        'an answer with data, and an error of one alias',
+        runResult({
+          code: 1,
+          stdout: answer(basics(null, 'SUCCESS'), merge(), [
+            { path: ['q0', 'pullRequest', 'baseRef'], message: 'x', extensions: { code: 'x' } },
+          ]),
+        }),
+      ],
+    ];
+    for (const [name, result] of failures) {
+      await t.test(name, async (t) => {
+        const d = deck(t, [URL7], () => result);
+        await fetchPrs(d.deps, [URL7]);
+        assert.equal(d.runner.calls.length, 1, name);
+      });
+    }
+  });
+
+  test('a gh that cannot be started is not asked again', async (t) => {
+    const d = deck(t, [URL7], () => {
+      throw new Error('spawn gh EACCES');
+    });
+    assert.deepEqual(await fetchPrs(d.deps, [URL7]), { fetched: 0, failed: 1 });
+    assert.equal(d.runner.calls.length, 1);
+  });
+
+  test('an abort that came with the rejection asks nothing more and saves nothing', async (t) => {
+    const controller = new AbortController();
+    const d = deck(t, [URL7], () => {
+      controller.abort();
+      return rejected();
+    });
+    assert.deepEqual(await fetchPrs(d.deps, [URL7], { signal: controller.signal }), {
+      fetched: 0,
+      failed: 0,
+    });
+    assert.equal(d.runner.calls.length, 1);
   });
 });
