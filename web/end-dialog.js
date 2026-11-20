@@ -84,6 +84,8 @@ export function createEndDialog(root, deps) {
   heading.append(prefix, title);
   const text = element('div', 'end-text');
   text.id = 'end-dialog-text';
+  // The warning that comes while the dialog is shown (the session turned working) is announced.
+  text.setAttribute('aria-live', 'polite');
   const line = element('div', 'end-line', END_TEXTS.running);
   const warning = element('div', 'end-warning', END_TEXTS.working);
   text.append(line, warning);
@@ -236,7 +238,7 @@ export function createEndDialog(root, deps) {
       event.stopPropagation();
       const at = buttons.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement));
       if (at === -1) {
-        // Something outside took the keyboard (the key help, the toast): it comes back to the safe
+        // Something outside took the keyboard (a click on the toast): it comes back to the safe
         // button, and this key does nothing more — never a press the user did not aim.
         keepButton.focus();
         if (!isEscape || event.repeat) {

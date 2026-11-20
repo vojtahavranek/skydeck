@@ -4,7 +4,8 @@
 // shell line as the program, in a sandbox (realTestPlatform). No test signals a process itself:
 // every SIGHUP here is the keeper's.
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
 import { encodeFrame } from '../../src/window/frames.ts';
@@ -162,6 +163,26 @@ describe('keeper: the hang-up (E)', { concurrency: true }, () => {
     );
     await until(() => box.logLines().length > 0, 'a log line');
     assert.deepEqual(box.logLines(), [`keeper ${k.spec.id}: not-claimed`]);
+  });
+
+  test('E signals the program, not its group: a child in its group that traps the hang-up gets none while the program ignores it', async (t) => {
+    const box = keeperSandbox(t);
+    const stop = join(box.s.home, 'stop-the-child');
+    // The child is in the program's process group (no job control); the program ignores SIGHUP
+    // after it started the child, so only a signal sent to the group would reach the child.
+    const program = `(trap 'echo child-hup' HUP; echo child-ready; while [ ! -e '${stop}' ]; do sleep 0.1; done) & trap '' HUP; echo ready; wait`;
+    const k = await box.start({ spec: { argv: ['sh', '-c', program] } });
+    const { client, pid, procStart } = await startShell(k);
+    await client.waitForOutput('child-ready');
+    await client.waitForOutput('ready\r\n');
+    client.send('E');
+    await sleep(1000);
+    assert.doesNotMatch(client.output(), /child-hup/, 'the group got no SIGHUP');
+    assert.equal(stillRuns(pid, procStart), true);
+    writeFileSync(stop, '');
+    const x = exit(await client.next('X'));
+    assert.deepEqual([x.code, x.signal], [0, null]);
+    assert.doesNotMatch(client.output(), /child-hup/);
   });
 
   test('a hello after E names the program as before (a server that claims it again)', async (t) => {

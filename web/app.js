@@ -1198,6 +1198,9 @@ function openEnder(row, fromList) {
   if (modal()) {
     return;
   }
+  // The key help lies over every dialog: it goes, so that nothing hides this one (as for the
+  // switcher), and while it is shown Ctrl+Shift+H is refused (`windowChordGate`).
+  help.hide();
   state.enderFrom = document.activeElement;
   ender.open(row, fromList);
   appRoot.inert = true;
@@ -1872,9 +1875,10 @@ function xtermHasKeyboard() {
  * While the switcher is shown (E11): Ctrl+Shift+P (`switcher`, which closes it) and the reload keys
  * pass (nothing typed there is worth keeping); everything else, Ctrl+Shift+H too, says `close the
  * switcher first (Esc)` and does nothing else. While a dialog is shown: Ctrl+Shift+H (`help`)
- * passes; a reload passes unless the dialog holds text the user typed and did not save, when the
- * key bar says `save or cancel the edit first`; everything else says `close the edit first (Esc)`
- * and does nothing else.
+ * passes — not while F30's dialog "Mark done" is shown, which the help would cover —; a reload
+ * passes unless the dialog holds text the user typed and did not save, when the key bar says `save
+ * or cancel the edit first`; everything else says `close the edit first (Esc)` (`close the dialog
+ * first (Esc)` for "Mark done") and does nothing else.
  * @param {WindowChord['kind'] | string} kind
  * @returns {boolean} whether it may act
  */
@@ -1886,7 +1890,8 @@ function windowChordGate(kind) {
     say('close the switcher first (Esc)');
     return false;
   }
-  if (!modal() || kind === 'help') {
+  // F30: the key help would lie over the dialog "Mark done" and hide what Enter presses.
+  if (!modal() || (kind === 'help' && !ender.shown())) {
     return true;
   }
   if (kind === 'reload') {

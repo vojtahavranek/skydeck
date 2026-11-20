@@ -901,8 +901,8 @@ requests — …`): look at it before you save.
 
 **Done.** `d` or `Done` marks the session done and shows a toast with `Undo` for 5 seconds:
 `Marked done: hidden from the list. It comes back on new activity.`, or for a session that runs
-in another terminal, or in a terminal of the window that skydeck cannot end (one started before an
-update of skydeck, or one whose terminal is not connected), `Marked done. skydeck cannot end this
+in another terminal, or in a terminal of the window that skydeck cannot end (one started before
+skydeck was updated to a version that can end sessions, or one whose terminal is not connected), `Marked done. skydeck cannot end this
 one: end it in its terminal. Hidden once it stops.` — such a row stays under Open with a `done` mark
 until the session stops. `Undo` marks it undone again: a click presses it, or Tab until it has the
 keyboard and then Enter.
@@ -918,7 +918,9 @@ while it runs; hidden once it stops.`). `End session and mark done` marks it don
 `claude` as closing its terminal would; the toast says `Ending the session…`, then `Ended and marked
 done: hidden from the list.` with `Undo` (it then shows under Recent and can be resumed; Undo does
 not bring the program back), or after 10 seconds `Marked done. It did not end: end it inside
-claude.` with `Undo`. Such a session counts as ended the normal way: it is not shown as ended
+claude.` with `Undo`; when skydeck refuses (the session stopped or was marked done meanwhile,
+its terminal is no longer connected, …), `End session: <why>`, and nothing was done. Such a
+session counts as ended the normal way: it is not shown as ended
 unexpectedly, and restore never offers it. When the session stops by itself, is marked done in
 another window or leaves the list while the dialog is open, the dialog closes and the toast says so;
 nothing is marked or ended.
@@ -1655,9 +1657,10 @@ whose controls edit that session as usual (a click on the title, ✎, `Note`, `D
 requests`), and once its program has ended, the ended bar with Resume and Close. A session
 without a terminal of the window shows nothing on the right then, no card (only the line `The
 selected session shows here.` while the list holds no session at all). `Done` in the header
-of such a session says `Marked done. skydeck cannot end this one: end it in its terminal. Hidden
-once it stops.` while it runs or starts, else `Marked done: hidden from the list. It comes back on
-new activity.` The new form (Ctrl+Shift+N) starts in its directory while a terminal of the window
+of such a session asks first while it runs in a terminal of the window that can end it (as `d`
+does, "Done." above); for another one that runs or starts it says `Marked done. skydeck cannot end
+this one: end it in its terminal. Hidden once it stops.`, else `Marked done: hidden from the list.
+It comes back on new activity.` The new form (Ctrl+Shift+N) starts in its directory while a terminal of the window
 holds it. When the list shows the session again (the filter cleared), it is selected again.
 
 #### The icon (stage E)

@@ -703,4 +703,122 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
       assert.equal((await ender(page)).focus, KEEP);
     },
   );
+
+  await t.test(
+    'the key help never covers it: opening it hides the help, and Ctrl+Shift+H is refused while it is shown',
+    async (t) => {
+      const { page, w } = await one(t, chromium);
+      const help = (): Promise<boolean> =>
+        page.evaluate(() => !(document.getElementById('help') as HTMLElement).hidden);
+      const onTop = (): Promise<boolean> =>
+        page.evaluate(() => {
+          const end = document.querySelector('#end-dialog .end-end') as HTMLElement;
+          const r = end.getBoundingClientRect();
+          const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return top !== null && end.contains(top);
+        });
+      // The dialog first, then the help's chord.
+      await dFrom(page, S1);
+      await shown(page, true);
+      await page.keyboard.press('Control+Shift+H');
+      assert.equal(await keyMessage(page), 'close the dialog first (Esc)');
+      assert.equal(await help(), false);
+      assert.equal(await onTop(), true);
+      await page.keyboard.press('Escape');
+      await shown(page, false);
+      // The help first, then `d`: the dialog opens with the help gone.
+      await toZone(page, 'list');
+      await page.keyboard.press('Control+Shift+H');
+      await eventually(help, 'the help shown');
+      await page.keyboard.press('d');
+      await shown(page, true);
+      assert.equal(await help(), false, 'the help went');
+      assert.equal(await onTop(), true, 'nothing lies over the End button');
+      await page.keyboard.press('Escape');
+      await shown(page, false);
+      assert.deepEqual(w.acts(), []);
+    },
+  );
+
+  await t.test(
+    'a press acts on the dialog’s own session and terminal also when the selection moved behind it (a resume answered meanwhile)',
+    async (t) => {
+      const d = await deck(t, chromium, {
+        sections: { open: [endable(S1, TERM_A, 1)], week: [row(S2)] },
+        terminals: [terminal(TERM_A, S1, 1)],
+      });
+      const { page, w } = d;
+      // A resume of S2 sent and not answered yet.
+      await clickRow(page, S2);
+      await toZone(page, 'list');
+      await page.keyboard.press('Enter');
+      const resume = await w.act(1);
+      assert.deepEqual(actsAfter(w), [
+        { kind: 'resume', sessionId: S2, cols: resume['cols'], rows: resume['rows'] },
+      ]);
+      await dFrom(page, S1);
+      await shown(page, true);
+      // Its answer: the page selects S2 and S2 runs in TERM_B.
+      d.set({
+        sections: { open: [endable(S1, TERM_A, 1), endable(S2, TERM_B, 2)], week: [] },
+        terminals: [terminal(TERM_A, S1, 1), terminal(TERM_B, S2, 2)],
+      });
+      w.answer(resume, { ok: true, sessionId: S2 });
+      await eventually(
+        async () =>
+          (await page.evaluate(() =>
+            document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id'),
+          )) === S2,
+        'S2 selected behind the dialog',
+      );
+      assert.equal((await ender(page)).shown, true);
+      await page.click('#end-dialog .end-end');
+      await w.act(2);
+      assert.deepEqual(actsAfter(w, 1), [{ kind: 'end-session', term: TERM_A, sessionId: S1 }]);
+    },
+  );
+
+  await t.test(
+    'Enter and Space with Shift, Ctrl, Alt or Meta, fresh or held, press nothing',
+    async (t) => {
+      const { page, w } = await one(t, chromium);
+      await dFrom(page, S1);
+      await shown(page, true);
+      const cdp = await page.context().newCDPSession(page);
+      const bits = { Alt: 1, Control: 2, Meta: 4, Shift: 8 } as const;
+      for (const name of ['end', 'keep', 'cancel'] as const) {
+        await page.evaluate((selector) => {
+          (document.querySelector(selector) as HTMLElement).focus();
+        }, `#end-dialog .end-${name}`);
+        for (const modifier of ['Shift', 'Control', 'Alt', 'Meta'] as const) {
+          for (const [key, code, keyCode, text] of [
+            ['Enter', 'Enter', 13, '\r'],
+            [' ', 'Space', 32, ' '],
+          ] as const) {
+            for (const autoRepeat of [false, true, true]) {
+              await cdp.send('Input.dispatchKeyEvent', {
+                type: 'keyDown',
+                key,
+                code,
+                windowsVirtualKeyCode: keyCode,
+                modifiers: bits[modifier],
+                autoRepeat,
+                text,
+              });
+            }
+            await cdp.send('Input.dispatchKeyEvent', {
+              type: 'keyUp',
+              key,
+              code,
+              windowsVirtualKeyCode: keyCode,
+              modifiers: bits[modifier],
+            });
+          }
+        }
+        await sleep(200);
+        assert.deepEqual(w.acts(), [], `nothing pressed on ${name}`);
+        assert.equal((await ender(page)).shown, true, `still shown on ${name}`);
+      }
+    },
+  );
 });

@@ -1684,6 +1684,7 @@ test('F30: a window end of one session leaves the other sessions of the process 
     start(P2, S3, T0, 'startup'),
   ];
   assert.deepEqual(session({ events }, S1).marks, []);
+  assert.equal(session({ events }, S2).lastHolding?.endDetail, 'clear', 'its own end, the clear');
   assert.deepEqual(session({ events }, S3).marks, ['ended-unexpectedly']);
 });
 
