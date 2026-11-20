@@ -103,7 +103,8 @@ export function latestEarlierBoot(
 /**
  * 7.8 set and preselection, in the order of `rows` (pass list order).
  *
- * The default set is the rows marked `ended-unexpectedly`, not done and not expired, whose last
+ * The default set is the rows marked `ended-unexpectedly`, not done, not expired and not an empty
+ * copy (F33: it has nothing to restore), whose last
  * holding was in the latest earlier boot (latestEarlierBoot); `all` takes such rows from every boot,
  * the current one included. An entry is preselected when no exit was recorded, or when it ended at
  * most two minutes before the last event of its own boot (D17). `scripted` and `scripted-end` events
@@ -125,7 +126,8 @@ export function planRestore(
       holding === null ||
       !row.marks.includes('ended-unexpectedly') ||
       row.done ||
-      row.marks.includes('expired')
+      row.marks.includes('expired') ||
+      row.marks.includes('empty-copy')
     ) {
       continue;
     }

@@ -216,6 +216,27 @@ first refresh after `skydeck install`) is dropped too: skydeck does not know the
 whose previously held session (6.1) is a different session, a row old → new is written to
 `links` with kind `clear`, `switch` or `fork`. Nothing is inherited or copied.
 
+**Copies** (follow-up F33). A process started with `--fork-session` together with `--resume` (or
+`-r`) whose value is a session id, or a path whose last part is `<session id>.jsonl`, holds as its
+first session a NEW session that is a copy of that id: Claude Code's background feature (agent
+view, `/bg`) starts `claude --fork-session --resume <the original's transcript>`, and a user can
+type it. Only that id is kept, never the value (principle 4: a value can be a search term), as a
+row original → copy of kind `copy` in `links`, on the process's first event (its `start` or
+`observed` one, or its `end` when the spool file of its first start was lost: its session is the
+earliest the process is known to have held; never a scripted run's), written once per session:
+at ingest, when a non-scripted `start` is recorded with
+such a command (whatever its detail: which `source` Claude Code sends for a copy is not known,
+14), and at reconcile (5.4) from the command line of a process that still runs. A copy of an id
+skydeck does not know is recorded all the same; a process whose first event names the id itself
+makes no copy; `--resume` alone, `--fork-session` alone, or a value that is neither (a name Claude
+Code searches for) make no copy. Sessions recorded before follow-up F33 get the link only if their
+process still runs at a later reconcile: nothing else is rewritten. A known limit: when the first
+event skydeck has of a copy's process is already that of a session the process `/clear`ed into —
+the spool files of both the copy's start and its end were lost, or no hook spoke at all and
+reconcile is the first to see a process that had cleared already (it started before `skydeck
+install`, or its hook did not run) —, that cleared session is linked in the copy's place. It heals
+itself at that session's first prompt (7.2).
+
 **Order.** "Earlier" and "latest" for events always mean ordering by (`time_ns`, `id`).
 
 ### 5.4 Reconcile with live processes
@@ -240,7 +261,11 @@ hook file was lost.
   event is not the hook speaking: it is stamped with the clock at reconcile, after the file it was
   read from, so a file that names another session than it always wins (the file changed since).
 
-An `observed` event never creates a link.
+An `observed` event never creates a `clear`, `switch` or `fork` link. Follow-up F33: a candidate
+process whose command line makes a copy (5.3 "Copies") gets the `copy` link on its first event
+when it has none yet — the `observed` event just inserted, or the event a hook or an earlier
+reconcile recorded —, so a copy recorded before skydeck knew of copies is linked while its process
+still runs.
 
 ### 5.5 Liveness rule
 
@@ -340,7 +365,8 @@ Marks are shown next to the state.
 |---|---|
 | `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. The latest holding is decided per process, not by the latest event: of the holdings of the processes that held the session, the one that ended last. A holding ends at the process's `end` for the session, or at the process's first event naming another session (it moved on; when that event is an `observed` one, reconcile noticed the move only then, so the holding counts as ended at the process's last event for the session); a process that is gone without either ended when it was last seen — its last event, or the last write of the live-session file it left naming the session, whichever is later. So after two holders, one that exited deliberately does not hide one killed after it — when anything shows the killed one alive after that exit. A live-session file is not rewritten while its session is idle, so a holder killed while idle since before the other holder's exit cannot be told from one that died first: its holding counts as ended when it was last seen, before the exit, and the session gets no mark (a known limit). A scripted run's holding (5.3) is never the latest holding: when it ends or is killed it leaves no mark, and the session keeps what its last interactive holding says, so restore never offers a session because of a scripted run. A holding the user ended in the window (design-step-2.md 12.5) is a deliberate exit: once its program has exited, the window's server stores an `end` of detail `exit` for each of its holders, with no spool file and the raw detail `skydeck-window`, and a process that has one for the session ended its holding by that exit, whatever other `end` Claude Code's own hook sends for it before or after (its hang-up reports `other`, 14). |
 | `was-working` | `ended-unexpectedly`, and a turn was in progress: either a leftover live-session file of that dead process (same pid and process start) says `status` `busy`, or the last `assistant` record or `user` turn (5.6) of its transcript is a `user` record. (Closing a terminal removes the live-session file, so the transcript is what covers that case.) |
-| `continued` | The session is the target of a `clear` or `fork` link. `show` names the session it continues. |
+| `continued` | The session is the target of a `clear`, `fork` or `copy` link (5.3). `show` names the session it continues. |
+| `empty-copy` | Follow-up F33: the session is the target of a `copy` link, has had no turn and no input — no transcript, or one with no `user` turn, no `assistant` record and no `user` input (5.6): a copy that holds only the title it copied —, and no live process of it works or waits for an answer to a question (its holder's live-session file says neither `busy` nor `waiting`, 6.2: idle at its first prompt, or not running), whatever its transcript says yet. It is listed as a done one unless the user kept it (7.2) and never offered by restore (7.8). Its first turn or input, or its process starting to work or to ask, ends the mark by itself; `continued` stays. |
 | `expired` | Its transcript is missing. It cannot be resumed. |
 | `expiring` | Its transcript was last modified more than (retention − 5) days ago, where retention is `cleanupPeriodDays` from the settings file, default 30. |
 | `duplicate` | Two live processes hold it. |
@@ -397,12 +423,24 @@ Marks are shown next to the state.
 ### 7.2 Which sessions are listed
 
 Every session known from events or transcripts, except: sessions whose transcript has an
-`entrypoint` other than `cli`; sessions hidden by done (shown with `--all`); and sessions that
-are `expired` and have nothing the user attached: no label, no group set by the user, no note, no
-attached pull request and no ticket (a group that `groupPattern` takes from the title does not count, or an
-expired session with a ticket key in its title would stay in the list for ever). A session that is not running and
-has no transcript is never listed, not even with `--all`: there is nothing to resume, and one that
-never received a prompt has no transcript (14).
+`entrypoint` other than `cli`; sessions hidden by done (shown with `--all`); and sessions that are
+`expired` and have nothing the user attached: no label, no group set by the user, no note, no
+attached pull request and no ticket (a group that `groupPattern` takes from the title does not
+count, or an expired session with a ticket key in its title would stay in the list for ever). A
+session that is not running and has no transcript is never listed, not even with `--all`: there is
+nothing to resume, and one that never received a prompt has no transcript (14). Follow-up F33: a
+session marked `empty-copy` (6.3) — a copy Claude Code made that has had no message yet and neither
+works nor asks — that the user did not keep (by setting what only the user can set: a label, a
+group, a note, a ticket, or a pull request attached by hand; one skydeck attached by itself from a
+`pr-link` record does not count, since Claude Code may have copied that record with the title) is
+listed only where done ones are (`--all`, the interactive list's `a`), running or not, and so is in
+no count of the list; the window lists it too while a terminal of the window shows it
+(design-step-2.md 12.1). A copy started by hand with `--fork-session` is the same: skydeck cannot
+tell the two apart, and what it would have to remember does not outlive the process. Its first turn
+or input lists it by the rules above, with no reload. Hiding is a matter of the list only: the guard
+(7.6), the double-resume check and the holders see it as any session. Both are needed — the `copy`
+link and the empty transcript —: a session with no link whose transcript holds only a title is
+listed as before.
 
 ### 7.3 Pull requests
 
@@ -600,7 +638,12 @@ are written as `\uXXXX` escapes like in any other string of the JSON. Sessions a
 `unresolved-comments`, `blocked` or `not-required` (7.3); `checks` is `passing`, `failing`,
 `pending` or, since F32, `not-reported` (a check the rules require has not reported). A reader of
 version 1 that knows only the earlier values meets a word it does not know, and gets
-`not-required` where it got null for a pull request that no rule asks to review. Since F32
+`not-required` where it got null for a pull request that no rule asks to review. Follow-up F33,
+still version 1, an addition only: `marks` can hold `empty-copy` (6.3) — the session is a copy
+that has had no message yet and neither works nor asks, listed only with `--all` unless the user
+kept it (7.2) —, and then, as for every copy, `marks`
+holds `continued` and `continuedFrom` is the id of the session it is a copy of; `show --json`'s
+`links` can hold a link of kind `copy` (5.3), from that id to the session. Since F32
 `review` is no longer GitHub's decision alone: an approved pull request that has open
 conversations or that GitHub will not merge exports `unresolved-comments` or `blocked`, so a
 reader that looks for `approved` no longer finds it there. `show --json` prints one
@@ -777,7 +820,8 @@ they stay.
 
 ### 7.8 Restore
 
-**The set.** By default: the sessions marked `ended-unexpectedly`, not done and not expired,
+**The set.** By default: the sessions marked `ended-unexpectedly`, not done, not expired and not
+`empty-copy` (follow-up F33: it has nothing to restore; also not with `--all`),
 whose last holder belongs to the **latest earlier boot** in which any session was held: of the
 boots other than the current one that have a `start` or `observed` event, the one whose last
 event is the latest. A `scripted` event (5.3) counts for neither: a scripted run is not what the
@@ -1112,7 +1156,9 @@ CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 ```
 
 `kind` in `events` can also be `scripted` or `scripted-end` (5.3); such a row has `detail` `''`
-and no `argv` or `name`. The column is free text, so this needs no migration.
+and no `argv` or `name`. The column is free text, so this needs no migration. Nor does the `kind`
+`copy` in `links` (follow-up F33, 5.3 "Copies"): the column is free text too; a skydeck from
+before F33 derives no mark from such a row (`show` prints its kind as it is).
 
 Step 2 adds migration 2 (the table `attention`), migration 3 (follow-up F18: the nullable column
 `ticket_url` of `session_meta`, the ticket of 7.1, by the first `ALTER TABLE`) and migration 4
@@ -1195,7 +1241,8 @@ module takes those as parameters, so tests pass fakes.
   - **Hook:** the spool file it writes; silent and exit 0 with an unwritable state directory, an
     unreadable `/proc`, and no `CLAUDE_PID`; ten hooks at once produce ten files.
   - **Ingest:** each event and detail; a file read twice; a bad file; scripted runs dropped;
-    links for clear, switch and fork; path flags made absolute.
+    links for clear, switch and fork, and the copy link of `--fork-session --resume` (F33); path
+    flags made absolute.
   - **Derived state:** start, clear, switch, deliberate exit, exit by signal, crash, reboot (boot
     id change), reused pid, two holders; each state and each mark.
   - **Transcripts:** half-written last line, shrunk file, other entry points, set-aside copies,
@@ -1272,6 +1319,7 @@ inspecting local files, unless marked otherwise.
 | In a hook's environment `$CLAUDE_CODE_ENTRYPOINT` is `cli` for an interactive session and `sdk-cli` for `claude -p`. Hooks fire for `-p` runs, and their command line contains `-p`. After `/clear`, the environment and the hook input both carry the new session id. | observed |
 | A session that never received a prompt has no transcript. | observed |
 | `←` on the empty prompt of a session started in a terminal moves its conversation into a background session with a new id and opens agent view in that terminal; what is typed there then goes to the background session. Its program runs under a `claude bg-pty-host` process whose parent is init, outside the terminal's process tree. The live-session file of the background session has `kind` `bg` and a `jobId` (in the one case seen, the first eight hex digits of the new session's id); the live-session file of the terminal's own program gets `parkedJobId` with the same value. skydeck reads only `kind`, and only to choose its words (follow-up F34, design-step-2.md 7.9): a holder whose trusted live-session file has `kind` `bg` runs the session in Claude Code's background; any other value, none, or a file that is not trusted reads as a session in another terminal. It reads neither `jobId` nor `parkedJobId`, and stores nothing of the three. Whether `claude --bg`, `/bg` and a copy made by `/fork` write the same `kind` was not observed. | observed (Claude Code 2.1.311, 2026-11-16, follow-up F11); `kind` `bg`, `jobId`, `parkedJobId` not documented |
+| Claude Code's background feature (agent view, `/bg`) can start `claude --fork-session --resume <path of the original's transcript> --permission-mode auto` under its own supervisor: a copy with a new session id, its transcript only the title copied from the original and no message, its process running in the background. skydeck records it as a copy of the original (5.3 "Copies") and lists it only once it has a message (7.2). What `source` its `SessionStart` reports, when its history is written under the new id, and whether the supervisor starts it again later are not known; nothing in skydeck depends on them. `--fork-session` with `--resume` is Claude Code's documented way to start such a copy, so a user can start one too. | reported from a tester's machine (2026-11-20, follow-up F33), not observed here; the flag: documentation |
 | `leftArrowOpensAgents`: a boolean, default `true`, a global config key kept in `~/.claude.json` ("Claude Code ignores this key in settings.json"; with `CLAUDE_CONFIG_DIR` set the file lives under that directory). `false`: "Claude Code turns the shortcut off; in a session you attached to from agent view, `←` on an empty prompt still detaches." Its `/config` label is "← opens agents"; `/config` writes these keys "and you can also edit them by hand". The file is "Read at session start", and Claude Code "writes back to it when you change a global config option in /config or trust a project folder". Whether a running session re-reads a hand edit, and whether its own write merges or overwrites one, is not documented; nor is any command that sets a global key without a session. The file holds the user's account details and the MCP servers' settings, mode 600. | documentation (read 2026-11-17) |
 
 ## 15. How changes are made

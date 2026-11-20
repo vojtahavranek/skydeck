@@ -97,7 +97,59 @@ const MARKS = /** @type {const} */ ([
   ],
   ['duplicate', 'duplicate', '2 processes', 'two live processes hold it'],
 ]);
-const KNOWN_MARKS = new Set([...MARKS.map(([mark]) => mark), 'was-working']);
+const KNOWN_MARKS = new Set([...MARKS.map(([mark]) => mark), 'was-working', 'empty-copy']);
+
+/** A session id's short form (design 7.4: its first 8 characters). */
+const SHORT_ID_LENGTH = 8;
+
+/**
+ * Follow-up F33: how a copy's tooltip names its original — its title in quotes, else
+ * `session <short id>` (an original skydeck has no row for), else `another session`.
+ * @param {RowPayload} row
+ * @returns {string | null} null when the row names no original (no copy, a server before F33)
+ */
+function originalOf(row) {
+  const copy = /** @type {unknown} */ (row.copyOf);
+  if (typeof copy !== 'object' || copy === null || Array.isArray(copy)) {
+    return null;
+  }
+  const { id, title } = /** @type {{ id?: unknown, title?: unknown }} */ (copy);
+  if (typeof id !== 'string') {
+    return null;
+  }
+  const named = clean(title);
+  if (named !== '') {
+    return `"${named}"`;
+  }
+  const short = clean(id).slice(0, SHORT_ID_LENGTH);
+  return short === '' ? 'another session' : `session ${short}`;
+}
+
+/**
+ * Follow-up F33 (S2 12.2): a copy's mark in the place of `continued` — `empty copy` while the
+ * server marks it `empty-copy`, else `continued` naming the original it began as a copy of; null
+ * for a row that is no copy, whose `continued` keeps its words. The empty copy's tooltip says it
+ * shows by itself once it has a first message while the list hides it (`hiddenWhileEmpty`, absent
+ * counts as hidden), else that it has no message yet (the user kept it, or a terminal shows it).
+ * @param {RowPayload} row
+ * @param {readonly string[]} marks
+ * @returns {MarkText | null}
+ */
+function copyMark(row, marks) {
+  const original = originalOf(row);
+  if (marks.includes('empty-copy')) {
+    const shown = row.copyOf?.hiddenWhileEmpty === false;
+    const then = shown ? 'it has no message yet' : 'it shows by itself once it has a first message';
+    return {
+      kind: 'continued',
+      text: 'empty copy',
+      tip: `an empty copy of ${original ?? 'another session'} made by Claude Code; ${then}`,
+    };
+  }
+  return original === null
+    ? null
+    : { kind: 'continued', text: 'continued', tip: `it began as a copy of ${original}` };
+}
 
 /**
  * @param {RowPayload} row
@@ -108,6 +160,13 @@ function marksOf(row) {
   /** @type {MarkText[]} */
   const shown = [];
   for (const [mark, kind, text, tip] of MARKS) {
+    if (mark === 'continued' && (marks.includes('continued') || marks.includes('empty-copy'))) {
+      const copy = copyMark(row, marks);
+      if (copy !== null) {
+        shown.push(copy);
+        continue;
+      }
+    }
     if (!marks.includes(mark)) {
       continue;
     }

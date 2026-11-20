@@ -591,7 +591,8 @@ describe("doctor: Claude Code's ← shortcut (follow-up F11, L4)", () => {
       assert.equal(r.code, 0, r.stdout);
       assert.deepEqual(arrowLines(r), [
         "info     Claude Code's ← shortcut is on: ← on an empty prompt sends a window terminal's " +
-          "session to the background, and the list then shows it running in Claude Code's background; " +
+          "session to the background, and the list then shows it running in Claude Code's " +
+          'background once it has a message (before that, a in the window shows it); ' +
           `to turn it off: skydeck install asks, or ${HOW}`,
       ]);
       assert.ok(!r.stdout.includes(CANARY), r.stdout);

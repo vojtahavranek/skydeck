@@ -61,14 +61,15 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
     }
   }
 
-  const continuation = new Map<string, LinkRow>(); // target session → its latest clear or fork link
+  // Target session → its latest clear, fork or copy link; and its latest copy link (F33).
+  const continuation = new Map<string, LinkRow>();
+  const copied = new Map<string, LinkRow>();
   for (const link of input.links) {
-    if (link.kind !== 'clear' && link.kind !== 'fork') {
-      continue;
+    if (link.kind === 'copy') {
+      keepLatest(copied, link);
     }
-    const chosen = continuation.get(link.toSession);
-    if (chosen === undefined || compareLinks(link, chosen) > 0) {
-      continuation.set(link.toSession, link);
+    if (link.kind === 'clear' || link.kind === 'fork' || link.kind === 'copy') {
+      keepLatest(continuation, link);
     }
   }
 
@@ -151,10 +152,23 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
           (file) => isFileOf(file, lastHolding.process) && file.status === 'busy',
         ));
     const continuedBy = continuation.get(id);
+    const copyOf = copied.get(id)?.fromSession;
+    // F33 (ruled): a copy whose process works, or waits for an answer to a question (a dialog), is
+    // in use whatever its transcript says yet; only one idle at its first prompt, or not running, is
+    // empty.
+    const inUse = holders.some(
+      (held) => held.live?.status === 'busy' || held.live?.status === 'waiting',
+    );
     const has: Record<Mark, boolean> = {
       'ended-unexpectedly': endedUnexpectedly,
       'was-working': wasWorking,
       continued: continuedBy !== undefined,
+      // F33: a copy with no turn and no input yet (no transcript, or one with only a title).
+      'empty-copy':
+        copyOf !== undefined &&
+        !inUse &&
+        (transcript === null ||
+          (transcript.lastTurnRole === null && transcript.lastUserNs === null)),
       expired: transcript !== null && transcript.missingSinceNs !== null,
       expiring:
         transcript !== null &&
@@ -186,8 +200,17 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
       bootId: input.bootId,
       doneAtNs,
       hidden: doneAtNs !== null && !activityAfter(doneAtNs, transcript, sessionEvents),
+      ...(copyOf === undefined ? {} : { copyOf }),
     };
   });
+}
+
+/** Keeps in `map`, under its target session, the later of `link` and the link already there. */
+function keepLatest(map: Map<string, LinkRow>, link: LinkRow): void {
+  const chosen = map.get(link.toSession);
+  if (chosen === undefined || compareLinks(link, chosen) > 0) {
+    map.set(link.toSession, link);
+  }
 }
 
 /** 6.2: the state from the latest holder's live file, and the time the session has been in it. */

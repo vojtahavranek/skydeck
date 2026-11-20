@@ -3,13 +3,14 @@
 // comes from one live process stops the reconcile: the whole handling of one (looking at it and
 // saving its event) is guarded, and an error is recorded for doctor (problems.ts) and that process
 // skipped. A failure of the database as a whole (isDatabaseFailure) ends the command at once.
-import { absolutizePathFlags, storableArgv } from '../claude/launch.ts';
+import { absolutizePathFlags, copiedSessionOf, storableArgv } from '../claude/launch.ts';
 import { isLiveFileTrusted, readLiveFiles } from '../claude/live.ts';
-import type { LiveFile } from '../claude/live.ts';
+import type { LiveFile, ProcessKey } from '../claude/live.ts';
 import { argvFromCmdline } from '../claude/procstat.ts';
 import { NS_PER_SECOND } from '../platform/time.ts';
 import type { Ns, Platform } from '../platform/types.ts';
 import { isDatabaseFailure } from '../store/store.ts';
+import { copyLinkTarget, linkCopy } from './copies.ts';
 import type { Deck } from './deck.ts';
 import { describeError, recordProblems } from './problems.ts';
 
@@ -23,7 +24,10 @@ const SETTLE_NS = 2n * NS_PER_SECOND;
  * event does not name the file's session, or when it has no event with a launch command and its
  * /proc/<pid>/cmdline can be read now. An observed event's time is the clock now (D21); its launch
  * command is storableArgv(absolutizePathFlags(cmdline, file.cwd)), as for a spooled one, so no
- * prompt, removed flag or unknown flag's value is stored (principle 4).
+ * prompt, removed flag or unknown flag's value is stored (principle 4). F33: a process whose
+ * command line makes a copy (`copiedSessionOf`) gets the copy link on its first event when it has
+ * none yet (`linkCopy`), whether or not it got an observed event: so a copy recorded before skydeck
+ * knew of copies is linked while its process still runs. Only the id is kept.
  *
  * Never throws for one process: an error while looking at one or saving its event (the store's
  * included) is recorded in kv `reconcile_problems` (replaced on every run) and the next one is
@@ -45,8 +49,15 @@ export function reconcile(deck: Deck): { observed: number } {
   // readLiveFiles keeps only files whose session id passes isSessionId.
   for (const file of readLiveFiles(platform.files, deck.places.claudeHome)) {
     try {
-      if (isCandidate(platform, file, now) && recordObserved(deck, bootId, file, now)) {
-        observed++;
+      if (isCandidate(platform, file, now)) {
+        const recorded = recordedCommand(platform, file);
+        if (recordObserved(deck, bootId, file, now, storedCommand(platform, file, recorded))) {
+          observed++;
+        }
+        const copyOf = recorded === null ? null : copiedSessionOf(recorded);
+        if (copyOf !== null) {
+          recordCopy(deck, { bootId, pid: file.pid, procStart: file.procStart }, copyOf);
+        }
       }
     } catch (error) {
       if (isDatabaseFailure(error)) {
@@ -60,11 +71,19 @@ export function reconcile(deck: Deck): { observed: number } {
   return { observed };
 }
 
-/** Inserts the observed event of `file`'s process when 5.4 asks for one; whether it did. */
-function recordObserved(deck: Deck, bootId: string, file: LiveFile, now: Ns): boolean {
+/**
+ * Inserts the observed event of `file`'s process when 5.4 asks for one, with `argv` as its launch
+ * command; whether it did.
+ */
+function recordObserved(
+  deck: Deck,
+  bootId: string,
+  file: LiveFile,
+  now: Ns,
+  argv: string[] | null,
+): boolean {
   const { platform, store } = deck;
   const { pid, procStart } = file;
-  const argv = launchCommand(platform, file);
   const needed = (atNs: Ns): boolean => {
     const latest = store.latestEventOfProcess(bootId, pid, procStart, atNs);
     if (latest === null) {
@@ -118,11 +137,28 @@ function isCandidate(platform: Platform, file: LiveFile, now: Ns): boolean {
   );
 }
 
-/** The launch command to store, from /proc/<pid>/cmdline; null when it cannot be read or is empty. */
-function launchCommand(platform: Platform, file: LiveFile): string[] | null {
+/** F33: the copy link of a copy's process when it has none yet (checked first, outside a write). */
+function recordCopy(deck: Deck, process: ProcessKey, copyOf: string): void {
+  const { store } = deck;
+  if (copyLinkTarget(store, process, copyOf) !== null) {
+    store.transaction(() => linkCopy(store, process, copyOf));
+  }
+}
+
+/** The process's command line as recorded (/proc/<pid>/cmdline); null when unreadable or empty. */
+function recordedCommand(platform: Platform, file: LiveFile): string[] | null {
   const bytes = platform.proc.cmdline(file.pid);
   const recorded = bytes === null ? [] : argvFromCmdline(bytes);
-  if (recorded.length === 0) {
+  return recorded.length === 0 ? null : recorded;
+}
+
+/** The launch command to store of a recorded one (5.3); null for none. */
+function storedCommand(
+  platform: Platform,
+  file: LiveFile,
+  recorded: string[] | null,
+): string[] | null {
+  if (recorded === null) {
     return null;
   }
   const exists = (path: string): boolean => platform.files.stat(path) !== null;

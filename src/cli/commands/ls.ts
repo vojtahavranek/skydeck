@@ -16,7 +16,8 @@ const SPEC: ArgSpec = {
 
 Prints the sessions skydeck knows, in groups, one row each. It never starts or stops a session.
 
-  --all       also list the sessions marked done
+  --all       also list the sessions marked done, and the copies of a session Claude Code made
+              that have no message yet
   --json      print the list as JSON (version 1) instead of text
   --refresh   first read the status of the pull requests of the sessions printed that are not merged
               or closed (gh); without it the status printed is the one saved, and nothing touches

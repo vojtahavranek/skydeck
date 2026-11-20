@@ -19,7 +19,8 @@ F8), at "Updating skydeck"; W33 checks install's offer to turn off Claude Code's
 F13), at "The window's theme"; W35 checks the flags a session was started with in the header
 (follow-up F16), at "The flags a session was started with"; W36 checks the new form's favourite
 flags (follow-up F15) and its group chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
-session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status".
+session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status"; W40 checks
+a copy that Claude Code's background feature makes (follow-up F33), at "A copy made in agent view".
 
 Setup:
 
@@ -1981,7 +1982,9 @@ install would leave).
    Expected: the terminal stays as it is, the same empty prompt; no list of sessions (Claude Code's
    agent view, a table of sessions with an input at the bottom) takes it over, and the list on the
    left gets no new row "running in Claude Code's background" (nor one "running in another
-   terminal"). Only when the terminal is unchanged, press
+   terminal") — also with done sessions shown: a copy Claude Code made that has no message yet is
+   listed only then (follow-up F33), so press Ctrl+Shift+L until `Focus: list`, `a`, look, `a`
+   again, and Ctrl+Shift+L until `Focus: terminal`. Only when the terminal is unchanged, press
    ← a second time (Claude Code asks for a second press in some cases, `Press ← again to open
    agents`), and look again: the same is expected.
 
@@ -1991,13 +1994,15 @@ install would leave).
    and press Esc, which goes back to the conversation. That does not end it: "Detaching never stops
    a background session", and the row is made "even when the conversation has no messages yet", so
    until it is ended the window may list a row for `skydeck-try` as `running in Claude Code's
-   background`. When it does, select that row and look at its card: the title `Running in Claude
-   Code's background`, `pid <n>` with no `/dev/pts/…` after it, and the words `Claude Code runs this
-   session itself, without a terminal. skydeck cannot show it here. To see it or end it, run claude
-   agents in a terminal. Once it has ended it can be resumed in the window.` When the row says
-   `running in another terminal` instead, write that down: Claude Code did not mark it as a
-   background session in the way skydeck reads. Then click the row of the window's terminal, the
-   one with its slot number (1–9) in front, so that the right side shows that terminal again.
+   background` (only with done sessions shown, `a`, while it has no message: F33). When it does,
+   select that row and look at its card: the title `Running in Claude Code's background`, `pid <n>`
+   with no `/dev/pts/…` after it, and the words `Claude Code runs this session itself, without a
+   terminal. skydeck cannot show it here. To see it or end it, run claude agents in a terminal.
+   Once it has ended it can be resumed in the window.` When the row says `running in another
+   terminal` instead, write that down: Claude Code did not mark it as a background session in the
+   way skydeck reads. Then press `a` again if you pressed it (while the key bar says `Focus:
+   list`), and click the row of the window's terminal, the one with its slot number (1–9) in front,
+   so that the right side shows that terminal again.
    End it now: look that the terminal shows the throwaway session (the header's short id, and
    `skydeck-try` as its folder) and has the keyboard (`Focus: terminal`), then type `/stop` ("To end
    a session from inside it, run /stop"). When Esc did not go back (agent view's table is still in
@@ -2013,9 +2018,9 @@ install would leave).
    at the short id, since `/exit` ends the session it is typed into), type `/exit`, then `Close` on
    its ended bar. When step 3's branch was taken, the session is ended already: only `Close`, if
    the ended bar shows; and when the list still shows a row for `skydeck-try` as running in Claude
-   Code's background (or in another terminal), write that down. The shortcut stays off, on
-   purpose. Sessions you started before step 1 keep it until you start them again (`/exit`, then
-   resume them).
+   Code's background or in another terminal (look with `a` too), write that down. The shortcut
+   stays off, on purpose. Sessions you started before step 1 keep it until you start them again
+   (`/exit`, then resume them).
 
 To put the shortcut back on (not part of the check): in Claude Code, `/config`, the option "← opens
 agents"; or set `leftArrowOpensAgents` to `true` in `~/.claude.json` (or remove the key) and start
@@ -2647,3 +2652,74 @@ Not tried before this check was written: all of it with the real Claude Code. Th
 suite's stand-in program by the same hang-up (it runs its SessionEnd hook with reason `other`, as
 Claude Code does for a closed terminal), and check the dialog's keys and words in headless
 Chromium; they never start `claude`.
+
+## A copy made in agent view
+
+The check of a copy that Claude Code's background feature makes of a session (follow-up F33; design
+5.3 "Copies", 7.2; design-step-2.md 12.1, 12.2; [install.md](install.md), "A copy made by Claude
+Code's background feature"): W40, on one new throwaway session in `~/skydeck-try` and nothing else.
+No test may start the real `claude`, so only this shows what Claude Code really starts when a session
+goes to its background — whether it is the copy skydeck looks for (`--fork-session --resume`), and
+when its history reaches the copy's transcript. The tests feed the hook's recorded command and a
+process's command line to skydeck by hand.
+
+## W40. A copy made in agent view (real claude)
+
+Setup: skydeck updated to a commit that has follow-up F33 (`skydeck update`, W32), then the window
+open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Write down the time
+and the Claude Code version (`claude --version`).
+
+1. **A throwaway session.** In a WSL terminal of your own (not the window): `cd ~/skydeck-try &&
+   claude`, then `Reply with the single word ok, in this chat, with no tool and no file.` and Enter;
+   wait for the reply. In the window it is one row under Open, `running in another terminal`. Write
+   down its short id and its title once it has one.
+2. **To the background.** In that session, on an empty prompt, type `/bg` and Enter (agent view
+   opens; if it does not, `claude agents`). Wait 10 seconds. Expected: the window still shows ONE
+   row with that title — no second one under Open or Recent, without a reload. In another terminal,
+   `skydeck ls --all`: when Claude Code made a copy, a second row with that title and the marks
+   `continued,empty-copy`; write down its short id. `skydeck ls` does not list it. Then, for the
+   copy (or, when there is none, for a second row with that title that has no such mark),
+   `skydeck show <its short id>`: write down its `state:` line, what its `holder:` line says after
+   the time (`(scripted run)`, `(in Claude Code's background)` or nothing), and
+   with that line's pid `tr '\0' ' ' </proc/<pid>/cmdline; echo`: write down the flags it prints,
+   leaving out the value after `--resume` (a path). No copy and no second row: write that down,
+   and the check ends here.
+3. **Shown with `a`.** In the window, press Ctrl+Shift+L until the key bar says `Focus: list`, then
+   `a`. Expected: the copy is listed, marked `empty copy`; hovering the mark shows `an empty copy of
+   "<the title>" made by Claude Code; it shows by itself once it has a first message`. Write down
+   whether its row shows a pull-request chip (Claude Code may copy the original's pull request with
+   its title). Press `a` again: it is hidden again.
+4. **Its first prompt.** In agent view, open the background session and give it `Reply with the
+   single word ok, in this chat, with no tool and no file.` Expected: within a few seconds, without a
+   reload, the copy appears in the window by itself, marked `continued`; hovering the mark shows `it
+   began as a copy of "<the title>"`. `skydeck show <its short id>` prints `continues:` with the
+   throwaway session's id, and a `link:` line `copy <that short id> -> <its short id> at …`.
+5. **Its words** (follow-up F34). Click the copy's row, which runs in Claude Code's background, and
+   write down what each of these says: the row's second line (expected `running in Claude Code's
+   background`); the card on the right (expected the title `Running in Claude Code's background`,
+   `pid <n>` with no `/dev/pts/…` after it, and `Claude Code runs this session itself, without a
+   terminal. skydeck cannot show it here. To see it or end it, run claude agents in a terminal.
+   Once it has ended it can be resumed in the window.`); the title bar's counts (expected `1 in the
+   background` among them); and the `holder:` line of `skydeck show <its short id>` (expected to
+   end with `(in Claude Code's background)`). `running in another terminal` in their place means
+   Claude Code did not mark the copy as a background session in the way skydeck reads: write that
+   down. Then press Ctrl+Shift+L until the key bar says `Focus: list`, press `d`, and write down the
+   toast (expected `Marked done. It runs in Claude Code's background: end it in claude agents.
+   Hidden once it stops.`); click its `Undo`.
+6. **The end of the check.** Stop the background session in agent view as Claude Code's own help
+   there says, and `/exit` the throwaway session if it still runs. In the window, for each of the
+   two: click its row and look at the header's short id (the one you wrote down), press
+   Ctrl+Shift+L until the key bar says `Focus: list`, and `d`.
+
+Write down: the time of the setup and the Claude Code version; for each step whether it went as
+expected; in step 2, whether a second row ever showed without `a` and for how long, and what `skydeck
+show --json <the copy's short id>` printed under `links`; in step 4, how long it took to appear; in
+step 5, each of the words;
+whether the copy came back as a second row at any later time (after a restart of Claude Code's
+background, say).
+
+Not tried before this check was written: all of it with the real Claude Code. Which command the
+background feature runs is known from one tester's report: `claude --fork-session --resume <the
+original's transcript> --permission-mode auto`. What Claude Code does with such a copy later — the
+`source` of its start, when its history is written under its new id, whether its supervisor starts
+it again — is not known, and nothing in skydeck depends on it.

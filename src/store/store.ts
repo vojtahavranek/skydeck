@@ -99,6 +99,11 @@ export interface Store {
     procStart: number | null,
     beforeNs: Ns,
   ): EventRow | null;
+  /**
+   * Follow-up F33: the first event (by time_ns, id) of the process (bootId, pid, procStart), null
+   * when it has none. procStart null matches proc_start IS NULL.
+   */
+  firstEventOfProcess(bootId: string, pid: number, procStart: number | null): EventRow | null;
   /** Whether any event of that process has a non-null argv. */
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
   /**
@@ -114,6 +119,8 @@ export interface Store {
   latestEventIdOfSession(sessionId: string): number | null;
   /** All links ordered by time_ns. */
   links(): LinkRow[];
+  /** Follow-up F33: the links to the session, ordered by time_ns, then event id. */
+  linksTo(sessionId: string): LinkRow[];
 
   // session_meta (7.1)
   meta(sessionId: string): SessionMeta | null;
@@ -939,6 +946,18 @@ class SqliteStore implements Store {
     return row === undefined ? null : mapEvent(row);
   }
 
+  firstEventOfProcess(bootId: string, pid: number, procStart: number | null): EventRow | null {
+    const row = this.#get(
+      `SELECT * FROM events
+       WHERE boot_id = ? AND pid = ? AND proc_start IS ?
+       ORDER BY time_ns, id LIMIT 1`,
+      bootId,
+      int(pid),
+      optIntParam(procStart),
+    );
+    return row === undefined ? null : mapEvent(row);
+  }
+
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean {
     return (
       this.#get(
@@ -972,6 +991,13 @@ class SqliteStore implements Store {
 
   links(): LinkRow[] {
     return this.#all('SELECT * FROM links ORDER BY time_ns, event_id').map(mapLink);
+  }
+
+  linksTo(sessionId: string): LinkRow[] {
+    return this.#all(
+      'SELECT * FROM links WHERE to_session = ? ORDER BY time_ns, event_id',
+      sessionId,
+    ).map(mapLink);
   }
 
   meta(sessionId: string): SessionMeta | null {

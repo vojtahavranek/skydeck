@@ -4,7 +4,13 @@
  * Pure: it reads no file and calls no program; whether a path exists is asked through a callback.
  */
 import type { Ns } from '../platform/types.ts';
-import { absolutizePathFlags, isPrintRun, isSessionId, storableArgv } from './launch.ts';
+import {
+  absolutizePathFlags,
+  copiedSessionOf,
+  isPrintRun,
+  isSessionId,
+  storableArgv,
+} from './launch.ts';
 import { argvFromCmdline, procStartFromStat } from './procstat.ts';
 
 export interface SpoolEvent {
@@ -34,6 +40,12 @@ export interface SpoolEvent {
    * 'sdk-cli'). An end event has no command: only entrypointEnv decides.
    */
   scripted: boolean;
+  /**
+   * Follow-up F33 (5.3 "Copies"): a SessionStart whose recorded command starts a copy of a session
+   * (`copiedSessionOf`, `--fork-session --resume <id>`): the id of the session it is a copy of.
+   * Absent for every other event, and when that id is the event's own session.
+   */
+  copyOf?: string;
 }
 
 /**
@@ -138,8 +150,8 @@ function recordedCommand(encoded: string): string[] | null {
  *
  * The launch command is normalised: `argv` is storableArgv(absolutizePathFlags(recorded, cwd,
  * exists)), so no positional argument, no removed flag (with its values) and no value of an unknown
- * flag is stored. `scripted` is set from the command as recorded. `exists` is used only by
- * absolutizePathFlags.
+ * flag is stored. `scripted` and `copyOf` are set from the command as recorded. `exists` is used
+ * only by absolutizePathFlags.
  */
 export function parseSpoolFile(
   name: string,
@@ -192,6 +204,7 @@ export function parseSpoolFile(
   const entrypointEnv = nonEmpty(keys.get('entrypoint_env'));
   const encoded = isStart ? (keys.get('argv_b64') ?? '') : '';
   const recorded = encoded === '' ? null : recordedCommand(encoded);
+  const copyOf = recorded === null ? null : copiedSessionOf(recorded);
 
   return {
     spoolName: name,
@@ -211,5 +224,6 @@ export function parseSpoolFile(
     scripted:
       (recorded !== null && isPrintRun(recorded)) ||
       (entrypointEnv !== null && entrypointEnv !== 'cli'),
+    ...(copyOf !== null && copyOf !== sessionId ? { copyOf } : {}),
   };
 }

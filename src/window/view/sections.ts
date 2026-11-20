@@ -2,11 +2,11 @@
  * The parts of the window's view model (S2 12.1, 12.2, stage A): which section a row is in, one
  * row as the page receives it, and the project directories the new form offers. Pure.
  *
- * Imports (S2 4.3, plan A8): types of `sessions`, step 1's `isListed`, the window's message and hub
- * types, `text`, and the window's chip (`./chip.ts`, plan D4).
+ * Imports (S2 4.3, plan A8): types of `sessions`, step 1's `isListed` (and F33's `isHiddenCopy`),
+ * the window's message and hub types, `text`, and the window's chip (`./chip.ts`, plan D4).
  */
 import type { Ns } from '../../platform/types.ts';
-import { isListed } from '../../sessions/list.ts';
+import { isHiddenCopy, isListed } from '../../sessions/list.ts';
 import type { ListRow } from '../../sessions/list.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import type { TerminalInfo, TerminalState } from '../hub.ts';
@@ -102,7 +102,9 @@ function noteHead(note: string | null): string[] {
  * chip is the window's (S2 12.3, `windowChip`), not design 7.3's of `ls`. Stage A has no attention and no stacks.
  * F19: `ticketStatus` is the session's ticket status while one is known — its name, its text and
  * its category —, else null (the row's chip is not drawn). F30: `endable` while the session runs in
- * the row's terminal of the window and that terminal can be ended (`TerminalInfo.endable`).
+ * the row's terminal of the window and that terminal can be ended (`TerminalInfo.endable`). F33:
+ * `copyOf` names the session a copy began as a copy of (`ListRow.copyOf`), else null, with
+ * `hiddenWhileEmpty` while the list hides it (`isHiddenCopy`, no terminal of the window showing it).
  */
 export function rowPayload(
   row: ListRow,
@@ -168,6 +170,14 @@ export function rowPayload(
             name: row.ticketStatus.name,
             status: row.ticketStatus.status,
             category: row.ticketStatus.category,
+          },
+    copyOf:
+      row.copyOf === undefined
+        ? null
+        : {
+            id: row.copyOf.id,
+            title: row.copyOf.title,
+            hiddenWhileEmpty: terminal === null && isHiddenCopy(row),
           },
   };
 }
