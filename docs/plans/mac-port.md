@@ -115,11 +115,13 @@ until part 9 or part 10 tells you to.
    I resume from my status file."
 4. **The facts only your Claude Code can show** (part 4.2). Show them the `claude -p …` line of part
    4.2 as it is, and say: "May I run this once? It starts Claude Code scripted, in a throwaway
-   folder, with a throwaway hook that records only the NAMES of what a hook receives. It costs one
-   tiny prompt to the cheapest model (a cent or less) and takes at most two minutes. It runs with
-   your own login and settings, so your own hooks, and any an administrator set, run as in any
-   session of yours, and Claude Code may write its own `~/.claude.json` as at any session start. I
-   run it once, never again if it fails."
+   folder inside this clone, with a throwaway hook that writes a file holding only these kinds of
+   lines: NAMES (of environment variables and of the input's fields), YES/NO answers, WORDS FROM
+   FIXED LISTS (anything else is written as "(other)") and one fully masked start time; never a
+   value of yours, never free text. It costs one tiny prompt to the cheapest model (a cent or less)
+   and takes at most two minutes. It runs with your own login and settings, so your own hooks, and
+   any an administrator set, run as in any session of yours, and Claude Code may write its own
+   `~/.claude.json` as at any session start. I run it once, never again if it fails."
 5. **The end.** "At the end, will you do a hands-on check of about fifteen minutes with me: install
    skydeck for real from a second clone I prepare at `~/skydeck-mac-check` (not from this one, where
    I work), open its window, press some keys, and once restart the Mac? Without it the window's look
@@ -224,15 +226,18 @@ newest three files instead (still masked): note that in the facts.
 ### 4.2 What a hook receives: one bounded run of Claude Code
 
 Only with a yes to question 4 of 2.2, and ONCE in the whole plan (never in a loop, never in the test
-suite, never again if it fails). The probe cannot see a hook's environment; one scripted run of
-Claude Code shows it. It runs with your human's own login and settings, as any session of theirs
-does:
+suite, never again if it fails). The suite runs the block below only with a stand-in `claude`
+(`test/mac-port-plan.test.ts`): it checks the flags, the markers left out, and that every line the
+hook writes has one of the forms below; keep it passing if you change the block. The probe cannot
+see a hook's environment; one scripted run of Claude Code shows it. It runs with your human's own
+login and settings, as any session of theirs does:
 
 - `--settings <file>`: a throwaway settings file whose only content is a `SessionStart` and a
-  `SessionEnd` hook, a script that writes only NAMES (of environment variables, of the input's
-  fields) and yes/no answers into the run's folder. Hooks of all levels merge (EXPECTED: not
-  documented), so your human's own hooks, and any set by an administrator, run too, as in any
-  session of theirs.
+  `SessionEnd` hook, a script that writes into the run's folder only NAMES (of the environment
+  variables and of the input's fields), YES/NO answers, WORDS FROM FIXED LISTS and one fully masked
+  start time: never a value of your human's, never free text; whatever does not fit a fixed list is
+  written as `(other)`. Hooks of all levels merge (EXPECTED: not documented), so your human's own
+  hooks, and any set by an administrator, run too, as in any session of theirs.
 - `--tools ""` and `--disallowedTools "mcp__*"`: no built-in tool and no MCP tool;
   `--strict-mcp-config` with an empty `--mcp-config`: no MCP server is started.
 - `--no-session-persistence`: the session is not saved to disk (documented); whether a `-p` run
@@ -260,7 +265,8 @@ facts="$(git rev-parse --absolute-git-dir)/skydeck-facts"
 mkdir "$facts" || { echo "$facts is there already: stop"; exit 1; }
 cat >"$facts/hook.sh" <<'EOF'
 #!/bin/sh
-# Records what a hook receives: names, forms and yes/no only, never a value.
+# Records what a hook receives: names, yes/no answers, words from fixed lists and one fully
+# masked start time; never a value, never free text.
 {
   echo "event: $1"
   echo "CLAUDE* variable names:"
@@ -270,8 +276,9 @@ cat >"$facts/hook.sh" <<'EOF'
     print "input field names:\n"; print "  $_\n" for sort keys %$j;
     my $s = $ENV{CLAUDE_CODE_SESSION_ID};
     print "CLAUDE_CODE_SESSION_ID equals session_id: ", (defined $s && $s eq ($j->{session_id} // "") ? "yes" : "no"), "\n";
-    my $e = $ENV{CLAUDE_CODE_ENTRYPOINT} // "(not set)";
-    print "CLAUDE_CODE_ENTRYPOINT: ", ($e =~ /\A[a-z-]{1,20}\z/ ? $e : "(other)"), "\n";'
+    my %word = map { $_ => 1 } qw(cli sdk-cli sdk-ts sdk-py claude-vscode claude-desktop);
+    my $e = $ENV{CLAUDE_CODE_ENTRYPOINT};
+    print "CLAUDE_CODE_ENTRYPOINT: ", (!defined $e ? "(not set)" : $word{$e} ? $e : "(other)"), "\n";'
   case ":$PATH:" in *:/usr/sbin:*) echo "PATH holds /usr/sbin: yes" ;; *) echo "PATH holds /usr/sbin: no" ;; esac
   case ":$PATH:" in *:/bin:*) echo "PATH holds /bin: yes" ;; *) echo "PATH holds /bin: no" ;; esac
   pid=${CLAUDE_PID-}
@@ -286,7 +293,7 @@ cat >"$facts/hook.sh" <<'EOF'
   case $parent in sh | bash | zsh | dash) ;; *) parent="(other)" ;; esac
   echo "the hook's parent: $parent"
   echo "ps lstart of CLAUDE_PID, masked: [$(LC_ALL=C TZ=UTC ps -o lstart= -p "$pid" | sed 's/[A-Za-z]/a/g; s/[0-9]/9/g')]"
-} >"$(dirname "$0")/$1.txt" 2>&1
+} >"$(dirname "$0")/$1.txt" 2>/dev/null
 exit 0
 EOF
 printf '{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"sh %s/hook.sh SessionStart","timeout":5}]}],"SessionEnd":[{"hooks":[{"type":"command","command":"sh %s/hook.sh SessionEnd","timeout":5}]}]}}\n' \
