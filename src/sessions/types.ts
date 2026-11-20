@@ -6,13 +6,20 @@ import type { EndDetail, TranscriptRow } from '../store/types.ts';
 
 export type State = 'working' | 'waiting' | 'running' | 'not-running';
 export type Mark =
-  'ended-unexpectedly' | 'was-working' | 'continued' | 'expired' | 'expiring' | 'duplicate';
+  | 'ended-unexpectedly'
+  | 'was-working'
+  | 'continued'
+  | 'empty-copy'
+  | 'expired'
+  | 'expiring'
+  | 'duplicate';
 
 /** Display and JSON order of marks (design 6.3 table order). */
 export const MARK_ORDER: readonly Mark[] = [
   'ended-unexpectedly',
   'was-working',
   'continued',
+  'empty-copy',
   'expired',
   'expiring',
   'duplicate',
@@ -45,6 +52,11 @@ export interface DerivedSession {
   holders: Holder[]; // live holders, latest event first
   marks: Mark[]; // in MARK_ORDER
   continuedFrom: string | null;
+  /**
+   * Follow-up F33: the session this one began as a copy of (its latest `copy` link, design 5.3),
+   * present exactly when it has one; absent for every other session.
+   */
+  copyOf?: string;
   dir: string | null;
   launch: string[] | null;
   transcript: TranscriptRow | null;

@@ -1165,7 +1165,15 @@ test('28: marks come in the fixed order', () => {
 test('MARK_ORDER is the order of the table in design 6.3', () => {
   assert.deepEqual(
     [...MARK_ORDER],
-    ['ended-unexpectedly', 'was-working', 'continued', 'expired', 'expiring', 'duplicate'],
+    [
+      'ended-unexpectedly',
+      'was-working',
+      'continued',
+      'empty-copy', // F33
+      'expired',
+      'expiring',
+      'duplicate',
+    ],
   );
 });
 
