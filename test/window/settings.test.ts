@@ -710,7 +710,7 @@ describe('the screen (payload) and what the running server uses (G4)', () => {
   });
 
   test('every text the screen shows is sanitised; a value for a control is sent exactly', (t) => {
-    const pattern = '^\u001b[31m[A-Z]+‮-[0-9]+';
+    const pattern = '^\u001b[31m[A-Z]+\u202e-[0-9]+';
     const w = world(t, { groupPattern: pattern });
     const one = setting(w.settings.payload(), 'groupPattern');
     assert.equal(one.value, pattern);
