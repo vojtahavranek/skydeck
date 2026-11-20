@@ -458,8 +458,9 @@ function isEnforcementError(path: readonly unknown[]): boolean {
  * The q<i> part of the answer (MERGE_FIELDS). Null when it is not there (no alias, a null
  * repository or pull request, an error at q<i> or its pull request). A part that an error of the
  * answer lies under (path q<i>, pullRequest, <part>, …) is not used at all: a value GitHub nulled
- * by an error (a rollup, a list) would else read as a fact. An error under a rule's
- * `repositoryRuleset` only leaves that rule's enforcement unread (`isEnforcementError`).
+ * by an error (a rollup, a list) would else read as a fact. An error that names no path leaves no
+ * q<i> part used at all, for the same reason. An error under a rule's `repositoryRuleset` only
+ * leaves that rule's enforcement unread (`isEnforcementError`).
  */
 function readMerge(
   data: Record<string, unknown>,
@@ -474,7 +475,10 @@ function readMerge(
   const hit = new Set<unknown>();
   for (const entry of Array.isArray(errors) ? (errors as unknown[]) : []) {
     const path = isRecord(entry) ? entry['path'] : undefined;
-    if (Array.isArray(path) && path[0] === alias && !isEnforcementError(path)) {
+    if (!Array.isArray(path) || path.length === 0) {
+      return null; // an error that names no place may have nulled any value of q<i>
+    }
+    if (path[0] === alias && !isEnforcementError(path)) {
       if (path.length <= 2) {
         return null;
       }
@@ -724,7 +728,8 @@ function ghEnvironment(env: Env): Record<string, string> {
  * F32 (ruled): GitHub rejected the query as a whole. It checks a query before it runs it, so a
  * field or a type its schema no longer has fails every pull request of the batch: the answer has
  * no `data`, and its errors name the query (`path` from `query`) or a code of that check
- * (`extensions.code`). A timeout, a rate limit or GitHub's own failure is none of these.
+ * (`extensions.code`), or say that the token lacks a scope a field needs (`type`
+ * `INSUFFICIENT_SCOPES`). A timeout, a rate limit or GitHub's own failure is none of these.
  */
 function rejectedQuery(result: RunResult): boolean {
   if (result.timedOut || result.notFound) {
@@ -744,6 +749,7 @@ function rejectedQuery(result: RunResult): boolean {
     const path = isRecord(entry) ? entry['path'] : undefined;
     const extensions = isRecord(entry) ? entry['extensions'] : undefined;
     return (
+      (isRecord(entry) && entry['type'] === 'INSUFFICIENT_SCOPES') ||
       (Array.isArray(path) && path[0] === 'query') ||
       (isRecord(extensions) && typeof extensions['code'] === 'string')
     );

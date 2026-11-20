@@ -376,6 +376,17 @@ describe('F32: the bug, and each level alone', () => {
       reviews: ['APPROVED', 'APPROVED', 'APPROVED'],
     });
     assert.equal(levelOf(basics(null, 'SUCCESS'), three), 'approved-green');
+    for (const reviews of [['APPROVED'], ['APPROVED', 'APPROVED']]) {
+      const first = merge({ rules: [reviewRule(3), reviewRule(1)], reviews });
+      assert.equal(levelOf(basics(null, 'SUCCESS'), first), 'review-required', 'the largest first');
+    }
+  });
+
+  test('latest reviews that neither approve nor ask for changes count as no approval, all of them seen', () => {
+    for (const other of ['DISMISSED', 'COMMENTED', 'PENDING']) {
+      const q = merge({ rules: [reviewRule(2)], reviews: [other, 'APPROVED'] });
+      assert.equal(levelOf(basics(null, 'SUCCESS'), q), 'review-required', other);
+    }
   });
 
   test('changes requested by a writer, without a decision; not when the decision is APPROVED', () => {
@@ -677,6 +688,13 @@ describe('F32: an answer without the new parts, or with them broken, is read as 
       'blocked',
       'an error of another alias is not one of q0',
     );
+  });
+
+  test('an error without a path, beside data: no q<i> part is used (a value it nulled would read as a fact)', () => {
+    const q = merge({ rules: [checksRule('build'), reviewRule(2)], contexts: null });
+    const errors = [{ message: 'Something went wrong while executing your query.' }];
+    const result = parseOne(answer(basics(null, 'SUCCESS'), q, errors), { code: 1 });
+    assert.deepEqual(result, before(basics(null, 'SUCCESS')));
   });
 
   test('no base branch (baseRef null): the rules are not known, as before', () => {
@@ -1235,6 +1253,26 @@ describe('F32: a query GitHub rejects as a whole is asked once more with the que
   test('an unknown type in a fragment condition is a rejection too', async (t) => {
     let call = 0;
     const d = deck(t, [URL7], (c) => (++call === 1 ? rejected('type') : before(c)));
+    assert.deepEqual(await fetchPrs(d.deps, [URL7]), { fetched: 1, failed: 0 });
+    assert.equal(d.runner.calls[1]?.args[5], BEFORE);
+  });
+
+  test('a token without the scope a field needs is a rejection too (no path, no code: its type)', async (t) => {
+    const scopes = runResult({
+      code: 1,
+      stdout: JSON.stringify({
+        errors: [
+          {
+            type: 'INSUFFICIENT_SCOPES',
+            locations: [{ line: 1, column: 300 }],
+            message: 'Your token has not been granted the required scopes to execute this query.',
+          },
+        ],
+      }),
+      stderr: 'gh: Your token has not been granted the required scopes to execute this query.\n',
+    });
+    let call = 0;
+    const d = deck(t, [URL7], (c) => (++call === 1 ? scopes : before(c)));
     assert.deepEqual(await fetchPrs(d.deps, [URL7]), { fetched: 1, failed: 0 });
     assert.equal(d.runner.calls[1]?.args[5], BEFORE);
   });

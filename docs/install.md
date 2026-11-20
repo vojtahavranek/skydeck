@@ -919,14 +919,17 @@ approvals its rules ask for (from people who can write to the repository), `chec
 checks run, `unresolved comments` while a conversation its rules ask to resolve is open, then
 `draft`; a required check that has not reported says `checks pending` only after these (it can wait
 for days, and the review is what you can act on), and `blocked` when GitHub will not merge it for a
-reason skydeck does not show (code owners, a merge queue, a deployment). `approved, green` needs an
-approval, unless GitHub's answer does not say what it waits for (a pull request whose base branch
-is gone, say); with no review asked for it is `checks passing`, or `open` without any checks. A
-pull request read by an older skydeck keeps its old words until it is read again. One that cannot
-be read shows when it was last read and its error, `acme/web #7 · can't read · last read 3h ago ·
-gh: HTTP 502` (`never read` when it never was; a long error is cut, and the line's tooltip has it
-whole, after the pull request's title). The merged and closed ones are folded into `30 merged, 2
-closed ▸`; a click unfolds them (they show no age: they are never read again). On a line:
+reason skydeck does not show (code owners, a merge queue, a deployment), once GitHub has worked
+that out: right after the base branch moved it may not have, and the next `↻` can turn `approved,
+green` into `blocked`. Conflicts and a branch behind its base are not shown. `approved, green`
+needs an approval, unless GitHub's answer does not say what it waits for (a pull request whose base
+branch is gone, say); with no review asked for it is `checks passing`, or `open` without any
+checks. A pull request read by an older skydeck keeps its old words until it is read again. One
+that cannot be read shows when it was last read and its error, `acme/web #7 · can't read · last
+read 3h ago · gh: HTTP 502` (`never read` when it never was; a long error is cut, and the line's
+tooltip has it whole, after the pull request's title). The merged and closed ones are folded into
+`30 merged, 2 closed ▸`; a click unfolds them (they show no age: they are never read again). On a
+line:
 
 - a click that selected no text opens the pull request in your default browser (`window.links`);
 - `×` detaches it and shows the toast `Detached acme/web #7` with `Undo`, which attaches it again.
@@ -1149,7 +1152,7 @@ For a GitHub issue the failures have the pull requests' words: `gh timed out aft
 not installed`, the first line of `gh`'s own message (not logged in: `To get started with GitHub
 CLI, please run:  gh auth login`), `gh exited <n>`, and `not found` or GitHub's message for an
 issue it does not find. `gh` is called as for the pull requests (`gh api graphql --hostname
-github.com`, in batches of 50, 10 seconds, no `GH_HOST`).
+github.com`, 10 seconds, no `GH_HOST`), in batches of 50 (the pull requests' hold 10).
 
 **An example**, for a made-up tracker at `https://tickets.example.com/`, whose API answers
 `{"state": "In Progress"}` for `GET /api/tickets/<key>` to a bearer token. Save it as

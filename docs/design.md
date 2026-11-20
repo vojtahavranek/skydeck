@@ -473,8 +473,12 @@ never received a prompt has no transcript (14).
   comments, draft, checks pending (a required check has not reported), blocked; then
   checks passing (no review asked for, the checks pass), open (no review asked for, no checks at
   all), else approved and green (approved, with checks that pass or none; or nothing known of the
-  review, as for a row read before F32). So "approved and green" needs a real approval wherever
-  GitHub's answer tells what is needed.
+  review, as for a row read before F32, or rules that need approvals that cannot be counted: the
+  reviews not read, or more than 50). So "approved and green" needs a real approval wherever
+  GitHub's answer tells what is needed. Not shown: conflicts and a branch behind its base (GitHub's
+  merge state `DIRTY` and `BEHIND`, the latter hiding `BLOCKED`); and `blocked` only once GitHub
+  has worked out the merge state (`UNKNOWN` right after the base branch moved: the next read can
+  show it).
 - **Chip.** A row shows one chip for all attached pull requests: the worst state among them in
   this order — can't read, not fetched, checks failing, changes requested, checks pending, review
   required, unresolved comments, blocked, draft, open, checks passing, approved and green, merged,
@@ -583,7 +587,10 @@ are written as `\uXXXX` escapes like in any other string of the JSON. Sessions a
 `unresolved-comments`, `blocked` or `not-required` (7.3); `checks` is `passing`, `failing`,
 `pending` or, since F32, `not-reported` (a check the rules require has not reported). A reader of
 version 1 that knows only the earlier values meets a word it does not know, and gets
-`not-required` where it got null for a pull request that no rule asks to review. `show --json` prints one
+`not-required` where it got null for a pull request that no rule asks to review. Since F32
+`review` is no longer GitHub's decision alone: an approved pull request that has open
+conversations or that GitHub will not merge exports `unresolved-comments` or `blocked`, so a
+reader that looks for `approved` no longer finds it there. `show --json` prints one
 session object with `doneAt` (the time it was marked done while it is done, else null), `note`,
 `ticket` (`{ "url", "text", "status", "category", "okAt", "triedAt", "error" }`: the ticket set on
 it, its short name (7.1) and, from follow-up F19, its status, its category, the times of the last
