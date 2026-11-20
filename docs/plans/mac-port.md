@@ -80,10 +80,10 @@ yourself):
   print `false`: if it prints `true`, this clone came from a fork, and pull requests against it
   would never reach the maintainer: STOP and ask. `gh api repos/<owner>/<name> --jq .allow_forking`
   must print `true`, and `gh api user --jq .login` prints the login. Whether that account already
-  has a fork: `gh repo view <login>/<name> --json isFork,parent --jq '.isFork,
-  .parent.nameWithOwner'` (an error means no repository of that name; a repository of that name that
-  is not a fork of `<owner>/<name>` is in the way: STOP and ask); if it has one, its branches: `gh
-  api --paginate repos/<login>/<name>/branches --jq '.[].name'`; a `mac-…` branch there is from an
+  has a fork: `gh api repos/<login>/<name> --jq '.fork, .parent.full_name'` prints `true` and
+  `<owner>/<name>` for one (an error means no repository of that name; a repository of that name
+  that prints anything else is in the way: STOP and ask); if it has one, its branches: `gh api
+  --paginate repos/<login>/<name>/branches --jq '.[].name'`; a `mac-…` branch there is from an
   earlier try, which a push would collide with and force is forbidden: STOP and ask. Some company
   accounts may not fork outside their company: if `gh repo fork` refuses later, STOP and tell your
   human.
