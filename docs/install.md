@@ -411,7 +411,7 @@ npm run check
 | `~/.local/bin/skydeck` | Symbolic link to `<checkout>/bin/skydeck`. The folder is created when missing. |
 | `<dataDir>/node` | Symbolic link to the Node.js binary that ran `install`. |
 | `<dataDir>/skydeck.db` | The database, mode 600. |
-| `<stateDir>/spool/`, `<stateDir>/locks/`, `<configDir>/` | Empty folders (mode 700). The hook writes to the spool; `locks/` is unused; `config.json` is yours to write (see "Configuration"). |
+| `<stateDir>/spool/`, `<stateDir>/locks/`, `<configDir>/` | Empty folders (mode 700). The hook writes to the spool; `locks/` is unused; `config.json` is yours to write, by hand or in the window's Settings (see "Configuration"). |
 
 The defaults of `<dataDir>`, `<stateDir>`, `<configDir>` and `<claudeHome>` are in "Configuration".
 
@@ -461,25 +461,41 @@ global config file that is a symbolic link is never written.
 ### `config.json`
 
 The file is `<configDir>/config.json` (default `~/.config/skydeck/config.json`). It does not exist
-until you write it, and every key is optional. Unknown keys are an error, so a typo is not silently
-ignored.
+until you write it (by hand, or with a change in the window's Settings, below), and every key is
+optional. Unknown keys are an error, so a typo is not silently ignored.
 
-| Key | Default | What it does |
-|---|---|---|
-| `terminal` | `"here"` | Where `resume`, `new`, `restore` and `R` start `claude` when you give none of `--here`, `--tab` and `--window`: `"here"` (this terminal), `"wezterm"` (a new WezTerm tab) or `"window"` (the skydeck window, through its server; `--tab` then means the window too, and `--here` this terminal: "Starting sessions in the window from a terminal (stage C)"). |
-| `wezterm.domain` | `null` | The WezTerm domain a tab opens in (`--domain-name`). `null` passes no domain. |
-| `groupPattern` | `"^[A-Z][A-Z0-9]+-[0-9]+"` | A JavaScript regular expression (the source, no flags). When a session has no group, the text it matches in the session's title is the group. The default takes a ticket key such as `ABC-123` at the start of the title. |
-| `firstRunDoneAfterDays` | `7` | install's one-time offer to mark sessions as done: those not running whose last activity is older than this many days. |
-| `prRefreshMinutes` | `5` | The least time between two automatic attempts to read a pull request's status. |
-| `restoreBatch` | `3` | How many sessions `restore` opens at a time. |
-| `restoreMinFreeMb` | `4096` | `restore` stops (exit 5) before a batch when less memory than this (MiB, `MemAvailable`) is free. |
-| `restoreStartTimeoutSeconds` | `120` | How long `restore` waits for the sessions of a batch to report their start. |
-| `claudeHome` | `null` | Claude Code's folder. `null` means `$CLAUDE_CONFIG_DIR`, else `~/.claude`. Must be an absolute path (no `~`). |
-| `claudeCommand` | `"claude"` | The program `resume`, `new` and `restore` (and `R` in the list) run. One word: a name on `PATH` or an absolute path. It is not split into arguments. The window runs it too. |
-| `ticketUrl` | `null` | A ticket's address with `{key}` where the ticket key goes, for Jira `"https://example.atlassian.net/browse/{key}"`. The group chip of the window's header then opens the session's ticket, and `skydeck show` prints its address as a `ticket:` line (while the session has no ticket of its own); a bare key then also sets a session's ticket ("The ticket link", "The ticket of a session"). `null`: no link. What it accepts, and its line when it is refused: "The ticket link", in "The window (step 2)". |
-| `ticketStatus` | `[]` | The programs that read a ticket's status, for the trackers `gh` does not know (a GitHub issue's status needs only `gh`): a list of at most 8 rules `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` starts a ticket's address takes it. The program is run without a shell, with `{url}` and `{key}` filled into its arguments, and prints the status on one line and its category on the next. The rule, the answer and a complete example: "A ticket's status", in "The window (step 2)". `[]`: only GitHub issues have a status. A program never gets a secret from here: it reads its own from a file you keep. |
-| `ticketRefreshMinutes` | `10` | The least time between two automatic reads of a ticket's status, in whole minutes from 1 to 1440, counted from the last attempt; a status that is `done` or `closed` is read again after 12 hours instead. The window's server reads both ticket keys when it starts: `skydeck window --restart` after a change. |
-| `window` | see the window's section | The window's keys `window.port`, `window.edge`, `window.profileDir` and `window.keepAlive`: "The window (step 2)", "The `window` keys". |
+**In the window: Settings.** `Settings` in the window's title bar (or `> settings` in the quick
+switcher, Ctrl+Shift+P) shows every key, its value, its default and whether the file sets it. The
+keys marked `change` below are changed there, one at a time: `Save` (or Enter in its field), or
+`Default` to remove the key from the file. A key marked `shown` names a program, a folder or the
+port: the window shows it, and you change it in the file. A value the file's rules refuse is
+refused there in the same words (`"prRefreshMinutes" must be a positive integer`), and the file
+stays as it was; a file that cannot be read is never written (the screen says what `doctor` says:
+mend it by hand). Only that key changes; every other key of the file stays, in its order. Before
+the window's first change after its server started, a copy of the file is kept beside it as
+`config.json.skydeck-backup` (one copy, replaced by the next start's first change). **Applies**
+says when a change takes effect in the window: `at once` (from its next use: the next list, link,
+refresh or restore), `after the window restarts` (`skydeck window --restart`; the screen says
+`applies after the window restarts` beside such a value, and beside a hand edit it does not use
+yet), or that only the commands read it, at each run (or only `skydeck install`). A change in the
+window restarts, starts and stops nothing; the commands always read the file as it is.
+
+| Key | Default | In the window | Applies | What it does |
+|---|---|---|---|---|
+| `terminal` | `"here"` | change | the commands, at their next run | Where `resume`, `new`, `restore` and `R` start `claude` when you give none of `--here`, `--tab` and `--window`: `"here"` (this terminal), `"wezterm"` (a new WezTerm tab) or `"window"` (the skydeck window, through its server; `--tab` then means the window too, and `--here` this terminal: "Starting sessions in the window from a terminal (stage C)"). |
+| `wezterm.domain` | `null` | change | the commands, at their next run | The WezTerm domain a tab opens in (`--domain-name`). `null` passes no domain. |
+| `groupPattern` | `"^[A-Z][A-Z0-9]+-[0-9]+"` | change | at once | A JavaScript regular expression (the source, no flags). When a session has no group, the text it matches in the session's title is the group. The default takes a ticket key such as `ABC-123` at the start of the title. |
+| `firstRunDoneAfterDays` | `7` | change | `skydeck install` only | install's one-time offer to mark sessions as done: those not running whose last activity is older than this many days. |
+| `prRefreshMinutes` | `5` | change | at once | The least time between two automatic attempts to read a pull request's status. |
+| `restoreBatch` | `3` | change | at once | How many sessions `restore` opens at a time. |
+| `restoreMinFreeMb` | `4096` | change | at once | `restore` stops (exit 5) before a batch when less memory than this (MiB, `MemAvailable`) is free. |
+| `restoreStartTimeoutSeconds` | `120` | change | at once | How long `restore` waits for the sessions of a batch to report their start. |
+| `claudeHome` | `null` | shown | after the window restarts | Claude Code's folder. `null` means `$CLAUDE_CONFIG_DIR`, else `~/.claude`. Must be an absolute path (no `~`). |
+| `claudeCommand` | `"claude"` | shown | after the window restarts | The program `resume`, `new` and `restore` (and `R` in the list) run. One word: a name on `PATH` or an absolute path. It is not split into arguments. The window runs it too. |
+| `ticketUrl` | `null` | change | at once | A ticket's address with `{key}` where the ticket key goes, for Jira `"https://example.atlassian.net/browse/{key}"`. The group chip of the window's header then opens the session's ticket, and `skydeck show` prints its address as a `ticket:` line (while the session has no ticket of its own); a bare key then also sets a session's ticket ("The ticket link", "The ticket of a session"). `null`: no link. What it accepts, and its line when it is refused: "The ticket link", in "The window (step 2)". |
+| `ticketStatus` | `[]` | shown | after the window restarts | The programs that read a ticket's status, for the trackers `gh` does not know (a GitHub issue's status needs only `gh`): a list of at most 8 rules `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` starts a ticket's address takes it. The program is run without a shell, with `{url}` and `{key}` filled into its arguments, and prints the status on one line and its category on the next. The rule, the answer and a complete example: "A ticket's status", in "The window (step 2)". `[]`: only GitHub issues have a status. A program never gets a secret from here: it reads its own from a file you keep. |
+| `ticketRefreshMinutes` | `10` | change | at once | The least time between two automatic reads of a ticket's status, in whole minutes from 1 to 1440, counted from the last attempt; a status that is `done` or `closed` is read again after 12 hours instead. The window's server reads both ticket keys when it starts: `skydeck window --restart` after a change by hand (a change of this one in Settings applies at once). |
+| `window` | see the window's section | — | — | The window's keys `window.port`, `window.edge`, `window.profileDir` and `window.keepAlive`: "The window (step 2)", "The `window` keys". |
 
 The numbers must be positive integers. An example that uses WezTerm tabs and a lower-case ticket key:
 
@@ -710,15 +726,15 @@ ok       the window's Edge profile folder: C:\Users\you\AppData\Local\skydeck\ed
 
 ### The `window` keys
 
-In `config.json` ("Configuration" above), all optional:
+In `config.json` ("Configuration" above), all optional; "In the window" and "Applies" as there:
 
-| Key | Default | What it does |
-|---|---|---|
-| `window.port` | `47613` | The server's port on `127.0.0.1`: a whole number from 1 to 65535. Keep it unchanged once windows were opened: a window keeps its key per port, so after a change the old windows cannot connect (close them) and `skydeck window` opens a new one. |
-| `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | The Edge program: an absolute path in WSL. With `window.links` `"edge"` the links the window opens open with it too, in your own Edge profile. |
-| `window.profileDir` | `null` | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
-| `window.keepAlive` | `"wsl"` | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`. |
-| `window.links` | `"default"` | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
+| Key | Default | In the window | Applies | What it does |
+|---|---|---|---|---|
+| `window.port` | `47613` | shown | after the window restarts | The server's port on `127.0.0.1`: a whole number from 1 to 65535. Keep it unchanged once windows were opened: a window keeps its key per port, so after a change the old windows cannot connect (close them) and `skydeck window` opens a new one. |
+| `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | shown | after the window restarts | The Edge program: an absolute path in WSL. With `window.links` `"edge"` the links the window opens open with it too, in your own Edge profile. |
+| `window.profileDir` | `null` | shown | `skydeck window`, at its next run | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
+| `window.keepAlive` | `"wsl"` | change | after the window restarts | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`. |
+| `window.links` | `"default"` | change | at once | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
 
 With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
 "Starting sessions in the window from a terminal (stage C)" below. An example, for a PC with two
@@ -736,7 +752,9 @@ on port 47613:
 
 A key inside `window` that skydeck does not know is an error, as everywhere in the file
 (`skydeck: /home/you/.config/skydeck/config.json: unknown key "window.prot"`). The server reads the
-file when it starts: after a change, run `skydeck window --restart`.
+file when it starts: after a change by hand, run `skydeck window --restart`. A change in the
+window's Settings ("Configuration" above) of a key that applies at once needs none; one of
+`window.keepAlive` applies after the restart (a keep-alive that runs keeps running until then).
 
 ### Keeping WSL running
 
@@ -2409,7 +2427,7 @@ your sessions again. The backup install made of that file stays, and is not name
 account details, so remove it yourself when you no longer need it.
 
 The database, its copies (`skydeck.db.schema<V>-<time>`, "Going back"), the spool and
-`config.json` stay. Sessions that are running keep running: skydeck never stops a process by
+`config.json` (with the window's copy of it, `config.json.skydeck-backup`) stay. Sessions that are running keep running: skydeck never stops a process by
 itself.
 `uninstall` creates nothing, except that one backup when it needs it (and, when it is the first
 command to open a database an update upgrades, the copy kept before the upgrade).
@@ -2420,7 +2438,7 @@ skydeck uninstall --purge
 
 does the same and then removes the data, state and configuration folders (`<dataDir>`, `<stateDir>`,
 `<configDir>`): from each only what skydeck writes there — the database and its copies, the spool, `hook.log`,
-`config.json`, the window's logs and runtime folder, a link inside them that `uninstall` left alone —
+`config.json` and its copy, the window's logs and runtime folder, a link inside them that `uninstall` left alone —
 and then the folder. It cannot be undone. A folder that holds anything else (a file of yours, an
 editor's backup), is a symbolic link, is another user's or cannot be read is left alone, whole; the
 others are still purged, and the last line says which folder stayed and why (`skydeck is

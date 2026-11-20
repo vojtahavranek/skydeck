@@ -150,9 +150,10 @@ The pull requests a session touched are attached by themselves. To attach one yo
 with `gh`: `PR · failing`, `PR · review`, `PR · approved` and so on.
 
 For the ticket, press `t` (or **+ ticket** in the header) and paste its link. A key alone, such as
-`ABC-123`, works once `~/.config/skydeck/config.json` says how a key becomes a link, for example
-`{ "ticketUrl": "https://tickets.example.com/browse/{key}" }`, and you have run
-`skydeck window --restart`. The ticket's status shows as a chip when the ticket is a GitHub issue,
+`ABC-123`, works once skydeck knows how a key becomes a link: open **Settings** in the title bar,
+type `https://tickets.example.com/browse/{key}` into `ticketUrl` and press Enter (it applies at
+once). Settings shows every setting of `~/.config/skydeck/config.json`; those that name a program,
+a folder or the port you change in the file itself (and then run `skydeck window --restart`). The ticket's status shows as a chip when the ticket is a GitHub issue,
 or when you name a program that reads it (the guide's
 [A ticket's status](install.md#a-tickets-status)).
 
@@ -188,8 +189,8 @@ restart … sessions were open"), with a check box each; the ones the restart cu
 **Restore 3** (its number counts the ticked ones) resumes them in the window, a few at a time.
 **Not now** hides the offer; until the next restart, typing `>restore` in the quick switcher still
 offers it. Without the window, `skydeck restore` in a terminal resumes the first session there and
-prints a command for each of the others (with `"terminal": "wezterm"` in `config.json`, it opens a
-WezTerm tab for each).
+prints a command for each of the others (with `terminal` set to `wezterm` in Settings or in
+`config.json`, it opens a WezTerm tab for each).
 
 ![The offer after a restart: four sessions with check boxes, three of them ticked, and the buttons Restore 3 and Not now.](img/restore.png)
 

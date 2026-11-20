@@ -975,8 +975,9 @@ could not be resumed; see above`).
   user's own (`SKYDECK_HOME=$HOME` makes them `~/data`, `~/state`, `~/config`; principle 6): from
   each it removes only what skydeck itself writes there, each entry of its kind (the database and
   the files SQLite keeps beside it, its copies and their temporaries (9.2), the two links, the
-  spool with `bad/`, `locks/`, `hook.log`, notes being edited, the window's logs, a runtime directory of this store, `config.json`, and the
-  temporaries of their writers; one list in `src/cli/purge.ts`, which a new file skydeck writes
+  spool with `bad/`, `locks/`, `hook.log`, notes being edited, the window's logs, a runtime directory of this store, `config.json` and the
+  copy the window's settings screen keeps of it (design-step-2.md 12.13), and the temporaries of
+  their writers; one list in `src/cli/purge.ts`, which a new file skydeck writes
   there must join), then the folder. A folder that is a symbolic link, is another user's, cannot be
   looked at, or holds anything else — `notes.txt`, an editor's backup, a directory where skydeck
   keeps a file — is left alone, whole; the others are still purged, and the command ends with
@@ -1056,7 +1057,9 @@ design-step-2.md 16.4; default `here`), `wezterm.domain`, `groupPattern`, `first
 `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`,
 `claudeHome`, `claudeCommand`, `ticketUrl` (design-step-2.md 16.4), `ticketStatus` and
 `ticketRefreshMinutes` (follow-up F19, 7.3; design-step-2.md 16.4).
-Unknown keys are an error.
+Unknown keys are an error. The file is the user's, written by hand, or from follow-up F36 by the
+window's settings screen one plain key at a time (design-step-2.md 12.13; `config.json.skydeck-backup`
+beside it is that screen's copy); every command reads it at each run.
 
 ### 9.2 Database
 

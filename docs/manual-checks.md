@@ -20,7 +20,8 @@ F13), at "The window's theme"; W35 checks the flags a session was started with i
 (follow-up F16), at "The flags a session was started with"; W36 checks the new form's favourite
 flags (follow-up F15) and its group chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
 session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status"; W40 checks
-a copy that Claude Code's background feature makes (follow-up F33), at "A copy made in agent view".
+a copy that Claude Code's background feature makes (follow-up F33), at "A copy made in agent view";
+W41 checks the window's settings screen (follow-up F36), at "The settings screen".
 
 Setup:
 
@@ -2739,3 +2740,50 @@ background feature runs is known from one tester's report: `claude --fork-sessio
 original's transcript> --permission-mode auto`. What Claude Code does with such a copy later — the
 `source` of its start, when its history is written under its new id, whether its supervisor starts
 it again — is not known, and nothing in skydeck depends on it.
+
+## The settings screen
+
+The check of the window's settings screen (follow-up F36; design-step-2.md 12.13;
+[install.md](install.md), "config.json", its paragraph "In the window: Settings"): W41, in your
+window, on your own `config.json`. It changes one harmless setting, `prRefreshMinutes` (how often
+the window reads a pull request's status), and puts it back; the file is copied aside first.
+Commands are typed in W, a WSL terminal of your own (never a `!` command inside Claude Code). The
+tests run the screen in headless Chromium against a test server with a sandbox's file; only here
+does the screen meet Edge and your own file.
+
+## W41. A harmless setting changed in the window, and put back
+
+Setup: skydeck updated to a commit that has follow-up F36 (`skydeck update`, W32); the window open.
+
+1. **Copy the file aside.** In W: `ls -l ~/.config/skydeck/`. Write down whether `config.json` and
+   `config.json.skydeck-backup` are listed. When `config.json` is: `cp -p
+   ~/.config/skydeck/config.json ~/config.json.before-w41`, then `grep -n prRefreshMinutes
+   ~/.config/skydeck/config.json` and write down the value (no line: it is not set).
+2. **Open it.** Click `Settings` at the right end of the title bar. Expected: a dialog over the page
+   whose first lines are `Settings`, `The file: <your config.json>` and where its copy is kept;
+   under `Pull requests` the line `prRefreshMinutes`, its field holding your value (or `5`),
+   `default 5 · set in the file` (or `· not in the file: the default is used`) and `applies at
+   once`; under `Claude Code`, `claudeCommand` shown as text with `names a program: it is changed
+   in the file only` and no button. The keyboard is in the first field (`terminal`'s choice).
+3. **Change it.** Click into the `prRefreshMinutes` field, press Ctrl+A, type `6` and press Enter.
+   Expected: under the field `Saved: it applies at once.` In W: `grep -n prRefreshMinutes
+   ~/.config/skydeck/config.json` prints `6`; `skydeck doctor` prints no `configuration:` line; `ls
+   -l ~/.config/skydeck/` lists `config.json.skydeck-backup` when step 1 found a `config.json`
+   (and, when the window changed nothing else since its server started, `cmp
+   ~/config.json.before-w41 ~/.config/skydeck/config.json.skydeck-backup` prints nothing).
+4. **A refusal.** In the same field press Ctrl+A, type `0` and press Enter. Expected: under it, in
+   the refusal's colour, `"prRefreshMinutes" must be a positive integer`; the grep of step 3 still
+   prints `6`.
+5. **Put it back.** When step 1 wrote down a value: Ctrl+A in the field, type it, Enter (`Saved: it
+   applies at once.`). When it was not set: click `Default` (`Put back to its default: it applies
+   at once.`, the field shows `5`). In W, the grep prints the value of step 1, or nothing. Press Esc:
+   the dialog closes and the keyboard is back where it was.
+6. **The end.** Only once the grep of step 5 shows the value of step 1 (or nothing): `rm
+   ~/config.json.before-w41`. If anything went wrong and you changed nothing else in the file since
+   step 1: `cp -p ~/config.json.before-w41 ~/.config/skydeck/config.json`; a later change of yours
+   would be lost by that copy, so then mend the one line by hand instead.
+
+Write down: what step 1 found; for each step whether it went as expected, and the words where they
+differ; whether the dialog, its fields and its buttons read well in your theme.
+
+Not tried before this check was written: all of it, in Edge.

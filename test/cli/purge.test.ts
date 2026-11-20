@@ -102,7 +102,13 @@ const EVERYTHING: Record<string, { spec: Spec; entries: Record<string, Maker> }>
   },
   config: {
     spec: CONFIG_DIR,
-    entries: { 'config.json': file('config.json') },
+    entries: {
+      'config.json': file('config.json'),
+      // F36: the settings screen's copy, and the temporaries of its writes.
+      'config.json.skydeck-backup': file('config.json.skydeck-backup'),
+      '.config.json.<hex>.tmp': file('.config.json.0123456789ab.tmp'),
+      '.config.json.skydeck-backup.<hex>.tmp': file('.config.json.skydeck-backup.0123456789ab.tmp'),
+    },
   },
   runtime: {
     spec: RUNTIME_DIR,

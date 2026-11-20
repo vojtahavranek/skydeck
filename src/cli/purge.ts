@@ -114,8 +114,18 @@ export function stateDirSpec(storeId: string): Spec {
   ];
 }
 
-/** `<configDir>`: config.json (the user writes it; skydeck only reads it). */
-export const CONFIG_DIR: Spec = [{ name: 'config.json', kinds: ['file'] }];
+/**
+ * `<configDir>`: config.json (the user writes it, or the window's settings screen one key at a
+ * time, F36), that screen's copy of it (src/window/settings.ts) and the temporaries of its writes.
+ */
+export const CONFIG_DIR: Spec = [
+  { name: 'config.json', kinds: ['file'] },
+  { name: 'config.json.skydeck-backup', kinds: ['file'] },
+  {
+    name: new RegExp(`^\\.config\\.json(?:\\.skydeck-backup)?\\.${HEX12}\\.tmp$`),
+    kinds: ['file'],
+  },
+];
 
 // ---------------------------------------------------------------------------------------------
 // Removing one
