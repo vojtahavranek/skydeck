@@ -1534,24 +1534,38 @@ terminal.
   it: the first characters of the short id in the header (or in `skydeck ls`'s last column), or
   the whole id. A shorter word is looked for in the fields only, so that `fix 2` does not list
   nearly every session through the digits of its id.
-- **While filtering** — a word in the field, or one of the chips below but `Show done` — done
-  sessions are listed too, with their `done` mark; every section is unfolded and every block flat
-  (below); the footer `17 done hidden · show` is not shown; and nothing folds: ← and → do nothing,
-  nor does a click on Earlier's header. A filter that leaves no session says `No session matches
-  the filter.` A text of white space only is no filter. The title bar's counts, the `need you`
-  count and `(3) skydeck` do not change with the filter: they count what the list lists without
-  it.
+- **While a word is typed**, done sessions are listed too, with their `done` mark; every section
+  is unfolded and every block flat (below); the footer `17 done hidden · show` is not shown; and
+  nothing folds: ← and → do nothing, nor does a click on Earlier's header. The chips below do none
+  of that. A filter — a word or a chip — that leaves no session says `No session matches the
+  filter.` A text of white space only is no filter. The title bar's counts, the `need you` count
+  and `(3) skydeck` do not change with the filter or the chips: they count what the list lists
+  without them.
 
 **The chips**, under the field: `Running` (the sessions under Open), `Open PR` (those with a pull
 request that is not merged or closed: open, draft, `not fetched` or `can't read`), `Has note`, and
-`Show done`. A click turns one on or off, drawn pressed while it is on, and leaves the keyboard
-where it was. Every chip that is on must hold, with every word: `Running` with `Has note` lists
-the running sessions that have a note. `Show done` is the same switch as the list key `a` and the
-footer's `show` (`done sessions shown · hide`): each turns the others on and off, and it shows
-done sessions without filtering. Esc clears the words, not the chips: a chip stays on until it is
-clicked again, the page reloads, or the switcher (below) clears it to show a session it hides.
-The chips are buttons: Tab from the field reaches them, Enter or Space presses the one that has
-the keyboard, and while one has it no list key acts.
+`Done` (only the sessions marked done). A click turns one on or off, drawn pressed while it is on,
+and leaves the keyboard where it was. Every chip that is on must hold, with every word: `Running`
+with `Has note` lists the running sessions that have a note. A chip narrows the list as you see it
+without one: it lists no done session — nor an empty copy ("A copy made by Claude Code's background
+feature") — unless `Show done` is on or a word is typed. So `Has note` alone lists the sessions
+with a note that are not done (a done one that still runs stays under Open, as without a chip), and
+the footer says how many done ones it leaves out, `2 done hidden · show`, whose `show` lists them;
+`Done` lists the done ones by itself, and then there is no footer. With chips alone the sections
+stay as they are — Earlier folded or unfolded as it was, ← and → and a click on its header fold
+and unfold it — and so do the cards, each counting the sessions the chips leave in it; setting or
+clearing a chip folds, unfolds, opens and closes nothing. Esc clears the words, not the chips: a
+chip stays on until it is clicked again, the page reloads, or the switcher (below) clears it to
+show a session it hides.
+
+**Show done**, at the right end of the chips' row, is a switch: a small box, with a ✓ while it is
+on. It adds the done sessions to the list, each with its `done` mark, and it is the same switch as
+the list key `a` and the footer's `show` (`done sessions shown · hide`): each turns the others on
+and off. While `Done` is on it is drawn dimmed and keeps its state (its tooltip says `the Done
+filter lists done sessions by itself`); a click still turns it on or off, for when `Done` is off
+again. The chips and the switch are buttons: Tab from the field reaches the four chips and then
+`Show done`, Enter or Space presses the one that has the keyboard, and while one has it no list
+key acts.
 
 **Blocks.** In every section — Open, Recent and Earlier —, each on its own, the sessions of one
 group sit together as a block when there are at least two: under Open only running ones, under
@@ -1571,8 +1585,9 @@ indented, none is marked `×4`, and the ticket key or group is not repeated on t
 caption says it. A block is open until you close it. Closed, it is its caption alone: no session is
 shown, the first one hidden like the others. When sessions it hides need you the caption says so, `▸
 ORB-2107 4 · 1 needs you`, that part in the colour of the title bar's `need you` count; the title
-bar counts the same whether a block is open or closed. While a filter or a chip is on, there are no
-cards: every session is a flat row with its group.
+bar counts the same whether a block is open or closed. While a word is in the filter there are no
+cards: every session is a flat row with its group. With chips alone the cards stay, each counting
+the sessions the chips leave in it, and a closed one stays closed.
 
 - A click on the caption line closes or opens the block (the whole line is the control). It selects
   nothing and leaves the keyboard where it was, with one exception: on a closed caption that is
@@ -1669,7 +1684,8 @@ does:
 When the list does not show that session, the list first changes so that it does, by what hides
 it: the filter's field and the chips are cleared (the key bar says `the filter was cleared to
 show <short id>`), done sessions are shown, Earlier is unfolded; a closed block opens by itself
-for its selected session.
+for its selected session. A done session a chip matches only needs done sessions shown: the chip
+stays on.
 
 Enter acts only on the answer to what you typed: pressed right after a keystroke, it waits for that
 answer (usually a fraction of a second) and then acts on the highlighted session of it, the first
@@ -1903,8 +1919,8 @@ of the window between light and dark: after one, start or resume the session aga
   shows its mark, and Ctrl+Shift+J reaches it, but the title bar's count leaves it out (without
   the filter it is not listed), so the key bar's `… hidden by the filter or the fold` counts one
   too few for each such session.
-- **`d` while filtering.** The toast says `Marked done: hidden from the list. It comes back on new
-  activity.` while the filter still lists the session, with its `done` mark.
+- **`d` while a word is typed.** The toast says `Marked done: hidden from the list. It comes back
+  on new activity.` while the filter still lists the session, with its `done` mark.
 - **Blocks the window cannot close.** A block whose group is over 1,024 bytes (of UTF-8) cannot
   be closed: ← on a session of it and a click on its caption do nothing, and it stays open. A
   window remembers at most 64 closed blocks: closing another opens the one closed first again
