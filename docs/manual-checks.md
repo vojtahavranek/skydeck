@@ -1129,12 +1129,19 @@ select the throwaway session: the header's third line says `no pull request` and
    (W12: your default browser, or your own Edge with `window.links` `"edge"`).
 5. `Pull requests`, then `↻`. Expected: within seconds the line's `checked … ago` starts again
    from a few seconds.
-6. `×` on the line. Expected: the line goes, and the toast says `Detached <owner>/<repo> #<n>`
+6. Open the pull request's page on GitHub and read what it says above the merge button (approvals
+   still required, checks pending, conversations to resolve, merging blocked). Expected (no test
+   can show GitHub's real answer): the line says `approved, green` only when that page shows the
+   approvals it needs and waits for nothing else; otherwise the first in the chip's order of
+   `checks pending`, `review required`, `unresolved comments`, `blocked`; `checks passing` or
+   `open` only where the page asks for no review.
+7. `×` on the line. Expected: the line goes, and the toast says `Detached <owner>/<repo> #<n>`
    with `Undo` (leave it). Esc. The header's third line says `no pull request` and `+ PR` again,
    and `skydeck show <short id>` has no `pr:` line.
 
 Write down: how long the state took to show; whether the dialog's line, the header, the list's
-chip and `skydeck show` agreed; any `can't read`, with its error.
+chip and `skydeck show` agreed; what GitHub's page said in step 6 and the line's words; any
+`can't read`, with its error.
 
 ## W29. The edit keys on your layouts (real claude)
 

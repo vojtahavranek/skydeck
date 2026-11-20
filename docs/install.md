@@ -912,8 +912,17 @@ held `d` acts once, and so does a double click on a button of the header.
 
 **The pull-request dialog** (`p`, `Pull requests` or `+ PR`) lists every attached pull request on
 a line of its own: `acme/web #7 · approved, green · checked 4m ago` (or `checks failing`, `changes
-requested`, `checks pending`, `review required`, `draft`; `not fetched` until it is first read),
-and one that cannot be read with when it was last read and its error, `acme/web #7 · can't read ·
+requested`, `checks pending`, `review required`, `unresolved comments`, `draft`, `blocked`, `checks
+passing`, `open`; `not fetched` until it is first read). They say what GitHub waits for before it
+merges, also when the repository asks for it through rulesets: `review required` until it has the
+approvals its rules ask for (from people who can write to the repository), `checks pending` while
+a required check has not reported, `unresolved comments` while a conversation its rules ask to
+resolve is open, `blocked` when GitHub will not merge it for a reason skydeck does not show (code
+owners, a merge queue, a deployment). `approved, green` needs an approval, unless GitHub's answer
+does not say what it waits for (a pull request whose base branch is gone, say); with no review
+asked for it is `checks passing`, or `open` without any checks. A pull request read by an older skydeck
+keeps its old words until it is read again. One that cannot be read shows when it was last read
+and its error, `acme/web #7 · can't read ·
 last read 3h ago · gh: HTTP 502` (`never read` when it never was; a long error is cut, and the
 line's tooltip has it whole, after the pull request's title). The merged and closed ones are
 folded into `30 merged, 2 closed ▸`; a click unfolds them (they show no age: they are never read
@@ -935,14 +944,16 @@ attached by themselves (design.md 7.3).
 **The window's chip**, in the list and on the header's third line, counts the open pull requests
 and the merged ones apart: `PR · failing` for one open pull request, `3 PRs · failing` for three,
 named by the one that most needs you (in this order: `can't read`, `not fetched`, `failing`,
-`changes`, `pending`, `review`, `draft`, `approved`), with `+30` after it for 30 merged ones;
+`changes`, `pending`, `review`, `comments`, `blocked`, `draft`, `open`, `green` for checks
+passing, `approved`), with `+30` after it for 30 merged ones;
 with none open, `3 merged`, or a dim `closed`. It is dotted while it says `can't read`, and its
 tooltip lists each open one with its state. `skydeck ls` and the interactive list keep the command
 line's chip (design.md 7.3).
 
 The chip has a quiet colour for its state, in both colour schemes: red for `failing` and
-`changes`, amber for `pending`, blue for `review`, green for `approved`, purple for `3 merged`;
-`draft`, `closed`, `not fetched` and `can't read` stay grey. Its `+30` has the chip's colour (dim
+`changes`, amber for `pending`, blue for `review`, `comments` and `blocked`, green for `approved`
+and `green`, purple for `3 merged`; `draft`, `open`, `closed`, `not fetched` and `can't read` stay
+grey. Its `+30` has the chip's colour (dim
 on a grey chip). The header's open pull requests, the state on a line of the pull-request dialog
 and the quick switcher's chip show the state's words in the same colour. Sessions that need you
 stay the strongest in the list: only they have a coloured bar at the left and their reason's line
