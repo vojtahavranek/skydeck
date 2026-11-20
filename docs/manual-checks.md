@@ -2556,3 +2556,62 @@ Not tried before this check was written: all of it, in Edge. The tests run the h
 the dialog in headless Chromium against a stand-in server, and the server and the commands with
 stand-in programs on test databases; they never ask a real tracker, never call the real `gh` and
 never start `claude`.
+
+## Ending a session from the window
+
+The check of the dialog "Mark done" (follow-up F30; design-step-2.md 12.10; [install.md](install.md),
+"Done."): W39, in your window, on one new throwaway session in `~/skydeck-try` and nothing else. No
+test may start the real `claude`, so only this shows that a real Claude Code ends on the dialog's
+hang-up, how its end is recorded, and that it resumes with its conversation. It ends that throwaway
+session twice and nothing else: before every `d`, every Enter and every click, look at the header's
+short id: it must be the throwaway session's (step 1 writes it down). A session that was already
+running before skydeck was updated runs on an older keeper: `d` on it asks nothing (its toast says
+`skydeck cannot end this one`), which is right and not part of this check.
+
+## W39. Ending a session from the window (real claude)
+
+Setup: skydeck updated to a commit that has follow-up F30 (`skydeck update`, W32), then the window
+open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Write down the time.
+
+1. **A throwaway session.** Press Ctrl+Shift+N, type the throwaway folder's full path into the
+   directory field (`/home/<you>/skydeck-try`), leave the other fields empty and press Enter. Look
+   that it is the new one (a short id you have not seen, its folder ends in `skydeck-try`) and write
+   the short id down. With `Focus: terminal`, type `Reply with the single word ok, in this chat, with
+   no tool and no file.` and Enter, and wait for its reply: the row no longer says working.
+2. **The dialog, and Esc.** Press Ctrl+Shift+L (`Focus: list`; the selected row is the throwaway
+   session's) and `d`. Expected: a dialog over the window, `Mark done: ` and the session's title,
+   `This session is still running.`, no warning, the buttons `End session and mark done`, `Keep it
+   running`, `Cancel`, the first one outlined. Tab moves the outline to the next and back to the
+   first after the third; Shift+Tab the other way; a click on the list or the terminal does nothing.
+   Press Esc. Expected: the dialog is gone, the row still under Open, not marked done.
+3. **End it.** Look at the short id again, then `d`, and Enter while `End session and mark done` is
+   outlined. Expected: the toast `Ending the session…`, within a few seconds `Ended and marked done:
+   hidden from the list.` with `Undo`; the row is gone from Open, its slot free, and the right side
+   no longer shows its terminal.
+4. **An ordinary end.** Press `a` (show done). Expected: the throwaway session is listed, marked
+   done, not in the crash colour and with no `ended unexpectedly` (its row, its card's "how it
+   ended"). In a WSL terminal of your own, `skydeck show <short id>`: no `ended-unexpectedly` mark
+   (the mark restore offers a session by).
+5. **Back.** In the window, with the session selected, press `d` (it marks it undone) and `a` again:
+   it is listed under Recent. Click `Resume here` on its card (a click, not Enter). Expected: it runs
+   again in a terminal of the window, the same short id, and scrolling up in its terminal shows the
+   prompt of step 1 and its `ok`.
+6. **While it works.** With `Focus: terminal` and its short id looked at, type `Count slowly from 1 to
+   40, one number per line, with no tool and no file.` and Enter. While it is still counting (the row
+   says working), press Ctrl+Shift+L and `d`. Expected: the dialog also says `It is working: ending it
+   now stops the current turn.`, and `Keep it running` is outlined. Press Enter. Expected: the toast
+   `Marked done. Stays under Open while it runs; hidden once it stops.`; it goes on counting.
+7. **The end of the check.** When it has finished, with `Focus: terminal` and its short id looked at,
+   type `/exit` and Enter, and click `Close` on the ended bar. Expected: the row is hidden (it is
+   done); `a` lists it, `d` there marks it undone again.
+
+Write down: the time of the setup; for each step whether it went as expected; how long step 3's
+`Ending the session…` stayed; whether step 4 showed anything of an unexpected end, and what `skydeck
+show` printed under the mark; whether step 5's terminal showed the earlier conversation; in step 6,
+which button was outlined. If step 3 says `Marked done. It did not end: end it inside claude.`, the
+Claude Code version (`claude --version`) and whether the session ended later by itself.
+
+Not tried before this check was written: all of it with the real Claude Code. The tests end the
+suite's stand-in program by the same hang-up (it runs its SessionEnd hook with reason `other`, as
+Claude Code does for a closed terminal), and check the dialog's keys and words in headless
+Chromium; they never start `claude`.

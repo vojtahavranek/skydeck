@@ -41,7 +41,8 @@ minutes in the window.
   until skydeck reads it in, or up to seven days if that file cannot be read.
 - Its logs (`~/.local/state/skydeck/*.log`) hold no prompt.
 - Network: only `gh`, `skydeck update`'s `git fetch` and your ticket-status programs. No telemetry.
-- The window is a local page (127.0.0.1) served from WSL; it types into your sessions as a terminal.
+- The window is a local page (127.0.0.1) served from WSL; it types into your sessions as a terminal,
+  and ends a session of the window only when you ask it to (Done's dialog).
 
 ## Documents
 
