@@ -21,7 +21,8 @@ F13), at "The window's theme"; W35 checks the flags a session was started with i
 flags (follow-up F15) and its group chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
 session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status"; W40 checks
 a copy that Claude Code's background feature makes (follow-up F33), at "A copy made in agent view";
-W41 checks the window's settings screen (follow-up F36), at "The settings screen".
+W41 checks the window's settings screen (follow-up F36), at "The settings screen"; W43 checks the
+window's notice of a newer skydeck (follow-up F38), at "The update notice".
 
 Setup:
 
@@ -2804,3 +2805,70 @@ Write down: what step 1 found; for each step whether it went as expected, and th
 differ; whether the dialog, its fields and its buttons read well in your theme.
 
 Not tried before this check was written: all of it, in Edge.
+
+## The update notice
+
+The check of the window's notice of a newer skydeck (follow-up F38; design-step-2.md 16.5, 12.1,
+12.13; [install.md](install.md), "Updating", its part "The window says when there is one"): W43,
+in your window, on your own checkout. Its first half (steps 1–6) applies nothing: it presses
+`Check now`, reads the settings screen's block `Updates`, the title bar and `skydeck doctor`, turns
+the switch `window.updateCheck` off and on again, and, only where you have such a remote, looks at
+what a check does with a remote that needs a passphrase or a login. The tests run all of it
+against a test server, a throwaway checkout and a remote that is a folder; only here does a check
+meet your own remote, your network, ssh and the Windows credential manager. Commands are typed in
+W, a WSL terminal of your own (never a `!` command inside Claude Code).
+
+## W43. The update notice (first half: nothing is applied)
+
+Setup: skydeck updated to a commit that has follow-up F38 (`skydeck update`, W32); the window open.
+In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git remote get-url origin`
+(write it down: steps 5 and 6 put it back), `grep -n updateCheck ~/.config/skydeck/config.json`
+(write down the line, or that there is none).
+
+1. **Check now.** Click `Settings`. Expected: above the list, the block `Updates` with one line —
+   `Last check: <age> ago — skydeck is up to date (main at <id>, as origin/main)`, or `… — <n> new
+   commits on origin/main` — and `Check now`. Click `Check now`. Expected: `Checking…` for a
+   moment, then `Last check: 0s ago — …` (or `1s`). When it says that new commits are there, the
+   title bar shows `Update available` right before `Settings`; when it says up to date, it shows
+   none. Press Esc: the screen closes, the keyboard is back where it was.
+2. **The dialog**, only when the title bar shows `Update available`. Click it. Expected: a dialog
+   with the lines `skydeck update --check` prints (in W, `skydeck update --check` prints the same
+   lines, then `run skydeck update to apply it`), then `To apply it, in a WSL terminal of your own:
+   skydeck update`, and one button, `Close`, which has the keyboard. Ctrl+Shift+N says `close the
+   dialog first (Esc)`. Press Esc: it closes. Nothing was applied: `git log -1 --format=%h` prints
+   the id the block's line had before (`skydeck doctor`'s first line names it too).
+3. **doctor.** In W: `skydeck doctor`. Expected: an `info` line `update: …` — `update: <n> new
+   commits on origin/main (fetched <age> ago); skydeck update applies them`, or `update: skydeck is
+   up to date (…) (fetched <age> ago)` — and no `problem` line that step 1's setup did not have.
+   doctor used no network for it (it reads what the window's server stored).
+4. **The switch.** In Settings, set `window.updateCheck` to `off` and Save (`Saved: it applies at
+   once.`); in W, `grep -n updateCheck ~/.config/skydeck/config.json` prints `"off"`. `Check now`
+   still checks (`Last check: 0s ago — …`). Then put it back: the value of the setup (`Default`
+   when there was none: `Put back to its default: it applies at once.`); the grep prints the line
+   of the setup, or nothing.
+5. **A remote that needs a passphrase**, only when you have an ssh key with a passphrase that this
+   checkout's remote host takes (else write down "left out: no such remote"). In W: `git remote
+   set-url origin <the ssh address of the same repository>`. In Settings, `Check now`. Expected:
+   nothing asks for the passphrase — no prompt in any terminal, no window; the block says either
+   `Last check: 0s ago — …` (the key was in an agent) or `The last check failed 0s ago: git fetch
+   from origin failed: …` with what was known before. Then `git remote set-url origin <the address
+   of the setup>` and `git remote get-url origin` prints it.
+6. **A private https remote**, only when you have a private repository that needs a login and the
+   Windows credential manager as git's helper (else write down "left out: no such remote"). In W:
+   `git remote set-url origin <its https address>`. In Settings, `Check now`. Expected: no Windows
+   dialog opens; the block says `The last check failed 0s ago: git fetch from origin failed: …`
+   (no login stored), or, with a stored login, `Last check: 0s ago — …` and, as the branch does not
+   follow that repository's history, whatever the look says. Then `git remote set-url origin <the
+   address of the setup>`, `git remote get-url origin` prints it, and `Check now` once more gives
+   the line of step 1 (`git fetch` may have fetched that repository's objects; they are unused and
+   `git gc` removes them in time).
+
+Leaves behind: the remote's address as it was, `window.updateCheck` as it was, the remote-tracking
+refs as a `git fetch` leaves them, and `kv window_update_check` with the last check. `git status
+--short` prints what it printed in the setup.
+
+Write down: for each step whether it went as expected, and the words where they differ; which of
+steps 5 and 6 were left out; whether the control, the dialog and the block read well in your theme.
+
+Not tried before this check was written: all of it, in Edge; that `GCM_INTERACTIVE` reaches the
+Windows credential manager through `WSLENV` (step 6).

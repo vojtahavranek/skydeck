@@ -201,13 +201,16 @@ Added to design 11:
 | `bin/skydeck-keeper` | The keeper (7.1), python3. | — |
 | `bin/skydeck-keepalive` | The keep-alive's inner script (6.1): `sh` builtins, `sleep`, `mv` and `rm` only (`rm` for its own `keepalive.pid` and temporary file). | — |
 | `src/claude/terminal.ts` | What Claude Code sets in its children's environment (7.4); the meaning of a live-file status change for a turn end (10.3). | platform |
-| `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses; from follow-up F19 the reads of a ticket's status (`ticket-fetches.ts`); from follow-up F36 the settings screen's table of every key of `config.json` and the change of one of them (`settings.ts`, 12.13). | platform, text, store, claude, sessions, terminals, github, ticket-status (F19) |
+| `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses; from follow-up F19 the reads of a ticket's status (`ticket-fetches.ts`); from follow-up F36 the settings screen's table of every key of `config.json` and the change of one of them (`settings.ts`, 12.13); from follow-up F38 the check for a newer skydeck (`updates.ts`, 16.5). | platform, text, store, claude, sessions, terminals, github, ticket-status (F19), update (F38) |
+| `src/window/updates.ts` | Follow-up F38 (16.5): the server's check for a newer skydeck — when it runs, the state every page is told, the stored outcome; it decides everything the page shows of it. | platform, sessions (the deck), update, text, and `auth.ts`'s `failureKind` |
+| `src/update/` | Follow-up F38: the look for a newer skydeck, one copy for three callers — `skydeck update`, the window's server and `doctor` (the server may not import `src/cli/`): `git.ts` (how skydeck runs git on its own checkout, and the window's fetch that never asks; moved from `src/cli/update-git.ts`), `look.ts` (the look in the command's order and in the window's tolerant one, and `--check`'s lines), `record.ts` (the stored outcome, `kv window_update_check`). | platform, text, store (types), and `protocol.ts`'s types |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
 | `src/window/view/search/` | The rules of search as pure functions (stage E, plan E1): the filter's words and chips (12.8), the blocks (12.2; the code calls them stacks), the switcher's ranking (12.8); `build.ts` calls them. No pattern is ever built from a search text. | values: its own files and `text`'s `sanitize` only; types: sessions, `protocol.ts`, `hub.ts`, `view/sections.ts` |
 | `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the stored choices of the theme switch and the colour themes' switch on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
+| `web/update.js`, `web/update-text.js` | Follow-up F38 (12.1, 12.13, 16.5): the dialog of `Update available`, and its words and the settings screen's block `Updates` as pure functions. They put the server's texts into sentences and decide nothing. | `web/format.js` |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
 
 Nothing in `web/` decides a rule that the server also needs: the page renders what the server
@@ -223,7 +226,9 @@ words and refusals.
 starting a detached process in a session of its own with a given environment and signalling a
 process (`Platform.processes`); an HTTP server on TCP or on a unix socket, connecting to a unix
 socket and one JSON request over it (`Platform.net`); a one-shot timer (`Clock.after`); random
-bytes (`Platform.randomBytes`); this process's pid, uid and user name; a file's permission bits and
+bytes (`Platform.randomBytes`); from follow-up F38, a run that a timeout or an abort ends with
+SIGTERM first and SIGKILL only after a grace (`RunOptions.killGraceMs`, answered at the child's
+exit, not when its pipes close); this process's pid, uid and user name; a file's permission bits and
 owner (`FileInfo.mode`, `uid`); the target of a process's file descriptor and whether a TCP port
 has a listener (`Proc.fdTarget`, `Proc.tcpListening`, read from `/proc/net/tcp` and `tcp6`). A
 process's parent pid is read from `/proc/<pid>/stat` (`Proc.stat`) by a pure helper of
@@ -1920,6 +1925,21 @@ for a session no page lists, and nothing at all for an address no provider takes
 a change of `ticketRefreshMinutes` in the settings screen applies at once, 12.13); its stop aborts a running read
 and saves nothing more of it.
 
+**The check for a newer skydeck** (follow-up F38, 16.5). Every second, after the keep-alive, the
+tick offers the checker a turn. With `window.updateCheck` `"daily"` (read at each tick, so a change
+in the settings screen applies at once) it starts a check in the background, never delaying the
+tick or the server's start, when none runs and this server has made no check yet — the first tick
+is part of the start, so every server start checks — or its last one ended 24 hours ago or more by
+the wall clock, or the clock stepped back behind it (`CHECK_EVERY_NS`); after a check whose fetch
+failed the wait is `RETRY_AFTER_FAILURE_NS`, which is also 24 hours for now (whether a failure is
+tried again sooner is the owner's to decide). So "daily" is: at every start, then every 24 hours
+from the last check this server made, a Check now included. With the switch `"off"` no check
+starts by itself; a server that finds a stored outcome of its checkout looks once without the
+network at its first tick, so that a notice does not outlive an update made by hand. A server
+sends no stored outcome before its own first check or look has ended. The checker's own promises
+each end in a catch that logs the failure by kind, so nothing it does can end the server; the
+server's stop ends a running check (SIGTERM, then 2 seconds, 16.5) before the store is closed.
+
 Cost, from step 1's measurements: an idle refresh is about 16 ms at 3,000 recorded sessions and
 about 60 ms when 3,000 transcripts are listed; at one every 2 seconds that is under 3% of one core.
 A headless terminal with 5,000 lines of scrollback is about 15 MB (measured: 25 MB at 10,000
@@ -2017,6 +2037,7 @@ install.md "Going back").
 | `window_restore_dismissed` | The boot id whose restore the user dismissed with "Not now" (12.7): written only when it is the earlier boot the banner offers; while it names that boot the banner is not shown. |
 | `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; at an orderly stop the server writes it once more as its pages are, and when it dies it stays as the last refresh left it, so that the next server knows that a window may come back (ruled by the plan owner, plan task 74). |
 | `window_favourites` | The new form's favourite flags (12.6, follow-up F15): a JSON array of their texts, in the order they were added, at most 12; absent while there is none (the last one removed takes the entry away). One write is one transaction that reads the list first. A value that is not such an array is read as no favourite, and of an array only the entries 12.6's rule takes are read; the next save writes the list afresh. An older skydeck reads only the keys it knows and leaves this one alone. |
+| `window_update_check` | Follow-up F38 (16.5): what the window's server's last look for a newer skydeck said, as JSON: `{ v: 1, root, lookedAtNs, fetchedAtNs, failure, head, outcome }` — `root` the checkout it looked at (its real path: one database serves every checkout of the user), `fetchedAtNs` when the last fetch that worked ended (null: never), `failure` `{ atNs, line }` while the last check's fetch failed, `head` HEAD's full id at the look, and `outcome` one of `{ kind: 'cannot', line }`, `{ kind: 'current', line }` and `{ kind: 'available', upstream, count, to, lines, blocked }`. Written by the server only, after each check and look; read by it and by `doctor`. Every line in it clipped to 300 characters. A value that is not exactly such a record is read as none, and so is one of another root, which the next look writes over. |
 
 ### 10.3 When a turn ends
 
@@ -4091,6 +4112,7 @@ editing the file by hand stay as they are, and the file's format does not change
 | **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s and stops reading a keeper whose records its screen side has not applied (7.3), so the keeper closes that connection at its send cap and the server reconnects; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
 | **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. The server's own connection waits at most 250 ms for another process's write lock (the commands wait 5 s), so a lock held for long never freezes the server: the piece of work that met it is given up and tried again — the tick's store work at the next tick, an action answers `skydeck's database is busy; try again`, a `hello` is closed with 1013 and the page tries again, and a found keeper's decision (7.3) is put off to the next refresh while its deadline allows; a start that meets it fails at once (5.2), leaving nothing behind (ruled, plan task 23). |
 | **skydeck is updated** | 16.5. |
+| **The check for a newer skydeck fails** (follow-up F38: no network, a remote that needs a login, a remote gone, git missing) | No notice of its own: an update an earlier fetch brought stays shown, and the settings screen's block and `doctor` say that the last check failed, when, and git's line (12.13, 16.3). It never asks for a password or a passphrase and never waits at a prompt; it ends after 60 seconds at most. A check that was cut can leave a ref's `.lock`; 16.5 says what then. |
 | **The key is wrong** (after `--new-secret`, a launch address used too late or given up, a stale bookmark) | The page says that its key is not valid and to run `skydeck window` again (8.2.2). |
 | **A launch token is presented twice** | Another program may have the secret: the alarm (8.2.2) — the page, the waiting `skydeck window` and `doctor` all say to run `skydeck window --new-secret`. |
 | **Something else answers on the port** (a program on the Windows side, 15.3) | An open window gets no server proof, sends nothing, and says `something answers on port <n> that is not skydeck's server`. |
@@ -4159,6 +4181,15 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   mended and the window restarted (ruled by the lead: it stays changeable, with no time limit; the
   screen's line for it says that it runs on every title, and the guide's trouble table how to get
   back — the copy, or the key taken out of the file, then `skydeck window --restart`).
+  `window.updateCheck` turns the window's daily check for a newer skydeck on or off (16.5).
+  From follow-up F38 a proven connection can also make the server fetch skydeck's own checkout's
+  remote (`act update-check`; one check at a time, a second request joins it) and make it look at
+  that checkout again without the network (`act update-look`). Neither carries a field: it cannot
+  name a remote, a branch, a path or a program, and nothing it sends reaches a git argument. What
+  the fetch brings is what the checkout's remote serves, as for `skydeck update --check`, and it
+  changes the remote-tracking refs and `FETCH_HEAD` only; nothing is applied. Every text of the
+  dialog and the settings block is git's or skydeck's, sanitised, written as text. A program in a
+  terminal cannot press the page's buttons (15.4).
 - **Browser extensions.** An extension that may read `127.0.0.1` pages could read the terminals and
   the secret. The window runs in its own profile folder, so the user's extensions are not there.
   Extensions that an Edge policy forces into every profile still are: check W13 lists them
@@ -4254,6 +4285,12 @@ side. `openLink` applies it itself, whatever its caller checked, and it is not w
 scheme) without this in mind. So no input from a page becomes a program name or a shell string by
 skydeck's hand, but a link does reach the Windows shell: only an `http` or `https` address that
 check let through; a page's `new` flags become `claude` arguments only after design 7.7's refusals.
+
+From follow-up F38 the server also runs `git` on its own checkout (16.5: the check for a newer
+skydeck, and the looks around it), as `git -C <checkout> …` with an argument list it builds itself,
+never a shell; the remote is the one the checkout's branch follows, and nothing a page sends
+becomes one of its arguments. The fetch runs in a session of its own with no terminal and no askpass
+program, so neither git nor ssh nor a credential manager can ask anything.
 
 ## 16. Install, uninstall, doctor, configuration, updating
 
@@ -4383,10 +4420,10 @@ owner). Then:
   reads.
 
 **`skydeck update [--check]`** (src/cli/commands/update.ts) updates the checkout it runs from
-(`platform.appRoot`). It is a command the user types; nothing checks for an update or applies one by
-itself, and there is no prompt, no `doctor` run at its end and no command to go back (the store
-keeps a copy of the database before it migrates it, design 9.2; install.md, "Going back", gives the
-steps by hand).
+(`platform.appRoot`). It is a command the user types; nothing applies an update by itself — the
+window's server only looks for one ("The window's check" below, follow-up F38) —, and there is no
+prompt, no `doctor` run at its end and no command to go back (the store keeps a copy of the
+database before it migrates it, design 9.2; install.md, "Going back", gives the steps by hand).
 
 1. **It looks, and refuses** (exit 1, one line, nothing changed) in this order: `CLAUDECODE` set
    without `--check` (the server it restarts would give every session in the window that
@@ -4491,6 +4528,63 @@ file in place — it removes the old file and creates a new one (a new inode), s
 old file it holds open —, and after node has ended the launcher only runs a handoff when there is
 one (`update` writes none) and exits with node's status.
 
+**The window's check** (follow-up F38, issue #163; the owner's decision of 2026-11-21, design 2
+principle 8). The window's server says when a newer skydeck is there: the title bar's `Update
+available` (12.1), its dialog, the settings screen's block `Updates` and `Check now` (12.13), and
+`doctor`'s `update:` line (16.3). It applies nothing.
+
+- **One look, three callers.** The looks of steps 1 and 2 above live in `src/update/look.ts`
+  (`lookForUpdate`), used by the command, by the server and, through what the server stored, by
+  `doctor`; git is run as above (`src/update/git.ts`). The command's order is unchanged (a changed
+  file refuses before the fetch; a failed fetch, an ahead or a diverged checkout refuse after it).
+  The window's order is tolerant: no git, not a work tree, a detached HEAD and no branch of a remote
+  are still "cannot tell" (their lines); a fetch that fails does not end the look, which goes on
+  with what the remote-tracking ref already says; the branch and HEAD are read again after the
+  fetch (`this checkout changed while git fetch ran …`); and the two refusals that only stop an
+  apply — a changed tracked file, commits the upstream does not have — are kept as why it cannot
+  be applied as it is (`blocked`; the changes line first), the commits and the database line read
+  all the same. A checkout only ahead of its upstream is up to date for the notice (`nothing new on
+  <upstream>: this checkout has <n> commits that it does not have`).
+- **The fetch that never asks.** `git -C <root> -c core.askPass= fetch --quiet -- <remote>` through
+  the runner, with git's environment of step 1 and `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS`
+  (with `-c core.askPass=`: whichever git reads first), no `SSH_ASKPASS` and
+  `SSH_ASKPASS_REQUIRE=never`, and `GCM_INTERACTIVE=never`, also named in `WSLENV` (on WSL the
+  usual credential helper is the Windows `git-credential-manager.exe`, which gets only the
+  variables `WSLENV` names); in a session of its own (no controlling terminal: neither git nor ssh
+  can open `/dev/tty`, also under `skydeck serve --foreground`), stdin `/dev/null`, 60 seconds, its
+  output capped at 16 KiB. The owner's `GIT_SSH_COMMAND` and `core.sshCommand` are not rewritten:
+  with no terminal and no askpass ssh cannot ask. It writes what `skydeck update --check` writes:
+  the fetched objects, the remote-tracking refs and `FETCH_HEAD`. Its failure line is `git fetch
+  from <remote> failed: <git's first line>` (or `no answer within 60 s`), clipped to 300
+  characters.
+- **When** (10.1): with `window.updateCheck` `"daily"` (the default, 16.4), at every server start —
+  in the background, never delaying it — and then 24 hours after the last check this server made,
+  a Check now included (`CHECK_EVERY_NS`); after a check whose fetch failed the wait is
+  `RETRY_AFTER_FAILURE_NS`, the same 24 hours until the owner decides otherwise. Check now
+  (`act update-check`) checks whatever the switch says; with the switch `"off"` a server that finds
+  a stored outcome looks once without the network. One check runs at a time; a request while one
+  runs joins it. The dialog's look (`act update-look`) runs without the network, so that what it
+  says is true now (a change made, a branch switched, a `git pull` since the check).
+- **What a failed fetch leaves.** It hides nothing: what the look says without the network stands,
+  so an update an earlier fetch brought stays shown, and the failure — its line and its time — is
+  kept beside it for the settings screen and `doctor` until a check whose fetch works. A failure
+  makes no notice of its own, and a look that cannot tell shows none.
+- **What is stored.** `kv window_update_check` (10.2), naming the checkout it is of; a server sends
+  no stored outcome before its own first check or look has ended, so the window that comes back
+  after an update never shows the notice of the update it just applied.
+- **What a check can leave or meet.** The server's stop (5.5) and the 60 seconds end a check with
+  SIGTERM, on which git removes its lock files, and with SIGKILL only 2 seconds later
+  (`RunOptions.killGraceMs`), sent to git alone; the runner answers at git's exit, not when its
+  pipes close (an ssh or a credential helper git started may hold them), so the stop waits at most
+  those 2 seconds. A git that is killed anyway, or dies with the machine, can leave a ref's
+  `.lock`, and every later fetch — the window's and the user's own — then fails with `cannot lock
+  ref …` until the file git names is removed (install.md, "If something goes wrong"). The user's
+  own `git fetch` or `git pull` at the very moment of a check can meet the check's lock and fail
+  once. A check runs while a restore runs (it touches no session). While another git works in the
+  checkout the look says what it sees (its changes are `blocked`).
+- **In the tests** (17): in a marked sandbox the checker looks only at the checkout
+  `SKYDECK_TEST_UPDATE_CHECKOUT` names, and without it runs no git at all.
+
 ### 16.6 Vendored files
 
 `vendor/xterm/` holds, at exact versions, each with its `LICENSE`: `@xterm/xterm` 6.0.0 (with its
@@ -4551,6 +4645,19 @@ reaches the stub; the default would hand it to `rundll32.exe`, which is refused)
 about them, and points the first interop candidate (6.4) into the sandbox. A test of the default
 browser stands in for `rundll32.exe` in its own platform and never passes it on. Without the
 variable nothing is refused: the rule belongs to the tests, not to skydeck.
+
+**No check of this repository, enforced** (follow-up F38). A test server's app root is this
+repository, and the window's server checks its own checkout for a newer skydeck (16.5): in a marked
+sandbox (`SKYDECK_TEST_NO_WINDOWS=1`) the checker looks only at the checkout
+`SKYDECK_TEST_UPDATE_CHECKOUT` names, and without that variable it runs no git at all (a check or
+a look answers `no update is looked for in a test sandbox`) — so every root git is run on lies
+inside the sandbox whatever a test forgets, as test/helpers/git-checkout.ts requires of `skydeck
+update`'s tests. Every test sets the variable through one helper (`updateSeam` of
+test/helpers/update.ts), which checks that the path lies inside the sandbox first; a checkout's only
+remote is a bare repository beside it, or an `ssh://…invalid` address whose `ssh` is a sandbox stub
+that connects nowhere. The sandbox's `config.json` has `window.updateCheck` `"off"`
+(test/helpers/window-config.ts, beside `keepAlive` `"off"`), so that no test server checks unless
+its test turns the switch on.
 
 **Two test platforms.** Logic is tested on a platform with a fake clock, a fake `/proc` and fake
 processes. Every test that starts a keeper, the stand-in or a server, or judges a real process
@@ -4862,6 +4969,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W38 | A ticket's status on the throwaway session (follow-up F19), asking no real tracker: a stand-in program the owner writes in a throwaway folder (`~/skydeck-try/status`, its three lines given) answers for a `ticketStatus` rule whose `match` is `https://example.com/try/`; the ticket `https://example.com/try/TRY-1` on the throwaway session shows `TRY-1 · In Progress ↗` in blue in the header and `In Progress` in the row's small chip; the answer changed to each category and ↻ pressed in the ticket dialog: `blocked` red, `review` amber, `doing` blue, `done` green, `todo` and `closed` grey; a failure (the program made not executable) keeps the old status and its tooltip says `status not read: …`; `skydeck show` prints `ticket:` with ` · <status>`. Every step checks the header's short id or the dialog's heading first; at the end the ticket is removed, `config.json` is as it was (restored from a copy), and the stand-in is deleted. | F19 | 12.5, 12.2, 12.3, 10.2 |
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
 | W41 | The settings screen on the owner's own `config.json`, copied aside first: `Settings` in the title bar shows the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36 | 12.13 |
+| W43 | The update notice, first half (nothing is applied): `Check now` in Settings gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Close` only; `doctor`'s `update:` line; `window.updateCheck` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. | F38 | 12.1, 12.13, 16.3, 16.5 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

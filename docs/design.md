@@ -1028,6 +1028,12 @@ could not be resumed; see above`).
   cannot be read. The time limits end the program skydeck started, not what that program started
   (the inner program of a wrapper script runs on).
 
+  Among the window's lines (design-step-2.md 16.3; follow-up F38), one `info` line `update: …`
+  says what the window's server's last check for a newer skydeck found — how many new commits on
+  which branch, up to date, or why it could not tell, and a failed last fetch beside it — from the
+  stored entry alone: `doctor` itself uses no network for it and runs no git but line (1)'s, whose
+  commit it compares with the entry's.
+
 `docs/install.md` is the guide for setting skydeck up on another machine.
 
 ## 9. Data
@@ -1217,7 +1223,7 @@ a copy back. No migration, setting or command comes with it.
 |---|---|---|
 | `bin/skydeck-hook` | The hook (5.1, 5.2). | — |
 | `src/platform/` | Interfaces and real implementations for clock, files, `/proc`, running programs; resolving the places in 9.1; reading the configuration. | — |
-| `src/text/` | The sanitiser; shell quoting. | — |
+| `src/text/` | The sanitiser; shell quoting; from follow-up F38 `clip.ts` (a text cut to a width without splitting a surrogate pair; moved from `src/cli/`, the window's server uses it too). | — |
 | `src/store/` | The database: connection settings, migrations and the copy kept before them (9.2), typed functions. The only SQL. | platform |
 | `src/claude/hookinput.ts` | Parses a spool file into a normalised event (5.3). | text |
 | `src/claude/live.ts` | Reads live-session files; the liveness rule (5.5). | platform |
@@ -1229,6 +1235,7 @@ a copy back. No migration, setting or command comes with it.
 | `src/github.ts` | Pull-request keys, batched status, cache rules (7.3); from F19 also GitHub issues' keys and batched status, and which provider takes a ticket's address (`statusProvider`: a configured rule, else a GitHub issue). | platform, store |
 | `src/ticket-status.ts` | A ticket's status (F19, 7.3): the configured program and its answer, when a status is due, the fetch that saves it. | github, platform, sessions (the ticket's name), store, text |
 | `src/terminals/` | The terminal interface and its implementations: `here` (handoff file), `wezterm`. | platform, text |
+| `src/update/` | Follow-up F38 (design-step-2.md 16.5): the look for a newer skydeck, one copy for `skydeck update`, the window's server and `doctor` — how skydeck runs git on its own checkout and the window's fetch that never asks (`git.ts`, moved from `src/cli/update-git.ts`), the look in the command's and the window's order and `--check`'s lines (`look.ts`), the stored outcome (`record.ts`). | platform, text, store (types), the window's protocol types |
 | `src/cli/` | Arguments, commands, output formats, the interactive list. | everything above |
 
 Nothing outside `src/claude/` reads a Claude Code file or names a Claude Code field. Nothing
