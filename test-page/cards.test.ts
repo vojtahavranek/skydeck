@@ -1538,7 +1538,10 @@ function helpNameOf(e: KeyLike, section: Section): string | null {
     if (e.key === 'F4') return 'Alt+F4'; // with or without Shift (keys.js)
     return `${held(e)}${e.key.length === 1 ? e.key.toUpperCase() : e.key}`;
   }
-  if (listKey(e) === null) return null;
+  const action = listKey(e);
+  if (action === null) return null;
+  // F37: Shift with the key that types k/K or j/J is the move, named Shift+K and Shift+J.
+  if (action.kind === 'reorder' && e.key.length === 1) return `Shift+${e.key.toUpperCase()}`;
   if (e.key.length === 1 && !e.ctrlKey) return e.key; // the character chose the key, Shift too
   return `${held(e)}${NAME_OF[e.key] ?? (e.key.length === 1 ? e.key.toUpperCase() : e.key)}`;
 }
