@@ -68,14 +68,18 @@ const LIGHT_COLOURS = { fg: '#24292f', bg: '#fbfbf9' };
 const DARK_COLOURS = { fg: '#d6d9de', bg: '#121417' };
 
 /** Sixteen cells, one in each ANSI colour (the cell's text is the colour's number in hex), and a
- *  `Y` in the 256 colours' fixed yellow (226, #ffff00), a colour meant for a dark background. */
+ *  `Y` in the 256 colours' fixed yellow (226, #ffff00), a colour meant for a dark background; the
+ *  cursor two rows below. Not on their row: xterm.js draws the cursor's row at once when a
+ *  terminal gets the keyboard (as one does when it is shown), so with the cursor there that draw
+ *  would stand in for the full one that a terminal hidden at a change of colours owes. */
 const PALETTE =
   '\x1b[H' +
   Array.from({ length: 16 }, (_, n) => `\x1b[${n < 8 ? 30 + n : 82 + n}m${n.toString(16)}`).join(
     '',
   ) +
   '\x1b[38;5;226mY' +
-  '\x1b[0m plain text to select';
+  '\x1b[0m plain text to select' +
+  '\r\n\r\nthe cursor is here';
 
 /** A stand-in server for the cases on a stand-in: S1 running in TERM_A, S2 in TERM_B. */
 interface Deck {
@@ -335,6 +339,59 @@ async function untilShown(page: Page, term: string): Promise<void> {
   );
 }
 
+/**
+ * From now on notes, at each change of the page's colours (the two switches' attributes on
+ * <html>, the system's scheme), the cells every terminal has drawn so far; see untilRedrawn. The
+ * observers are the test's own, made after the page's, so each runs after the page's retheme.
+ */
+async function noteRedraws(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const drawn = new WeakSet<Element>();
+    (window as unknown as { testDrawnBefore: WeakSet<Element> }).testDrawnBefore = drawn;
+    const note = (): void => {
+      for (const span of document.querySelectorAll('#terminal .tv-term .xterm-rows span')) {
+        drawn.add(span);
+      }
+    };
+    new MutationObserver(note).observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme', 'data-palette-light', 'data-palette-dark'],
+    });
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', note);
+  });
+}
+
+/**
+ * Waits until `term` has drawn its row of the sixteen colours again since the last change of the
+ * page's colours (noteRedraws). The page sets a terminal's new colours at once, and xterm.js
+ * 6.0.0 puts its background, its text and the sixteen colours' classes in its style sheet at once,
+ * but draws the rows in its next animation frame (a hidden terminal's once it is shown again):
+ * a colour that minimumContrastRatio adjusts is written into the cell at that draw. Until then a
+ * read finds the new background with the cells' old adjustment. For a shown terminal no painted
+ * frame shows that state. A terminal hidden at the change shows it for one frame when it is shown
+ * again (its full draw comes a frame after the one that first lays it out): a known defect of the
+ * page, and not what this wait is for. The tests assert the colours after the draw.
+ */
+async function untilRedrawn(page: Page, term: string): Promise<void> {
+  await until(
+    () =>
+      readPage(
+        page,
+        (term) => {
+          const drawn = (window as unknown as { testDrawnBefore?: WeakSet<Element> })
+            .testDrawnBefore;
+          const box = document.querySelector(`#terminal .tv-term[data-term="${term}"]`);
+          const zero = [...(box?.querySelectorAll('.xterm-rows span') ?? [])].find(
+            (span) => span.textContent === '0',
+          );
+          return drawn !== undefined && zero !== undefined && !drawn.has(zero);
+        },
+        term,
+      ),
+    `${term} drawn again since the change of colours`,
+  );
+}
+
 /** Selects the shown terminal's first line with the mouse, then gives the list the keyboard (so
  *  that every measure of the selection is of an unfocused terminal). */
 async function selectFirstLine(page: Page, term: string): Promise<void> {
@@ -540,6 +597,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
     'at a click every terminal of the page is repainted in the new colours — background, text, the sixteen colours and the selection — as after a flip of the system: the shown one at once, a hidden one when it is shown again',
     async (t) => {
       const { page, problems } = await opened(t, chromium);
+      await noteRedraws(page);
       await clickRow(page, S1);
       await untilShown(page, TERM_A);
       await selectFirstLine(page, TERM_A);
@@ -549,6 +607,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         async () => (await termColours(page, TERM_A)).background !== light.background,
         'the system’s flip repaints the terminal',
       );
+      await untilRedrawn(page, TERM_A);
       const dark = await termColours(page, TERM_A);
       for (const key of ['background', 'foreground', 'selection'] as const) {
         assert.notEqual(dark[key], light[key], `${key} differs between the schemes`);
@@ -575,9 +634,11 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         async () => (await termColours(page, TERM_B)).background === dark.background,
         'B repainted at the click',
       );
+      await untilRedrawn(page, TERM_B);
       assert.deepEqual(await termColours(page, TERM_B), dark, 'B in the dark colours');
       await clickRow(page, S1);
       await untilShown(page, TERM_A);
+      await untilRedrawn(page, TERM_A);
       assert.deepEqual(await termColours(page, TERM_A), dark, 'A, hidden at the click, is dark');
 
       await clickSwitch(page); // Auto: the light system's again
@@ -585,9 +646,11 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         async () => (await termColours(page, TERM_A)).background === light.background,
         'A repainted at the click',
       );
+      await untilRedrawn(page, TERM_A);
       assert.deepEqual(await termColours(page, TERM_A), light);
       await clickRow(page, S2);
       await untilShown(page, TERM_B);
+      await untilRedrawn(page, TERM_B);
       assert.deepEqual(await termColours(page, TERM_B), light, 'B, hidden at the click, is light');
       assert.deepEqual(problems, []);
     },
@@ -1201,8 +1264,22 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
     "at a click on the colour themes' switch every terminal of the page is repainted in the theme's colours — the shown one at once, a hidden one when it is shown again — and the server is told the colours",
     async (t) => {
       const { page, d, problems } = await opened(t, chromium);
+      await noteRedraws(page);
+      // B shown first, so that it is on the page, hidden, at the click; then A shown.
+      await clickRow(page, S2);
+      await untilShown(page, TERM_B);
       await clickRow(page, S1);
       await untilShown(page, TERM_A);
+      assert.equal(
+        await readPage(
+          page,
+          (term) =>
+            document.querySelector<HTMLElement>(`#terminal .tv-term[data-term="${term}"]`)?.hidden,
+          TERM_B,
+        ),
+        true,
+        'B is on the page and hidden at the click',
+      );
       const light = await termColours(page, TERM_A);
       const from = d.sent.length;
       await clickPalette(page); // light Iris
@@ -1210,6 +1287,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         async () => (await termColours(page, TERM_A)).background !== light.background,
         'A repainted at the click',
       );
+      await untilRedrawn(page, TERM_A);
       const iris = await termColours(page, TERM_A);
       assert.equal(iris.background, 'rgb(246, 242, 253)', 'the background');
       assert.equal(iris.foreground, 'rgb(36, 21, 35)', 'the text');
@@ -1218,6 +1296,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       assert.deepEqual(themesSent(d, from).at(-1)?.message['theme'], LIGHT_IRIS_COLOURS);
       await clickRow(page, S2);
       await untilShown(page, TERM_B);
+      await untilRedrawn(page, TERM_B);
       assert.deepEqual(await termColours(page, TERM_B), iris, 'B, hidden at the click, is Iris');
       assert.deepEqual(problems, []);
     },
