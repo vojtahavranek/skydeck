@@ -380,11 +380,19 @@ function apply(running: Config, key: SettingKey, from: Config): void {
   }
 }
 
+/**
+ * The file is read as bytes and decoded strictly: a byte that is not UTF-8 would come out as
+ * U+FFFD, and the file written back — a shown-only value in it too — and its copy would no longer
+ * hold the bytes as they were (as install reads Claude Code's global config file). The BOM is kept
+ * in the text, so a file that starts with one is not JSON, as for every command.
+ */
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
 /** A path that is not a regular file is never written (install's rule for odd files). */
 function lookAt(files: Files, path: string): Look {
   let info: FileInfo | null;
   let target = path;
-  let text: string | null;
+  let text: string;
   let mode: number;
   try {
     info = files.lstat(path);
@@ -404,11 +412,22 @@ function lookAt(files: Files, path: string): Look {
       return { state: 'refused', problem: `${path} is not a regular file` };
     }
     mode = info.mode;
-    text = files.readText(target);
+    let bytes: Uint8Array;
+    try {
+      bytes = files.readBytes(target, 0, Number.MAX_SAFE_INTEGER);
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') return { state: 'none' }; // gone in between
+      throw error;
+    }
+    try {
+      text = STRICT_UTF8.decode(bytes);
+    } catch {
+      return { state: 'refused', problem: `${path}: it is not UTF-8 text` };
+    }
   } catch (error) {
     return { state: 'refused', problem: `${path}: cannot be read (${describeError(error)})` };
   }
-  if (text === null) return { state: 'none' }; // gone in between
   let config: Config;
   try {
     config = parseConfig(text, path);
@@ -596,6 +615,10 @@ export function createSettings(deps: SettingsDeps): Settings {
       return safely(() => {
         if (value !== null && typeof value !== 'string' && typeof value !== 'number') {
           return refused("a setting's value cannot be an object, a list, true or false");
+        }
+        // JSON would write Infinity and NaN as null, which the file's rules take for some keys.
+        if (typeof value === 'number' && !Number.isFinite(value)) {
+          return refused("a setting's number must be finite");
         }
         return change(key, value);
       });

@@ -297,6 +297,136 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
   );
 
   await t.test(
+    "a save (Enter, Space on Save), a refusal, Default and another window's change move neither the keyboard nor the dialog's scroll; typing goes on",
+    async (t) => {
+      const l = await launched(t, chromium, { config: { prRefreshMinutes: 7 } });
+      await l.page.setViewportSize({ width: 1000, height: 600 });
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      const field = l.page.locator(`${row('restoreBatch')} .setting-control`);
+      await field.focus();
+      const where = (page: Page, selector: string): Promise<{ holds: boolean; top: number }> =>
+        readPage(
+          page,
+          (at) => ({
+            holds: document.activeElement === document.querySelector(at),
+            top: (document.querySelector('#settings .settings-dialog') as HTMLElement).scrollTop,
+          }),
+          selector,
+        );
+      const fieldAt = `${row('restoreBatch')} .setting-control`;
+      const start = await where(l.page, fieldAt);
+      assert.ok(start.holds && start.top > 0, JSON.stringify(start));
+      await l.page.keyboard.press('Control+a');
+      await l.page.keyboard.type('2');
+      await l.page.keyboard.press('Enter');
+      await messageIs(l.page, 'restoreBatch', 'Saved: it applies at once.');
+      assert.deepEqual(await where(l.page, fieldAt), start, 'after a save');
+      await l.page.keyboard.press('Control+a');
+      await l.page.keyboard.type('0');
+      await l.page.keyboard.press('Enter');
+      await messageIs(l.page, 'restoreBatch', '"restoreBatch" must be a positive integer');
+      assert.deepEqual(await where(l.page, fieldAt), start, 'after a refusal');
+      await l.page.keyboard.type('3'); // the field still has the keyboard: `03`
+      assert.equal(await fieldOf(l.page, 'restoreBatch'), '03');
+      const saveAt = `${row('restoreBatch')} .setting-save`;
+      await l.page.locator(saveAt).focus();
+      const onSave = await where(l.page, saveAt);
+      await l.page.keyboard.press('Space');
+      await messageIs(l.page, 'restoreBatch', 'Saved: it applies at once.');
+      assert.deepEqual(await where(l.page, saveAt), onSave, 'after Space on Save');
+      const resetAt = `${row('restoreBatch')} .setting-reset`;
+      await l.page.locator(resetAt).focus();
+      const onReset = await where(l.page, resetAt);
+      await l.page.keyboard.press('Enter');
+      await messageIs(l.page, 'restoreBatch', 'Put back to its default: it applies at once.');
+      assert.deepEqual(await where(l.page, resetAt), onReset, 'after Default');
+
+      const other = await l.page.context().newPage();
+      await other.setViewportSize({ width: 1000, height: 600 });
+      await other.goto(pageUrl(l.server.port));
+      await connection(other, 'open');
+      await other.locator('#settings-button').click();
+      await opened(other);
+      const typingAt = `${row('restoreMinFreeMb')} .setting-control`;
+      await other.locator(typingAt).focus();
+      await other.keyboard.press('Control+a');
+      await other.keyboard.type('20');
+      const typing = await where(other, typingAt);
+      const pr = l.page.locator(`${row('prRefreshMinutes')} .setting-control`);
+      await pr.fill('11');
+      await pr.press('Enter');
+      await until(async () => (await fieldOf(other, 'prRefreshMinutes')) === '11', 'B follows');
+      assert.deepEqual(await where(other, typingAt), typing, "B's keyboard and scroll stay");
+      await other.keyboard.type('48');
+      assert.equal(await fieldOf(other, 'restoreMinFreeMb'), '2048', 'the typing goes on');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'a text longer than a request carries (4,096 bytes) is refused before it is sent, in words that name the limit and the file; the connection stays',
+    async (t) => {
+      const l = await launched(t, chromium);
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      const before = readFileSync(l.d.deck.places.configPath, 'utf8');
+      const field = l.page.locator(`${row('groupPattern')} .setting-control`);
+      await field.fill('a'.repeat(5001));
+      await field.press('Enter');
+      await messageIs(
+        l.page,
+        'groupPattern',
+        'Longer than the window sends (4,096 bytes as UTF-8): change it in the file by hand.',
+      );
+      await connection(l.page, 'open');
+      assert.equal(readFileSync(l.d.deck.places.configPath, 'utf8'), before);
+      // 4,096 bytes are sent: the server takes it.
+      await field.fill('a'.repeat(4096));
+      await field.press('Enter');
+      await messageIs(l.page, 'groupPattern', 'Saved: it applies at once.');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'text typed and not saved holds nothing back once the screen is closed: a reload in another dialog passes',
+    async (t) => {
+      const l = await launched(t, chromium);
+      l.d.resumable(S1);
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      await l.page.locator(`${row('restoreBatch')} .setting-control`).fill('9');
+      await l.page.keyboard.press('Escape');
+      await closed(l.page);
+      await toZone(l.page, 'list');
+      await until(
+        async () =>
+          (await readPage(
+            l.page,
+            () => document.querySelector('#list [data-selected="true"]'),
+            null,
+          )) !== null,
+        'a row selected',
+      );
+      await l.page.keyboard.press('l');
+      await until(
+        async () =>
+          (await readPage(l.page, () => document.getElementById('editor')?.hidden, null)) === false,
+        'the label dialog',
+      );
+      const loaded = l.page.waitForEvent('load', { timeout: 15_000 });
+      await l.page.keyboard.press('F5');
+      await loaded;
+      await connection(l.page, 'open');
+      assert.deepEqual(
+        l.problems.filter((line) => !/reload/i.test(line)),
+        [],
+      );
+    },
+  );
+
+  await t.test(
     'every theme, light and dark, each colour theme: the texts of the screen hold 4.5 : 1 against their ground',
     async (t) => {
       const l = await launched(t, chromium);

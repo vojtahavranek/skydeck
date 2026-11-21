@@ -121,7 +121,7 @@
   border-color: var(--accent);
   font-weight: 600;
 }
-.setting-line button[disabled] {
+.setting-line button[aria-disabled='true'] {
   opacity: 0.55;
   cursor: default;
 }

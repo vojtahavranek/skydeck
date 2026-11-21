@@ -13,7 +13,11 @@
 // server's (src/window/settings.ts). One setting is saved at a time: `Save` (or Enter in its field)
 // sends `act setting-set` for that one, `Default` `act setting-default`; the answer's words stand
 // beside the field — the refusal's, or that it was saved and when it applies —, and the answer's
-// screen is drawn. A `settings` message (a change from another window) draws the screen again; a
+// screen is drawn. A text longer than a request carries (4,096 bytes of UTF-8) is refused here,
+// before sending, in words that name the limit and the file. Nothing is disabled while an answer
+// waits (the field is read-only, its buttons say so), and a draw moves no element (each row and
+// each group's heading is made once), so that the keyboard and the scroll stay where they are —
+// also when another window's change draws the screen again. A `settings` message (a change from another window) draws the screen again; a
 // field whose text the user changed and did not save keeps that text. Keys come from app.js's
 // capture phase: Esc closes (`escape()`); Tab and Shift+Tab walk the dialog's controls and stay in
 // it (`key()`); Enter in a field saves it. Every text reaches the DOM as text, a value only as a
@@ -24,6 +28,7 @@ import {
   appliesText,
   controlText,
   factsText,
+  overLimit,
   pendingText,
   savedText,
   SETTINGS_TEXTS,
@@ -133,9 +138,13 @@ export function createSettingsDialog(root, deps) {
   const rows = new Map();
   /** @type {Map<string, SettingPayload>} */
   const settings = new Map();
+  /** Each group's heading, made once and kept across screens as the rows are. */
+  /** @type {Map<string, HTMLElement>} */
+  const headings = new Map();
 
-  /** Whether the user changed a field's text and did not save it. */
+  /** Whether, while the screen is shown, the user changed a field's text and did not save it. */
   const changed = () =>
+    shown &&
     [...rows.values()].some((row) => row.control !== null && row.control.value !== row.drawn);
 
   /** @param {SettingPayload} setting */
@@ -211,7 +220,8 @@ export function createSettingsDialog(root, deps) {
 
   /**
    * Draws `payload`: every row's texts, and each control's value unless the user changed its text
-   * since it was drawn (`keep`: the keys whose field is to be drawn whatever it holds).
+   * since it was drawn (`redraw`: the keys whose field is drawn whatever it holds). Only what is
+   * out of place moves: an unchanged screen moves no element.
    * @param {SettingsPayload} payload
    * @param {ReadonlySet<string>} [redraw]
    */
@@ -230,7 +240,12 @@ export function createSettingsDialog(root, deps) {
       settings.set(setting.key, setting);
       if (setting.group !== group) {
         group = setting.group;
-        children.push(element('div', 'settings-group', group));
+        let heading = headings.get(group);
+        if (heading === undefined) {
+          heading = element('div', 'settings-group', group);
+          headings.set(group, heading);
+        }
+        children.push(heading);
       }
       let row = rows.get(setting.key);
       let made = false;
@@ -280,36 +295,35 @@ export function createSettingsDialog(root, deps) {
     if (row === undefined || setting === undefined || row.control === null || row.waiting) {
       return;
     }
-    const open = opens;
-    row.waiting = true;
-    row.root.dataset['waiting'] = 'true';
-    const holder = document.activeElement;
-    for (const control of [row.save, row.reset]) {
-      if (control !== null) control.disabled = true;
+    const value = valueToSend(setting, row.control.value);
+    if (!reset && typeof value === 'string' && overLimit(value)) {
+      row.message.dataset['outcome'] = 'refused';
+      setText(row.message, SETTINGS_TEXTS.tooLong);
+      return;
     }
-    row.control.disabled = true;
+    const open = opens;
+    // While the answer waits the field is read-only and its buttons say they wait; nothing is
+    // disabled, which would take the keyboard away from it.
+    const waiting = (/** @type {boolean} */ on) => {
+      row.waiting = on;
+      if (on) row.root.dataset['waiting'] = 'true';
+      else delete row.root.dataset['waiting'];
+      for (const one of [row.save, row.reset, row.control]) {
+        if (one === null) continue;
+        if (on) one.setAttribute('aria-disabled', 'true');
+        else one.removeAttribute('aria-disabled');
+      }
+      if (row.control instanceof HTMLInputElement) row.control.readOnly = on;
+    };
+    waiting(true);
     setText(row.message, SETTINGS_TEXTS.saving);
     delete row.message.dataset['outcome'];
     const result = await deps.act(
-      reset
-        ? { kind: 'setting-default', key }
-        : { kind: 'setting-set', key, value: valueToSend(setting, row.control.value) },
+      reset ? { kind: 'setting-default', key } : { kind: 'setting-set', key, value },
     );
-    row.waiting = false;
-    delete row.root.dataset['waiting'];
-    for (const control of [row.save, row.reset, row.control]) {
-      if (control !== null) control.disabled = false;
-    }
+    waiting(false);
     if (!shown || open !== opens) {
       return;
-    }
-    // The keyboard stays where it was: a disabled control dropped it.
-    if (
-      holder instanceof HTMLElement &&
-      box.contains(holder) &&
-      document.activeElement !== holder
-    ) {
-      holder.focus();
     }
     if (result.settings !== undefined) {
       draw(result.settings, result.ok ? new Set([key]) : new Set());

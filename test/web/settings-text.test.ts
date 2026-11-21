@@ -10,6 +10,7 @@ import {
   appliesText,
   controlText,
   factsText,
+  overLimit,
   pendingText,
   savedText,
   SETTINGS_TEXTS,
@@ -105,6 +106,18 @@ test('a field becomes the request: a number field a number when it reads as one,
   assert.equal(valueToSend(pattern, ''), '');
   const links = setting({ key: 'window.links', control: 'choice', choices: ['default', 'edge'] });
   assert.equal(valueToSend(links, 'edge'), 'edge');
+  assert.equal(valueToSend(pattern, 'a\ud800b'), 'a\ufffdb', 'a lone surrogate is no text');
+});
+
+test('the limit of a text in a request: 4,096 bytes of UTF-8, refused before sending, in words that name it and the file', () => {
+  assert.equal(overLimit('a'.repeat(4096)), false);
+  assert.equal(overLimit('a'.repeat(4097)), true);
+  assert.equal(overLimit('\u00e9'.repeat(2048)), false);
+  assert.equal(overLimit('\u00e9'.repeat(2049)), true);
+  assert.equal(overLimit('\u{1f600}'.repeat(1024)), false);
+  assert.equal(overLimit('\u{1f600}'.repeat(1025)), true);
+  assert.match(SETTINGS_TEXTS.tooLong, /4,096 bytes/);
+  assert.match(SETTINGS_TEXTS.tooLong, /in the file by hand/);
 });
 
 test('what a control shows of a value: a number as its digits, null as an empty field, a text as it is', () => {

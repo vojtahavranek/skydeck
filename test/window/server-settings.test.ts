@@ -160,6 +160,13 @@ describe('the settings through the server (S2 12.13, 8.2.3)', () => {
       const closed = await page.closed;
       assert.equal(closed.code, 1008, JSON.stringify(fields));
     }
+    // JSON reads 1e999 as Infinity, which JSON.stringify would write as null (ticketUrl takes
+    // null): refused as a number that is not finite, nothing written.
+    for (const number of ['1e999', '-1e999']) {
+      const page = await connectTestPage(t, d, server.server);
+      page.sendRaw(`{"t":"act","id":1,"kind":"setting-set","key":"ticketUrl","value":${number}}`);
+      assert.equal((await page.closed).code, 1008, number);
+    }
     assert.equal(readFileSync(d.deck.places.configPath, 'utf8'), before);
     assert.deepEqual(screens(b), []);
   });

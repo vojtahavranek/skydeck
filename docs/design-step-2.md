@@ -1910,7 +1910,8 @@ age, and so that no more than one status program runs in the server at a time, w
 reads asked for while one runs wait for it and then run together. Each saved result makes the
 server load the rows again and send the lists, as an edit does (within a second). Nothing is read
 for a session no page lists, and nothing at all for an address no provider takes. The server reads
-`ticketStatus` and `ticketRefreshMinutes` at its start only (16.4); its stop aborts a running read
+`ticketStatus` and `ticketRefreshMinutes` from the file at its start only (16.4; from follow-up F36
+a change of `ticketRefreshMinutes` in the settings screen applies at once, 12.13); its stop aborts a running read
 and saves nothing more of it.
 
 Cost, from step 1's measurements: an idle refresh is about 16 ms at 3,000 recorded sessions and
@@ -3028,8 +3029,9 @@ refresh`. The server runs one read at a time, so one status program at a time, a
 5 programs in a round of its tick (10.1); `skydeck ticket refresh` runs its own reads in its own
 process, one after the other. A result the server saved reaches every page within a second, as an
 edit does; one a command saved, with the server's next refresh (within 2 seconds, 10.1). Nothing is read for a session no page lists, and nothing at all for an address no
-provider takes. The server reads `ticketStatus` and `ticketRefreshMinutes` at its start only:
-after changing either, `skydeck window --restart`.
+provider takes. The server reads `ticketStatus` and `ticketRefreshMinutes` from the file at its start only:
+after changing either by hand, `skydeck window --restart` (from follow-up F36,
+`ticketRefreshMinutes` changed in the settings screen applies at once, 12.13).
 
 **The ticket's chip with its status.** Once a status is known the chip reads `<name> · <status> ↗`
 in the category's tint (12.3: the text colour and the faint background of the tint; grey, `--dim`
@@ -3931,7 +3933,10 @@ editing the file by hand stay as they are, and the file's format does not change
   (`… after the window restarts.`, `the commands use it at their next run.`, `skydeck install uses
   it.`; `Put back to its default: …`), or the refusal — `config.json`'s own words without the
   file's path (`"prRefreshMinutes" must be a positive integer`; a ticket link with a user name or a
-  password stays refused) —, the field keeping its text. Every page's screen follows a change
+  password stays refused) —, the field keeping its text. A text longer than a request carries
+  (4,096 bytes of UTF-8; the file takes a longer `groupPattern` or `wezterm.domain`) is refused by
+  the page before it is sent, `Longer than the window sends (4,096 bytes as UTF-8): change it in
+  the file by hand.` Every page's screen follows a change
   (`settings`, 8.2.3); a field whose text was changed and not saved keeps it; the screen opened
   again reads everything again.
 - **The file.** Read again for every change. Only that key changes: every other key — the
@@ -3949,7 +3954,10 @@ editing the file by hand stay as they are, and the file's format does not change
   does not parse is never written: it is the user's to mend.
 - **Keys** (12.9). The keyboard starts on the first field once the screen came. Tab and Shift+Tab
   walk its fields and buttons and stay in it; Enter in a field saves it; Esc closes it; the keyboard
-  goes back where it was (a text field, the list, the terminal), else to the zone's holder. While it
+  goes back where it was (a text field, the list, the terminal), else to the zone's holder. While
+  an answer waits its field is read-only and nothing is disabled, and a draw moves no element: the
+  keyboard and the dialog's scroll stay where they are, also when another window's change draws
+  the screen again. While it
   is shown every window chord but Ctrl+Shift+H says `close the settings first (Esc)`; a reload passes
   while no field holds text that was not saved.
 - **Look.** It is wider and taller than stage D's dialogs and scrolls inside itself in a small

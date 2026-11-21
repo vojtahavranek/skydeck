@@ -1407,6 +1407,14 @@ describe("parsePageMessage: F36's acts (S2 12.13)", () => {
     for (const value of ['', 'x', 0, -1, 1.5, 1e300, null]) {
       assert.equal(page({ ...set, value }).ok, true, JSON.stringify(value));
     }
+    // JSON reads 1e999 as Infinity (JSON.stringify would write it as null): not a finite number.
+    for (const number of ['1e999', '-1e999']) {
+      refused(
+        parsePageMessage(
+          `{"t":"act","id":1,"kind":"setting-set","key":"ticketUrl","value":${number}}`,
+        ),
+      );
+    }
   });
 
   test('setting-set: a text value is held to 4,096 bytes of UTF-8 and must be well formed; the key to 1,024', () => {

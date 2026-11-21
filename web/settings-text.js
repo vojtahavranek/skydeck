@@ -18,8 +18,22 @@ export const SETTINGS_TEXTS = {
   reset: 'Default',
   close: 'Close',
   saving: 'Saving…',
+  /** A text longer than a request carries (VALUE_LIMIT): refused before it is sent. */
+  tooLong: 'Longer than the window sends (4,096 bytes as UTF-8): change it in the file by hand.',
   help: 'Enter saves the field you are in; Esc closes. One setting is saved at a time.',
 };
+
+/** The most bytes of UTF-8 a setting's text may hold in a request (S2 8.2.3, the URL limit). */
+export const VALUE_LIMIT = 4096;
+
+/**
+ * Whether `text` is longer than a request carries: the server would refuse the whole message.
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function overLimit(text) {
+  return new TextEncoder().encode(text).length > VALUE_LIMIT;
+}
 
 /** @type {Readonly<Record<SettingApplies, string>>} */
 const APPLIES = {
@@ -120,7 +134,8 @@ export function valueToSend(setting, text) {
   if (setting.nullable && text === '') {
     return null;
   }
-  return text;
+  // A lone surrogate (a broken paste) is no text a message may carry: it becomes U+FFFD.
+  return text.toWellFormed();
 }
 
 /**

@@ -31,7 +31,7 @@ import type { SettingPayload, SettingsPayload } from '../../src/window/protocol.
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 
-/** The brief's two lists (the owner's "plain values only", 2026-11-20). */
+/** The two lists the owner decided ("plain values only", 2026-11-20). */
 const CHANGEABLE = [
   'groupPattern',
   'ticketUrl',
@@ -277,7 +277,14 @@ describe('what a page may send (G2): every refusal changes nothing', () => {
     for (const value of [{ prRefreshMinutes: 1 }, [1], true, undefined]) {
       refusedWith(w, w.settings.set('prRefreshMinutes', value as never), /cannot be/);
     }
+    // JSON would write them as null, which ticketUrl and wezterm.domain take.
+    for (const key of ['ticketUrl', 'wezterm.domain', 'prRefreshMinutes']) {
+      for (const value of [Infinity, -Infinity, NaN]) {
+        refusedWith(w, w.settings.set(key, value), /finite/);
+      }
+    }
     assert.equal(w.text(), before);
+    assert.equal(w.d.deck.config.ticketUrl, null);
   });
 
   test("a wrong type, a bad pattern, a number out of its range, a ticket link with a user name or a password: config.json's own message, without the path", (t) => {
@@ -454,6 +461,31 @@ describe('writing the file (G3)', () => {
       assert.equal(w.text(), broken);
       assert.equal(existsSync(w.backup), false);
     }
+  });
+
+  test('a file that is not UTF-8 text (one Latin-1 byte in a shown-only value) is one to mend by hand: nothing written, no copy', (t) => {
+    const w = world(t, { claudeCommand: '/opt/claude' });
+    const bytes = Buffer.concat([
+      Buffer.from('{ "claudeCommand": "/opt/cl'),
+      Buffer.from([0xe9]),
+      Buffer.from('ude" }'),
+    ]);
+    writeFileSync(w.path, bytes);
+    const outcome = w.settings.set('prRefreshMinutes', 9);
+    assert.ok(!outcome.ok && /is not UTF-8 text; mend the file by hand first/.test(outcome.error));
+    assert.ok(/is not UTF-8 text/.test(w.settings.payload().problem ?? ''));
+    assert.ok(readFileSync(w.path).equals(bytes), 'the bytes as they were');
+    assert.equal(existsSync(w.backup), false);
+  });
+
+  test('the copy is the file as it was, byte for byte (UTF-8 beyond ASCII, a line break at the end)', (t) => {
+    const text =
+      '{\n  "groupPattern": "^[\u00e4\u00f6\u05e9]+-[0-9]+",\n  "claudeCommand": "/opt/\u00e9t\u00e9"\n}\n';
+    const w = world(t, text);
+    const before = readFileSync(w.path);
+    assert.equal(w.settings.set('prRefreshMinutes', 9).ok, true);
+    assert.ok(readFileSync(w.backup).equals(before), 'the copy holds the same bytes');
+    assert.equal(at(w.json(), 'claudeCommand'), '/opt/\u00e9t\u00e9');
   });
 
   test('the file is read again for every change: a hand edit between two changes stays', (t) => {
@@ -711,13 +743,27 @@ describe('the screen (payload) and what the running server uses (G4)', () => {
     assert.deepEqual([pr.value, pr.inFile, pr.pending], [7, false, false]);
   });
 
-  test('every text the screen shows is sanitised; a value for a control is sent exactly', (t) => {
-    const pattern = '^\u001b[31m[A-Z]+\u202e-[0-9]+';
-    const w = world(t, { groupPattern: pattern });
+  test('every text the screen shows is sanitised — the value, the value the server uses, the problem, the path —; a value for a control is sent exactly', (t) => {
+    // Neither JSON nor the URL parser escapes these: DEL, a C1 control, the bidirectional controls.
+    const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/;
+    const running = '^\u007f[A-Z]+\u0085\u202e-[0-9]+\u2066';
+    const w = world(t, { groupPattern: running });
+    const pattern = '^\u001b[31m[a-z]\u202e+\u0090-[0-9]+\u2069';
+    writeFileSync(w.path, JSON.stringify({ groupPattern: pattern }));
     const one = setting(w.settings.payload(), 'groupPattern');
-    assert.equal(one.value, pattern);
-    assert.ok(!/[\u0000-\u001f\u007f-\u009f]/.test(one.valueText), JSON.stringify(one.valueText));
-    const outcome = w.settings.set('groupPattern', '(\u001b');
-    assert.ok(!outcome.ok);
+    assert.equal(one.value, pattern, 'exact, for the field');
+    assert.equal(one.pending, true);
+    for (const text of [one.valueText, one.runningText ?? '', one.defaultText]) {
+      assert.ok(!UNSAFE.test(text), JSON.stringify(text));
+    }
+    writeFileSync(w.path, JSON.stringify({ 'bad\u202ekey\u0085': 1 }));
+    const payload = w.settings.payload();
+    assert.ok(
+      payload.problem !== null && payload.problem.includes('badkey'),
+      payload.problem ?? '',
+    );
+    assert.ok(!UNSAFE.test(payload.problem), JSON.stringify(payload.problem));
+    const refused = w.settings.set('prRefreshMinutes', 9);
+    assert.ok(!refused.ok && !UNSAFE.test(refused.payload.problem ?? ''));
   });
 });

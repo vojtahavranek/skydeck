@@ -936,10 +936,12 @@ const CLOSED: Check = (value, where) => {
 };
 
 /** F36: a setting's value — a string held to the path limit (a ticket link of 2,048 characters is
- *  sent whole), a number, or null; never an object, a list or a boolean (no setting the window
- *  changes is one: a whole configuration is never sent). */
+ *  sent whole), a finite number (JSON reads `1e999` as Infinity, which JSON would write as null),
+ *  or null; never an object, a list or a boolean (no setting the window changes is one: a whole
+ *  configuration is never sent). */
 const SETTING_VALUE: Check = (value, where) => {
-  if (value === null || typeof value === 'number') return null;
+  if (value === null) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? null : `${where}: wrong value`;
   return typeof value === 'string' ? PATH(value, where) : `${where}: wrong type`;
 };
 

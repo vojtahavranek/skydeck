@@ -470,7 +470,8 @@ keys marked `change` below are changed there, one at a time: `Save` (or Enter in
 `Default` to remove the key from the file. A key marked `shown` names a program, a folder or the
 port: the window shows it, and you change it in the file. A value the file's rules refuse is
 refused there in the same words (`"prRefreshMinutes" must be a positive integer`), and the file
-stays as it was; a file that cannot be read is never written (the screen says what `doctor` says:
+stays as it was; a text longer than 4,096 bytes (the file takes a longer `groupPattern`) is changed
+in the file by hand; a file that cannot be read is never written (the screen says what `doctor` says:
 mend it by hand). Only that key changes; every other key of the file stays, in its order. Before
 the window's first change after its server started, a copy of the file is kept beside it as
 `config.json.skydeck-backup` (one copy, replaced by the next start's first change). **Applies**
@@ -1065,8 +1066,9 @@ the file, as for every key: every command fails with exit 1 and
 skydeck: /home/you/.config/skydeck/config.json: "ticketUrl" must be null or an http or https address with {key} once, after its host
 ```
 
-The window's server reads the file when it starts: after you set or change `ticketUrl`, run
-`skydeck window --restart`. `skydeck show <ref>` reads it at once and prints the address after the
+The window's server reads the file when it starts: after you set or change `ticketUrl` by hand,
+run `skydeck window --restart`; set in the window's Settings ("Configuration"), it applies at
+once. `skydeck show <ref>` reads it at once and prints the address after the
 group (`--json` does not hold it), while the session has no ticket of its own (next):
 
 ```
@@ -1269,7 +1271,8 @@ ones included (as `skydeck pr refresh` reads every session's pull requests), eac
 printing `fetched 3, failed 0` at its end, one program after the other. A result the window's
 server read reaches every open window within a second; one that a command read, at the server's
 next refresh (within 2 seconds). The window's server reads `ticketStatus` and `ticketRefreshMinutes` when it
-starts: after you change either, run `skydeck window --restart`.
+starts: after you change either by hand, run `skydeck window --restart`. `ticketRefreshMinutes`
+changed in the window's Settings applies at once; `ticketStatus` is changed in the file only.
 
 **Where it shows.** The ticket's chip becomes `<name> · <status> ↗`, in the category's colour (the
 name still underlined); its tooltip holds the address, then `In Progress, checked 3m ago`, or, after
@@ -1445,7 +1448,9 @@ a WSL terminal of your own, run `skydeck window`:
 - **The settings are the server's.** A restore in the window uses the `restoreBatch`,
   `restoreMinFreeMb`, `restoreStartTimeoutSeconds` and `claudeCommand` that the server read when it
   started, and its sessions get the server's environment ("Starting it" above): after a change of
-  `config.json`, run `skydeck window --restart`.
+  `config.json` by hand, run `skydeck window --restart`. The three restore keys changed in the
+  window's Settings ("Configuration") apply from the next restore; `claudeCommand` is changed in
+  the file only.
 
 #### Starting sessions in the window from a terminal (stage C)
 
