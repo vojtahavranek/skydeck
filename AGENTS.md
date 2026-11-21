@@ -90,8 +90,9 @@ or feed them from a pipe (`printf 'y\n' |`, `yes |`). Tell them first what a yes
 tell you: it must print their `~/.local/bin/skydeck` (nothing: give them
 `export PATH="$HOME/.local/bin:$PATH"` for `~/.bashrc` or `~/.zshrc`, which you never edit; another
 path: tell them that program answers). Then run `~/.local/bin/skydeck doctor` and
-`~/.local/bin/skydeck ls` and read them out. doctor's lines start `ok`, `info` or `problem`,
-versions first; normal when new: `info     no events yet`, a `problem` (exit 1) for a missing or
+`~/.local/bin/skydeck ls` and read them out. doctor's lines start `ok`, `info` or `problem`, under
+group headings, versions first, and a verdict ends it (`no problems`, or `1 problem` and the line
+again); normal when new: `info     no events yet`, a `problem` (exit 1) for a missing or
 logged-out `gh`, `info` for the window's until it is used. Other problems are theirs.
 
 **6. Tell the human, at the end:** what changed (above), and that `skydeck uninstall` undoes it

@@ -4272,7 +4272,8 @@ holds is `RUNTIME_DIR` in `src/cli/purge.ts`.
 
 ### 16.3 Doctor
 
-New lines, with `ok`, `info` or `problem` as in design 8. It still starts no program but those it
+New lines, with `ok`, `info` or `problem` as in design 8, under its Window heading after the
+terminal's line. It still starts no program but those it
 already runs (`gh`, `wezterm`, and for its first three lines git and `<claudeCommand> --version`,
 design 8, follow-up F20) and `python3 --version`; it starts nothing on Windows, signals
 nothing and creates nothing. While the window has never been used — no `window_secret`, or no

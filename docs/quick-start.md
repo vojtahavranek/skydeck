@@ -51,8 +51,9 @@ one more), and run:
 skydeck doctor
 ```
 
-It prints one line per check, each starting with `ok`, `info` or `problem`, and most `problem`
-lines say what to do. Two things are normal on a new machine: `doctor` has seen no events yet (that
+It prints its checks in groups (Versions, Recording, Claude Code, GitHub, Window), one line per
+check, each starting with `ok`, `info` or `problem`, and ends with a verdict: `no problems`, or how
+many there are with each `problem` line again. Most `problem` lines say what to do. Two things are normal on a new machine: `doctor` has seen no events yet (that
 changes once a session starts), and without `gh` logged in, its `gh` line is a `problem`.
 `skydeck ls` prints your sessions, also those Claude Code had before the install; one that never
 had a prompt shows only while it runs.

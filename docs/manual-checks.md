@@ -78,8 +78,10 @@ Expected:
   more than one backup, name the one that was printed).
 - `~/.claude/settings.json` still has everything it had, plus the two entries. Its layout may
   change: it is written with two-space indentation and a newline at the end.
-- `skydeck doctor` prints no line that starts with `problem`, and `echo $?` right after it prints
-  `0`. (It needs `gh` logged in.)
+- `skydeck doctor` prints its lines under the headings Versions, Recording, Claude Code, GitHub and
+  Window, no line that starts with `problem`, and `no problems` last; `echo $?` right after it
+  prints `0`. (It needs `gh` logged in.) In a terminal the headings are bold and each `ok` green;
+  `skydeck doctor | cat` and `NO_COLOR=1 skydeck doctor` show the same lines without colour.
 - `bin/skydeck install` a second time prints `hook entries already present` and makes no new backup.
 
 With no settings file (only the folder `~/.claude`): skip the `cp` and every `cmp` and `ls -l` of the

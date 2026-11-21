@@ -346,12 +346,17 @@ export PATH="$HOME/.local/bin:$PATH"
 skydeck doctor
 ```
 
-On a healthy machine every line is `ok` or `info`, and the exit code is 0:
+It prints its checks in groups, one line per check under the group's heading, and ends with a
+verdict. On a healthy machine every line is `ok` or `info`, the verdict is `no problems`, and the
+exit code is 0 (the window's own lines, under Window after the terminal's, are left out here):
 
 ```
+Versions
 info     skydeck 0.1.0 (f1fce49, 2026-11-19)
 info     Claude Code 2.1.0
 info     system: Ubuntu 24.04.1 LTS, Linux 6.6.87.2-microsoft-standard-WSL2
+
+Recording
 ok       hook entries present in /home/you/.claude/settings.json
 ok       /home/you/.local/share/skydeck/skydeck-hook -> /home/you/skydeck/bin/skydeck-hook
 ok       Node.js 24.19.0 (/home/you/.nvm/versions/node/v24.19.0/bin/node)
@@ -362,16 +367,30 @@ ok       /home/you/.local/state/skydeck/spool/bad: no files that could not be re
 info     hook.log is empty
 info     scripted runs dropped: 0
 ok       the last refresh skipped nothing
+
+Claude Code
 ok       /home/you/.claude/sessions can be read
 ok       transcripts: 12 files under /home/you/.claude/projects
 ok       Claude Code's ← shortcut is off (/home/you/.claude.json)
+
+GitHub
 ok       gh version 2.69.0 (2025-03-19)
 ok       gh is logged in
+
+Window
 ok       terminal: here (sessions start in the terminal skydeck runs in)
+ok       python3 3.12.3 for the window's terminals
+…
+
+no problems
 ```
 
-`doctor` exits 1 when any line starts with `problem`. "Checking" below says what each check means.
-A `gh` that is not logged in is not healthy either: `doctor` prints
+`doctor` exits 1 when any line starts with `problem`; the verdict then says how many there are
+(`1 problem`, `3 problems`) and repeats each problem line under it. A group with no line to show
+(its checks need a configuration that cannot be read) has no heading. On a terminal the headings
+are bold, `ok` green and `problem` red; with `NO_COLOR` set, `TERM=dumb` or the output going to a
+file or a pipe there is no colour. "Checking" below says what each check means. A `gh` that is
+not logged in is not healthy either: `doctor` prints
 `problem  gh is not logged in, or GitHub cannot be reached (gh auth status: exit 1); run gh auth status to see why`
 and exits 1. That happens, for example, after a clone with an SSH key and no `gh auth login`.
 

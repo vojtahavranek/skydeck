@@ -1002,6 +1002,20 @@ could not be resumed; see above`).
   of the report; so is a configuration file that cannot be read or a database that is missing or
   cannot be opened, and the checks that do not need it still run.
 
+  Each line is `ok`, `info` or `problem` padded to 9 characters, then the text, at the start of
+  its line, on stdout. The lines stand in groups, in this order, each under a heading line with a
+  blank line before every heading but the first: Versions (the three lines below), Recording (the
+  configuration's and the database's problem lines, the hook entries and link, Node.js, the
+  database, the spool, the last event, `spool/bad/`, `hook.log`, scripted runs, the last refresh),
+  Claude Code (its folders, the ← shortcut), GitHub (`gh`), Window (the terminal adapter, then the
+  window's checks, design-step-2.md 16.3). A group with no line, because its checks were skipped,
+  has no heading. After the groups, a blank line and the verdict: `no problems`, or `1 problem` /
+  `<n> problems` followed by each problem line again, as it stood. The exit code is 1 exactly when
+  there is a problem line. On a terminal (stdout a terminal, `NO_COLOR` unset or empty, `TERM` not
+  `dumb`) headings and the verdict are bold, the word `ok` green and `problem` red; otherwise the
+  output holds no escape sequence. Colour goes around what skydeck writes, never into foreign text,
+  which is sanitised as everywhere (7.4).
+
   Before every other line, three `info` lines say what runs (follow-up F20); none is ever a
   problem, none changes the exit code, and none names a path. (1) `skydeck <version line>`, the
   line `skydeck --version` prints: `<package version> (<short commit>, <commit date>)` of the
