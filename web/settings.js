@@ -22,8 +22,14 @@
 // capture phase: Esc closes (`escape()`); Tab and Shift+Tab walk the dialog's controls and stay in
 // it (`key()`); Enter in a field saves it. Every text reaches the DOM as text, a value only as a
 // control's value or as text, each isolated for right-to-left text.
+//
+// Follow-up F38 (S2 12.13, 16.5): above the list, the block `Updates` — when the window's server
+// last looked for a newer skydeck and what it found, a failed last check and why, `Checking…` while
+// one runs (web/update-text.js) —, and `Check now` (`deps.checkNow`, `act update-check`), which
+// works whatever the switch `window.updateCheck` says. It follows every state the page is given
+// (`updateState`), also while the screen is closed, and draws it while it is shown.
 
-/** @import { ResultMessage, SettingPayload, SettingsPayload } from '../src/window/protocol.ts' */
+/** @import { ResultMessage, SettingPayload, SettingsPayload, UpdatePayload } from '../src/window/protocol.ts' */
 import {
   appliesText,
   controlText,
@@ -36,11 +42,14 @@ import {
   shownOnlyText,
   valueToSend,
 } from './settings-text.js';
+import { settingsLines, UPDATE_TEXTS } from './update-text.js';
 
 /**
  * @typedef {object} SettingsDeps
  * @property {(action: Record<string, unknown> & { kind: string }) => Promise<ResultMessage>} act
  * @property {() => void} closed called once whenever the dialog closes, whatever closed it
+ * @property {() => Promise<ResultMessage>} checkNow F38: `act update-check`
+ * @property {() => string} now F38: the server's time now (ns, decimal; '' when not known)
  */
 
 /**
@@ -125,10 +134,17 @@ export function createSettingsDialog(root, deps) {
   const help = element('div', 'settings-help', SETTINGS_TEXTS.help);
   const status = element('div', 'settings-status');
   const list = element('div', 'settings-list');
+  // F38: the block `Updates`, above the list.
+  const updates = element('div', 'settings-updates');
+  updates.setAttribute('aria-live', 'polite');
+  const updatesHeading = element('div', 'settings-updates-heading', UPDATE_TEXTS.block);
+  const updatesLines = element('div', 'settings-updates-lines');
+  const checkNow = button('settings-check-now', UPDATE_TEXTS.checkNow);
+  updates.append(updatesHeading, updatesLines, checkNow);
   const close = button('settings-close', SETTINGS_TEXTS.close);
   const actions = element('div', 'edit-actions settings-actions');
   actions.append(close);
-  box.append(heading, fileLine, copyLine, noFile, problem, help, status, list, actions);
+  box.append(heading, fileLine, copyLine, noFile, problem, help, status, updates, list, actions);
   root.replaceChildren(scrim, box);
   root.hidden = true;
 
@@ -144,6 +160,30 @@ export function createSettingsDialog(root, deps) {
   /** Each group's heading, made once and kept across screens as the rows are. */
   /** @type {Map<string, HTMLElement>} */
   const headings = new Map();
+  /** F38: the last state of the check the page was given. @type {UpdatePayload | null} */
+  let updateState = null;
+
+  /** F38: the block's lines, one element each, made again only when a text changed. */
+  const drawUpdates = () => {
+    const texts = settingsLines(updateState, deps.now());
+    const now = [...updatesLines.children].map((one) => one.textContent);
+    if (now.length === texts.length && now.every((text, i) => text === texts[i])) {
+      return;
+    }
+    updatesLines.replaceChildren(
+      ...texts.map((text) => element('div', 'settings-updates-line', text)),
+    );
+  };
+  checkNow.addEventListener('click', () => {
+    void deps.checkNow().then((result) => {
+      if (result.update !== undefined) {
+        updateState = result.update;
+      }
+      if (shown) {
+        drawUpdates();
+      }
+    });
+  });
 
   /** Whether, while the screen is shown, the user changed a field's text and did not save it. */
   const changed = () =>
@@ -411,6 +451,7 @@ export function createSettingsDialog(root, deps) {
       const fresh = new Set(rows.keys());
       status.hidden = false;
       setText(status, SETTINGS_TEXTS.reading);
+      drawUpdates();
       root.hidden = false;
       box.focus();
       void deps.act({ kind: 'settings' }).then((result) => {
@@ -432,6 +473,17 @@ export function createSettingsDialog(root, deps) {
     update(payload) {
       if (shown && screen !== null) {
         draw(payload);
+      }
+    },
+    /**
+     * F38: the check's state (every `update` message, and the answers of the page's acts); drawn
+     * while the screen is shown.
+     * @param {UpdatePayload} payload
+     */
+    updateState(payload) {
+      updateState = payload;
+      if (shown) {
+        drawUpdates();
       }
     },
     /** Esc, from app.js's capture phase. */

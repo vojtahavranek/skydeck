@@ -1544,6 +1544,8 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `settings` | — | Follow-up F36, 12.13: the result's `settings` is the settings screen as the file and the running server are now. |
 | `setting-set` | `key` (a text: a setting's name as in the file, `window.links`), `value` (a string of at most 4,096 bytes, a number, or null) | Follow-up F36, 12.13: sets that one key of `config.json`. Refused, nothing changed, with the words as the result's error: a key that is not one of the server's table (`skydeck has no setting "<key>"`) or a shown-only one (`<key> names a program: it is changed in the file only (<file>)`; `names a folder`, `is the window's port`); a value `config.json`'s own rules refuse, in their words without the file's path (`"prRefreshMinutes" must be a positive integer`); a file that cannot be parsed or a path that is not a regular file (its problem, as `doctor` names it, then `; mend the file by hand first: nothing was changed`); a copy or a write that fails. The result carries `settings`, a refusal's too. After a change every page gets `settings`, and its `list` (the rows are loaded again at once). |
 | `setting-default` | `key` | Follow-up F36, 12.13: removes that one key from the file, back to its default; refused as `setting-set`. |
+| `update-check` | — | Follow-up F38, 16.5: Check now — a check for a newer skydeck with the network (`git fetch` of the server's own checkout), whatever `window.updateCheck` says; one that runs is joined. Answered when it has ended; the result's `update` is the state. |
+| `update-look` | — | Follow-up F38, 16.5: the dialog's look, without the network; while a check runs it starts nothing and answers the state as it is. The result's `update` is the state. Neither kind carries a field: the checkout, its remote and the program are the server's. |
 
 An unknown kind or field is refused, and so is a string over its limit (in UTF-8 bytes: paths and
 URLs 4,096 — a `ticket`'s `text` too —, `input.data` 64 KiB, a note's `text` and `base` 64 KiB
@@ -1578,8 +1580,9 @@ Server → page:
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
-| `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; else null); from follow-up F36, for `settings`, `setting-set` and `setting-default` only, `settings`: the settings screen as below. |
+| `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; else null); from follow-up F36, for `settings`, `setting-set` and `setting-default` only, `settings`: the settings screen as below; from follow-up F38, for `update-check` and `update-look` only, `update`: the check's state as below. |
 | `settings` | Follow-up F36, 12.13: `settings`, the settings screen, to every page after a change: `path` (the file's), `backup` (where its copy goes), `exists`, `problem` (why the window changes nothing in the file until it is mended by hand, or null) and `settings`, in the server's table's order, each with `key`, `group`, `meaning`, `kind` (`change` or `show`), `names` (`program`, `folder` or `port` for a shown one, else null), `control` (`number`, `text` or `choice`), `choices`, `nullable`, `applies` (`now`, `restart`, `commands` or `install`), `default` and `defaultText`, `inFile`, `value` (exact) and `valueText`, `pending` (the running server uses another value) and `runningText`. Every text but `value` is sanitised. |
+| `update` | Follow-up F38, 16.5: `update`, the check for a newer skydeck, to a page right after its `start` and to every page on each change: `auto` (`window.updateCheck` is `"daily"`), `checking` (one runs), `check` (null: this server's own first check or look has not ended — it sends no stored outcome before), `fetchedAtNs` (when the last fetch that worked ended, or null) and `failure` (`{ atNs, line }` when the last check's fetch failed, else null). `check` is `{ state: 'cannot', summary }` (the look could not tell: its line), `{ state: 'current', summary }` (`skydeck is up to date (<branch> at <id>, as <upstream>)`, or `nothing new on <upstream>: this checkout has <n> commits that it does not have`) or `{ state: 'available', summary, to, lines, blocked }` (`<n> new commits on <upstream>`; `to` the new commit's full id; `lines` exactly `skydeck update --check`'s, the database line included; `blocked` why it cannot be applied as it is, or null). Every text sanitised and clipped to 300 characters. |
 | `notify` | `sessionId`, `title` (the row's, sanitised), `reason` (the kind: `asks`, `ended` or `finished`, 12.4; the page writes the words), `detail` (the row's attention detail, else null) (13). |
 | `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. `restore-progress`: one report line of a restore, sanitised, to every page, whoever asked for the restore (11.3, 12.7; stage C). |
 | `bye` | `reason` (5.5). |
@@ -2401,6 +2404,24 @@ rule (4.3; stage B, plan B7).
 
 **Settings** (follow-up F36): the title bar's last control, after `Switch…`, opens the settings
 screen (12.13).
+
+**Update available** (follow-up F38, 16.5): right before `Settings`, which stays the last control,
+on every page, shown exactly while the server's last look says that a newer skydeck is known
+(`update`, 8.2.3: `check.state` is `available`, also after a check whose fetch failed) and hidden
+otherwise. A click, through the gate of a window chord (12.9), opens a dialog of stage D's kind
+(12.5: modal, the page inert under it, Esc closes, Tab stays inside, the keyboard goes back where it
+was; while it is shown every window chord says `close the dialog first (Esc)`). The dialog asks the
+server to look again without the network (`act update-look`), so that what it says is true now,
+and draws the answer as text, one line each: `skydeck update --check`'s lines (the database line
+included) and `To apply it, in a WSL terminal of your own: skydeck update`; for a checkout that
+cannot be updated as it is (`blocked`: changes, or commits the upstream does not have), the lines,
+`This checkout cannot be updated as it is: <why>` and `Once that is set right, in a WSL terminal of
+your own: skydeck update`; for an answer that is up to date (the notice was stale), its summary;
+for one that cannot tell (the branch follows no branch of a remote any more, HEAD detached),
+`skydeck cannot tell here whether there is an update: <the look's line>` and the same `Once that is
+set right, …`. Its only button is `Close`, which has the keyboard from the start. The look's
+answer goes to every page, so a control the look found stale goes on every page. The page decides
+no rule (4.3): what is known, and whether it can be applied, is the server's.
 
 **The theme switch** (follow-up F13, 2026-11-18: so that the theme can also be chosen by
 hand). The page is light or dark as the
@@ -3979,6 +4000,15 @@ editing the file by hand stay as they are, and the file's format does not change
   window; its texts hold 4.5 : 1 in every theme (`Save` is told apart by its border, not by an
   accent ground); every text is text, a value only an input's value or text: one with markup stays
   text, a long one wraps, a right-to-left one keeps its order.
+- **Updates** (follow-up F38, 16.5). Above the list, a block `Updates` says what the window's server
+  last found when it looked for a newer skydeck: `Last check: <age> ago — <summary>` (`No check was
+  made yet.`; a look that could not tell and fetched nothing: `Last check: <its line>`); when the
+  last check's fetch failed, first `The last check failed <age> ago: <git's line>`, then `Known from
+  <age> ago: <summary>` (`Nothing was fetched before.`); `Checking…` while a check runs. `Check now`
+  runs a check at once (`act update-check`), whether `window.updateCheck` is `"daily"` or `"off"`,
+  and the block follows every `update` message while the screen is shown. A checkout whose branch
+  follows no branch of a remote never shows the title bar's `Update available` (12.1); this block
+  is where it says why. The switch itself is the row `window.updateCheck` of the table.
 
 ## 13. Notifications
 

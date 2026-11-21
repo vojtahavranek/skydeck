@@ -14,7 +14,9 @@
      follow-up F22's line on the right side while the list holds no session (`#right-none`);
      follow-up F30's dialog "Mark done" for a session the window can end (`#end-dialog`);
      follow-up F36's settings screen (`#settings`, web/settings.js), opened by the title bar's
-     `Settings` after `Switch…` (`#settings-button`), with its style sheet. -->
+     `Settings` after `Switch…` (`#settings-button`), with its style sheet; follow-up F38's
+     `Update available` before `Settings` (`#update-button`, shown while a newer skydeck is known)
+     and the dialog it opens (`#update-dialog`, web/update.js), with their style sheet. -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -32,6 +34,7 @@
     <link rel="stylesheet" href="/assets/__VERSION__/web/banner.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/search.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/settings.css" />
+    <link rel="stylesheet" href="/assets/__VERSION__/web/update.css" />
     <script type="module" src="/assets/__VERSION__/web/app.js"></script>
   </head>
   <body>
@@ -51,6 +54,9 @@
         </button>
         <button class="switch-button" id="switch-button" type="button">
           ⌕ Switch… <kbd>Ctrl+Shift+P</kbd>
+        </button>
+        <button class="update-button" id="update-button" type="button" hidden>
+          Update available
         </button>
         <button class="settings-button" id="settings-button" type="button">Settings</button>
       </header>
@@ -92,6 +98,7 @@
     <div class="editor" id="editor" hidden></div>
     <div class="editor" id="end-dialog" hidden></div>
     <div class="editor" id="settings" hidden></div>
+    <div class="editor" id="update-dialog" hidden></div>
     <div class="help" id="help" hidden></div>
     <div class="toast" id="toast" role="status" hidden></div>
     <div class="switcher" id="switcher" hidden></div>

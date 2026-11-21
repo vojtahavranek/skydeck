@@ -34,6 +34,12 @@
 // as a dialog is (D2): `.app` is inert under its scrim, every window chord but Ctrl+Shift+H says
 // `close the settings first (Esc)`, Esc closes it, and the keyboard goes back where it was.
 //
+// Follow-up F38 (S2 16.5, 12.1): the server's `update` says what its last look for a newer skydeck
+// found; the title bar's `Update available` (before `Settings`) shows exactly while a newer version
+// is known (web/update-text.js), and its click, through `windowChordGate`, opens web/update.js's
+// dialog, modal as "Mark done" is (`close the dialog first (Esc)`). The settings screen's block
+// `Updates` follows every state.
+//
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
 
@@ -63,6 +69,8 @@ import { createTerminalView } from './terminal-view.js';
 import { createSettingsDialog } from './settings.js';
 import { createPaletteSwitch, createThemeSwitch } from './theme.js';
 import { createToast } from './toast.js';
+import { createUpdateDialog } from './update.js';
+import { showsNotice } from './update-text.js';
 
 // S2 8.2.2: before anything else.
 let token = takeToken();
@@ -113,6 +121,8 @@ const dom = {
   endDialog: byId('end-dialog'),
   settings: byId('settings'),
   settingsButton: byId('settings-button'),
+  updateDialog: byId('update-dialog'),
+  updateButton: byId('update-button'),
   toast: byId('toast'),
   notifyOn: /** @type {HTMLButtonElement} */ (byId('notify-on')),
   switcher: byId('switcher'),
@@ -221,6 +231,8 @@ const state = {
   enderFrom: /** @type {Element | null} */ (null),
   /** F36: what had the keyboard when the settings screen opened: it gets it back. */
   settingsFrom: /** @type {Element | null} */ (null),
+  /** F38: what had the keyboard when the update dialog opened: it gets it back. */
+  updateFrom: /** @type {Element | null} */ (null),
 };
 
 /** @type {ReturnType<typeof createConnection> | null} */
@@ -317,6 +329,18 @@ const ender = createEndDialog(dom.endDialog, {
 const settingsDialog = createSettingsDialog(dom.settings, {
   act: (action) => act(action),
   closed: () => settingsClosed(),
+  checkNow: () =>
+    act({ kind: 'update-check' }).then((result) => {
+      if (result.update !== undefined) updateState(result.update);
+      return result;
+    }),
+  now: () => listNow(),
+});
+// F38: the dialog of the title bar's `Update available` (web/update.js).
+const updateDialog = createUpdateDialog(dom.updateDialog, {
+  act: (action) => act(action),
+  answered: (update) => updateState(update),
+  closed: () => updateClosed(),
 });
 // Stage B (B15): a click on a notification passes the gate of a window chord, then selects. A
 // session this page's list does not show (its filter, the folded Earlier) and that has no terminal
@@ -404,6 +428,12 @@ dom.settingsButton.addEventListener('click', () => {
     openSettings();
   }
 });
+// F38: the title bar's `Update available`, through the same gate.
+dom.updateButton.addEventListener('click', () => {
+  if (windowChordGate('update')) {
+    openUpdate();
+  }
+});
 // Follow-up F13: the title bar's theme switch (web/theme.js). Whenever the page's colours may have
 // changed — a click, another window's change, the system's scheme while the page follows it — the
 // server is told them again (`theme`), so that it answers OSC 10 / 11 with the colours the
@@ -422,7 +452,13 @@ createPaletteSwitch(dom.paletteButton, coloursChanged);
 
 /** Whether a dialog or the switcher is shown (D2, E11, F30, F36: then the page is modal). */
 function modal() {
-  return editor.shown() || switcher.shown() || ender.shown() || settingsDialog.shown();
+  return (
+    editor.shown() ||
+    switcher.shown() ||
+    ender.shown() ||
+    settingsDialog.shown() ||
+    updateDialog.shown()
+  );
 }
 
 // --- what the page says -------------------------------------------------------------------------
@@ -1014,6 +1050,59 @@ function broughtTakesKeyboard() {
   }
   // Not shown yet: render gives it the keyboard when its list comes.
   return true;
+}
+
+// --- F38: the update notice ---------------------------------------------------------------------
+
+/**
+ * The check's state, from an `update` message or an act's answer: the title bar's control shows
+ * exactly while a newer version is known; the dialog and the settings screen follow.
+ * @param {import('../src/window/protocol.ts').UpdatePayload} update
+ */
+function updateState(update) {
+  dom.updateButton.hidden = !showsNotice(update);
+  updateDialog.update(update);
+  settingsDialog.updateState(update);
+}
+
+/**
+ * `Update available`, once past the gate: the help hidden, the page inert under the dialog, which
+ * looks again; it remembers what had the keyboard.
+ */
+function openUpdate() {
+  if (modal()) {
+    return;
+  }
+  help.hide();
+  state.updateFrom = document.activeElement;
+  appRoot.inert = true;
+  updateDialog.open();
+}
+
+/**
+ * The update dialog closed: the page is no longer inert, and the keyboard goes back where it was
+ * when that is still there, else to the zone's holder (as the settings screen's close).
+ */
+function updateClosed() {
+  appRoot.inert = false;
+  const from = state.updateFrom;
+  state.updateFrom = null;
+  if (broughtTakesKeyboard()) {
+    return;
+  }
+  if (
+    from instanceof HTMLElement &&
+    from !== document.body &&
+    from.isConnected &&
+    from.checkVisibility() &&
+    !dom.updateDialog.contains(from)
+  ) {
+    from.focus();
+    if (document.activeElement === from) {
+      return;
+    }
+  }
+  giveKeyboard();
 }
 
 // --- F36: the settings screen -------------------------------------------------------------------
@@ -1643,6 +1732,10 @@ function received(message) {
       // F36: a setting was changed in some window; an open screen follows.
       settingsDialog.update(message.settings);
       return;
+    case 'update':
+      // F38: the check's state; the title bar's control, the dialog and the settings follow.
+      updateState(message.update);
+      return;
     case 'notify':
       // S2 13, B15: none for the session that is selected while this page has focus.
       notifications.show(message, { focused: document.hasFocus(), selected: state.selected });
@@ -1971,7 +2064,7 @@ function windowChordGate(kind) {
     return false;
   }
   // F30: the key help would lie over the dialog "Mark done" and hide what Enter presses.
-  if (!modal() || (kind === 'help' && !ender.shown())) {
+  if (!modal() || (kind === 'help' && !ender.shown() && !updateDialog.shown())) {
     return true;
   }
   if (kind === 'reload') {
@@ -1982,7 +2075,7 @@ function windowChordGate(kind) {
     return false;
   }
   say(
-    ender.shown()
+    ender.shown() || updateDialog.shown()
       ? 'close the dialog first (Esc)'
       : settingsDialog.shown()
         ? 'close the settings first (Esc)'
@@ -2181,6 +2274,9 @@ function onKeyDown(event) {
   }
   if (settingsDialog.shown() && settingsKey(event)) {
     return; // F36: Esc, Tab and Enter in a field are the screen's
+  }
+  if (updateDialog.shown() && updateDialog.key(event)) {
+    return; // F38: Esc and Tab are the dialog's
   }
   const zone = state.zone;
   let handled = false;
