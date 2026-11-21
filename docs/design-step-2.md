@@ -94,8 +94,11 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   kernel sends when a terminal's window is closed, and nothing else — never SIGTERM or SIGKILL, and
   never to a session in another terminal. Every other session ends when the user ends it inside
   `claude`.
-- **Principle 8 (local only)**: the server listens on the loopback interface only (15). The only
-  network use is still `gh`.
+- **Principle 8 (local only)**: the server listens on the loopback interface only (15). Its one
+  network use is the check for a newer skydeck: `git fetch` of skydeck's own checkout when it
+  starts and once a day, which the setting `window.updateCheck` turns off; nothing is applied
+  without a click (16.5; the owner's decision of 2026-11-21, issue #163). The other network uses
+  are design.md's: `gh`, the ticket-status programs and `skydeck update`'s `git fetch`.
 - **Windows programs.** Step 2 is the first time skydeck starts Windows programs by itself, through
   WSL interop. It starts exactly three, and only these: `msedge.exe` (the window, 5.3, and the
   links the window opens when `window.links` is `"edge"`, 9.6), `rundll32.exe` (the links the

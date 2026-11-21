@@ -54,8 +54,12 @@ section first.
    transient files (5.3). The one exception is the label and group skydeck itself has just stored
    for a `new` session that never started (7.7).
 7. **Never resume one session twice.** Two processes on one session interleave one transcript.
-8. **Local only.** No network service, no account, no telemetry. The only network use is the
-   `gh` command line for pull-request status.
+8. **Local only.** No network service, no account, no telemetry, and nothing is applied without
+   a click. The network is used only by: the `gh` command line (the status of pull requests and
+   GitHub issues); the user's own ticket-status programs; `skydeck update`'s `git fetch`; and the
+   window's server, which runs `git fetch` of skydeck's own checkout when it starts and once a day
+   to say whether a newer skydeck is there (design-step-2.md 16.5), a check that a setting turns
+   off. That last use is the owner's decision of 2026-11-21 (issue #163).
 9. **Everything that knows a Claude Code format lives in `src/claude/`**, so a Claude Code update
    that changes a format changes one place. Other modules see normalised values only.
 
