@@ -68,14 +68,18 @@ const LIGHT_COLOURS = { fg: '#24292f', bg: '#fbfbf9' };
 const DARK_COLOURS = { fg: '#d6d9de', bg: '#121417' };
 
 /** Sixteen cells, one in each ANSI colour (the cell's text is the colour's number in hex), and a
- *  `Y` in the 256 colours' fixed yellow (226, #ffff00), a colour meant for a dark background. */
+ *  `Y` in the 256 colours' fixed yellow (226, #ffff00), a colour meant for a dark background; the
+ *  cursor two rows below. Not on their row: xterm.js draws the cursor's row at once when a
+ *  terminal gets the keyboard (as one does when it is shown), so with the cursor there that draw
+ *  would stand in for the full one that a terminal hidden at a change of colours owes. */
 const PALETTE =
   '\x1b[H' +
   Array.from({ length: 16 }, (_, n) => `\x1b[${n < 8 ? 30 + n : 82 + n}m${n.toString(16)}`).join(
     '',
   ) +
   '\x1b[38;5;226mY' +
-  '\x1b[0m plain text to select';
+  '\x1b[0m plain text to select' +
+  '\r\n\r\nthe cursor is here';
 
 /** A stand-in server for the cases on a stand-in: S1 running in TERM_A, S2 in TERM_B. */
 interface Deck {
@@ -363,7 +367,10 @@ async function noteRedraws(page: Page): Promise<void> {
  * 6.0.0 puts its background, its text and the sixteen colours' classes in its style sheet at once,
  * but draws the rows in its next animation frame (a hidden terminal's once it is shown again):
  * a colour that minimumContrastRatio adjusts is written into the cell at that draw. Until then a
- * read finds the new background with the cells' old adjustment, a state no painted frame shows.
+ * read finds the new background with the cells' old adjustment. For a shown terminal no painted
+ * frame shows that state. A terminal hidden at the change shows it for one frame when it is shown
+ * again (its full draw comes a frame after the one that first lays it out): a known defect of the
+ * page, and not what this wait is for. The tests assert the colours after the draw.
  */
 async function untilRedrawn(page: Page, term: string): Promise<void> {
   await until(
