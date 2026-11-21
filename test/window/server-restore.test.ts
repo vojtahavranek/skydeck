@@ -643,3 +643,29 @@ describe('the take mark end to end (C19, task 80)', () => {
     assert.equal(startsOf(d, X1).length, 1);
   });
 });
+
+describe('the restore order (F37, design 7.8)', () => {
+  test('the slots the sessions last had in their boot: the banner lists them in that order, and the restore opens them so that their new slots ascend in it', async (t) => {
+    const r = restoreSandbox(t, { config: { restoreStartTimeoutSeconds: 120, restoreBatch: 1 } });
+    const { d } = r;
+    threeSessions(r);
+    // What the earlier boot's window remembered: X3 in slot 1, X1 in 4, X2 in 6.
+    d.deck.store.setKv(
+      'window_restore_order',
+      JSON.stringify([{ bootId: EARLIER_BOOT, sessions: { [X3]: 1, [X1]: 4, [X2]: 6 } }]),
+    );
+    const test = await d.start();
+    const page = await connectTestPage(t, d, test.server);
+    await offering(page, [X3, X1, X2]);
+    const result = await page.act({ kind: 'restore', sessionIds: [X1, X2, X3] });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    for (const id of [X3, X1, X2]) {
+      await until(() => r.waiting(id), `${id} at its gate`, WAIT_MS);
+      r.open(id);
+    }
+    await noticed(page, 'restore finished: 3 started');
+    const slotOf = (id: string): number | null =>
+      test.server.hub.list().find((term) => term.expectedSessionId === id)?.slot ?? null;
+    assert.deepEqual([slotOf(X3), slotOf(X1), slotOf(X2)], [1, 2, 3]);
+  });
+});

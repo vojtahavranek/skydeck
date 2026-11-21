@@ -7,6 +7,7 @@ import type { Context } from '../../../src/cli/context.ts';
 import { main } from '../../../src/cli/main.ts';
 import { isoFromNs } from '../../../src/platform/time.ts';
 import { loadRows } from '../../../src/sessions/load.ts';
+import { formatRememberedSlots, rememberSlots } from '../../../src/sessions/restore-order.ts';
 import { acquireLock } from '../../../src/sessions/resume.ts';
 import { handoffScript } from '../../../src/terminals/here.ts';
 import { shellQuote } from '../../../src/text/shell.ts';
@@ -390,4 +391,37 @@ test('restore --help says that with "terminal": "window" the sessions start in t
       ),
     c.stdout(),
   );
+});
+
+// F37 (design 7.8): the window's record of the slots each session last had in its boot.
+function remembered(d: TestDeck, slots: [number, number][]): void {
+  d.deck.store.setKv(
+    'window_restore_order',
+    formatRememberedSlots(rememberSlots([], BOOT_A, new Map(slots.map(([n, s]) => [sid(n), s])))),
+  );
+}
+
+test('F37: restore --dry-run lists the sessions in the order of the slots they last had in the window', async (t) => {
+  const d = machine(t);
+  remembered(d, [
+    [3, 1],
+    [1, 2],
+  ]);
+  assert.equal(await main(['restore', '--dry-run'], d.ctx), 0);
+  const ids = [...d.stdout().matchAll(/^\d+\. \[.\] (\w{8})/gm)].map((match) => match[1]);
+  assert.deepEqual(ids, ['00000003', '00000001', '00000002']);
+});
+
+test('F37: restore --yes without tabs hands off the first preselected session in that order', async (t) => {
+  const d = machine(t);
+  remembered(d, [
+    [2, 1],
+    [1, 2],
+  ]);
+  assert.equal(await main(['restore', '--yes'], d.ctx), 0);
+  assert.equal(
+    readFileSync(handoffPath(d), 'utf8'),
+    handoffScript({ cwd: projectDir(d), argv: ['claude', '--resume', sid(2)] }),
+  );
+  assert.ok(d.stdout().includes(resumeLine(sid(1))), d.stdout());
 });

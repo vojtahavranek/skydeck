@@ -25,6 +25,9 @@ export interface ReorderDeps {
   rows: () => readonly ListRow[];
   elsewhere: () => ReadonlyMap<string, { pid: number; tty: string | null }>;
   nowNs: () => Ns;
+  /** After a move: the restore's memory of the slots takes the new ones (slot-memory.ts); it never
+   *  throws. Absent: nothing is remembered. */
+  remember?: () => void;
 }
 
 export interface Reorder {
@@ -58,6 +61,7 @@ export function createReorder(deps: ReorderDeps): Reorder {
       const outcome = deps.registry.setSlots(plan.slots);
       if (outcome === 'stopping') return { ok: false, error: SERVER_STOPPING };
       if (outcome === 'changed') return { ok: false, error: REORDER_REFUSALS.changed };
+      deps.remember?.();
       return { ok: true };
     },
   };

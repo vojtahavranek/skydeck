@@ -79,6 +79,7 @@ import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
 import { readMovedSlots, writeMovedSlots } from './moved-slots.ts';
 import { createReorder } from './reorder.ts';
+import { createSlotMemory } from './slot-memory.ts';
 import { createRegistry } from './terminals.ts';
 import type { Registry } from './terminals.ts';
 import { createTick } from './tick.ts';
@@ -564,11 +565,16 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     });
     // F36 (S2 12.13): the settings screen; one per server, whose first change keeps the copy.
     const settings = createSettings({ deck, log });
+    // F37 (design 7.8): the slots each session last had in this boot, a restore's order.
+    const slotMemory = createSlotMemory({ store: deck.store, bootId: own.bootId, log: quietLog });
     const reorder = createReorder({
       registry: created,
       rows: () => tick?.rows() ?? NO_ROWS,
       elsewhere: () => tick?.elsewhere() ?? new Map(),
       nowNs: () => clock.nowNs(),
+      remember: () => {
+        slotMemory.update(created.list());
+      },
     });
     const acting = createActions({
       deck,
@@ -778,6 +784,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         pageMark.update(pages.count()); // plan C20; it never throws
         decidePostponed();
         created.flushSlots(); // F37: a write of the moved slots that failed; it never throws
+        slotMemory.update(created.list()); // F37: the restore's order; it never throws
       },
       storeNewer,
       attention: attending.tick,

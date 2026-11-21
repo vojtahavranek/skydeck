@@ -10,6 +10,7 @@ import type { Deck } from '../../src/sessions/deck.ts';
 import type { ListRow } from '../../src/sessions/list.ts';
 import { loadRows } from '../../src/sessions/load.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
+import { formatRememberedSlots, rememberSlots } from '../../src/sessions/restore-order.ts';
 import { lockKey, lockTakenNs, readLock } from '../../src/sessions/resume.ts';
 import type { LaunchSpec, OpenResult } from '../../src/terminals/types.ts';
 import type { RestoreOutcomeLine, RestoreStreamLine } from '../../src/window/protocol.ts';
@@ -1203,4 +1204,33 @@ test('heartbeatMs must be a whole number of milliseconds a timer can wait, at le
     assert.throws(() => world(d, { heartbeatMs }), RangeError, String(heartbeatMs));
   }
   assert.ok(world(d, { heartbeatMs: 2 ** 31 - 1 }).restorer);
+});
+
+// --- F37: the restore's order (design 7.8) -------------------------------------------------------
+
+test('F37: the banner lists the sessions in the order of their slots, and a run opens them in it', async (t) => {
+  const d = restarted(t, 3);
+  d.deck.store.setKv(
+    'window_restore_order',
+    formatRememberedSlots(
+      rememberSlots(
+        [],
+        BOOT_A,
+        new Map([
+          [sid(3), 1],
+          [sid(2), 4],
+        ]),
+      ),
+    ),
+  );
+  const w = world(d);
+  assert.deepEqual(
+    w.restorer.banner(loadRows(d.deck))?.entries.map((entry) => entry.sessionId),
+    [sid(3), sid(2), sid(1)],
+  );
+  await restore(w, [sid(1), sid(2), sid(3)]);
+  assert.deepEqual(
+    w.specs.map((spec) => spec.sessionId),
+    [sid(3), sid(2), sid(1)],
+  );
 });

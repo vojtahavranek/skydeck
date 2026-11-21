@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
+import { parseRememberedSlots } from '../../src/sessions/restore-order.ts';
 import type { ListMessage } from '../../src/window/protocol.ts';
 import { REORDER_REFUSALS } from '../../src/window/view/slot-moves.ts';
 import { S1, S2, S3 } from '../helpers/platform.ts';
@@ -81,6 +82,9 @@ describe('moving a session of Open (F37)', () => {
     const order = ['S1:1', 'S3:2', 'S2:3'];
     const shown = await page.list(reads(order), 'the new order on the page that moved it');
     assertSlotsMatchRows(shown);
+    // What a restore after a reboot goes by (design 7.8): this boot's slots, as moved.
+    const remembered = parseRememberedSlots(d.deck.store.getKv('window_restore_order'))[0];
+    assert.deepEqual(Object.fromEntries(remembered?.sessions ?? []), { [S1]: 1, [S3]: 2, [S2]: 3 });
     await other.list(reads(order), 'the new order on the other page');
     const later = await connectTestPage(t, d, first.server);
     assertSlotsMatchRows(await later.list(reads(order), 'the new order after a reload'));

@@ -47,12 +47,15 @@ function running(id: string, pid: number) {
   });
 }
 
-/** S1 in slot 1, S2 in slot 2; setSlots records its calls and answers `answer`. */
+/** S1 in slot 1, S2 in slot 2; setSlots records its calls and answers `answer`; `remembered`
+ *  counts the calls of `remember`. */
 function glue(answer: () => 'ok' | 'changed' | 'stopping' = () => 'ok'): {
   reorder: ReturnType<typeof createReorder>;
   calls: Map<string, number>[];
+  remembered: () => number;
 } {
   const calls: Map<string, number>[] = [];
+  let remembered = 0;
   const deps: ReorderDeps = {
     registry: {
       list: () => [terminal(1, S1), terminal(2, S2)],
@@ -64,8 +67,11 @@ function glue(answer: () => 'ok' | 'changed' | 'stopping' = () => 'ok'): {
     rows: () => rows([running(S1, 4001), running(S2, 4002)]),
     elsewhere: () => new Map(),
     nowNs: () => T0,
+    remember: () => {
+      remembered += 1;
+    },
   };
-  return { reorder: createReorder(deps), calls };
+  return { reorder: createReorder(deps), calls, remembered: () => remembered };
 }
 
 function view(over: Partial<ViewMessage> = {}): ViewMessage {
@@ -73,9 +79,14 @@ function view(over: Partial<ViewMessage> = {}): ViewMessage {
 }
 
 describe('the reorder act on the server (F37)', () => {
-  test('a move: the slots of the plan go to setSlots', () => {
-    const { reorder, calls } = glue();
+  test('a move: the slots of the plan go to setSlots, then the restore order remembers them', () => {
+    const { reorder, calls, remembered } = glue();
     assert.deepEqual(reorder.reorder(view(), S2, 'up'), { ok: true });
+    assert.equal(remembered(), 1);
+    assert.deepEqual(glue().reorder.reorder(view(), S1, 'up').ok, false);
+    const refused = glue(() => 'changed');
+    refused.reorder.reorder(view(), S2, 'up');
+    assert.equal(refused.remembered(), 0, 'nothing moved: nothing remembered');
     assert.deepEqual(calls, [
       new Map([
         ['000000000002', 1],

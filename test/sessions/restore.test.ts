@@ -13,6 +13,7 @@ import {
   restorePlan,
   runRestore,
 } from '../../src/sessions/restore.ts';
+import { formatRememberedSlots, rememberSlots } from '../../src/sessions/restore-order.ts';
 import type {
   ReportOutcome,
   RestoreEntry,
@@ -1988,4 +1989,89 @@ test('the fixtures: BOOT_A’s last event is T0 and the clock is two hours later
     .reduce((max, event) => (event.timeNs > max ? event.timeNs : max), 0n);
   assert.equal(last, T0);
   assert.equal(d.clock.nowNs(), NOW);
+});
+
+// --- F37: the restore's order (design 7.8) -------------------------------------------------------
+
+/** The window's record of the slots: BOOT_A's part, session n → slot. */
+function rememberInBootA(d: TestDeck, slots: [number, number][]): void {
+  d.deck.store.setKv(
+    'window_restore_order',
+    formatRememberedSlots(rememberSlots([], BOOT_A, new Map(slots.map(([n, s]) => [sid(n), s])))),
+  );
+}
+
+test('F37: restorePlan puts the entries in the order of the slots they last had, the rest after in list order', (t) => {
+  const { d } = fiveToRestore(t);
+  rememberInBootA(d, [
+    [4, 1],
+    [2, 2],
+    [5, 3],
+  ]);
+  assert.deepEqual(
+    restorePlan(d.deck, false).entries.map((entry) => entry.row.id),
+    [4, 2, 5, 1, 3].map(sid),
+  );
+});
+
+test("F37: under --all each entry is ordered by its own boot's slots", (t) => {
+  const d = restartedMachine(t);
+  d.deck.store.setKv(
+    'window_restore_order',
+    formatRememberedSlots(
+      rememberSlots(
+        rememberSlots(
+          [],
+          BOOT_A,
+          new Map([
+            [sid(3), 2],
+            [sid(1), 5],
+          ]),
+        ),
+        BOOT_B,
+        new Map([
+          [sid(6), 3],
+          [sid(9), 1], // sid(9)'s entry is of BOOT_A: this part says nothing of it
+        ]),
+      ),
+    ),
+  );
+  const listed = planRestore(listOrder(d), d.deck.store.events(), BOOT_B, true).map(
+    (entry) => entry.row.id,
+  );
+  const rest = listed.filter((id) => ![sid(3), sid(6), sid(1)].includes(id));
+  assert.deepEqual(
+    restorePlan(d.deck, true).entries.map((entry) => entry.row.id),
+    [sid(3), sid(6), sid(1), ...rest],
+  );
+});
+
+test('F37: with a batch of one and a memory stop after it, the one started is the first in that order', async (t) => {
+  const { d } = fiveToRestore(t, { config: { ...TAB_CONFIG, restoreBatch: 1 } });
+  rememberInBootA(d, [
+    [3, 1],
+    [1, 2],
+  ]);
+  const entries = restorePlan(d.deck, false).entries;
+  const tabs = fakeTabs(d, {
+    onOpen: (count) => {
+      if (count === 1) d.proc.setMemAvailableMb(3000);
+    },
+  });
+  const { outcome } = await run(d, tabs.terminal, entries);
+  assert.deepEqual(outcome, {
+    ...NOTHING,
+    started: [sid(3)],
+    notStarted: [1, 2, 4, 5].map(sid),
+    stoppedForMemory: true,
+  });
+});
+
+test('F37: without tabs the first in that order is the one handed off here', async (t) => {
+  const { d } = fiveToRestore(t);
+  rememberInBootA(d, [[4, 1]]);
+  const entries = restorePlan(d.deck, false).entries;
+  const { outcome } = await run(d, here(d), entries.slice(0, 2));
+  assert.equal(outcome.handedOff, sid(4));
+  assert.deepEqual(outcome.printed, [resumeLine(sid(1))]);
 });
