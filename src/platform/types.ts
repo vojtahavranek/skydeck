@@ -153,6 +153,16 @@ export interface RunOptions {
    * holds no memory. Without it everything is kept.
    */
   maxOutputBytes?: number;
+  /**
+   * F38: with it a timeout or an abort ends the child with SIGTERM first (on which git removes its
+   * lock files), and with SIGKILL only if it has not ended this many ms later. The signal goes to
+   * the child alone, not its process group. A timed-out run answers `timedOut` at the child's
+   * `exit`, and an aborted one rejects with an AbortError at that `exit` — or, for an abort, when
+   * the grace is over and SIGKILL was sent; at that `exit` the pipes are destroyed, not waited for
+   * (something the child started may hold them). Without it a timeout and an abort send SIGKILL
+   * at once, and an abort rejects at once.
+   */
+  killGraceMs?: number;
 }
 
 export interface RunResult {

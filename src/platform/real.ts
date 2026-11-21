@@ -584,13 +584,33 @@ function realRunner(guard: WindowsGuard): Runner {
         let timedOut = false;
         let settled = false;
         let graceTimer: NodeJS.Timeout | undefined;
+        // F38: with killGraceMs a timeout or an abort sends SIGTERM, and SIGKILL after the grace.
+        const killGraceMs = options.killGraceMs;
+        /** An abort that waits for the child's exit (only with killGraceMs). */
+        let aborting = false;
+        let killTimer: NodeJS.Timeout | undefined;
+        const alive = (): boolean => child.exitCode === null && child.signalCode === null;
+        /** SIGTERM now and SIGKILL after the grace; once only (a timeout and then an abort). */
+        const terminate = (): void => {
+          if (killTimer !== undefined) return;
+          child.kill('SIGTERM');
+          killTimer = setTimeout(() => {
+            if (alive()) child.kill('SIGKILL');
+            // An abort is answered once SIGKILL was sent; a timeout at the exit that follows.
+            if (aborting) rejectAborted();
+          }, killGraceMs);
+        };
         const timer =
           options.timeoutMs === undefined
             ? undefined
             : setTimeout(() => {
-                if (child.exitCode === null && child.signalCode === null) {
+                if (alive()) {
                   timedOut = true;
-                  child.kill('SIGKILL');
+                  if (killGraceMs === undefined) {
+                    child.kill('SIGKILL');
+                  } else {
+                    terminate(); // answered at the child's exit
+                  }
                 } else {
                   // The child is gone but something it started still holds the pipes: give what
                   // the child wrote a moment to arrive, then stop waiting for the rest.
@@ -609,17 +629,34 @@ function realRunner(guard: WindowsGuard): Runner {
           settled = true;
           clearTimeout(timer);
           clearTimeout(graceTimer);
+          clearTimeout(killTimer);
           signal?.removeEventListener('abort', abort);
           return true;
         };
         const settle = (code: number | null, notFound = false): void => {
-          if (finish()) {
+          if (aborting) {
+            rejectAborted();
+          } else if (finish()) {
             resolve({ code: timedOut ? null : code, stdout, stderr, timedOut, notFound });
           }
         };
+        /** An abort with killGraceMs, answered: at the child's exit, or once SIGKILL was sent. */
+        function rejectAborted(): void {
+          if (finish()) {
+            child.stdin?.destroy();
+            child.stdout?.destroy();
+            child.stderr?.destroy();
+            reject(abortError());
+          }
+        }
         // The caller no longer wants the answer: the child is killed and nothing it, or something
         // it started, still holds is waited for.
         function abort(): void {
+          if (killGraceMs !== undefined && !settled && alive()) {
+            aborting = true;
+            terminate();
+            return;
+          }
           if (finish()) {
             child.kill('SIGKILL');
             child.stdin?.destroy();
@@ -678,7 +715,9 @@ function realRunner(guard: WindowsGuard): Runner {
         });
         // A grandchild may hold the pipes open after the child was killed; do not wait for it.
         child.on('exit', () => {
-          if (timedOut) {
+          if (aborting) {
+            rejectAborted();
+          } else if (timedOut) {
             child.stdout?.destroy();
             child.stderr?.destroy();
             settle(null);

@@ -26,25 +26,24 @@ import { DatabaseNewerError } from '../../store/store.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import { computeBuild } from '../../window/build.ts';
 import { findServer, stopServer } from '../../window/lifecycle.ts';
-import { parseCommandArgs } from '../args.ts';
-import type { ArgSpec } from '../args.ts';
-import { clip } from '../clip.ts';
-import type { Command } from '../command.ts';
-import type { Context } from '../context.ts';
-import { withDeck } from '../deck.ts';
-import { EXIT } from '../exit.ts';
 import {
   changedFiles,
   commitOf,
   definedEnv,
   failureReason,
-  gitFailure,
   gitOn,
-  GIT_MS,
   MERGE_MS,
   untrackedFiles,
-} from '../update-git.ts';
-import type { Git } from '../update-git.ts';
+} from '../../update/git.ts';
+import type { Git } from '../../update/git.ts';
+import { lookForUpdate, report, short } from '../../update/look.ts';
+import type { Update } from '../../update/look.ts';
+import { parseCommandArgs } from '../args.ts';
+import type { ArgSpec } from '../args.ts';
+import type { Command } from '../command.ts';
+import type { Context } from '../context.ts';
+import { withDeck } from '../deck.ts';
+import { EXIT } from '../exit.ts';
 import { windowTimes } from '../window-open.ts';
 import type { WindowTimes } from '../window-open.ts';
 import { hungServerLine, keepRunning, pagesOf } from './window.ts';
@@ -65,11 +64,6 @@ reloads itself; the sessions in it keep running.
 
 const IN_CLAUDE_CODE =
   "skydeck update is not run from inside a Claude Code session: it restarts the window's server, and every session in the window would inherit that session's environment; run it in a terminal of your own (skydeck update --check only looks)";
-
-/** The file whose change says that the new code may upgrade the database (U4). */
-const MIGRATIONS = 'src/store/migrations.ts';
-/** The most commits the report lists (U4). */
-const LISTED = 20;
 
 export const command: Command = {
   name: 'update',
@@ -103,215 +97,17 @@ export const command: Command = {
   },
 };
 
-/** What the fetch brought: HEAD's commit and the upstream's, and (when they differ) the rest. */
-interface Update {
-  branch: string;
-  /** The upstream's short name (`origin/main`). */
-  upstream: string;
-  oldId: string;
-  newId: string;
-  /** How many commits the upstream has that HEAD does not. */
-  count: number;
-  /** The newest of them (at most LISTED), newest first. */
-  commits: { id: string; subject: string }[];
-  /** Whether MIGRATIONS differs between the two commits, or is gone. */
-  upgradesDatabase: boolean;
-}
-
-/** The short id of a commit: its first seven hexadecimal digits, whatever git's settings say. */
-function short(id: string): string {
-  return id.slice(0, 7);
-}
-
-/** `n` and the word for one or more of it (`1 file`, `3 files`). */
-function counted(n: number, one: string, more: string): string {
-  return `${n} ${n === 1 ? one : more}`;
-}
-
-/** A count git printed; a SkydeckError naming the call when it is not one. */
-async function countOf(git: Git, args: readonly string[]): Promise<number> {
-  const text = (await git.output(args)).trim();
-  if (!/^(0|[1-9][0-9]*)$/.test(text)) {
-    throw new SkydeckError('git rev-list failed: its answer is not a count; nothing was changed');
-  }
-  return Number(text);
-}
-
-/** The ref HEAD names (`refs/heads/<branch>`); null for a detached HEAD (or one that names no branch). */
-async function headRef(git: Git): Promise<string | null> {
-  const args = ['symbolic-ref', '--quiet', 'HEAD'];
-  const head = await git.run(args);
-  if (head.code === 1 && !head.timedOut) return null;
-  if (head.code !== 0 || head.timedOut) throw gitFailure(args, head, GIT_MS);
-  const ref = head.stdout.trim();
-  return ref.startsWith('refs/heads/') ? ref : null;
-}
-
-/** U2 6: no tracked file changed, staged or unmerged (untracked files do not count). */
-async function refuseChanges(git: Git): Promise<void> {
-  const changed = await changedFiles(git);
-  const [first] = changed;
-  if (first !== undefined) {
-    throw new SkydeckError(
-      `this checkout has changes that are not committed (${counted(changed.length, 'file', 'files')}, the first: ${sanitize(first)}); commit or undo them first`,
-    );
-  }
-}
-
-/** U2 2–8 in their order, then U4's facts. Every refusal is a SkydeckError; nothing is changed. */
+/**
+ * U2 2–8 in their order, then U4's facts: the look of src/update/look.ts in the command's order.
+ * Every refusal is a SkydeckError; nothing is changed.
+ */
 async function whatIsNew(ctx: Context, git: Git): Promise<Update> {
-  const { root } = git;
-  const { files } = ctx.platform;
-  // 2, 3: git is found, and the root is the top of a work tree of its own.
-  const top = await git.run(['rev-parse', '--show-toplevel']);
-  const topDir = top.stdout.replace(/\n$/, '');
-  if (
-    top.code !== 0 ||
-    top.timedOut ||
-    topDir === '' ||
-    files.realpath(topDir) === null ||
-    files.realpath(topDir) !== files.realpath(root)
-  ) {
-    throw new SkydeckError(
-      `${sanitize(root)} is not a git checkout; update it the way it was installed`,
-    );
-  }
-  // 4: on a branch.
-  const ref = await headRef(git);
-  if (ref === null) {
-    throw new SkydeckError(
-      'this checkout is not on a branch (detached HEAD); update it with git yourself',
-    );
-  }
-  const branch = ref.slice('refs/heads/'.length);
-  // 5: following a branch of a remote.
-  // Each field ends with a NUL, so that a line break in one (a remote's name may hold one) cannot
-  // be taken for the end of the record. The pattern matches the branch alone (a branch `main`
-  // leaves no room for a `main/…`), so the one record, when there is one, is the branch's.
-  const tracking = await git.output([
-    'for-each-ref',
-    '--format=%(refname)%00%(upstream)%00%(upstream:remotename)%00%(upstream:short)%00',
-    ref,
-  ]);
-  const fields = tracking.split('\0');
-  const [refname, upstreamRef = '', remote = '', upstream = ''] = fields;
-  if (
-    refname !== ref ||
-    !upstreamRef.startsWith('refs/remotes/') ||
-    remote === '' ||
-    remote === '.'
-  ) {
-    throw new SkydeckError(
-      `the branch ${sanitize(branch)} follows no branch of a remote; update it with git yourself`,
-    );
-  }
-  // 6: no tracked change (untracked files do not count).
-  await refuseChanges(git);
-  const oldId = await commitOf(git, 'HEAD');
-  // 7: the fetch, in the owner's terminal: a passphrase prompt works, Ctrl+C ends it.
-  if ((await git.interactive(['fetch', '--quiet', '--', remote])) !== 0) {
-    throw new SkydeckError(
-      `git fetch from ${sanitize(remote)} failed (git's own message is above); nothing was changed`,
-    );
-  }
-  // The fetch can wait at a prompt while the checkout is used: what was looked at before it is
-  // looked at again (review 2 C3).
-  const refAfter = await headRef(git);
-  const headAfter = await commitOf(git, 'HEAD');
-  if (refAfter !== ref || headAfter !== oldId) {
-    const where =
-      refAfter === null ? 'detached HEAD' : sanitize(refAfter.slice('refs/heads/'.length));
-    throw new SkydeckError(
-      `this checkout changed while git fetch ran (${where} at ${short(headAfter)}); run skydeck update again`,
-    );
-  }
-  await refuseChanges(git);
-  const newId = await commitOf(git, upstreamRef);
-  const update: Update = {
-    branch,
-    upstream,
-    oldId,
-    newId,
-    count: 0,
-    commits: [],
-    upgradesDatabase: false,
-  };
-  if (newId === oldId) return update;
-  // 8: HEAD is behind the upstream, not ahead of it and not beside it.
-  const ancestorArgs = ['merge-base', '--is-ancestor', oldId, newId];
-  const ancestor = await git.run(ancestorArgs);
-  if (ancestor.code === 1 && !ancestor.timedOut) {
-    const ahead = await countOf(git, ['rev-list', '--count', `${newId}..${oldId}`]);
-    throw new SkydeckError(
-      `this checkout has ${counted(ahead, 'commit', 'commits')} that ${sanitize(upstream)} does not have; update it with git yourself`,
-    );
-  }
-  if (ancestor.code !== 0 || ancestor.timedOut) throw gitFailure(ancestorArgs, ancestor, GIT_MS);
-  update.count = await countOf(git, ['rev-list', '--count', `${oldId}..${newId}`]);
-  update.commits = await newCommits(git, oldId, newId);
-  update.upgradesDatabase = (await migrationsOf(git, oldId)) !== (await migrationsOf(git, newId));
-  return update;
-}
-
-/** The newest LISTED commits of `old..new`, newest first: full id and subject. */
-async function newCommits(
-  git: Git,
-  oldId: string,
-  newId: string,
-): Promise<{ id: string; subject: string }[]> {
-  const out = await git.output([
-    'log',
-    '--no-show-signature', // log.showSignature would add gpg's lines
-    '--no-color',
-    '--encoding=UTF-8', // i18n.logOutputEncoding would recode the subjects
-    '-z',
-    `--max-count=${LISTED}`,
-    '--format=%H%x00%s',
-    `${oldId}..${newId}`,
-    '--',
-  ]);
-  const fields = out.split('\0');
-  const commits: { id: string; subject: string }[] = [];
-  for (let i = 0; i + 1 < fields.length; i += 2) {
-    commits.push({ id: fields[i] ?? '', subject: fields[i + 1] ?? '' });
-  }
-  return commits;
-}
-
-/** The blob MIGRATIONS has in `commit`; '' when the commit has no such file. */
-async function migrationsOf(git: Git, commit: string): Promise<string> {
-  const out = await git.output(['ls-tree', '--full-tree', '-z', commit, '--', MIGRATIONS]);
-  // `<mode> SP <type> SP <object> TAB <path> NUL`
-  const entry = out.split('\0')[0] ?? '';
-  return entry.split('\t')[0]?.split(' ')[2] ?? '';
-}
-
-/** The longest subject the report shows, in UTF-16 units (review 2 C2). */
-const SUBJECT_MAX = 200;
-
-/** A commit's subject as the report shows it: sanitised, and clipped with `…` past SUBJECT_MAX. */
-function subjectLine(subject: string): string {
-  const text = sanitize(subject);
-  return text.length > SUBJECT_MAX ? `${clip(text, SUBJECT_MAX - 1)}…` : text;
-}
-
-/** U4's lines for an update that brings commits. */
-function report(update: Update): string[] {
-  const lines = [
-    `${counted(update.count, 'new commit', 'new commits')} on ${sanitize(update.upstream)} (${short(update.oldId)}..${short(update.newId)}):`,
-    ...update.commits.map((c) => `  ${short(c.id)}  ${subjectLine(c.subject)}`),
-  ];
-  if (update.count > update.commits.length) {
-    lines.push(`  … and ${update.count - update.commits.length} more`);
-  }
-  if (update.upgradesDatabase) {
-    // F21: the store keeps a copy of the database before it upgrades it; the guide says how to go
-    // back to the commit the checkout is at now, which this line names.
-    lines.push(
-      `this update changes the database's upgrade steps: it may upgrade the database, which an older checkout cannot open; a copy of the database as it was is kept first, and docs/install.md ("Going back") says how to return to ${short(update.oldId)}`,
-    );
-  }
-  return lines;
+  const looked = await lookForUpdate(git, ctx.platform.files, {
+    fetch: 'terminal',
+    tolerant: false,
+  });
+  if (looked.kind === 'cannot') throw new SkydeckError(looked.line);
+  return looked.update;
 }
 
 /** What step 1 did: whether it stopped a server, and the pages that server had. */

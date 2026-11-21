@@ -6,14 +6,14 @@
 // It runs often (by people and by scripts), so it never fails, never writes and never waits long:
 // two git calls side by side, as argument lists through the platform's runner (never a shell),
 // each stopped after VERSION_GIT_MS, in the command's environment without the variables that would
-// point git at another repository (update-git.ts), with git's search for the repository stopped
+// point git at another repository (src/update/git.ts), with git's search for the repository stopped
 // at the app root, and with no optional lock: `status` would otherwise refresh the index and
 // write it into the checkout.
 import { dirname } from 'node:path';
 
 import pkg from '../../package.json' with { type: 'json' };
 import type { Platform, RunResult } from '../platform/types.ts';
-import { gitEnv } from './update-git.ts';
+import { gitEnv } from '../update/git.ts';
 
 /** How long each git call may take before it is stopped and the commit counts as unknown. */
 export const VERSION_GIT_MS = 2_000;
