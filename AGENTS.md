@@ -66,9 +66,15 @@ question gets a no, so the second line shows the exact entries install would add
 (but skydeck's compile cache in `~/.cache/skydeck`) and exits 1, as expected. It prints:
 
 ```text
-skydeck will add these hook entries to /home/you/.claude/settings.json:
-{ ... the two entries, as JSON ... }
-Add them? [y/N] settings not changed
+Hooks
+  skydeck adds these hook entries to /home/you/.claude/settings.json
+  (the file is backed up first):
+
+    SessionStart  '/home/you/.local/share/skydeck/skydeck-hook' SessionStart …  timeout 5 s
+    SessionEnd    '/home/you/.local/share/skydeck/skydeck-hook' SessionEnd …    timeout 5 s
+
+> Add them? [y/N]
+settings not changed
 ```
 
 A line `the rest of the file will be rewritten …` means install would also reformat the file, and

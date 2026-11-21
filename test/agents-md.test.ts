@@ -139,15 +139,20 @@ describe("AGENTS.md's questions are install's own", () => {
 
     assert.equal(r.code, 0, r.stderr);
     const quoted = [...AGENTS.matchAll(/`([^`]*\? \[y\/N\])`/g)].map((m) => m[1]);
+    // Each question stands on its own line after `> `, which AGENTS.md leaves out of its quotes.
+    assert.ok(
+      r.prompts.every((prompt) => prompt.startsWith('> ')),
+      r.prompts.join('\n'),
+    );
     assert.deepEqual(
-      r.prompts.map((prompt) => prompt.trimEnd()),
+      r.prompts.map((prompt) => prompt.slice(2).trimEnd()),
       quoted,
     );
   });
 });
 
 describe("AGENTS.md's preview: bin/skydeck install </dev/null", () => {
-  test('shows the two hook entries, ends as the file says, exits 1 and changes nothing but the compile cache', (t) => {
+  test('shows the two hook entries, one line each, ends as the file says, exits 1 and changes nothing but the compile cache', (t) => {
     const s = sandbox(t);
     // The programs the launcher itself uses, and its handoff file inside the sandbox.
     s.link('dirname', 'readlink', 'mktemp', 'cat', 'rm');
@@ -166,14 +171,31 @@ describe("AGENTS.md's preview: bin/skydeck install </dev/null", () => {
 
     assert.equal(r.status, 1, r.stderr);
     assert.equal(r.stdout, '');
+    // No Node.js warning either: nothing but install's own lines.
     const lines = r.stderr.split('\n');
-    const header = `skydeck will add these hook entries to ${settings}:`;
-    assert.equal(lines[0], header, r.stderr);
-    assert.equal(lines.at(-2), 'Add them? [y/N] settings not changed', r.stderr);
-    assert.equal(lines.at(-1), '');
-    const shown = JSON.parse(lines.slice(1, -2).join('\n')) as Record<string, unknown>;
-    assert.deepEqual(Object.keys(shown), ['SessionStart', 'SessionEnd']);
-    assert.match(JSON.stringify(shown), /skydeck-hook/);
+    assert.deepEqual(
+      lines.slice(0, 4),
+      [
+        'Hooks',
+        `  skydeck adds these hook entries to ${settings}`,
+        '  (the file is backed up first):',
+        '',
+      ],
+      r.stderr,
+    );
+    assert.deepEqual(
+      lines
+        .slice(4, 6)
+        .map((line) => /^ {4}(\w+) +'.*skydeck-hook' \1 .* timeout 5 s$/.exec(line)?.[1]),
+      ['SessionStart', 'SessionEnd'],
+      r.stderr,
+    );
+    assert.deepEqual(
+      lines.slice(6),
+      ['', '> Add them? [y/N] ', 'settings not changed', ''],
+      r.stderr,
+    );
+    assert.ok(!r.stderr.includes('{'), 'no JSON');
 
     // Nothing changed: the settings file, Claude Code's folder, skydeck's folders, ~/.local.
     assert.equal(readFileSync(settings, 'utf8'), before);
@@ -183,14 +205,27 @@ describe("AGENTS.md's preview: bin/skydeck install </dev/null", () => {
     assert.deepEqual(readdirSync(s.home), ['.cache']);
     assert.deepEqual(readdirSync(join(s.home, '.cache')), ['skydeck']);
 
-    // The output AGENTS.md shows for the preview: the same first and last line.
+    // The output AGENTS.md shows for the preview: the same lines, with its own home and shortened
+    // commands.
     const block = /bin\/skydeck install <\/dev\/null\n```\n[^]*?```text\n([^]*?)\n```/.exec(AGENTS);
     assert.ok(block, 'AGENTS.md shows the preview and its output in a text block');
     const quoted = (block[1] ?? '').split('\n');
-    assert.equal(
-      quoted[0],
-      'skydeck will add these hook entries to /home/you/.claude/settings.json:',
+    assert.deepEqual(quoted.slice(0, 4), [
+      'Hooks',
+      '  skydeck adds these hook entries to /home/you/.claude/settings.json',
+      '  (the file is backed up first):',
+      '',
+    ]);
+    assert.deepEqual(
+      quoted
+        .slice(4, 6)
+        .map((line) => /^ {4}(\w+) +'.*skydeck-hook' \1 .* timeout 5 s$/.exec(line)?.[1]),
+      ['SessionStart', 'SessionEnd'],
     );
-    assert.equal(quoted.at(-1), 'Add them? [y/N] settings not changed');
+    // (A Markdown file keeps no space at a line's end: the prompt's own is left out there.)
+    assert.deepEqual(
+      quoted.slice(6).map((line) => line.trimEnd()),
+      ['', '> Add them? [y/N]', 'settings not changed'],
+    );
   });
 });

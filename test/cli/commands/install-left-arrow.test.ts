@@ -21,14 +21,20 @@ import { main } from '../../../src/cli/main.ts';
 import { NS_PER_DAY } from '../../../src/platform/time.ts';
 import type { Files, Platform } from '../../../src/platform/types.ts';
 import { capture } from '../../helpers/capture.ts';
-import { installedTail, run, settingsFile, transcript } from '../../helpers/install.ts';
+import {
+  installStdout,
+  installedTail,
+  run,
+  settingsFile,
+  transcript,
+} from '../../helpers/install.ts';
 import type { Run } from '../../helpers/install.ts';
 import { S1, T0, testPlatform } from '../../helpers/platform.ts';
 import type { TestPlatform } from '../../helpers/platform.ts';
 
 const CANARY = 'canary-7c4d9e21';
 const KEY = 'leftArrowOpensAgents';
-const QUESTION = 'Turn the shortcut off? [y/N] ';
+const QUESTION = '> Turn the shortcut off? [y/N] ';
 const HOW = '/config in Claude Code ("← opens agents")';
 
 /** A made-up global config: account details and an MCP server's token, each holding CANARY. */
@@ -46,21 +52,34 @@ function put(path: string, text: string): void {
   chmodSync(path, 0o600);
 }
 
-/** The three lines before the question, for the file at `path`. */
+/** The section's heading and the lines before the question, for the file at `path`. */
 function preamble(path: string): string {
   return (
-    "Claude Code's ← shortcut is on: ← on an empty prompt sends the session to the background and opens agent view.\n" +
-    "← also closes a group in skydeck's list, so a ← meant for the list can send a window terminal's session away.\n" +
-    `Turning it off sets only ${KEY} in ${path}, after a backup; agent view itself stays (claude agents, /bg).\n`
+    "Claude Code's ← shortcut\n" +
+    '  It is on: ← on an empty prompt sends the session to the background and opens\n' +
+    "  agent view. ← also closes a group in skydeck's list, so a ← meant for the list\n" +
+    "  can send a window terminal's session away. Turning it off sets only\n" +
+    `  ${KEY} in ${path}, after a backup;\n` +
+    '  agent view itself stays (claude agents, /bg).\n'
   );
 }
 
+/** The section as it stands on stdout when there is no question: its heading and one line. */
+const alone = (line: string): string => `Claude Code's ← shortcut\n  ${line}\n`;
 const unknownLine = (path: string, reason: string): string =>
-  `Claude Code's ← shortcut: left ${path} alone (${reason}); to turn it off: ${HOW}`;
-const LATER = `the ← shortcut stays on; to turn it off later: ${HOW}, or skydeck install again`;
-const OFF = "Claude Code's ← shortcut is off";
-const FROM_NOW_ON =
-  'the shortcut is off for sessions started from now on; a session already running keeps it until it is started again';
+  alone(`left ${path} alone (${reason}); to turn it off: ${HOW}`);
+const OFF = alone('It is off.');
+
+/** A result line of the section: its word padded to the width of `turned off`, then the text. */
+const result = (word: string, text: string): string => `  ${word.padEnd(10)}  ${text}\n`;
+const LATER = result(
+  'note',
+  `the ← shortcut stays on; to turn it off later: ${HOW}, or skydeck install again`,
+);
+const FROM_NOW_ON = result(
+  'note',
+  'only for sessions started from now on; a session already running keeps it until it is started again',
+);
 
 /** The backup install makes at T0 (the test clock's start). */
 const backupOf = (path: string): string => `${path}.skydeck-backup-20261112T090000Z`;
@@ -99,21 +118,26 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
     const r = await run(d.platform, ['install'], { lines: ['y', 'y'] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.deepEqual(r.prompts, ['Add them? [y/N] ', QUESTION]);
-    assert.ok(r.stderr.endsWith(`${preamble(path)}${QUESTION}`), r.stderr);
+    assert.deepEqual(r.prompts, ['> Add them? [y/N] ', QUESTION]);
+    assert.ok(r.stderr.endsWith(`\n${preamble(path)}\n${QUESTION}\n`), r.stderr);
     assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')), { ...sample(), [KEY]: false });
     assert.equal(readFileSync(backupOf(path), 'utf8'), before);
     assert.equal(statSync(backupOf(path)).mode & 0o777, 0o600);
     assert.equal(statSync(path).mode & 0o777, 0o600);
     assert.deepEqual(leftovers(path), [basename(backupOf(path))]);
+    const out = installStdout(r.stdout);
     assert.ok(
-      r.stdout.endsWith(
-        `turned Claude Code's ← shortcut off in ${path}; the file as it was is kept in ${backupOf(path)}\n` +
-          `${FROM_NOW_ON}\n` +
-          installedTail(d.platform),
+      out.before.endsWith(
+        result('turned off', `in ${path}`) + result('backup', backupOf(path)) + FROM_NOW_ON,
       ),
       r.stdout,
     );
+    // The summary names the file and its backup, after the settings file's.
+    assert.deepEqual(out.summary.slice(-2), [
+      `  ${'← shortcut'.padEnd(12)}  ${path}`,
+      `  ${'backup'.padEnd(12)}  ${backupOf(path)}`,
+    ]);
+    assert.equal(out.tail, installedTail(d.platform));
     noCanary(r);
   });
 
@@ -141,8 +165,11 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
       const r = await run(d.platform, ['install'], { lines });
 
       assert.equal(r.code, 0, r.stderr);
-      assert.deepEqual(r.prompts, ['Add them? [y/N] ', QUESTION]);
-      assert.ok(r.stdout.endsWith(`${LATER}\n${installedTail(d.platform)}`), r.stdout);
+      assert.deepEqual(r.prompts, ['> Add them? [y/N] ', QUESTION]);
+      const out = installStdout(r.stdout);
+      assert.ok(out.before.endsWith(LATER), r.stdout);
+      assert.ok(!out.summary.some((line) => line.includes('.claude.json')), r.stdout);
+      assert.equal(out.tail, installedTail(d.platform));
       assert.equal(readFileSync(path, 'utf8'), before);
       assert.equal(statSync(path).ino, inode);
       assert.deepEqual(leftovers(path), []);
@@ -159,7 +186,7 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
 
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.prompts, []);
-    assert.ok(r.stdout.endsWith(`${OFF}\n${installedTail(d.platform)}`), r.stdout);
+    assert.ok(r.stdout.endsWith(`${OFF}\nnothing was changed\n${installedTail(d.platform)}`));
     assert.equal(readFileSync(path, 'utf8'), after);
     assert.deepEqual(leftovers(path), [basename(backupOf(path))], 'no second backup');
   });
@@ -172,8 +199,8 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
 
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.prompts, [
-      'Add them? [y/N] ',
-      'Mark 1 session older than 7 days as done? [y/N] ',
+      '> Add them? [y/N] ',
+      '> Mark 1 session older than 7 days as done? [y/N] ',
       QUESTION,
     ]);
     assert.ok(r.stdout.endsWith(installedTail(d.platform)), r.stdout);
@@ -197,9 +224,12 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
 
     assert.equal(r.code, 0, r.stderr);
     assert.ok(
-      r.stdout.endsWith(
-        `${path} kept changing while skydeck wrote it, so skydeck left it as it is; ` +
-          `to turn the ← shortcut off: ${HOW}\n${installedTail(d.platform)}`,
+      installStdout(r.stdout).before.endsWith(
+        result(
+          'note',
+          `${path} kept changing while skydeck wrote it, so skydeck left it as it is; ` +
+            `to turn the ← shortcut off: ${HOW}`,
+        ),
       ),
       r.stdout,
     );
@@ -218,8 +248,8 @@ describe('install: the ← shortcut, when it is off or cannot be told (L2)', () 
     const r = await run(d.platform, ['install'], { lines: ['y'] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.deepEqual(r.prompts, ['Add them? [y/N] ']);
-    assert.ok(r.stdout.endsWith(`${OFF}\n${installedTail(d.platform)}`), r.stdout);
+    assert.deepEqual(r.prompts, ['> Add them? [y/N] ']);
+    assert.ok(installStdout(r.stdout).before.endsWith(OFF), r.stdout);
     assert.equal(readFileSync(path, 'utf8'), before);
     assert.equal(statSync(path).ino, inode);
     assert.deepEqual(leftovers(path), []);
@@ -231,11 +261,8 @@ describe('install: the ← shortcut, when it is off or cannot be told (L2)', () 
     const r = await run(d.platform, ['install'], { lines: ['y'] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.deepEqual(r.prompts, ['Add them? [y/N] ']);
-    assert.ok(
-      r.stdout.endsWith(`${unknownLine(path, 'it does not exist')}\n${installedTail(d.platform)}`),
-      r.stdout,
-    );
+    assert.deepEqual(r.prompts, ['> Add them? [y/N] ']);
+    assert.ok(installStdout(r.stdout).before.endsWith(unknownLine(path, 'it does not exist')));
     assert.throws(() => lstatSync(path), { code: 'ENOENT' });
     assert.deepEqual(leftovers(path), []);
   });
@@ -255,11 +282,8 @@ describe('install: the ← shortcut, when it is off or cannot be told (L2)', () 
       const r = await run(d.platform, ['install'], { lines: ['y'] });
 
       assert.equal(r.code, 0, r.stderr);
-      assert.deepEqual(r.prompts, ['Add them? [y/N] ']);
-      assert.ok(
-        r.stdout.endsWith(`${unknownLine(path, reason)}\n${installedTail(d.platform)}`),
-        r.stdout,
-      );
+      assert.deepEqual(r.prompts, ['> Add them? [y/N] ']);
+      assert.ok(installStdout(r.stdout).before.endsWith(unknownLine(path, reason)), r.stdout);
       assert.equal(readFileSync(path, 'utf8'), text);
       assert.deepEqual(leftovers(path), []);
       noCanary(r);
@@ -276,11 +300,9 @@ describe('install: the ← shortcut, when it is off or cannot be told (L2)', () 
     const r = await run(d.platform, ['install'], { lines: ['y', 'y'] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.deepEqual(r.prompts, ['Add them? [y/N] ']);
+    assert.deepEqual(r.prompts, ['> Add them? [y/N] ']);
     assert.ok(
-      r.stdout.endsWith(
-        `${unknownLine(path, 'it is a symbolic link')}\n${installedTail(d.platform)}`,
-      ),
+      installStdout(r.stdout).before.endsWith(unknownLine(path, 'it is a symbolic link')),
       r.stdout,
     );
     assert.equal(lstatSync(path).isSymbolicLink(), true);
@@ -296,7 +318,7 @@ describe('install: the ← step never changes what install did (L2)', () => {
     const r = await run(d.platform, ['install'], { lines: ['n', 'y'] });
 
     assert.equal(r.code, 1);
-    assert.deepEqual(r.prompts, ['Add them? [y/N] ']);
+    assert.deepEqual(r.prompts, ['> Add them? [y/N] ']);
     assert.ok(!r.stdout.includes('←') && !r.stderr.includes('←'), r.stdout + r.stderr);
     assert.equal(readFileSync(path, 'utf8'), before);
   });
@@ -336,8 +358,12 @@ describe('install: the ← step never changes what install did (L2)', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.ok(
       r.stderr.endsWith(
-        `${QUESTION}could not turn Claude Code's ← shortcut off: cannot write ${path} (EACCES); ` +
-          `it was not changed; to turn it off: ${HOW}\n`,
+        `${QUESTION}\n` +
+          result(
+            'note',
+            `could not turn Claude Code's ← shortcut off: cannot write ${path} (EACCES); ` +
+              `it was not changed; to turn it off: ${HOW}`,
+          ),
       ),
       r.stderr,
     );
@@ -364,8 +390,12 @@ describe('install: the ← step never changes what install did (L2)', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.ok(
       r.stderr.endsWith(
-        `${QUESTION}could not turn Claude Code's ← shortcut off: cannot write ${path} (TypeError); ` +
-          `it was not changed; to turn it off: ${HOW}\n`,
+        `${QUESTION}\n` +
+          result(
+            'note',
+            `could not turn Claude Code's ← shortcut off: cannot write ${path} (TypeError); ` +
+              `it was not changed; to turn it off: ${HOW}`,
+          ),
       ),
       r.stderr,
     );
@@ -438,8 +468,11 @@ describe('install: an error of the ← step that is no write (review 2, C6)', ()
       captured
         .stderr()
         .endsWith(
-          "could not turn Claude Code's ← shortcut off: an unexpected error (TypeError); " +
-            `skydeck doctor says whether it is off; to turn it off: ${HOW}\n`,
+          result(
+            'note',
+            "could not turn Claude Code's ← shortcut off: an unexpected error (TypeError); " +
+              `skydeck doctor says whether it is off; to turn it off: ${HOW}`,
+          ),
         ),
       captured.stderr(),
     );

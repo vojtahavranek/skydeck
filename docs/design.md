@@ -929,6 +929,30 @@ could not be resumed; see above`).
   session saved it while the question was open), install stops and writes nothing. A write that
   fails is an error naming the file, and leaves no backup of its own behind.
 
+  What install prints comes in sections, in the order of its steps: Hooks (3), Old sessions (5,
+  only when its question is asked), Window (only for the python3 line, design-step-2.md 16.1),
+  Claude Code's ← shortcut (6). A section is a heading line, with a blank line before every heading
+  but the first, and its explanation indented by two spaces. In Hooks each entry is one line: its
+  event, the whole command as it is written to the file and the timeout (`timeout 5 s`), lined up;
+  an entry the line cannot show whole — anything but one hook of type `command` with a timeout, or
+  a command that sanitising (7.4) would change — is shown as JSON instead (written as by `jsonText`,
+  a character a terminal acts on escaped), so that the question never shows less than what is
+  written. Each question stands on its own line after a blank line and starts `> `; its wording,
+  `[y/N]` and the answers it takes do not change, and when no answer was echoed (end of input, or
+  standard input that is not a terminal) install ends the line, so that what follows starts on a
+  line of its own. Under a question, results are short lines, a word lined up with the other
+  results of that question and the rest: `linked <path> -> <target>` for each link made or
+  pointed anew, `added`, `backup`, `marked`, `turned off`, `note`. Before `skydeck is installed`,
+  `Changed` lists every file this run changed — the database when this run created it (every run
+  writes to it, which does not count), each link made or pointed anew, the settings file, the
+  global config file — each followed by its backup when it had one; a run that changed none of
+  them prints the one line `nothing was changed`. Last, `Next`: the four things to do next,
+  numbered, and the guide's path. Explanations, the entries and the questions go to stderr,
+  results, the summary and Next to stdout. On a terminal (that stream a terminal, `NO_COLOR`
+  unset or empty, `TERM` not `dumb`) headings, questions and `skydeck is installed` are bold and
+  the backup and link lines dim; otherwise there is no colour. The first scan's progress line
+  (5.6) is cleared as for every command.
+
   Step (6) reads `leftArrowOpensAgents` from Claude Code's global config file (9.1,
   `claudeGlobalConfig`): `off` when it is exactly `false`; `on` when it is absent or `true`;
   `unknown` when there is no file, it cannot be read, it is not UTF-8 (the file is read as bytes
@@ -936,11 +960,11 @@ could not be resumed; see above`).
   backup), it is not a JSON object, the key holds anything else, or the path is a symbolic link,
   not a regular file, or another user's (such a file is never written, so its state is not asked
   for); and a file without its owner's write bit whose shortcut is on (one that is off reads `off`:
-  nothing would be written to it). The reader never creates the file and never follows a link. On `on` install prints three lines (what the shortcut does, that ← also
-  closes a group in the window's list, that agent view itself stays) and asks `Turn the shortcut
-  off? [y/N]`; a no, or no answer, is one line on how to do it later (`/config` in Claude Code,
-  "← opens agents", or install again). On `off` it prints one line, on `unknown` one line naming
-  the file, left alone; neither asks. After the yes it sets the key, and only it: the text is
+  nothing would be written to it). The reader never creates the file and never follows a link. On `on` install explains in its section what the shortcut does, that ← also
+  closes a group in the window's list, that only this key changes, after a backup, and that agent
+  view itself stays, and asks `Turn the shortcut off? [y/N]`; a no, or no answer, is one line on
+  how to do it later (`/config` in Claude Code, "← opens agents", or install again). On `off` its
+  section has one line, on `unknown` one line naming the file, left alone; neither asks. After the yes it sets the key, and only it: the text is
   edited, not parsed and written back (that would reorder numeric keys, lose digits and change
   escapes), the key's `true` replaced where it is or the key added after the last member with
   that member's own white space and colon, so indentation, line ends and the final newline stay;

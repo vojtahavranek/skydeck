@@ -4226,8 +4226,8 @@ check let through; a page's `new` flags become `claude` arguments only after des
 ### 16.1 Install
 
 Unchanged in what it writes: the same two hook entries (10.3), the same links, nothing on the
-Windows side. It adds one `info` line when `python3` 3.9 or newer is not found: `the window
-(skydeck window) needs python3 3.9 or newer; the commands do not`. (3.9 is the oldest the keeper's
+Windows side. It adds one line, in a section `Window` of its own (design 8), when `python3` 3.9 or
+newer is not found: `the window (skydeck window) needs python3 3.9 or newer; the commands do not`. (3.9 is the oldest the keeper's
 code allows; it is tested on 3.12, which Ubuntu 24.04 and the CI runners have.)
 
 ### 16.2 Uninstall

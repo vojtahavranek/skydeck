@@ -13,6 +13,11 @@
 // a no, leaves nothing behind (ruled by the plan owner). The ← step is the user's own choice made
 // through skydeck: after a yes it sets that one key in Claude Code's global config file, and it
 // never changes install's result.
+//
+// What it prints comes in sections (design 8): a heading, its explanation indented by two spaces,
+// each question on a line of its own that starts `> `, and short results under it; then a summary
+// of the files this run changed, `skydeck is installed` and what to do next. Explanations and
+// questions go to stderr, results to stdout, as before the sections.
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 
@@ -22,7 +27,6 @@ import {
   readLeftArrow,
   turnLeftArrowOff,
 } from '../../claude/global-config.ts';
-import type { TurnOffResult } from '../../claude/global-config.ts';
 import { addHookEntries, hookEntry, rewriteReport, settingsPath } from '../../claude/settings.ts';
 import type { RewriteReport, SettingsEdit } from '../../claude/settings.ts';
 import { SkydeckError } from '../../platform/errors.ts';
@@ -45,6 +49,8 @@ import { EXIT } from '../exit.ts';
 import { jsonText } from '../json.ts';
 import { PYTHON3_NEEDED, probePython3 } from '../python.ts';
 import { backupBase, createBackup, nextBackupName } from '../settings-backup.ts';
+import { styleFor } from '../style.ts';
+import type { Style } from '../style.ts';
 
 const SPEC: ArgSpec = {
   usage:
@@ -85,6 +91,84 @@ interface Prepared {
   links: Link[];
 }
 
+/** One file this run changed, for the summary: what it holds, its path, and its backup if any. */
+interface Change {
+  what: string;
+  path: string;
+  note?: string;
+  backup?: string;
+}
+
+/**
+ * How install writes (design 8). Every line that holds foreign text, a path above all, is
+ * sanitised here; colour goes around it afterwards, decided for each stream on its own.
+ */
+interface Output {
+  /** A heading line: bold, with a blank line before it unless it is the first. */
+  heading(stream: Stream, title: string): void;
+  /** A line of explanation, indented by two spaces. */
+  text(stream: Stream, line: string): void;
+  /** Lines written as they are (the hook entries), only sanitised by the caller. */
+  raw(stream: Stream, text: string): void;
+  /**
+   * A blank line, then the question on its own line, `> ` before it; true for a yes. When no
+   * answer was echoed (end of input, or input that is not a terminal), the line is closed, so that
+   * what follows starts on a line of its own.
+   */
+  ask(question: string): Promise<boolean>;
+  /**
+   * A result under a question on stdout: `word`, padded to `width` so that the results of one
+   * question line up, then the text. Backup and link lines are dim.
+   */
+  result(width: number, word: string, text: string, dim?: boolean): void;
+  /** A result line on stderr, for what went wrong in a step that does not end install. */
+  failure(width: number, word: string, text: string): void;
+}
+
+type Stream = 'stdout' | 'stderr';
+
+function output(ctx: Context): Output {
+  const { io } = ctx;
+  const styles: Record<Stream, Style> = {
+    stdout: styleFor(io, ctx.platform.env, 'stdout'),
+    stderr: styleFor(io, ctx.platform.env, 'stderr'),
+  };
+  const write = (stream: Stream, text: string): void => {
+    io[stream](text);
+  };
+  const resultLine = (width: number, word: string, text: string): string =>
+    `  ${word.padEnd(width)}  ${sanitize(text)}`;
+  let first = true;
+  return {
+    heading(stream, title) {
+      write(stream, `${first ? '' : '\n'}${styles[stream].bold(sanitize(title))}\n`);
+      first = false;
+    },
+    text(stream, line) {
+      write(stream, `  ${sanitize(line)}\n`);
+    },
+    raw: write,
+    async ask(question) {
+      write('stderr', '\n');
+      const answer = await io.readLine(`${styles.stderr.bold(`> ${question}`)} `);
+      if (answer === null || !io.isTTY.stdin) {
+        write('stderr', '\n');
+      }
+      return isYes(answer);
+    },
+    result(width, word, text, dim = false) {
+      const line = resultLine(width, word, text);
+      write('stdout', `${dim ? styles.stdout.dim(line) : line}\n`);
+    },
+    failure(width, word, text) {
+      write('stderr', `${resultLine(width, word, text)}\n`);
+    },
+  };
+}
+
+/** The width of the result words of the Hooks section: `linked`, `backup`, `added`. */
+const HOOKS_WIDTH = 6;
+
 export const command: Command = {
   name: 'install',
   summary: 'Install the hooks and links',
@@ -100,32 +184,45 @@ export const command: Command = {
     }
     const { places } = resolveDeckPlaces(ctx.platform);
     const prepared = prepare(ctx.platform, places);
+    const out = output(ctx);
+    const changes: Change[] = [];
     if (prepared.edit.changed) {
-      showChange(ctx, places.hookPath, prepared);
-      if (!isYes(await ctx.io.readLine('Add them? [y/N] '))) {
+      showChange(ctx, out, places.hookPath, prepared);
+      if (!(await out.ask('Add them? [y/N]'))) {
         ctx.io.stderr('settings not changed\n');
         return EXIT.failure;
       }
       requireUnchanged(ctx.platform.files, prepared);
+    } else {
+      out.heading('stdout', 'Hooks');
+      out.text('stdout', `hook entries already present in ${prepared.settingsPath}`);
     }
+    const newDatabase = isMissing(ctx.platform.files, places.dbPath);
     return withDeck(ctx, { refresh: false }, async (deck) => {
-      makeLinks(ctx, deck.platform.files, prepared.links);
+      if (newDatabase) {
+        changes.push({ what: 'database', path: deck.store.path, note: 'new' });
+      }
+      makeLinks(out, deck.platform.files, prepared.links, changes);
       if (prepared.edit.changed) {
-        writeSettings(ctx, deck, prepared);
-      } else {
-        ctx.io.stdout('hook entries already present\n');
+        writeSettings(out, deck, prepared, changes);
       }
       refreshWithProgress(ctx, deck);
-      await offerFirstRun(ctx, deck);
+      await offerFirstRun(out, deck);
       // S2 16.1: the commands do not need python3, so this is said and nothing else changes.
       if ((await probePython3(deck.platform)).kind !== 'found') {
-        ctx.io.stdout(`${PYTHON3_NEEDED}\n`);
+        out.heading('stdout', 'Window');
+        out.text('stdout', PYTHON3_NEEDED);
       }
-      await offerLeftArrowOff(ctx, deck);
-      ctx.io.stdout('skydeck is installed\n');
-      for (const line of nextSteps(deck.platform)) {
-        ctx.io.stdout(`${sanitize(line)}\n`);
-      }
+      await offerLeftArrowOff(out, deck, changes);
+      summary(out, changes);
+      out.heading('stdout', 'skydeck is installed');
+      out.heading('stdout', 'Next');
+      const steps = nextSteps(deck.platform);
+      const guide = steps.pop() ?? '';
+      steps.forEach((step, index) => {
+        out.text('stdout', `${index + 1}. ${step}`);
+      });
+      out.text('stdout', guide);
       return EXIT.ok;
     });
   },
@@ -237,8 +334,10 @@ function readSettings(files: Files, path: string): string | null {
 }
 
 /**
- * The exact groups that will be appended, by event. jsonText escapes, rather than drops, any
- * character of the path a terminal would act on, so what is shown is what is written.
+ * The exact groups that will be appended, by event: each entry on one line, its event, its whole
+ * command and its timeout (entryLine). An entry the line cannot show whole, a command with a
+ * character a terminal would act on above all, is shown as JSON instead: jsonText escapes, rather
+ * than drops, such a character, so what is shown is what is written (principle 2).
  *
  * The file does not go back as it was, only with the entries added: it is parsed and written in
  * skydeck's formatting. When that would change more than the entries, one more line says so and
@@ -246,13 +345,27 @@ function readSettings(files: Files, path: string): string | null {
  * formatting whenever it saves a setting). A number that would lose digits is the one case where
  * content, not formatting, changes: its key is named.
  */
-function showChange(ctx: Context, hookPath: string, prepared: Prepared): void {
+function showChange(ctx: Context, out: Output, hookPath: string, prepared: Prepared): void {
   const { files } = ctx.platform;
-  const added = Object.fromEntries(
-    prepared.edit.events.map((event) => [event, [hookEntry(hookPath, event)]]),
-  );
-  ctx.io.stderr(`skydeck will add these hook entries to ${sanitize(prepared.settingsPath)}:\n`);
-  ctx.io.stderr(jsonText(added));
+  out.heading('stderr', 'Hooks');
+  out.text('stderr', `skydeck adds these hook entries to ${prepared.settingsPath}`);
+  out.text('stderr', prepared.text === null ? '(a new file):' : '(the file is backed up first):');
+  out.raw('stderr', '\n');
+  const entries = prepared.edit.events.map((event) => {
+    const entry = hookEntry(hookPath, event);
+    return { event, entry, line: entryLine(entry) };
+  });
+  const eventWidth = Math.max(...entries.map(({ event }) => event.length));
+  const commandWidth = Math.max(...entries.map(({ line }) => line?.command.length ?? 0));
+  for (const { event, entry, line } of entries) {
+    if (line === null) {
+      const json = jsonText([entry]).replace(/\n$/, '').replaceAll('\n', '\n      ');
+      out.raw('stderr', `    ${event}\n      ${json}\n`);
+    } else {
+      const command = line.command.padEnd(commandWidth);
+      out.raw('stderr', `    ${event.padEnd(eventWidth)}  ${command}  timeout ${line.timeout} s\n`);
+    }
+  }
   const { rewrite, backupBase: base } = prepared;
   if (rewrite?.reformatted === true && base !== null) {
     const lost =
@@ -260,13 +373,45 @@ function showChange(ctx: Context, hookPath: string, prepared: Prepared): void {
         ? ''
         : ` and ${rewrite.lossyPaths.join(', ')} would lose digits`;
     const backup = nextBackupName(files, prepared.settingsPath, base);
-    ctx.io.stderr(
-      sanitize(
-        `the rest of the file will be rewritten in skydeck's formatting${lost}; ` +
-          `the file as it is now is kept in ${backup}`,
-      ) + '\n',
+    out.raw('stderr', '\n');
+    out.text(
+      'stderr',
+      `the rest of the file will be rewritten in skydeck's formatting${lost}; ` +
+        `the file as it is now is kept in ${backup}`,
     );
   }
+}
+
+/**
+ * The one line of an entry: its command and timeout, when they are all the entry holds (one hook
+ * of type `command`) and the command reads the same on a terminal as in the file. null otherwise:
+ * the entry is then shown as JSON.
+ */
+function entryLine(entry: unknown): { command: string; timeout: number } | null {
+  if (!isPlain(entry, ['hooks']) || !Array.isArray(entry['hooks']) || entry['hooks'].length !== 1) {
+    return null;
+  }
+  const hook: unknown = entry['hooks'][0];
+  if (!isPlain(hook, ['type', 'command', 'timeout']) || hook['type'] !== 'command') {
+    return null;
+  }
+  const { command, timeout } = hook;
+  if (typeof command !== 'string' || typeof timeout !== 'number' || !Number.isFinite(timeout)) {
+    return null;
+  }
+  if (command === '' || command.trim() !== command || sanitize(command) !== command) {
+    return null;
+  }
+  return { command, timeout };
+}
+
+/** An object with exactly these keys. */
+function isPlain(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const own = Object.keys(value).sort();
+  return own.length === keys.length && [...keys].sort().every((key, i) => own[i] === key);
 }
 
 /**
@@ -288,7 +433,7 @@ function requireUnchanged(files: Files, prepared: Prepared): void {
  * points where it should is not touched. prepare() refused anything that is not a link; each path
  * is looked at again here, since the question was open in between.
  */
-function makeLinks(ctx: Context, files: Files, links: readonly Link[]): void {
+function makeLinks(out: Output, files: Files, links: readonly Link[], changes: Change[]): void {
   for (const { path, target } of links) {
     if (files.readlink(path) === target) {
       continue;
@@ -300,7 +445,8 @@ function makeLinks(ctx: Context, files: Files, links: readonly Link[]): void {
     } catch (error) {
       throw new SkydeckError(`cannot create the link ${path} (${describeError(error)})`);
     }
-    ctx.io.stdout(`linked ${sanitize(path)} -> ${sanitize(target)}\n`);
+    out.result(HOOKS_WIDTH, 'linked', `${path} -> ${target}`, true);
+    changes.push({ what: 'link', path });
   }
 }
 
@@ -310,7 +456,7 @@ function makeLinks(ctx: Context, files: Files, links: readonly Link[]): void {
  * that fails is an ordinary error naming the file, and the backup this run made of the unchanged
  * file is removed again.
  */
-function writeSettings(ctx: Context, deck: Deck, prepared: Prepared): void {
+function writeSettings(out: Output, deck: Deck, prepared: Prepared, changes: Change[]): void {
   const { files } = deck.platform;
   const { settingsPath: path, text, edit } = prepared;
   requireUnchanged(files, prepared);
@@ -338,23 +484,27 @@ function writeSettings(ctx: Context, deck: Deck, prepared: Prepared): void {
     store.setKv('settings_backup', backup);
     store.setKv('settings_hash', sha256(edit.text));
   });
-  ctx.io.stdout(
-    backup === NO_FILE
-      ? `added the hook entries to ${sanitize(path)} (a new file)\n`
-      : `added the hook entries to ${sanitize(path)}; the file as it was is kept in ${sanitize(backup)}\n`,
-  );
+  if (backup === NO_FILE) {
+    out.result(HOOKS_WIDTH, 'added', `the hook entries to ${path} (a new file)`);
+    changes.push({ what: 'hook entries', path, note: 'a new file' });
+  } else {
+    out.result(HOOKS_WIDTH, 'added', `the hook entries to ${path}`);
+    out.result(HOOKS_WIDTH, 'backup', backup, true);
+    changes.push({ what: 'hook entries', path, backup });
+  }
 }
 
 /** Follow-up F22: what the first-run question's "done" means, for someone new to skydeck. */
-const DONE_ONLY_HIDES =
-  '"Done" only hides a session from skydeck\'s list: nothing is deleted, it can still be ' +
-  'resumed, and skydeck ls --all shows it.';
+const DONE_ONLY_HIDES = [
+  '"Done" only hides a session from skydeck\'s list: nothing is deleted,',
+  'it can still be resumed, and skydeck ls --all shows it.',
+];
 
 /**
  * Design 7.1 "First run", once (D20): the listed sessions that are not running and whose last
  * activity is older than firstRunDoneAfterDays may be marked as done. Nothing changes without a yes.
  */
-async function offerFirstRun(ctx: Context, deck: Deck): Promise<void> {
+async function offerFirstRun(out: Output, deck: Deck): Promise<void> {
   const { store, config } = deck;
   if (store.getKv('first_run_offered') !== null) {
     return;
@@ -367,11 +517,12 @@ async function offerFirstRun(ctx: Context, deck: Deck): Promise<void> {
   );
   let mark = false;
   if (old.length > 0) {
-    ctx.io.stderr(`${DONE_ONLY_HIDES}\n`);
-    mark = isYes(
-      await ctx.io.readLine(
-        `Mark ${count(old.length, 'session')} older than ${count(days, 'day')} as done? [y/N] `,
-      ),
+    out.heading('stderr', 'Old sessions');
+    for (const line of DONE_ONLY_HIDES) {
+      out.text('stderr', line);
+    }
+    mark = await out.ask(
+      `Mark ${count(old.length, 'session')} older than ${count(days, 'day')} as done? [y/N]`,
     );
   }
   store.transaction(() => {
@@ -383,7 +534,11 @@ async function offerFirstRun(ctx: Context, deck: Deck): Promise<void> {
     store.setKv('first_run_offered', '1');
   });
   if (mark) {
-    ctx.io.stdout(`marked ${count(old.length, 'session')} as done (skydeck ls --all shows them)\n`);
+    out.result(
+      'marked'.length,
+      'marked',
+      `${count(old.length, 'session')} as done (skydeck ls --all shows them)`,
+    );
   }
 }
 
@@ -397,31 +552,43 @@ const IN_CLAUDE_CODE = `/config in Claude Code ("${LEFT_ARROW_LABEL}")`;
  * names the file, left alone. It runs after every other step has succeeded and never changes
  * install's result: whatever goes wrong is one line on stderr. No line holds a value of the file.
  */
-async function offerLeftArrowOff(ctx: Context, deck: Deck): Promise<void> {
+async function offerLeftArrowOff(out: Output, deck: Deck, changes: Change[]): Promise<void> {
   const { platform, places } = deck;
   const path = places.claudeGlobalConfig;
-  const say = (text: string): void => {
-    ctx.io.stdout(`${sanitize(text)}\n`);
+  let shown = false;
+  const section = (stream: Stream): void => {
+    if (!shown) {
+      out.heading(stream, LEFT_ARROW_SECTION);
+      shown = true;
+    }
+  };
+  const note = (text: string): void => {
+    out.result(LEFT_ARROW_WIDTH, 'note', text);
   };
   try {
     const reading = readLeftArrow(platform.files, platform.uid, path);
     if (reading.state === 'off') {
-      say(OFF_LINE);
+      section('stdout');
+      out.text('stdout', OFF_LINE);
       return;
     }
     if (reading.state === 'unknown') {
-      say(leftAlone(path, reading.reason ?? 'it cannot be read'));
+      section('stdout');
+      out.text('stdout', leftAlone(path, reading.reason ?? 'it cannot be read'));
       return;
     }
+    section('stderr');
     for (const line of [
-      "Claude Code's ← shortcut is on: ← on an empty prompt sends the session to the background and opens agent view.",
-      "← also closes a group in skydeck's list, so a ← meant for the list can send a window terminal's session away.",
-      `Turning it off sets only ${LEFT_ARROW_KEY} in ${path}, after a backup; agent view itself stays (claude agents, /bg).`,
+      'It is on: ← on an empty prompt sends the session to the background and opens',
+      "agent view. ← also closes a group in skydeck's list, so a ← meant for the list",
+      "can send a window terminal's session away. Turning it off sets only",
+      `${LEFT_ARROW_KEY} in ${path}, after a backup;`,
+      'agent view itself stays (claude agents, /bg).',
     ]) {
-      ctx.io.stderr(`${sanitize(line)}\n`);
+      out.text('stderr', line);
     }
-    if (!isYes(await ctx.io.readLine('Turn the shortcut off? [y/N] '))) {
-      say(
+    if (!(await out.ask('Turn the shortcut off? [y/N]'))) {
+      note(
         `the ← shortcut stays on; to turn it off later: ${IN_CLAUDE_CODE}, or skydeck install again`,
       );
       return;
@@ -430,36 +597,65 @@ async function offerLeftArrowOff(ctx: Context, deck: Deck): Promise<void> {
     const result = turnLeftArrowOff(platform.files, platform.uid, path, (text) =>
       createBackup(platform.files, path, base, text),
     );
-    for (const line of turnedOffLines(path, result)) {
-      say(line);
+    switch (result.kind) {
+      case 'written':
+        out.result(LEFT_ARROW_WIDTH, 'turned off', `in ${path}`);
+        out.result(LEFT_ARROW_WIDTH, 'backup', result.backup, true);
+        note(
+          'only for sessions started from now on; a session already running keeps it until it is started again',
+        );
+        changes.push({ what: '← shortcut', path, backup: result.backup });
+        return;
+      case 'off':
+        note('it is off already');
+        return;
+      case 'unknown':
+        note(leftAlone(path, result.reason));
+        return;
+      case 'kept-changing':
+        note(
+          `${path} kept changing while skydeck wrote it, so skydeck left it as it is; to turn the ← shortcut off: ${IN_CLAUDE_CODE}`,
+        );
+        return;
     }
   } catch (error) {
-    const line = `could not turn Claude Code's ← shortcut off: ${stepFailure(error)}; to turn it off: ${IN_CLAUDE_CODE}`;
-    ctx.io.stderr(`${sanitize(line)}\n`);
+    section('stderr');
+    out.failure(
+      LEFT_ARROW_WIDTH,
+      'note',
+      `could not turn Claude Code's ← shortcut off: ${stepFailure(error)}; to turn it off: ${IN_CLAUDE_CODE}`,
+    );
   }
 }
 
-const OFF_LINE = "Claude Code's ← shortcut is off";
+const LEFT_ARROW_SECTION = "Claude Code's ← shortcut";
+
+/** The width of the result words of the ← section: `turned off`, `backup`, `note`. */
+const LEFT_ARROW_WIDTH = 'turned off'.length;
+
+const OFF_LINE = 'It is off.';
 
 function leftAlone(path: string, reason: string): string {
-  return `Claude Code's ← shortcut: left ${path} alone (${reason}); to turn it off: ${IN_CLAUDE_CODE}`;
+  return `left ${path} alone (${reason}); to turn it off: ${IN_CLAUDE_CODE}`;
 }
 
-function turnedOffLines(path: string, result: TurnOffResult): string[] {
-  switch (result.kind) {
-    case 'written':
-      return [
-        `turned Claude Code's ← shortcut off in ${path}; the file as it was is kept in ${result.backup}`,
-        'the shortcut is off for sessions started from now on; a session already running keeps it until it is started again',
-      ];
-    case 'off':
-      return [OFF_LINE];
-    case 'unknown':
-      return [leftAlone(path, result.reason)];
-    case 'kept-changing':
-      return [
-        `${path} kept changing while skydeck wrote it, so skydeck left it as it is; to turn the ← shortcut off: ${IN_CLAUDE_CODE}`,
-      ];
+/**
+ * Design 8: before `skydeck is installed`, every file this run changed, and the backup of each it
+ * changed rather than created; one line when it changed nothing. The database counts only when
+ * this run created it: every run writes to it.
+ */
+function summary(out: Output, changes: readonly Change[]): void {
+  if (changes.length === 0) {
+    out.heading('stdout', 'nothing was changed');
+    return;
+  }
+  out.heading('stdout', 'Changed');
+  const width = Math.max(...changes.map(({ what }) => what.length), 'backup'.length);
+  for (const { what, path, note, backup } of changes) {
+    out.result(width, what, note === undefined ? path : `${path} (${note})`, what === 'link');
+    if (backup !== undefined) {
+      out.result(width, 'backup', backup, true);
+    }
   }
 }
 
@@ -479,6 +675,15 @@ function stepFailure(error: unknown): string {
     what = code;
   }
   return `an unexpected error (${what}); skydeck doctor says whether it is off`;
+}
+
+/** For the summary only: a path that cannot be looked at is not counted as missing. */
+function isMissing(files: Files, path: string): boolean {
+  try {
+    return files.lstat(path) === null;
+  } catch {
+    return false;
+  }
 }
 
 function isYes(answer: string | null): boolean {
