@@ -1141,10 +1141,11 @@ describe('writeWindowConfig (A32)', () => {
       profileDir: null,
       keepAlive: 'off',
       links: 'edge',
+      updateCheck: 'off',
     });
   });
 
-  test('writes a config.json that parses, with the Edge stub, the keep-alive off and links to the stub', (t) => {
+  test('writes a config.json that parses, with the Edge stub, the keep-alive off, links to the stub and the update check off', (t) => {
     const s = sandbox(t);
 
     const { edgeStub } = writeWindowConfig(s);
@@ -1156,6 +1157,7 @@ describe('writeWindowConfig (A32)', () => {
       profileDir: null,
       keepAlive: 'off',
       links: 'edge',
+      updateCheck: 'off',
     });
     assert.ok(edgeStub.startsWith(`${s.root}/`), edgeStub);
     assert.ok(!/\.exe$/i.test(edgeStub) && !edgeStub.startsWith('/mnt/'), edgeStub);
@@ -1164,7 +1166,12 @@ describe('writeWindowConfig (A32)', () => {
   test('what the test passes is merged over it', (t) => {
     const s = sandbox(t);
 
-    const { edgeStub } = writeWindowConfig(s, { keepAlive: 'wsl', links: 'default', port: 47000 });
+    const { edgeStub } = writeWindowConfig(s, {
+      keepAlive: 'wsl',
+      links: 'default',
+      port: 47000,
+      updateCheck: 'daily',
+    });
     const config = loadConfig(realPlatform().files, `${s.skydeckHome}/config/config.json`);
 
     assert.deepEqual(config.window, {
@@ -1173,6 +1180,7 @@ describe('writeWindowConfig (A32)', () => {
       profileDir: null,
       keepAlive: 'wsl',
       links: 'default',
+      updateCheck: 'daily',
     });
   });
 

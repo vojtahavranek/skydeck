@@ -740,6 +740,7 @@ In `config.json` ("Configuration" above), all optional; "In the window" and "App
 | `window.profileDir` | `null` | shown | `skydeck window`, at its next run | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
 | `window.keepAlive` | `"wsl"` | change | after the window restarts | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`: without it, WSL stops 15 seconds after its last Windows terminal closes, ending every session in the window. |
 | `window.links` | `"default"` | change | at once | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
+| `window.updateCheck` | `"daily"` | change | at once | `"daily"`: the window's server looks for a newer skydeck when it starts and once a day, with a `git fetch` of skydeck's own checkout, and the title bar says `Update available` while one is known ("Updating" below); nothing is applied without a click. `"off"`: it does not look by itself; Check now in Settings still does. Anything else: `<file>: "window.updateCheck" must be "daily" or "off"`. |
 
 With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
 "Starting sessions in the window from a terminal (stage C)" below. An example, for a PC with two
@@ -758,7 +759,8 @@ on port 47613:
 A key inside `window` that skydeck does not know is an error, as everywhere in the file
 (`skydeck: /home/you/.config/skydeck/config.json: unknown key "window.prot"`). The server reads the
 file when it starts: after a change by hand, run `skydeck window --restart`. A change in the
-window's Settings ("Configuration" above) of a key that applies at once needs none; one of
+window's Settings ("Configuration" above) of a key that applies at once needs none (turning
+`window.updateCheck` on checks at once when the server has not checked for a day); one of
 `window.keepAlive` applies after the restart (a keep-alive that runs keeps running until then).
 
 ### Keeping WSL running

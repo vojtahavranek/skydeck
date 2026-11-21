@@ -143,7 +143,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
         null,
       );
       assert.deepEqual(drawn.keys.slice(0, 3), ['terminal', 'wezterm.domain', 'groupPattern']);
-      assert.equal(drawn.keys.length, 18);
+      assert.equal(drawn.keys.length, 19);
       assert.deepEqual(drawn.groups, [
         'Starting sessions',
         'The list',
