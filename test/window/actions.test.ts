@@ -25,7 +25,7 @@ import { printableCommand } from '../../src/text/shell.ts';
 import { createActions } from '../../src/window/actions.ts';
 import type { ActionDeps } from '../../src/window/actions.ts';
 import type { PageInfo, TerminalHub, TerminalInfo, TerminalState } from '../../src/window/hub.ts';
-import type { ActMessage, ResultMessage } from '../../src/window/protocol.ts';
+import type { ActMessage, ResultMessage, UpdatePayload } from '../../src/window/protocol.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { BOOT_A, S1, S2, S3, SEC, T0, statLine } from '../helpers/platform.ts';
@@ -1845,4 +1845,62 @@ test("resume is refused while a lost terminal's program may still run (task 82):
   d.proc.setProcess(6161, null); // the program has ended
   assert.equal((await h.act(resume(S1, 4))).ok, true);
   assert.deepEqual(h.hub.closed, ['aaaaaaaaaaa1']);
+});
+
+describe("F38's update-check and update-look (S2 16.5)", () => {
+  const STATE: UpdatePayload = {
+    auto: true,
+    checking: false,
+    check: { state: 'current', summary: 'skydeck is up to date (main at 0123456, as origin/main)' },
+    fetchedAtNs: '1',
+    failure: null,
+  };
+
+  test("each act answers ok with the checker's state as `update`", async (t) => {
+    const d = testDeck(t);
+    const h = harness(d);
+    const calls: string[] = [];
+    const actions = createActions({
+      deck: d.deck,
+      hub: h.hub,
+      terminalFor: () => {
+        throw new Error('no terminal is built for an update act');
+      },
+      openLink: async () => true,
+      log: (line) => h.logs.push(line),
+      changed: () => h.told.push('changed'),
+      prs: { fetch: () => undefined, refresh: () => undefined },
+      updates: {
+        check: () => {
+          calls.push('check');
+          return Promise.resolve({ ...STATE, fetchedAtNs: '2' });
+        },
+        look: () => {
+          calls.push('look');
+          return Promise.resolve(STATE);
+        },
+      },
+    });
+
+    const checked = await actions.act(PAGE, { t: 'act', id: 41, kind: 'update-check' });
+    const looked = await actions.act(PAGE, { t: 'act', id: 42, kind: 'update-look' });
+
+    assert.deepEqual(checked, { ...ok(41), update: { ...STATE, fetchedAtNs: '2' } });
+    assert.deepEqual(looked, { ...ok(42), update: STATE });
+    assert.deepEqual(calls, ['check', 'look']);
+    assert.deepEqual(h.told, []);
+    assert.deepEqual(h.logs, []);
+  });
+
+  test("without the dep each answers 'skydeck cannot do that action'", async (t) => {
+    const d = testDeck(t);
+    const h = harness(d);
+    for (const kind of ['update-check', 'update-look'] as const) {
+      assert.deepEqual(
+        await h.act({ t: 'act', id: 43, kind }),
+        refused(43, 'skydeck cannot do that action'),
+        kind,
+      );
+    }
+  });
 });

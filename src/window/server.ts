@@ -80,6 +80,7 @@ import { decideFoundKeeper } from './starts.ts';
 import { createRegistry } from './terminals.ts';
 import type { Registry } from './terminals.ts';
 import { createTick } from './tick.ts';
+import { createUpdates } from './updates.ts';
 import type { Tick } from './tick.ts';
 import { buildListMessage } from './view/build.ts';
 import { restoreOffer } from './view/search/switcher.ts';
@@ -557,6 +558,14 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     });
     // F36 (S2 12.13): the settings screen; one per server, whose first change keeps the copy.
     const settings = createSettings({ deck, log });
+    // F38 (S2 16.5): the check for a newer skydeck; its state to every page on each change.
+    const updates = createUpdates({
+      deck,
+      changed: (payload) => {
+        pages.update(payload);
+      },
+      log,
+    });
     const acting = createActions({
       deck,
       hub: created,
@@ -576,6 +585,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       settingsChanged: (payload) => {
         pages.settings(payload);
       },
+      updates,
     });
     // Plan C7, S2 8.2.6: what a terminal the server opens for a command or a restore starts at —
     // the area the page that had focus last reported, read when the terminal is opened.
@@ -722,6 +732,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       log,
       starting: () => !ready,
       seen: attending.seen,
+      update: () => updates.payload(),
     });
     created.onChange(() => {
       pages.pushList();
@@ -766,6 +777,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       storeNewer,
       attention: attending.tick,
       tickets: ticketFetches,
+      updates,
     });
     tick = startedTick;
 
@@ -932,6 +944,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       await startedTick.stop();
       await prFetches.idle(); // aborted: it saves nothing more and starts no other (plan D8)
       await ticketFetches.idle(); // F19: likewise
+      await updates.stop(); // F38: a running fetch gets SIGTERM, and up to 2 s; nothing is saved
       attending.seen.stop(); // no hold ends from now on (plan B 2.7)
       await control.close(); // no command reaches it any more; its file goes with it
       await pages.bye(reason); // then an upgrade is answered 503 until the port closes (task 17)

@@ -296,6 +296,8 @@ export async function startPages(
     starting?: () => boolean;
     /** PagesDeps.seen (plan B task 54). */
     seen?: PagesDeps['seen'];
+    /** PagesDeps.update (F38). */
+    update?: PagesDeps['update'];
   } = {},
 ): Promise<PagesFixture> {
   const d = testDeck(t);
@@ -342,6 +344,7 @@ export async function startPages(
     },
     ...(options.starting === undefined ? {} : { starting: options.starting }),
     ...(options.seen === undefined ? {} : { seen: options.seen }),
+    ...(options.update === undefined ? {} : { update: options.update }),
   });
   const listener = await platform.net.listenHttp(
     { host: '127.0.0.1', port: 0 },

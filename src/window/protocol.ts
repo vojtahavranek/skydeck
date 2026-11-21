@@ -6,7 +6,8 @@
  * group, note, done, undone, pr-refresh, pr-add and pr-rm (plan D 2.2); stage C's are restore and
  * dismiss-restore, the banner, and `POST /resume`, `/new` and `/restore` (plan C 2.2); follow-up
  * F36's are settings, setting-set and setting-default, the server's `settings` and the settings
- * screen's payload (S2 12.13).
+ * screen's payload (S2 12.13); F38's are update-check and update-look, the server's `update` and
+ * its payload (S2 16.5).
  *
  * The validators read foreign input: they never throw and return `{ ok: false, kind }` with a fixed
  * kind that never quotes the input (plan A22), so a caller can log the kind. This module imports
@@ -158,7 +159,12 @@ export interface ResizeMessage {
  *  `setting-set` sets ONE setting `key` (a text) of config.json to `value` — a string of at most
  *  4,096 bytes, a number or null, never an object or a list —, `setting-default` removes it from
  *  the file (back to its default). Which keys may be changed, and what a value may be, is the
- *  server's table and config.json's own rules (src/window/settings.ts). */
+ *  server's table and config.json's own rules (src/window/settings.ts).
+ *
+ *  F38 (S2 16.5): `update-check` is Check now (a check for a newer skydeck, with the network,
+ *  whatever the switch says; answered when it has ended), `update-look` the dialog's look without
+ *  the network. Neither carries a field: the checkout, its remote and the program are the
+ *  server's. The result's `update` is the state. */
 export type ActMessage =
   | { t: 'act'; id: number; kind: 'resume'; sessionId: string; cols: number; rows: number }
   | {
@@ -191,7 +197,8 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'end-session'; term: string; sessionId: string }
   | { t: 'act'; id: number; kind: 'settings' }
   | { t: 'act'; id: number; kind: 'setting-set'; key: string; value: string | number | null }
-  | { t: 'act'; id: number; kind: 'setting-default'; key: string };
+  | { t: 'act'; id: number; kind: 'setting-default'; key: string }
+  | { t: 'act'; id: number; kind: 'update-check' | 'update-look' };
 /** Follow-up F13: the page's colours changed while it is open — the title bar's theme switch was
  *  clicked here or in another window of the profile, or the system's scheme changed while the page
  *  follows it. The same colours as `start.theme`, checked the same way; the server answers OSC 10
@@ -613,6 +620,8 @@ export interface ResultMessage {
   /** F36, `settings`, `setting-set` and `setting-default` only, also with a refusal: the settings
    *  screen as the file and the running server are now. Absent for every other kind. */
   settings?: SettingsPayload;
+  /** F38, `update-check` and `update-look` only: the check's state. Absent for every other kind. */
+  update?: UpdatePayload;
 }
 /** F36 (S2 12.13): a JSON value, as config.json holds one. */
 export type SettingValue =
@@ -691,6 +700,11 @@ export interface UpdatePayload {
   /** The last check's fetch failed: when, and why (sanitised, clipped). */
   failure: { atNs: NsText; line: string } | null;
 }
+/** F38: the check's state, to a page right after its `start` and to every page on each change. */
+export interface UpdateMessage {
+  t: 'update';
+  update: UpdatePayload;
+}
 /** F36: a setting was changed in some window: every page's screen follows. */
 export interface SettingsMessage {
   t: 'settings';
@@ -738,7 +752,8 @@ export type ServerMessage =
   | NoticeMessage
   | ByeMessage
   | NotifyMessage
-  | SettingsMessage;
+  | SettingsMessage
+  | UpdateMessage;
 
 /** Output frames (S2 8.2.3): byte 1, the channel as 4-byte big-endian, the record's bytes.
  *  RangeError for a channel that is not a whole number 0–2³²−1. */
@@ -1017,6 +1032,9 @@ const ACTS: Readonly<Record<string, Check>> = {
   settings: object({ t: ANY, id: COUNT, kind: ANY }),
   'setting-set': object({ t: ANY, id: COUNT, kind: ANY, key: TEXT, value: SETTING_VALUE }),
   'setting-default': object({ t: ANY, id: COUNT, kind: ANY, key: TEXT }),
+  // F38 (S2 16.5): Check now and the dialog's look; no field: what is looked at is the server's.
+  'update-check': object({ t: ANY, id: COUNT, kind: ANY }),
+  'update-look': object({ t: ANY, id: COUNT, kind: ANY }),
 };
 
 const INPUT_SHAPE = object({ t: ANY, term: TERM, data: STRING, binary: TRUE }, ['binary']);

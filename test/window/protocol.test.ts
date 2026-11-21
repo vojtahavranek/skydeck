@@ -39,6 +39,8 @@ import type {
   SettingsPayload,
   SizeMessage,
   SnapMessage,
+  UpdateMessage,
+  UpdatePayload,
   StartMessage,
   StatusAnswer,
   ThemeMessage,
@@ -1468,6 +1470,52 @@ describe("parsePageMessage: F36's acts (S2 12.13)", () => {
         error: null,
         sessionId: null,
         settings: payload,
+      } satisfies ResultMessage,
+    ];
+    assert.deepEqual(JSON.parse(JSON.stringify(messages)), messages);
+  });
+});
+
+describe("parsePageMessage: F38's acts (S2 16.5)", () => {
+  for (const kind of ['update-check', 'update-look'] as const) {
+    const message: PageMessage = { t: 'act', id: 7, kind };
+    test(`act ${kind} → ok and equal`, () => {
+      assert.deepEqual(parsePageMessage(JSON.stringify(message)), { ok: true, value: message });
+    });
+    test(`act ${kind} with an extra field → refused (no remote, path or program travels)`, () => {
+      refused(page({ ...message, [MARKER]: 1 }));
+      refused(page({ ...message, remote: 'origin' }));
+      refused(page({ ...message, to: 'f'.repeat(40) }));
+    });
+    test(`act ${kind} without its id → refused`, () => {
+      refused(page({ t: 'act', kind }));
+    });
+  }
+
+  test('the update message and the result carrying it compile, and travel as JSON', () => {
+    const update: UpdatePayload = {
+      auto: true,
+      checking: false,
+      check: {
+        state: 'available',
+        summary: '1 new commit on origin/main',
+        to: 'f'.repeat(40),
+        lines: ['1 new commit on origin/main (0123456..fffffff):', '  fffffff  a subject'],
+        blocked: null,
+      },
+      fetchedAtNs: '1794474000000000000',
+      failure: { atNs: '1794474000000000001', line: 'git fetch from origin failed: x' },
+    };
+    const messages: ServerMessage[] = [
+      { t: 'update', update } satisfies UpdateMessage,
+      {
+        t: 'result',
+        id: 1,
+        ok: true,
+        lines: [],
+        error: null,
+        sessionId: null,
+        update,
       } satisfies ResultMessage,
     ];
     assert.deepEqual(JSON.parse(JSON.stringify(messages)), messages);

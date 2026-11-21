@@ -47,6 +47,7 @@ import type { TicketFetches } from './ticket-fetches.ts';
 import { parsePageMessage } from './protocol.ts';
 import type { ActMessage, ResultMessage, SettingsPayload } from './protocol.ts';
 import type { Settings } from './settings.ts';
+import type { Updates } from './updates.ts';
 import { linkToOpen } from './windows.ts';
 
 export interface ActionDeps {
@@ -79,6 +80,9 @@ export interface ActionDeps {
   settings?: Settings;
   /** F36: a setting was changed: every page's screen follows (the server's `pages.settings`). */
   settingsChanged?(payload: SettingsPayload): void;
+  /** F38: the check for a newer skydeck (updates.ts, one per server). Absent: its kinds answer
+   *  "skydeck cannot do that action". */
+  updates?: Pick<Updates, 'check' | 'look'>;
 }
 
 /** A result without its `t` and `id`, which `act` adds. */
@@ -438,6 +442,14 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'setting-set':
       case 'setting-default':
         return changeSetting(action);
+      case 'update-check':
+      case 'update-look': {
+        // F38: the checker decides everything and never rejects; the answer is its state.
+        const updates = deps.updates;
+        if (updates === undefined) return refusal(NOT_AN_ACTION);
+        const update = await (action.kind === 'update-check' ? updates.check() : updates.look());
+        return { ...DONE, update };
+      }
     }
   }
 
@@ -485,7 +497,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
 
   return {
     async act(_page, given) {
-      const { ok, lines, error, sessionId, ended, settings } = await answer(given);
+      const { ok, lines, error, sessionId, ended, settings, update } = await answer(given);
       // Every text of a result passes the sanitiser step 1 prints with (ruled, review 2 of task
       // 32): whatever a message quotes, no escape sequence or line break reaches the page.
       return {
@@ -498,6 +510,8 @@ export function createActions(deps: ActionDeps): ActionHandler {
         ...(ended === undefined ? {} : { ended }),
         // F36: its texts are sanitised by settings.ts; a control's `value` is sent exactly.
         ...(settings === undefined ? {} : { settings }),
+        // F38: its texts are sanitised by the checker (src/update/record.ts).
+        ...(update === undefined ? {} : { update }),
       };
     },
   };

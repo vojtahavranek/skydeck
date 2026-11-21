@@ -1654,3 +1654,43 @@ describe('attention (plan B 2.7; S2 10.1, 10.3)', () => {
     });
   });
 });
+
+describe("F38: the update checker's tick", () => {
+  test('updates.tick is called every second, after the keep-alive; a throw of it is logged, not fatal', async (t) => {
+    const f = fixture(t);
+    const order: string[] = [];
+    let throws = false;
+    const tick = createTick({
+      ...f.deps,
+      keepAlive: {
+        tick() {
+          order.push('keep-alive');
+          return Promise.resolve();
+        },
+      },
+      updates: {
+        tick() {
+          order.push('updates');
+          if (throws) throw new TypeError('marker-secret');
+        },
+      },
+    });
+    t.after(() => tick.stop());
+
+    await tick.run();
+    await tick.run();
+    await tick.run();
+    assert.deepEqual(
+      order.filter((one) => one === 'keep-alive' || one === 'updates'),
+      ['keep-alive', 'updates', 'keep-alive', 'updates', 'keep-alive', 'updates'],
+    );
+    throws = true;
+    await tick.run();
+    await tick.run();
+    assert.equal(order.filter((one) => one === 'updates').length, 5);
+    assert.deepEqual(f.logs, [
+      'tick: the update check failed (TypeError)',
+      'tick: the update check failed (TypeError)',
+    ]);
+  });
+});
