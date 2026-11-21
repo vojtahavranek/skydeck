@@ -3111,6 +3111,14 @@ nothing; `ls` is unchanged.
   which a running Claude Code keeps when the page's scheme changes), or a fixed 256-colour or 24-bit
   colour chosen for a dark background. A colour that can be read already is drawn as it is
   (2026-11-20).
+  The terminal's font list names no symbol or emoji font (`"Cascadia Mono", "Cascadia Code",
+  Consolas, monospace`, the same in `--term-font`): what those fonts lack, Windows' own fallback
+  draws — an emoji in colour, a joined emoji (ZWJ, skin tone) as one picture, and a symbol of
+  text presentation such as Claude Code's `⏺ ⎿ ⏵ ✻ ⚠` in the program's colour. With "Segoe UI
+  Symbol" in the list every emoji was drawn from it, in one colour (the red, orange, yellow and
+  white circles were all grey), and a joined one as its parts squashed into two cells; with "Segoe
+  UI Emoji" ahead of it, `⏺ ⚠ ❤` would be colour emoji too, whatever colour the program gives them
+  (#154; 2026-11-21).
   What the server says about a terminal is shown over that terminal, as the page's own text and
   never written into it (so that the page's screen stays the screen side's): the reconnecting bar
   (7.8) and "sized by another window" (8.2.6) while they hold; a gap or a newer keeper, which the
@@ -4794,7 +4802,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W6 | **Real claude**: Shift+Enter inserts a newline; Ctrl+V pastes text; Ctrl+Shift+V pastes a Windows screenshot; Ctrl+Shift+C copies a selection, and a program's OSC 52 write reaches the Windows clipboard. | A | 9.1, 9.5 |
 | W7 | W6's Ctrl+Shift+V again after closing the WSL terminal `skydeck window` was run from (the interop link of 6.4). | A | 6.4 |
 | W8 | Czech layout in Edge: AltGr characters (`\ [ ] { } @ # ~ \|`) and dead keys (háček, čárka) in a terminal; Ctrl+Shift+digit and Ctrl+Shift+H chords; Ctrl+Shift+- reaches Claude Code (undo). | A | 9.1, 12.9 |
-| W9 | Cascadia and Segoe draw Claude Code's `⏺ ⎿ ⏵` (headless Linux showed empty boxes). | A | the page's font list |
+| W9 | Cascadia, Consolas and Windows' fallback draw Claude Code's `⏺ ⎿ ⏵` in its colours, and emoji in colour (headless Linux showed empty boxes; #154). | A | the page's font list |
 | W10 | **Real claude**: rows with emoji, ZWJ and skin-tone sequences line up; `unicode-graphemes` against `unicode11`, compared with Claude Code's own layout. | A | 9.4 |
 | W11 | Desktop notifications are allowed on the PC: the permission prompt, a toast, a click that selects the session; and they still come when the window has been minimised for half an hour (Chromium throttles hidden pages and Edge may put them to sleep). | B | 13 |
 | W12 | Ctrl+click on a link opens it in the user's default browser, logged in; with `window.links` `"edge"` (set only if the user wants to try it) in their main Edge window. The check copies the user's `config.json` aside first and gives it back at the end, and removes no file. | A | 9.6, 16.4 |
@@ -4972,6 +4980,7 @@ tracks of 2026-11-13; their prototypes and evidence are kept with the research n
 | xterm.js 6.0.0's paste handler sends the pasted text and empties its hidden textarea, but does not cancel the paste event, so the browser then puts the whole text into that textarea: after a paste of 10 MiB in headless Chromium the page sent its input at about 0.4 MB/s and answered a script in seconds; with the paste cancelled after xterm.js took it (the first fix; the page now takes the paste itself, 9.1), the same paste reached the server in under a second (plan task 28). | verified (headless Chromium 1223; the bundle's `handlePasteEvent`) |
 | xterm.js 6.0.0 wraps pasted text unfiltered (`ESC [ 2 0 0 ~`, the text, `ESC [ 2 0 1 ~`): a pasted text that holds `ESC [ 2 0 1 ~` ends its own bracketed paste, and what follows reaches the program as typed keys, Enter included. | verified (headless Chromium 1223; plan task 28's review 2) |
 | xterm.js 6.0.0's DOM renderer writes its colours, cursor and selection rules into `<style>` elements it creates at run time: under `style-src 'self'` a red cell renders black; with `'unsafe-inline'` it renders red. | verified in headless Chromium (review, 2026-11-13) |
+| In Edge 157 on Windows, xterm.js 6.0.0's DOM renderer with a font list that names "Segoe UI Symbol" draws every emoji from that font, which has a glyph of one colour for each (🔴 🟠 🟡 ⚪ grey, 🤷 👨), and a ZWJ sequence as its parts squashed into its two cells; without it Windows' fallback draws emoji in colour and ZWJ and skin-tone sequences as one picture, and `⏺ ⎿ ⏵ ✻ ✓ ⚠ ●` in the cell's colour; with "Segoe UI Emoji" ahead of "Segoe UI Symbol", `⏺ ⚠ ❤` are colour emoji. Flags (🇺🇳) are two letters on Windows either way. | verified (headless Edge 157, Windows fonts, 2026-11-21; #154) |
 | On WSL a crashing process's core dump is piped to WSL's crash collector (`core_pattern` is `\|/wsl-capture-crash …`), which keeps up to `maxCrashDumpCount` (default 10) dumps in `crashDumpFolder` (default `%Temp%\wsl-crashes`). A non-dumpable process (`PR_SET_DUMPABLE` 0) produces no dump, piped or not. For a piped dump the kernel ignores a core limit of 0 and aborts only on a soft limit of exactly 1 byte (`fs/coredump.c` of Linux 6.6). | `core_pattern` verified; documentation (learn.microsoft.com/windows/wsl/wsl-config, `prctl(2)`); kernel source read for 6.6 in review; 6.18 UNVERIFIED (W24) |
 | `/run/user/<uid>` outlives the user's last terminal only when the user lingers; on one machine the user does. | verified |
 | The keeper's code needs python3 3.9 or newer (`os.waitstatus_to_exitcode`); it was run on 3.12 only. | inferred (3.9) / verified (3.12) |
