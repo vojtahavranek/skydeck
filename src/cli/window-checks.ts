@@ -38,6 +38,8 @@ import type { RuntimeFiles } from '../window/runtime.ts';
 import { verifyVendored } from '../window/vendor.ts';
 import { deriveProfileDirUnder } from '../window/windows.ts';
 import { instanceIdleTimeout } from '../window/wslconfig.ts';
+import { counted, short } from '../update/look.ts';
+import { checkoutRoot, readCheckEntry } from '../update/record.ts';
 import { PYTHON3_NEEDED, probePython3 } from './python.ts';
 
 type Kind = 'ok' | 'info' | 'problem';
@@ -49,6 +51,8 @@ interface WindowFacts {
   places: Places;
   config: Config | null;
   store: Store | null;
+  /** The full id of the commit doctor's first line names; null when it is not known (F38). */
+  commit: string | null;
 }
 
 type Server =
@@ -178,6 +182,7 @@ export const WINDOW_CHECKS: readonly WindowCheck[] = [
   { name: "the window's server", needs: 'deck', run: checkServer },
   { name: 'port', needs: 'deck', run: checkPort },
   { name: 'launch alarm', needs: 'deck', run: checkAlarm },
+  { name: 'update', needs: 'deck', run: checkUpdate },
   { name: 'keep-alive', needs: 'deck', run: checkKeepAlive },
   { name: 'interop', needs: 'deck', run: checkInterop },
   { name: 'the C: drive', needs: 'nothing', run: checkDrive },
@@ -331,6 +336,57 @@ function checkAlarm(view: WindowView, report: Report): void {
     'problem',
     `a launch token was presented twice at ${timeOf(alarm)}, so another program may have skydeck's key; run skydeck window --new-secret`,
   );
+}
+
+/**
+ * F38 (S2 16.3, 16.5): what the window's server's last check for a newer skydeck said, from the
+ * stored entry (`window_update_check`) alone — doctor uses no network. Always `info`.
+ */
+function checkUpdate(view: WindowView, report: Report): void {
+  const { store } = view.deck ?? unreachable();
+  const { platform, commit } = view.facts;
+  const entry = readCheckEntry(store);
+  if (entry === null) {
+    report('info', "update: never checked (the window's server checks when it starts)");
+    return;
+  }
+  if (entry.root !== checkoutRoot(platform.files, platform.appRoot)) {
+    report(
+      'info',
+      `update: the last check was of another checkout (${entry.root}); none of this one yet`,
+    );
+    return;
+  }
+  const nowNs = platform.clock.nowNs();
+  const ago = (ns: string): string => `${formatAge(nowNs - BigInt(ns))} ago`;
+  if (entry.head !== null && commit !== null && entry.head !== commit) {
+    report(
+      'info',
+      `update: last looked ${ago(entry.lookedAtNs)} at ${short(entry.head)}, which is not the commit this checkout is at now; the window's server checks again when it starts`,
+    );
+    return;
+  }
+  const fetched =
+    entry.fetchedAtNs === null ? '(never fetched)' : `(fetched ${ago(entry.fetchedAtNs)})`;
+  const failed =
+    entry.failure === null
+      ? ''
+      : `; the last check failed ${ago(entry.failure.atNs)}: ${entry.failure.line}`;
+  const { outcome } = entry;
+  switch (outcome.kind) {
+    case 'available':
+      report(
+        'info',
+        `update: ${counted(outcome.count, 'new commit', 'new commits')} on ${outcome.upstream} ${fetched}; skydeck update applies ${outcome.count === 1 ? 'it' : 'them'}${failed}`,
+      );
+      return;
+    case 'current':
+      report('info', `update: ${outcome.line} ${fetched}${failed}`);
+      return;
+    case 'cannot':
+      report('info', `update: ${outcome.line}${failed}`);
+      return;
+  }
 }
 
 /**
