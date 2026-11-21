@@ -3894,7 +3894,8 @@ editing the file by hand stay as they are, and the file's format does not change
   unknown key "x"`) and `Mend the file by hand first: the window changes nothing in it until then.`
   Then every key in the guide's order under its group — Starting sessions, The list, Install, Pull
   requests, Restore, Claude Code, Tickets, The window —, each with its name as in the file
-  (`prRefreshMinutes`, `window.links`), its meaning in one line, its value, `default <value> · set in
+  (`prRefreshMinutes`, `window.links`), its meaning in one line (`groupPattern`'s says that it
+  runs on every session's title at every list), its value, `default <value> · set in
   the file` (or `· not in the file: the default is used`; while the file cannot be read only the
   default), when a change applies, and, while the running server uses another value than the file
   holds — a hand edit, or a key the server reads at its start that was just changed —, `applies
@@ -4096,7 +4097,9 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   one value of `--domain-name`, `window.links` picks between the two programs of 15.5. A
   `groupPattern` is a regular expression the server runs on every title at every list, as a hand
   edit of it already is: one that backtracks without end stalls the server until the file is
-  mended and the window restarted.
+  mended and the window restarted (ruled by the lead: it stays changeable, with no time limit; the
+  screen's line for it says that it runs on every title, and the guide's trouble table how to get
+  back — the copy, or the key taken out of the file, then `skydeck window --restart`).
 - **Browser extensions.** An extension that may read `127.0.0.1` pages could read the terminals and
   the secret. The window runs in its own profile folder, so the user's extensions are not there.
   Extensions that an Edge policy forces into every profile still are: check W13 lists them

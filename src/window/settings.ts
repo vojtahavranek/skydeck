@@ -103,7 +103,7 @@ export const SETTINGS: Readonly<Record<SettingKey, SettingRow>> = {
   groupPattern: {
     group: 'The list',
     meaning:
-      'A JavaScript regular expression: when a session has no group, the text it matches in the title is the group.',
+      'A JavaScript regular expression, run on every session’s title at every list: when a session has no group, the text it matches in its title is the group.',
     kind: 'change',
     names: null,
     ...TEXT,

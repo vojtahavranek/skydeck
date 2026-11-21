@@ -194,6 +194,8 @@ describe('the table (G1): one row for every key of Config', () => {
       Object.keys(SETTINGS).filter((key) => AT_ONCE.includes(key)),
     );
     assert.equal(SETTINGS['window.keepAlive'].applies, 'restart');
+    // Ruled: the pattern stays changeable, and its line says it runs on every title.
+    assert.match(SETTINGS.groupPattern.meaning, /regular expression, run on every session’s title/);
     assert.equal(SETTINGS.terminal.applies, 'commands');
     assert.equal(SETTINGS['wezterm.domain'].applies, 'commands');
     assert.equal(SETTINGS.firstRunDoneAfterDays.applies, 'install');
