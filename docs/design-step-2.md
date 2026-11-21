@@ -4117,8 +4117,9 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   decides the host of the group chip's link (opened only on the user's click, as 9.6 allows) and,
   for an address that starts with a `ticketStatus` rule's `match`, the `{url}` that rule's program
   is given — the rules, the programs, stay the file's. `window.keepAlive` `"off"` means that, from
-  the next start of the server, WSL is no longer kept running (6.1): it stops 15 seconds after its
-  last Windows terminal closes, and every session in the window with it. A
+  the next start of the server, WSL is no longer kept running (6.1): unless WSL's own
+  `instanceIdleTimeout` is `-1`, it stops 15 seconds after its last Windows terminal closes, and
+  every session in the window with it. A
   `groupPattern` is a regular expression the server runs on every title at every list, as a hand
   edit of it already is: one that backtracks without end stalls the server until the file is
   mended and the window restarted (ruled by the lead: it stays changeable, with no time limit; the

@@ -237,7 +237,7 @@ export const SETTINGS: Readonly<Record<SettingKey, SettingRow>> = {
   'window.keepAlive': {
     group: 'The window',
     meaning:
-      '"wsl": the server keeps WSL running while the window runs anything; "off": it does not, and WSL stops 15 s after its last Windows terminal closes, ending every session in the window.',
+      '"wsl": the server keeps WSL running while the window runs anything; "off": it does not, and unless instanceIdleTimeout is -1 WSL stops 15 s after its last Windows terminal, ending every session.',
     kind: 'change',
     names: null,
     control: 'choice',

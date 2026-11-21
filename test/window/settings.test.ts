@@ -17,6 +17,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -442,6 +443,8 @@ describe('writing the file (G3)', () => {
       '{ "prRefreshMinutes": 7, "futureKey": true }',
       '{ "window": { "links": "firefox" } }',
       '[]',
+      // A byte-order mark is kept in the text, so the file is not JSON, as for every command.
+      '\ufeff{ "prRefreshMinutes": 7 }',
     ]) {
       const w = world(t, broken);
       let problem: string;
@@ -680,7 +683,7 @@ describe('writing the file (G3)', () => {
     assert.ok(!outcome.ok && /symbolic link/.test(outcome.error), JSON.stringify(outcome));
     assert.ok(/symbolic link/.test(w.settings.payload().problem ?? ''));
     assert.equal(existsSync(elsewhere), false);
-    rmSync(w.path);
+    unlinkSync(w.path); // the link itself (rmSync leaves a dangling link on Node 24.12)
     mkdirSync(w.path);
     outcome = w.settings.set('prRefreshMinutes', 8);
     assert.ok(!outcome.ok && /not a regular file/.test(outcome.error), JSON.stringify(outcome));
