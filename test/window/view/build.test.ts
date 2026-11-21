@@ -1209,6 +1209,7 @@ test("src/window/view/ imports values only from text, A8's isListed (and F33's i
     'build.ts',
     'chip.ts',
     'sections.ts',
+    'slot-moves.ts',
   ]);
   for (const name of files) {
     for (const [names, from] of valueImports(join(dir, name))) {
