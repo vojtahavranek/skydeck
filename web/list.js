@@ -1010,12 +1010,14 @@ export function createList(root, hooks) {
       /** @type {HTMLElement} */ (selectedLine).scrollIntoView({ block: 'nearest' });
     }
     selectedSection = sectionNow;
-    // F37: a row this page moved is scrolled into view once, at the first render that draws it —
-    // the one exception to the rule above (a move inside its section).
+    // F37: a row this page moved is scrolled into view once, at the next render (the list that
+    // answers the move's `view`) — the one exception to the rule above (a move inside its
+    // section). The request goes with that render whether it drew the row or not, so that no
+    // later list scrolls to it unasked.
     if (followLine !== null) {
       /** @type {HTMLElement} */ (followLine).scrollIntoView({ block: 'nearest' });
-      following = null;
     }
+    following = null;
 
     // G5 (ruled 2026-11-16; F9: any row of the block, its first too): a closed block that the
     // selection opened — one of its rows is selected, however it got there (a slot chord,
@@ -1301,8 +1303,8 @@ export function createList(root, hooks) {
     }
   };
 
-  /** F37: the row of `sessionId` is scrolled into view at the next render that draws it (a move of
-   *  this page's: the list that shows the new order). @type {string | null} */
+  /** F37: the row of `sessionId` is scrolled into view at the next render, when it draws it (a move
+   *  of this page's: the list that shows the new order). @type {string | null} */
   let following = null;
   /** @param {string} sessionId */
   const follow = (sessionId) => {

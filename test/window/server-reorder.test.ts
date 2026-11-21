@@ -13,6 +13,7 @@ import { parseRememberedSlots } from '../../src/sessions/restore-order.ts';
 import type { ListMessage } from '../../src/window/protocol.ts';
 import { REORDER_REFUSALS } from '../../src/window/view/slot-moves.ts';
 import { S1, S2, S3 } from '../helpers/platform.ts';
+import { until } from '../helpers/keeper.ts';
 import { connectTestPage, serverSandbox } from '../helpers/window.ts';
 import type { ServerSandbox, TestPage, TestServer } from '../helpers/window.ts';
 
@@ -178,5 +179,49 @@ describe('moving a session of Open (F37)', () => {
     const slots = list.terminals.map((term) => term.slot);
     assert.deepEqual([...slots].sort(), [1, 2, 3, 4]);
     assertSlotsMatchRows(list);
+  });
+
+  test('without a move, a refresh takes the slots of the window into the restore order', async (t) => {
+    const { d } = await threeOpen(t);
+    const remembered = (): Record<string, number> =>
+      Object.fromEntries(
+        parseRememberedSlots(d.deck.store.getKv('window_restore_order'))[0]?.sessions ?? [],
+      );
+    await until(
+      () => JSON.stringify(remembered()) === JSON.stringify({ [S1]: 1, [S2]: 2, [S3]: 3 }),
+      () => `the restore order holds the three slots: ${JSON.stringify(remembered())}`,
+      10_000,
+    );
+  });
+
+  test("a moved terminal closed while the store is locked: its entry goes at the next refresh's write", async (t) => {
+    const { d, page } = await threeOpen(t);
+    const moved = await page.act({ kind: 'reorder', sessionId: S3, direction: 'up' });
+    assert.equal(moved.ok, true, JSON.stringify(moved));
+    const list = await page.list(reads(['S1:1', 'S3:2', 'S2:3']), 'moved');
+    const term = list.terminals.find((one) => one.sessionId === S2)?.id ?? '';
+    const kept = (): Record<string, number> =>
+      JSON.parse(d.deck.store.getKv('window_slots') ?? '{}') as Record<string, number>;
+    assert.equal(kept()[term], 3, "S2's terminal moved from 2 to 3");
+    page.send({ t: 'input', term, data: '/exit\r' });
+    await page.list(
+      (candidate) => candidate.terminals.some((one) => one.id === term && one.state === 'ended'),
+      "S2's program ended",
+    );
+    const other = new DatabaseSync(d.deck.places.dbPath);
+    other.exec('BEGIN IMMEDIATE');
+    try {
+      const closed = await page.act({ kind: 'close-terminal', term });
+      assert.equal(closed.ok, true, 'a close answers ok whatever the write does');
+      assert.equal(kept()[term], 3, 'the write met the lock: the entry is still stored');
+    } finally {
+      other.exec('ROLLBACK');
+      other.close();
+    }
+    await until(
+      () => !(term in kept()),
+      () => `the entry gone after a refresh: ${JSON.stringify(kept())}`,
+      10_000,
+    );
   });
 });

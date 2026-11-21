@@ -30,10 +30,20 @@ import {
 import type { EditWorld } from './helpers/shell.ts';
 import { resumeHere } from './helpers/terminal.ts';
 
-/** Open's rows in this order, each in its terminal, numbered 1, 2, … top to bottom. */
-function openList(ids: readonly string[], terms: Record<string, string>): Record<string, unknown> {
+/** Open's rows in this order, each in its terminal, numbered 1, 2, … top to bottom; the first row
+ *  titled `title` when it is given. */
+function openList(
+  ids: readonly string[],
+  terms: Record<string, string>,
+  title?: string,
+): Record<string, unknown> {
   return scriptedList(
-    ids.map((id, at) => ({ id, terminal: terms[id] ?? null, slot: at + 1 })),
+    ids.map((id, at) => ({
+      id,
+      terminal: terms[id] ?? null,
+      slot: at + 1,
+      ...(at === 0 && title !== undefined ? { title } : {}),
+    })),
     ids.map((id, at) => ({ id: terms[id] ?? '', slot: at + 1, sessionId: id })),
   );
 }
@@ -156,6 +166,54 @@ test('F37: moving a session of Open by key', async (t) => {
     assert.deepEqual(w.acts(), []);
   });
 
+  await t.test("a closed block's caption selected: `no session selected`, no act", async (t) => {
+    const page = await newPage(t, chromium);
+    // S1 and S2 a block of the group G; once the page's view closes it, the stand-in draws its
+    // caption alone, as the server does.
+    const shown = openList([S1, S2], TERMS) as { sections: Record<string, unknown>[] };
+    const rows = (shown.sections[0] as { rows: Record<string, unknown>[] }).rows;
+    rows.forEach((row, at) => {
+      row['group'] = 'G';
+      row['stack'] = { group: 'G', size: 2, role: at === 0 ? 'head' : 'member', head: S1 };
+    });
+    const closed = structuredClone(shown);
+    const open = closed.sections[0] as Record<string, unknown>;
+    open['rows'] = [];
+    open['closedStacks'] = [{ group: 'G', size: 2, needYou: 0, head: S1, at: 0 }];
+    let sent: Record<string, unknown>[] = [];
+    const closedByPage = (): boolean =>
+      sent.some(
+        (message) =>
+          message['t'] === 'view' &&
+          Array.isArray(message['closed']) &&
+          message['closed'].length > 0,
+      );
+    const w = await editWorld(t, page, () => (closedByPage() ? closed : shown));
+    sent = w.sent;
+    await clickRow(page, S1);
+    await toZone(page, 'list');
+    await page.keyboard.press('ArrowLeft'); // closes the block and selects its caption
+    await until(
+      () =>
+        page.evaluate(
+          () => document.querySelector('#list .block-head[data-selected="true"]') !== null,
+        ),
+      'the caption selected',
+    );
+    for (const key of ['Shift+ArrowUp', 'Shift+J']) {
+      await page.evaluate(() => {
+        (document.querySelector('#key-message') as HTMLElement).textContent = '';
+      });
+      await page.keyboard.press(key);
+      await until(
+        async () => (await keyMessage(page)) === 'no session selected',
+        `${key}: the key bar says why`,
+      );
+    }
+    await sleep(200);
+    assert.deepEqual(w.acts(), []);
+  });
+
   await t.test('after an ok the moved row is scrolled into view', async (t) => {
     const page = await newPage(t, chromium);
     await page.setViewportSize({ width: 900, height: 360 });
@@ -192,6 +250,18 @@ test('F37: moving a session of Open by key', async (t) => {
     w.list(openList([...ids.slice(0, 7), last, ids[7] as string], terms));
     await until(() => inView(last), 'the moved row in view');
     assert.equal(await selectedRow(page), last);
+    // Once: scrolled away again, a list that comes leaves the list where the user put it.
+    await page.evaluate(() => {
+      for (const one of document.querySelectorAll<HTMLElement>('#list, #list *')) one.scrollTop = 0;
+    });
+    assert.equal(await inView(last), false);
+    w.list(openList([...ids.slice(0, 7), last, ids[7] as string], terms, 'a new title'));
+    await until(
+      async () => (await page.locator('#list').textContent())?.includes('a new title') === true,
+      'the next list drawn',
+    );
+    await sleep(200);
+    assert.equal(await inView(last), false, 'no second scroll');
   });
 
   await t.test(

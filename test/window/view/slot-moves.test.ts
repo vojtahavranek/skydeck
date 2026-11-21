@@ -18,6 +18,7 @@ import {
   reorderedRows,
 } from '../../../src/window/view/slot-moves.ts';
 import type { ReorderDirection } from '../../../src/window/view/slot-moves.ts';
+import { planMove } from '../../../src/window/reorder.ts';
 import { ds, meta, rows } from '../../helpers/derived.ts';
 import { BOOT_A, SEC, T0 } from '../../helpers/platform.ts';
 
@@ -44,6 +45,9 @@ interface Spec {
   ended?: 'week' | 'earlier';
   /** An empty copy (of session 99) running elsewhere, which only Show done lists. */
   emptyCopy?: boolean;
+  /** A second terminal of the window showing the session too (a `/resume` inside a terminal),
+   *  with this slot. */
+  twin?: number;
 }
 
 function holder(sessionId: string, pid: number, background = false): Holder {
@@ -106,6 +110,24 @@ function world(specs: readonly Spec[]): Omit<ViewInput, 'view' | 'selected'> {
       elsewhere.set(id, { pid, tty: null });
     } else {
       sessions.push(ds({ id, state: 'working', holders: [holder(id, 4000 + spec.n)] }));
+    }
+    if (spec.twin !== undefined) {
+      terminals.push({
+        id: termId(100 + spec.n),
+        slot: spec.twin,
+        state: 'running',
+        sessionId: id,
+        expectedSessionId: id,
+        kind: 'resume',
+        label: null,
+        dir: '/home/dev/projects/demo',
+        program: { pid: 4100 + spec.n, procStart: 4600 + spec.n },
+        openedNs: T0 - DAY + BigInt(100 + spec.n) * SEC,
+        cols: 80,
+        rows: 24,
+        exit: null,
+        notReported: false,
+      });
     }
     if (spec.slot !== undefined) {
       terminals.push({
@@ -419,8 +441,9 @@ function generator(seed: number): () => number {
   };
 }
 
-test('F37, a property over generated Opens: after a move the order is the one intended, the numbers ascend and the set of slots stays', () => {
+test('F37, a property over generated Opens: after a move the order is the one intended, the numbers ascend and the set of slots stays; with a session two terminals show, the move is refused instead when it would not be', () => {
   let moved = 0;
+  let twinsRefused = 0;
   for (let seed = 1; seed <= 1000; seed += 1) {
     const random = generator(seed);
     const pick = <T>(items: readonly T[]): T => {
@@ -442,6 +465,7 @@ test('F37, a property over generated Opens: after a move the order is the one in
         'background',
         'copy',
         'ended',
+        'twin',
       ]);
       const base: Spec = group === '' ? { n } : { n, group };
       if (kind === 'slot' && free.length > 0) {
@@ -452,6 +476,14 @@ test('F37, a property over generated Opens: after a move the order is the one in
         specs.push({ ...base, slot: null });
       } else if (kind === 'other' || kind === 'background') {
         specs.push({ ...base, elsewhere: kind });
+      } else if (kind === 'twin' && free.length >= 2) {
+        const [slot, twin] = [
+          free.splice(Math.floor(random() * free.length), 1)[0],
+          free.splice(Math.floor(random() * free.length), 1)[0],
+        ];
+        specs.push({ ...base, slot: slot ?? null, ...(twin === undefined ? {} : { twin }) });
+      } else if (kind === 'twin') {
+        specs.push({ ...base, slot: null });
       } else if (kind === 'copy') {
         specs.push({ ...base, elsewhere: 'other', emptyCopy: true });
       } else if (free.length > 0) {
@@ -464,8 +496,18 @@ test('F37, a property over generated Opens: after a move the order is the one in
     const chosen = pick(specs);
     const direction = pick<ReorderDirection>(['up', 'down']);
     const intended = reorderedRows(before, sid(chosen.n), direction);
-    const plan = planReorder(before, sid(chosen.n), direction);
+    const plan = planMove(input, sid(chosen.n), direction);
     const label = `seed ${seed}: ${JSON.stringify(specs)} move ${chosen.n} ${direction}`;
+    if (!plan.ok && plan.error === REORDER_REFUSALS.twins) {
+      // Refused, nothing changed: only where a session has two terminals of the window.
+      assert.ok(intended.ok, label);
+      assert.ok(
+        specs.some((spec) => spec.twin !== undefined),
+        label,
+      );
+      twinsRefused += 1;
+      continue;
+    }
     assert.equal(plan.ok, intended.ok, label);
     if (!plan.ok || !intended.ok) {
       continue;
@@ -483,11 +525,12 @@ test('F37, a property over generated Opens: after a move the order is the one in
       [...slots].sort((a, b) => a - b),
       label,
     );
-    assert.deepEqual(
-      [...slots].sort((a, b) => a - b),
-      before.flatMap((row) => (row.slot === null ? [] : [row.slot])).sort((a, b) => a - b),
-      label,
-    );
+    // Every terminal of the window: the same slots as before, none twice.
+    const all = (terminals: readonly { slot: number | null }[]): number[] =>
+      terminals.flatMap((term) => (term.slot === null ? [] : [term.slot])).sort((a, b) => a - b);
+    const afterAll = all(applied(input, plan.slots).terminals);
+    assert.deepEqual(afterAll, all(input.terminals), label);
+    assert.equal(new Set(afterAll).size, afterAll.length, label);
     const was = before.findIndex((row) => row.id === sid(chosen.n));
     const now = after.findIndex((row) => row.id === sid(chosen.n));
     assert.ok(direction === 'up' ? now < was : now > was, label);
@@ -498,4 +541,5 @@ test('F37, a property over generated Opens: after a move the order is the one in
     }
   }
   assert.ok(moved > 150, `only ${moved} of the generated moves were made`);
+  assert.ok(twinsRefused > 0, 'the generator met a move that two terminals of a session refuse');
 });

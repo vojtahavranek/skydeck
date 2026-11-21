@@ -1583,10 +1583,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       if (changes.size === 0) return 'ok';
       const next = new Map(moved);
       for (const [id, slot] of changes) next.set(id, slot);
-      for (const [id, slot] of changes) {
-        if (slot === terms.get(id)?.metaSlot) next.delete(id);
-      }
-      const pruned = prunedSlots(next);
+      const pruned = prunedSlots(next); // entries equal to their meta slot are left out there
       deps.persistSlots?.(pruned); // a throw refuses the move: nothing is applied
       for (const [id, slot] of changes) {
         const term = terms.get(id);

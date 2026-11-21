@@ -2828,10 +2828,10 @@ terminal of the window first, or read the slots below as the ones after them.
    Shift+↑. Expected: `move-3` is the second row and has the number 2, `move-2` the third with 3; the
    selection and `Focus: list` stay on `move-3`. Ctrl+Shift+2 shows `move-3`'s terminal,
    Ctrl+Shift+3 `move-2`'s, Ctrl+Shift+1 `move-1`'s.
-3. **The letters.** Back in the list on `move-3` (Ctrl+Shift+L): Shift+K moves it to the top (number
-   1), Shift+J back down one place, Shift+↓ down again. Then turn Caps Lock on and press `k` and
-   `K` without Shift: the selection moves, no row does; Shift+K under Caps Lock moves `move-3` up.
-   Turn Caps Lock off.
+3. **The letters.** Click `move-3` (the second row), then Ctrl+Shift+L (`Focus: list`): Shift+K
+   moves it to the top (number 1), Shift+J back down one place, Shift+↓ down again. Then turn Caps
+   Lock on and press `k` and `K` without Shift: nothing moves, neither the selection nor a row;
+   Shift+K under Caps Lock moves `move-3` up. Turn Caps Lock off.
 4. **The Czech layout.** Switch Windows to the Czech layout (W8) and do step 3 again. Expected: the
    same. Switch back.
 5. **What does not move.** On the top row Shift+↑: the key bar says `already at the top of Open`,

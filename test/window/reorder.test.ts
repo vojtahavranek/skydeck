@@ -10,8 +10,8 @@ import type { ViewMessage } from '../../src/window/protocol.ts';
 import { createReorder, SERVER_STOPPING } from '../../src/window/reorder.ts';
 import type { ReorderDeps } from '../../src/window/reorder.ts';
 import { REORDER_REFUSALS } from '../../src/window/view/slot-moves.ts';
-import { ds, rows } from '../helpers/derived.ts';
-import { BOOT_A, S1, S2, SEC, T0 } from '../helpers/platform.ts';
+import { ds, meta, rows } from '../helpers/derived.ts';
+import { BOOT_A, S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
 
 function terminal(n: number, sessionId: string): TerminalInfo {
   return {
@@ -145,4 +145,44 @@ describe('the reorder act on the server (F37)', () => {
     });
     assert.throws(() => reorder.reorder(view(), S2, 'up'), /locked/);
   });
+});
+
+test('a session two terminals of the window show: a move that would not read as intended is refused with its own line, nothing changed', () => {
+  // S1 in slot 1 and, after a `/resume` inside a terminal, in slot 2 too; S2 and S3 a block in 3, 4.
+  // Moved past the block S1 would get 4: its row would go to the terminal in slot 2, and the numbers
+  // would read 1 3 2.
+  const calls: Map<string, number>[] = [];
+  let remembered = 0;
+  const twin = { ...terminal(5, S1), slot: 2 };
+  const reorder = createReorder({
+    registry: {
+      list: () => [terminal(1, S1), twin, { ...terminal(3, S2) }, { ...terminal(4, S3) }],
+      setSlots(changes) {
+        calls.push(new Map(changes));
+        return 'ok';
+      },
+    },
+    rows: () =>
+      rows([running(S1, 4001), running(S2, 4003), running(S3, 4004)], {
+        metas: [meta(S2, { group: 'G' }), meta(S3, { group: 'G' })],
+      }),
+    elsewhere: () => new Map(),
+    nowNs: () => T0,
+    remember: () => {
+      remembered += 1;
+    },
+  });
+  assert.deepEqual(reorder.reorder(view(), S1, 'down'), {
+    ok: false,
+    error: 'this session is shown by two terminals; close one to move it',
+  });
+  assert.equal(
+    REORDER_REFUSALS.twins,
+    'this session is shown by two terminals; close one to move it',
+  );
+  assert.deepEqual(calls, []);
+  assert.equal(remembered, 0);
+  // A move the twin does not spoil goes through: S3 up inside the block.
+  assert.deepEqual(reorder.reorder(view(), S3, 'up'), { ok: true });
+  assert.equal(calls.length, 1);
 });

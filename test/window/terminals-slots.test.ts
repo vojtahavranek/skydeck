@@ -375,6 +375,40 @@ describe('registry: when the moved slots are written (F37)', () => {
     await sleep(200);
     assert.equal(kept.writes.length, writes);
   });
+
+  test('a hello that comes after the stop changes no slot and writes nothing', async (t) => {
+    const box = await registrySandbox(t);
+    const r0 = box.registry();
+    const late = await open(box, r0, 5);
+    r0.drop();
+    // Its moved slot 3 is another terminal's: before the stop its hello would take another one.
+    const kept = store();
+    const r = box.registry({ movedSlots: new Map([[late, 3]]), persistSlots: kept.persist });
+    await open(box, r, 3);
+    const keeper = box.keeperOf(late);
+    box.signalKeeper(keeper, 'SIGSTOP');
+    let found: Promise<unknown> = Promise.resolve();
+    try {
+      found = r.registry.rediscover();
+      await sleep(300);
+      await r.registry.stopAll();
+    } finally {
+      box.signalKeeper(keeper, 'SIGCONT');
+    }
+    await found;
+    await until(
+      () => r.events.hello.some((event) => event.hello.id === late),
+      'the late hello came after the stop',
+      10_000,
+    );
+    await sleep(200);
+    assert.deepEqual(
+      r.log.filter((line) => line.includes("is another terminal's")),
+      [],
+      'no slot was taken for it',
+    );
+    assert.deepEqual(kept.writes, []);
+  });
 });
 
 describe('the moved slots in the store (F37)', () => {

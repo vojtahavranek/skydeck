@@ -1425,7 +1425,8 @@ a WSL terminal of your own, run `skydeck window`:
   `today at 18:02`, `yesterday at 18:02`, `on 12 Nov at 18:02` or `on 12 Nov 2025 at 18:02`, in the
   page's (Windows') time zone, and follows the clock: `today` becomes `yesterday` at midnight. The
   sessions are listed, and restored, in the order of the slots they last had in the window, so they
-  come back in the same order under Open (with new numbers from 1); the others follow. `skydeck
+  come back in the same order under Open, each taking the lowest free number in that order; the
+  others follow. `skydeck
   restore` uses the same order.
 - **`Restore 3`** starts the ticked sessions as `skydeck restore` does — each through the same
   checks, `restoreBatch` at a time, the memory check before each batch — but in the window: they
