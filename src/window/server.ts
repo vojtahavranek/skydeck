@@ -77,6 +77,7 @@ import { createSettings } from './settings.ts';
 import type { Seen } from './seen.ts';
 import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
+import { readMovedSlots, writeMovedSlots } from './moved-slots.ts';
 import { createRegistry } from './terminals.ts';
 import type { Registry } from './terminals.ts';
 import { createTick } from './tick.ts';
@@ -488,6 +489,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       keeperFile: files.keeperFile(build),
       keepersLog,
       log,
+      // F37 (S2 7.6): the slots moved by hand, applied at each keeper's hello.
+      movedSlots: readMovedSlots(deck.store),
+      persistSlots: (moved) => {
+        writeMovedSlots(deck.store, moved);
+      },
       events: {
         hello(term, hello, origin) {
           hellos.set(term.id, hello);
@@ -762,6 +768,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       afterRefresh: () => {
         pageMark.update(pages.count()); // plan C20; it never throws
         decidePostponed();
+        created.flushSlots(); // F37: a write of the moved slots that failed; it never throws
       },
       storeNewer,
       attention: attending.tick,
