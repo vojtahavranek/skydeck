@@ -12,9 +12,10 @@
  * be a changeable one of `SETTINGS`; the value is checked by config.json's own rules
  * (`parseConfig`, with its messages) as part of the whole file it would make. The file is read
  * again for every change and written back whole — every other key, known or shown-only, as it was,
- * in its order — through a temporary file beside it and a rename, with its mode; before the first
- * write of a server's life a copy of it is kept beside it (`<file>.skydeck-backup`, mode 600, one
- * copy, replaced by the next server's first write). A file that does not parse is never written
+ * in its order, with its indentation and line ends — through a temporary file beside it and a
+ * rename, with its mode; the first time a server writes over the file a copy of it is kept beside it
+ * first (`<file>.skydeck-backup`, mode 600, one copy, replaced by the next server's). A file its
+ * owner may not write, or another user's, is not written over. A file that does not parse is never written
  * ("repaired"): the screen says what `doctor` says. A symbolic link is followed as install's
  * settings file is (its file is replaced, the link stays; one to nothing is refused), and a path
  * that is not a regular file is refused. Only the keys the running server reads at each use (AT
@@ -236,7 +237,7 @@ export const SETTINGS: Readonly<Record<SettingKey, SettingRow>> = {
   'window.keepAlive': {
     group: 'The window',
     meaning:
-      '"wsl": the server keeps WSL running while the window has anything running; "off": it does not.',
+      '"wsl": the server keeps WSL running while the window runs anything; "off": it does not, and WSL stops 15 s after its last Windows terminal closes, ending every session in the window.',
     kind: 'change',
     names: null,
     control: 'choice',
@@ -300,6 +301,8 @@ type Look =
       /** The file written: the path, or the file a symbolic link there points to. */
       target: string;
       mode: number;
+      /** The owner's uid. */
+      uid: number;
       text: string;
       raw: Raw;
       config: Config;
@@ -340,6 +343,26 @@ function textOf(value: unknown): string {
 
 function same(a: unknown, b: unknown): boolean {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+/** The file's line end: CRLF when every line ends so, else LF (a file on one line: LF). */
+function lineEndOf(text: string): '\n' | '\r\n' {
+  return text.includes('\r\n') && !/(?:^|[^\r])\n/.test(text) ? '\r\n' : '\n';
+}
+
+/**
+ * Why the window does not write over this file, else null: one its owner may not write (a mode
+ * without the owner's write bit, 444 say) is the owner's statement, which a rename would overrule;
+ * one of another user would become the user's. Nothing is written over either.
+ */
+function notToWrite(path: string, look: { mode: number; uid: number }, uid: number): string | null {
+  if ((look.mode & 0o200) === 0) {
+    return `${path} is read-only (mode ${look.mode.toString(8).padStart(3, '0')}): the window does not write over it; make it writable (chmod u+w) or change it by hand: nothing was changed`;
+  }
+  if (look.uid !== uid) {
+    return `${path} belongs to another user: the window does not write over it; nothing was changed`;
+  }
+  return null;
 }
 
 /** The indentation the file's own lines show (the first one indented), else two spaces. */
@@ -394,6 +417,7 @@ function lookAt(files: Files, path: string): Look {
   let target = path;
   let text: string;
   let mode: number;
+  let uid: number;
   try {
     info = files.lstat(path);
     if (info === null) return { state: 'none' };
@@ -412,6 +436,7 @@ function lookAt(files: Files, path: string): Look {
       return { state: 'refused', problem: `${path} is not a regular file` };
     }
     mode = info.mode;
+    uid = info.uid;
     let bytes: Uint8Array;
     try {
       bytes = files.readBytes(target, 0, Number.MAX_SAFE_INTEGER);
@@ -437,7 +462,7 @@ function lookAt(files: Files, path: string): Look {
   }
   // parseConfig read it as JSON whose top level is an object.
   const raw = JSON.parse(text) as Raw;
-  return { state: 'file', target, mode, text, raw, config };
+  return { state: 'file', target, mode, uid, text, raw, config };
 }
 
 /** Writes `text` over `path` whole or not at all: a temporary file beside it with `mode`, then a
@@ -473,7 +498,7 @@ export function createSettings(deps: SettingsDeps): Settings {
   const files = deck.platform.files;
   const path = deck.places.configPath;
   const backup = `${path}${BACKUP_SUFFIX}`;
-  /** The copy was kept, or there was no file to copy at this server's first write. */
+  /** The copy of the file was kept by a change whose write over the file worked. */
   let copied = false;
 
   const payloadOf = (look: Look): SettingsPayload => {
@@ -558,6 +583,10 @@ export function createSettings(deps: SettingsDeps): Settings {
     if (look.state === 'refused') {
       return refused(`${look.problem}; mend the file by hand first: nothing was changed`);
     }
+    if (look.state === 'file') {
+      const why = notToWrite(path, look, deck.platform.uid);
+      if (why !== null) return refused(why);
+    }
     const before: Raw = look.state === 'file' ? look.raw : {};
     const after = edited(before, key, value);
     if (look.state === 'none' && Object.keys(after).length === 0) {
@@ -565,7 +594,10 @@ export function createSettings(deps: SettingsDeps): Settings {
       if (SETTINGS[key].applies === 'now') apply(deck.config, key, DEFAULT_CONFIG);
       return { ok: true, payload: payload() };
     }
-    const text = `${JSON.stringify(after, null, look.state === 'file' ? indentOf(look.text) : DEFAULT_INDENT)}\n`;
+    // The file's own indentation and line ends, where it shows them.
+    const lineEnd = look.state === 'file' ? lineEndOf(look.text) : '\n';
+    const indent = look.state === 'file' ? indentOf(look.text) : DEFAULT_INDENT;
+    const text = `${JSON.stringify(after, null, indent).replaceAll('\n', lineEnd)}${lineEnd}`;
     let next: Config;
     try {
       next = parseConfig(text, path);
@@ -578,7 +610,10 @@ export function createSettings(deps: SettingsDeps): Settings {
       );
     }
     if (!same(before, after)) {
-      if (!copied && look.state === 'file') {
+      // The copy counts as kept only once it was made AND the write over the file worked: after a
+      // write that failed, or a change that found no file, the next change that finds one makes it.
+      const copying = !copied && look.state === 'file';
+      if (copying) {
         try {
           writeWhole(files, backup, backup, look.text, BACKUP_MODE);
         } catch (error) {
@@ -597,10 +632,9 @@ export function createSettings(deps: SettingsDeps): Settings {
           look.state === 'file' ? look.mode : NEW_MODE,
         );
       } catch (error) {
-        copied = true; // the copy, when one was made, is of the file as it still is
         return refused(error instanceof Error ? error.message : String(error));
       }
-      copied = true;
+      if (copying) copied = true;
       log(
         `settings: ${key} ${value === undefined ? 'put back to its default' : 'changed'} in config.json`,
       );

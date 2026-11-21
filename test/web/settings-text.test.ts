@@ -10,6 +10,7 @@ import {
   appliesText,
   controlText,
   factsText,
+  faithful,
   overLimit,
   pendingText,
   savedText,
@@ -107,6 +108,17 @@ test('a field becomes the request: a number field a number when it reads as one,
   const links = setting({ key: 'window.links', control: 'choice', choices: ['default', 'edge'] });
   assert.equal(valueToSend(links, 'edge'), 'edge');
   assert.equal(valueToSend(pattern, 'a\ud800b'), 'a\ufffdb', 'a lone surrogate is no text');
+});
+
+test('a value a one-line field holds as it is, and one it does not (a line break, a control character): shown as text, changed in the file', () => {
+  assert.equal(faithful(setting({ value: 5 })), true);
+  assert.equal(faithful(setting({ control: 'text', value: null })), true);
+  assert.equal(faithful(setting({ control: 'text', value: '^[a-z]+ \u00e9\u05e9' })), true);
+  for (const value of ['^a\nb', 'a\rb', 'a\tb', 'a\u0007', 'a\u007f', 'a\u0085']) {
+    assert.equal(faithful(setting({ control: 'text', value })), false, JSON.stringify(value));
+  }
+  assert.match(SETTINGS_TEXTS.unshowable, /change it in the file while it does$/);
+  assert.equal(SETTINGS_TEXTS.unchanged, 'Nothing changed, nothing saved.');
 });
 
 test('the limit of a text in a request: 4,096 bytes of UTF-8, refused before sending, in words that name it and the file', () => {

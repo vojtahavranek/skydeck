@@ -1059,7 +1059,7 @@ design-step-2.md 16.4; default `here`), `wezterm.domain`, `groupPattern`, `first
 `ticketRefreshMinutes` (follow-up F19, 7.3; design-step-2.md 16.4).
 Unknown keys are an error. The file is the user's, written by hand, or from follow-up F36 by the
 window's settings screen one plain key at a time (design-step-2.md 12.13; `config.json.skydeck-backup`
-beside it is that screen's copy); every command reads it at each run.
+beside it is that screen's copy, kept the first time a server writes over the file); every command reads it at each run.
 
 ### 9.2 Database
 

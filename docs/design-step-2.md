@@ -3938,22 +3938,33 @@ editing the file by hand stay as they are, and the file's format does not change
   the page before it is sent, `Longer than the window sends (4,096 bytes as UTF-8): change it in
   the file by hand.` Every page's screen follows a change
   (`settings`, 8.2.3); a field whose text was changed and not saved keeps it; the screen opened
-  again reads everything again.
+  again reads everything again. The line under a field goes when its text or choice changes.
+  `Save` with nothing changed sends nothing (`Nothing changed, nothing saved.`). A text value a
+  one-line field cannot hold faithfully — a line break, a control character — is shown as text for
+  that row, with `holds a line break or a control character, which this field cannot show: change
+  it in the file while it does`, and no `Save`.
 - **The file.** Read again for every change. Only that key changes: every other key — the
   shown-only ones too — stays, in its order (a key the file did not hold comes last, inside
   `window` or `wezterm` for theirs), with the file's own indentation where it shows one, else two
-  spaces; `Default` removes the key (and a `window` or `wezterm` it leaves empty). With no file it
-  is created with that one key (mode 600), and `Default` creates none. The new file is checked whole
-  by `config.json`'s rules (`parseConfig`, design 9.1) before anything is written, then written
-  whole or not at all — a temporary file beside it, renamed over it — with the file's mode. Before
-  the first write of a server's life the file as it was is kept beside it as
-  `config.json.skydeck-backup` (mode 600; one copy, replaced by the next server's first write; none
-  when there was no file); when the copy cannot be kept, nothing is written. A symbolic link is
+  spaces, and its line ends (CRLF stays CRLF when every line ends so); `Default` removes the key
+  (and a `window` or `wezterm` it leaves empty). With no file it is created with that one key (mode
+  600), and `Default` creates none. The new file is checked whole by `config.json`'s rules
+  (`parseConfig`, design 9.1) before anything is written, then written whole or not at all — a
+  temporary file beside it, renamed over it — with the file's mode. The first time a server writes
+  over the file, the file as it was is kept beside it first as `config.json.skydeck-backup` (mode
+  600; one copy, replaced at the next server's first such write); it counts as kept only once that
+  write worked, so after a write that failed, or a change that created the file, the next change
+  that finds a file keeps it; when the copy cannot be kept, nothing is written. A symbolic link is
   followed as install follows Claude Code's settings file (design 8: its file is replaced, the
-  link stays; one to nothing is refused), and a path that is not a regular file is refused. A file that
-  does not parse is never written: it is the user's to mend.
+  link stays; one to nothing is refused), and a path that is not a regular file is refused. A file
+  that does not parse, or is not UTF-8 text, is never written: it is the user's to mend. Neither is
+  one its owner may not write (a mode without the owner's write bit, 444 say: the owner's
+  statement, which a rename would overrule) or another user's: `<file> is read-only (mode 444): the
+  window does not write over it; make it writable (chmod u+w) or change it by hand: nothing was
+  changed`.
 - **Keys** (12.9). The keyboard starts on the first field once the screen came. Tab and Shift+Tab
-  walk its fields and buttons and stay in it; Enter in a field saves it; Esc closes it; the keyboard
+  walk its fields and buttons and stay in it; Enter in a field saves it; Esc closes it — the key
+  help first, when it lies over the screen (Ctrl+Shift+H): Esc closes the top layer only; the keyboard
   goes back where it was (a text field, the list, the terminal), else to the zone's holder. While
   an answer waits its field is read-only and nothing is disabled, and a draw moves no element: the
   keyboard and the dialog's scroll stay where they are, also when another window's change draws
@@ -4100,9 +4111,14 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   `config.json` (12.13) — one key at a time, of the server's table's plain ones only: never a
   program, a folder or the port, whose keys the window shows and leaves to the file; never a whole
   configuration or a path; each value by the file's own rules; the file written whole, with a copy
-  kept before a server's first change. What a changeable key can make skydeck run is fixed by
-  skydeck: `terminal` picks among skydeck's own ways to start a session, `wezterm.domain` is the
-  one value of `--domain-name`, `window.links` picks between the two programs of 15.5. A
+  kept the first time a server writes over it. What a changeable key can make skydeck run is fixed
+  by skydeck: `terminal` picks among skydeck's own ways to start a session, `wezterm.domain` is the
+  one value of `--domain-name`, `window.links` picks between the two programs of 15.5. `ticketUrl`
+  decides the host of the group chip's link (opened only on the user's click, as 9.6 allows) and,
+  for an address that starts with a `ticketStatus` rule's `match`, the `{url}` that rule's program
+  is given — the rules, the programs, stay the file's. `window.keepAlive` `"off"` means that, from
+  the next start of the server, WSL is no longer kept running (6.1): it stops 15 seconds after its
+  last Windows terminal closes, and every session in the window with it. A
   `groupPattern` is a regular expression the server runs on every title at every list, as a hand
   edit of it already is: one that backtracks without end stalls the server until the file is
   mended and the window restarted (ruled by the lead: it stays changeable, with no time limit; the

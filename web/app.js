@@ -2262,7 +2262,8 @@ function dialogKey(event) {
 
 /**
  * F36: the keys the shown settings screen takes before anything else, in the capture phase — the
- * auto-repeats of the key that opened it, Esc (once per press), Tab and Enter in a field
+ * auto-repeats of the key that opened it, Esc (once per press; the key help first when it lies over
+ * the screen), Tab and Enter in a field
  * (`settingsDialog.key`). True when it took the key; every other key goes on to onKeyDown's
  * dispatch, where the chords meet `windowChordGate` and no list key acts.
  * @param {KeyboardEvent} event
@@ -2286,7 +2287,12 @@ function settingsKey(event) {
     event.preventDefault();
     event.stopPropagation();
     if (!event.repeat) {
-      settingsDialog.escape();
+      // Esc closes the top layer only: the key help when it lies over the screen (Ctrl+Shift+H).
+      if (help.shown()) {
+        help.hide();
+      } else {
+        settingsDialog.escape();
+      }
     }
     return true;
   }

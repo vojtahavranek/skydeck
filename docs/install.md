@@ -472,9 +472,13 @@ port: the window shows it, and you change it in the file. A value the file's rul
 refused there in the same words (`"prRefreshMinutes" must be a positive integer`), and the file
 stays as it was; a text longer than 4,096 bytes (the file takes a longer `groupPattern`) is changed
 in the file by hand; a file that cannot be read is never written (the screen says what `doctor` says:
-mend it by hand). Only that key changes; every other key of the file stays, in its order. Before
-the window's first change after its server started, a copy of the file is kept beside it as
-`config.json.skydeck-backup` (one copy, replaced by the next start's first change). **Applies**
+mend it by hand), and neither is one you may not write (mode 444) or another user's. Only that key
+changes; every other key of the file stays, in its order, with its indentation and line ends. The
+first time the window writes over the file after its server started, it keeps a copy of it first,
+beside it, as `config.json.skydeck-backup` (one copy, replaced at the next start's first such
+write; a change that creates the file makes none). `Save` with nothing changed saves nothing; a
+value with a line break or a control character, which a one-line field cannot hold, is shown as
+text, to be changed in the file. **Applies**
 says when a change takes effect in the window: `at once` (from its next use: the next list, link,
 refresh or restore), `after the window restarts` (`skydeck window --restart`; the screen says
 `applies after the window restarts` beside such a value, and beside a hand edit it does not use
@@ -734,7 +738,7 @@ In `config.json` ("Configuration" above), all optional; "In the window" and "App
 | `window.port` | `47613` | shown | after the window restarts | The server's port on `127.0.0.1`: a whole number from 1 to 65535. Keep it unchanged once windows were opened: a window keeps its key per port, so after a change the old windows cannot connect (close them) and `skydeck window` opens a new one. |
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | shown | after the window restarts | The Edge program: an absolute path in WSL. With `window.links` `"edge"` the links the window opens open with it too, in your own Edge profile. |
 | `window.profileDir` | `null` | shown | `skydeck window`, at its next run | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
-| `window.keepAlive` | `"wsl"` | change | after the window restarts | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`. |
+| `window.keepAlive` | `"wsl"` | change | after the window restarts | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`: without it, WSL stops 15 seconds after its last Windows terminal closes, ending every session in the window. |
 | `window.links` | `"default"` | change | at once | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
 
 With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
@@ -2509,7 +2513,7 @@ file.
 | `skydeck: port <n> on 127.0.0.1 is used by another program; set window.port in <config path>` | Another program inside WSL holds the port: stop it, or set `window.port`. |
 | `skydeck: the window's server runs from <checkout>; run skydeck window there, or skydeck window --restart here to replace it` | A server of another checkout runs. |
 | `skydeck: the window's server (pid <n>) does not answer; skydeck window --restart stops it` | The server hangs. `--restart` stops it (only that process, after checking it is the server); the sessions keep running. `<stateDir>/server.log` may say why. |
-| The window stops answering (`skydeck's server is not answering`) soon after `groupPattern` was changed, in Settings or by hand; `skydeck ls` may hang too (Ctrl+C) | The pattern is a regular expression run on every session's title at every list, and some patterns take very long on some titles. Take it back: `cp ~/.config/skydeck/config.json.skydeck-backup ~/.config/skydeck/config.json` puts back the file as it was before the window's first change since its server started (a later change of yours goes with it), or take the `groupPattern` line out of `config.json` by hand. Then `skydeck window --restart`; the sessions keep running. |
+| The window stops answering (`skydeck's server is not answering`) soon after `groupPattern` was changed, in Settings or by hand; `skydeck ls` may hang too (Ctrl+C) | The pattern is a regular expression run on every session's title at every list, and some patterns take very long on some titles. Take it back: `cp ~/.config/skydeck/config.json.skydeck-backup ~/.config/skydeck/config.json` puts back the file as it was before the window first wrote over it since its server started (a later change of yours goes with it), or take the `groupPattern` line out of `config.json` by hand. Then `skydeck window --restart`; the sessions keep running. |
 | `skydeck: the window's server did not start (exit <n> / no answer in 10 s); see <stateDir>/server.log` | Read the log; `skydeck doctor`. |
 | `skydeck: the runtime directory <dir> cannot be used: <reason>; see skydeck doctor` | The sockets' directory is not yours or not mode 700, or its paths are too long (a long `SKYDECK_HOME`). |
 | `skydeck: this window's launch address was used by another program, which may now have skydeck's key; run skydeck window --new-secret` (also in the window, and as `doctor`'s launch alarm) | A launch address was presented twice. Run `skydeck window --new-secret`, which replaces the key; close the windows opened before. |

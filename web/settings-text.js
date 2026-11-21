@@ -9,7 +9,7 @@
 export const SETTINGS_TEXTS = {
   heading: 'Settings',
   file: 'The file: ',
-  copy: 'Before the window’s first change after it starts, a copy of the file is kept as ',
+  copy: 'The first time the window writes over the file after its server starts, it first keeps a copy of it as ',
   noFile: 'The file does not exist yet: a change creates it.',
   /** After a problem the server names (a file that does not parse, a path that is no file). */
   mend: 'Mend the file by hand first: the window changes nothing in it until then.',
@@ -18,6 +18,11 @@ export const SETTINGS_TEXTS = {
   reset: 'Default',
   close: 'Close',
   saving: 'Saving…',
+  /** Save, or Enter, with the field as it was drawn: no request (nothing is written). */
+  unchanged: 'Nothing changed, nothing saved.',
+  /** A text value a one-line field cannot hold faithfully (`faithful`): shown as text. */
+  unshowable:
+    'holds a line break or a control character, which this field cannot show: change it in the file while it does',
   /** A text longer than a request carries (VALUE_LIMIT): refused before it is sent. */
   tooLong: 'Longer than the window sends (4,096 bytes as UTF-8): change it in the file by hand.',
   help: 'Enter saves the field you are in; Esc closes. One setting is saved at a time.',
@@ -136,6 +141,19 @@ export function valueToSend(setting, text) {
   }
   // A lone surrogate (a broken paste) is no text a message may carry: it becomes U+FFFD.
   return text.toWellFormed();
+}
+
+/** A line break, a control character (C0, DEL, C1): what a one-line field cannot hold as it is. */
+const UNSHOWABLE = /[\u0000-\u001f\u007f-\u009f]/;
+
+/**
+ * Whether the setting's value can stand in its control as it is: a text with a line break or a
+ * control character cannot (an input drops a line break), and a Save would write it changed.
+ * @param {SettingPayload} setting
+ * @returns {boolean}
+ */
+export function faithful(setting) {
+  return !(typeof setting.value === 'string' && UNSHOWABLE.test(setting.value));
 }
 
 /**

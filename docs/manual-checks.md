@@ -2749,8 +2749,8 @@ window, on your own `config.json`. It changes one harmless setting, `prRefreshMi
 the window reads a pull request's status), and puts it back; the file is copied aside first when
 there is one. What stays afterwards: `config.json` as it was (when there was none, the one the
 check made is removed at its end), and `config.json.skydeck-backup` beside it — the window makes
-it, or replaces the one there, at its first change since its server started (step 3): a copy of
-your file as it was then; you may leave it or remove it. Commands are typed in W, a WSL terminal of
+it, or replaces the one there, the first time it writes over the file since its server started
+(step 3, when there was a file): a copy of your file as it was then; you may leave it or remove it. Commands are typed in W, a WSL terminal of
 your own (never a `!` command inside Claude Code). The tests run the screen in headless Chromium
 against a test server with a sandbox's file; only here does the screen meet Edge and your own file.
 
@@ -2773,7 +2773,8 @@ Setup: skydeck updated to a commit that has follow-up F36 (`skydeck update`, W32
    Expected: under the field `Saved: it applies at once.`, and the keyboard still in the field. In
    W: `grep -n prRefreshMinutes ~/.config/skydeck/config.json` prints `6`; `skydeck doctor` prints
    no `configuration:` line. When step 1 found a `config.json`, `ls -l ~/.config/skydeck/` lists
-   `config.json.skydeck-backup`, and when the window had changed nothing since its server started,
+   `config.json.skydeck-backup`, and when the window had written over the file not once since its
+   server started,
    `cmp ~/config.json.before-w41 ~/.config/skydeck/config.json.skydeck-backup` prints nothing.
 4. **A refusal.** In the same field press Ctrl+A, type `0` and press Enter. Expected: under it, in
    the refusal's colour, `"prRefreshMinutes" must be a positive integer`; the grep of step 3 still

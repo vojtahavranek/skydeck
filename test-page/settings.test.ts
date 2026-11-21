@@ -77,13 +77,16 @@ function fieldOf(page: Page, key: string): Promise<string> {
 }
 
 async function messageIs(page: Page, key: string, expected: string | RegExp): Promise<void> {
-  await until(
-    async () => {
-      const text = await partOf(page, key, '.setting-message');
-      return typeof expected === 'string' ? text === expected : expected.test(text);
-    },
-    `${key}'s message ${String(expected)}`,
-  );
+  const deadline = performance.now() + 20_000;
+  for (;;) {
+    const text = await partOf(page, key, '.setting-message');
+    if (typeof expected === 'string' ? text === expected : expected.test(text)) return;
+    assert.ok(
+      performance.now() < deadline,
+      `${key}'s message ${String(expected)}; it says ${JSON.stringify(text)}`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }
 
 /** Whether the keyboard is inside the settings screen. */
@@ -427,6 +430,72 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
   );
 
   await t.test(
+    'Esc closes the top layer only: the key help over the screen first, then the screen',
+    async (t) => {
+      const l = await launched(t, chromium);
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      const helpShown = (): Promise<boolean> =>
+        readPage(l.page, () => document.getElementById('help')?.hidden === false, null);
+      await l.page.keyboard.press('Control+Shift+H');
+      await until(helpShown, 'the key help over the screen');
+      await l.page.keyboard.press('Escape');
+      await until(async () => !(await helpShown()), 'the help closed');
+      assert.equal(await shown(l.page), true, 'the screen stays');
+      await l.page.keyboard.press('Escape');
+      await closed(l.page);
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'the line under a field goes when its text or choice changes; Save with nothing changed sends nothing; a value with a line break is shown as text, changed in the file',
+    async (t) => {
+      const l = await launched(t, chromium, {
+        config: { groupPattern: '^a\nb', window: { links: 'edge' } },
+      });
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      const before = readFileSync(l.d.deck.places.configPath, 'utf8');
+      // Nothing changed: no request, the file as it was (restoreBatch is not in it).
+      const batch = l.page.locator(`${row('restoreBatch')} .setting-control`);
+      await batch.press('Enter');
+      await messageIs(l.page, 'restoreBatch', 'Nothing changed, nothing saved.');
+      assert.equal(readFileSync(l.d.deck.places.configPath, 'utf8'), before);
+      // The line goes when the field changes.
+      await batch.fill('2');
+      assert.equal(await partOf(l.page, 'restoreBatch', '.setting-message'), '');
+      await batch.press('Enter');
+      await messageIs(l.page, 'restoreBatch', 'Saved: it applies at once.');
+      await batch.press('3');
+      assert.equal(await partOf(l.page, 'restoreBatch', '.setting-message'), '');
+      const links = l.page.locator(`${row('window.links')} select`);
+      await links.selectOption('default');
+      await l.page.locator(`${row('window.links')} .setting-save`).click();
+      await messageIs(l.page, 'window.links', 'Saved: it applies at once.');
+      await links.selectOption('edge');
+      assert.equal(await partOf(l.page, 'window.links', '.setting-message'), '');
+      // groupPattern holds a line break: text, a plain line, no field and no Save to write it.
+      assert.equal(await partOf(l.page, 'groupPattern', '.setting-value'), JSON.stringify('^a\nb'));
+      assert.equal(
+        await partOf(l.page, 'groupPattern', '.setting-note'),
+        'holds a line break or a control character, which this field cannot show: change it in the file while it does',
+      );
+      const visible = await readPage(
+        l.page,
+        (at) =>
+          [...document.querySelectorAll(`${at} input, ${at} button`)].filter((one) =>
+            (one as HTMLElement).checkVisibility(),
+          ).length,
+        row('groupPattern'),
+      );
+      assert.equal(visible, 0);
+      assert.equal(configOf(l)['groupPattern'], '^a\nb');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
     'every theme, light and dark, each colour theme: the texts of the screen hold 4.5 : 1 against their ground',
     async (t) => {
       const l = await launched(t, chromium);
@@ -540,6 +609,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
       assert.ok(box.right <= box.width && box.bottom <= box.height, JSON.stringify(box));
       assert.equal(box.scrolls, true, 'it scrolls inside itself');
       assert.equal(box.wide, false, 'nothing is wider than it');
+      await l.page.locator(`${row('window.links')} select`).selectOption('default');
       const last = l.page.locator(`${row('window.links')} .setting-save`);
       await last.scrollIntoViewIfNeeded();
       await last.click();

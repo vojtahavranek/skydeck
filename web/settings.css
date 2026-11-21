@@ -59,6 +59,13 @@
 .settings-problem-text {
   font-family: var(--term-font);
 }
+.setting-note {
+  margin-top: 4px;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.setting-line [hidden],
+.setting-note[hidden],
 .settings-problem[hidden],
 .settings-no-file[hidden],
 .settings-status[hidden],

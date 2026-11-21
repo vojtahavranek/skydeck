@@ -28,6 +28,7 @@ import {
   appliesText,
   controlText,
   factsText,
+  faithful,
   overLimit,
   pendingText,
   savedText,
@@ -83,7 +84,9 @@ function setText(target, text) {
  * One setting's elements, made once per key and kept across screens.
  * @typedef {object} Row
  * @property {HTMLElement} root
- * @property {HTMLElement} value  a shown-only setting's value
+ * @property {HTMLElement} value  a shown-only setting's value, or a changeable one's that its
+ *   control cannot hold faithfully (`faithful`)
+ * @property {HTMLElement} note  then: that it is changed in the file
  * @property {HTMLInputElement | HTMLSelectElement | null} control  a changeable one's
  * @property {HTMLElement} facts
  * @property {HTMLElement} applies
@@ -162,6 +165,8 @@ export function createSettingsDialog(root, deps) {
     const facts = element('div', 'setting-facts');
     const applies = element('div', 'setting-applies');
     const pending = element('div', 'setting-pending');
+    const note = element('div', 'setting-note', SETTINGS_TEXTS.unshowable);
+    note.hidden = true;
     const message = element('div', 'setting-message');
     message.setAttribute('aria-live', 'polite');
     /** @type {HTMLInputElement | HTMLSelectElement | null} */
@@ -194,15 +199,26 @@ export function createSettingsDialog(root, deps) {
       control.setAttribute('aria-labelledby', `${id}-name`);
       save = button('setting-save', SETTINGS_TEXTS.save);
       reset = button('setting-reset', SETTINGS_TEXTS.reset);
-      line.append(control, save, reset);
+      value.hidden = true;
+      line.append(control, save, reset, value);
+      // The line under the field is about what was sent: it goes once the field's text or choice
+      // changes again (`input`, at each change; never at a blur, whose `change` would move the
+      // rows under a pointer that is pressing a button below).
+      control.addEventListener('input', () => {
+        if (!row.waiting) {
+          setText(message, '');
+          delete message.dataset['outcome'];
+        }
+      });
     } else {
       line.append(value);
     }
-    rowRoot.append(name, meaning, line, facts, applies, pending, message);
+    rowRoot.append(name, meaning, line, note, facts, applies, pending, message);
     /** @type {Row} */
     const row = {
       root: rowRoot,
       value,
+      note,
       control,
       facts,
       applies,
@@ -255,14 +271,24 @@ export function createSettingsDialog(root, deps) {
         made = true;
       }
       const text = controlText(setting);
+      // A value its control cannot hold as it is (a line break) is shown as text, without Save.
+      const asText = row.control !== null && !faithful(setting);
+      for (const one of [row.control, row.save, row.reset]) {
+        if (one !== null && one.hidden !== asText) one.hidden = asText;
+      }
       if (row.control !== null) {
+        row.value.hidden = !asText;
+        row.note.hidden = !asText;
+        if (asText) setText(row.value, setting.valueText);
+      }
+      if (row.control !== null && !asText) {
         if (made || redraw.has(setting.key) || row.control.value === row.drawn) {
           row.control.value = text;
           // A value that no option or number field shows (a hand edit) keeps the drawn text, so that
           // the field reads as unchanged.
           row.drawn = row.control.value;
         }
-      } else {
+      } else if (row.control === null) {
         setText(row.value, setting.kind === 'show' ? setting.valueText : text);
       }
       setText(row.facts, factsText(setting, payload.problem === null));
@@ -293,6 +319,12 @@ export function createSettingsDialog(root, deps) {
     const row = rows.get(key);
     const setting = settings.get(key);
     if (row === undefined || setting === undefined || row.control === null || row.waiting) {
+      return;
+    }
+    if (!reset && row.control.value === row.drawn) {
+      // Nothing typed or picked since the field was drawn: nothing to send, nothing written.
+      row.message.dataset['outcome'] = 'saved';
+      setText(row.message, SETTINGS_TEXTS.unchanged);
       return;
     }
     const value = valueToSend(setting, row.control.value);

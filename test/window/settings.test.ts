@@ -527,6 +527,81 @@ describe('writing the file (G3)', () => {
     noTemporary(w);
   });
 
+  test('the copy counts as kept only once it was made and the write worked: a change that found no file makes none, the next one that finds a file does; after a failed write the next change copies the file as it is then', (t) => {
+    const w = world(t, null);
+    assert.equal(w.settings.set('restoreBatch', 2).ok, true);
+    assert.equal(existsSync(w.backup), false, 'no file to copy');
+    const created = w.text();
+    assert.equal(w.settings.set('restoreBatch', 4).ok, true);
+    assert.equal(readFileSync(w.backup, 'utf8'), created, 'the first change that found a file');
+
+    const v = world(t, { prRefreshMinutes: 7 });
+    const files = v.d.deck.platform.files;
+    let failing = true;
+    const settings = createSettings({
+      deck: deckWith(v.d.deck, {
+        files: {
+          rename(from, to) {
+            if (failing && to === v.path) {
+              throw Object.assign(new Error('EIO: i/o error'), { code: 'EIO' });
+            }
+            files.rename(from, to);
+          },
+        },
+      }),
+      log: () => {},
+    });
+    assert.equal(settings.set('prRefreshMinutes', 8).ok, false);
+    failing = false;
+    writeFileSync(v.path, '{ "prRefreshMinutes": 7, "restoreBatch": 2 }');
+    assert.equal(settings.set('prRefreshMinutes', 8).ok, true);
+    assert.equal(
+      readFileSync(v.backup, 'utf8'),
+      '{ "prRefreshMinutes": 7, "restoreBatch": 2 }',
+      'the file as it was before the write that worked, the hand edit in it',
+    );
+  });
+
+  test("a file its owner may not write (mode 444), or another user's, is not written over: refused in plain words, nothing written, no copy", (t) => {
+    const w = world(t, '{ "prRefreshMinutes": 7 }');
+    chmodSync(w.path, 0o444);
+    const outcome = w.settings.set('prRefreshMinutes', 8);
+    assert.ok(
+      !outcome.ok &&
+        /is read-only \(mode 444\): the window does not write over it/.test(outcome.error),
+      JSON.stringify(outcome),
+    );
+    assert.equal(w.text(), '{ "prRefreshMinutes": 7 }');
+    assert.equal(statSync(w.path).mode & 0o777, 0o444);
+    assert.equal(existsSync(w.backup), false);
+    assert.equal(w.d.deck.config.prRefreshMinutes, 7);
+    chmodSync(w.path, 0o644);
+    const files = w.d.deck.platform.files;
+    const other = createSettings({
+      deck: deckWith(w.d.deck, {
+        files: {
+          lstat(path) {
+            const info = files.lstat(path);
+            return path === w.path && info !== null ? { ...info, uid: info.uid + 1 } : info;
+          },
+        },
+      }),
+      log: () => {},
+    });
+    const theirs = other.set('prRefreshMinutes', 8);
+    assert.ok(!theirs.ok && /belongs to another user/.test(theirs.error), JSON.stringify(theirs));
+    assert.equal(w.text(), '{ "prRefreshMinutes": 7 }');
+  });
+
+  test('line ends are kept as the indentation is: a file with CRLF throughout stays CRLF; one with LF, or mixed, is written with LF', (t) => {
+    const crlf = world(t, '{\r\n  "prRefreshMinutes": 7\r\n}\r\n');
+    assert.equal(crlf.settings.set('prRefreshMinutes', 9).ok, true);
+    assert.equal(crlf.text(), '{\r\n  "prRefreshMinutes": 9\r\n}\r\n');
+    const mixed = world(t, '{\r\n  "prRefreshMinutes": 7\n}\r\n');
+    assert.equal(mixed.settings.set('prRefreshMinutes', 9).ok, true);
+    assert.equal(mixed.text(), '{\n  "prRefreshMinutes": 9\n}\n');
+  });
+
   test('the copy cannot be kept (a folder in its place): nothing is changed, and the screen says so', (t) => {
     const w = world(t, { prRefreshMinutes: 7 });
     mkdirSync(w.backup);
