@@ -524,13 +524,19 @@ edit in the prompt).
 
 Write down every key that arrived wrong or did something else.
 
-## W9. Claude Code's symbols are drawn (real claude)
+## W9. Claude Code's symbols and emoji are drawn (real claude)
 
 In the throwaway session, send a prompt that makes Claude Code use a tool (`list the files here`).
 Its tool lines start with `⏺`, their results with `⎿`; Shift+Tab shows `⏵⏵` in the mode line.
-Expected: drawn as symbols, not as empty boxes.
+Expected: drawn as symbols, not as empty boxes, and in the colours Claude Code gives them: a
+finished tool's `⏺` is green (red after a failed one), never a colour emoji (a blue button).
 
-Write down which symbols show as boxes.
+Then send `print 🔴 🟠 🟡 ⚪ 🤷‍♂️ 👨‍👩‍👧 on one line, with a space between them`. Expected: the four
+circles red, orange, yellow and white, told apart at a glance (not four grey discs); the shrug and
+the family each one picture, two cells wide, not their parts squashed together (#154).
+
+Write down which symbols show as boxes or as colour emoji, and which emoji show in one colour or
+in parts.
 
 ## W10. Emoji line up (real claude)
 
