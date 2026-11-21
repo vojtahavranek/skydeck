@@ -244,6 +244,19 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
 }
 
 /**
+ * F38: the environment entry that names the checkout a test server's update checker looks at
+ * (`SKYDECK_TEST_UPDATE_CHECKOUT`, src/window/updates.ts) — only once the path is checked to lie
+ * inside the sandbox. Every test sets that variable through here, never by hand.
+ */
+export function updateSeam(
+  s: Sandbox,
+  checkout: string | { root: string },
+): { SKYDECK_TEST_UPDATE_CHECKOUT: string } {
+  const path = typeof checkout === 'string' ? checkout : checkout.root;
+  return { SKYDECK_TEST_UPDATE_CHECKOUT: insideSandbox(s, path) };
+}
+
+/**
  * `skydeck update <args>` on `platform` — only once its app root is checked to lie inside the
  * sandbox (hazard 1: the test platforms' default app root is this repository).
  */

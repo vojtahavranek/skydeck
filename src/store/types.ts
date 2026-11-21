@@ -196,6 +196,7 @@ export type KvKey =
   | 'window_restore_dismissed' // the earlier boot whose restore offer the user dismissed (S2 12.7, plan C9)
   | 'window_pages_open' // "1" while the server has pages connected (plan C20)
   | 'window_favourites' // the new form's favourite flags: a JSON array of texts (S2 12.6, F15)
+  | 'window_update_check' // F38: the last look for a newer skydeck, of one checkout (S2 10.2, 16.5)
   // A resume lock (design 7.6, D16): the decimal time in ns it was taken, then `:<id>` of the
   // session's latest event at that moment (0 when it had none; a bare time is a lock an earlier
   // version wrote); one per session id.

@@ -667,6 +667,30 @@ export interface SettingsPayload {
   problem: string | null;
   settings: SettingPayload[];
 }
+/**
+ * F38 (S2 16.5): what the last look for a newer skydeck says. `summary`: the look's line for
+ * `cannot`; `skydeck is up to date (<branch> at <id>, as <upstream>)` or `nothing new on …` for
+ * `current`; `<n> new commits on <upstream>` for `available`, with `lines` exactly `skydeck update
+ * --check`'s (the database line included), `to` the new commit's full id and `blocked` why it
+ * cannot be applied as it is. Every text sanitised and clipped.
+ */
+export type UpdateCheckPayload =
+  | { state: 'cannot'; summary: string }
+  | { state: 'current'; summary: string }
+  | { state: 'available'; summary: string; to: string; lines: string[]; blocked: string | null };
+/** F38: the window's check for a newer skydeck, as every page is told it. */
+export interface UpdatePayload {
+  /** The switch: window.updateCheck is "daily". */
+  auto: boolean;
+  /** A check runs. */
+  checking: boolean;
+  /** What the last look says; null: none yet (this server sends no stored one before its own). */
+  check: UpdateCheckPayload | null;
+  /** When the last fetch that worked ended. */
+  fetchedAtNs: NsText | null;
+  /** The last check's fetch failed: when, and why (sanitised, clipped). */
+  failure: { atNs: NsText; line: string } | null;
+}
 /** F36: a setting was changed in some window: every page's screen follows. */
 export interface SettingsMessage {
   t: 'settings';
