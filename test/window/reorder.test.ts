@@ -147,7 +147,7 @@ describe('the reorder act on the server (F37)', () => {
   });
 });
 
-test('a session two terminals of the window show: a move that would not read as intended is refused with its own line, nothing changed', () => {
+test('a session two terminals of the window show: a move of it, or of a row that would pass it, that would not read as intended is refused with its own line, nothing changed', () => {
   // S1 in slot 1 and, after a `/resume` inside a terminal, in slot 2 too; S2 and S3 a block in 3, 4.
   // Moved past the block S1 would get 4: its row would go to the terminal in slot 2, and the numbers
   // would read 1 3 2.
@@ -174,12 +174,18 @@ test('a session two terminals of the window show: a move that would not read as 
   });
   assert.deepEqual(reorder.reorder(view(), S1, 'down'), {
     ok: false,
-    error: 'this session is shown by two terminals; close one to move it',
+    error: 'a session here is shown by two terminals; close one of them first',
   });
   assert.equal(
     REORDER_REFUSALS.twins,
-    'this session is shown by two terminals; close one to move it',
+    'a session here is shown by two terminals; close one of them first',
   );
+  // A session with one terminal that would pass it: the block moved up past S1 would get slots 1
+  // and 3, S1 slot 4, and S1's row would go to its terminal in slot 2 (numbers 1 3 2): refused too.
+  assert.deepEqual(reorder.reorder(view(), S2, 'up'), {
+    ok: false,
+    error: REORDER_REFUSALS.twins,
+  });
   assert.deepEqual(calls, []);
   assert.equal(remembered, 0);
   // A move the twin does not spoil goes through: S3 up inside the block.

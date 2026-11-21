@@ -27,9 +27,10 @@ export const REORDER_REFUSALS = {
   top: 'already at the top of Open',
   last: 'already the last session with a slot under Open',
   changed: 'the list changed meanwhile; try again',
-  /** Two terminals of the window show the session (a `/resume` inside a terminal): see
+  /** Two terminals of the window show a session of Open (a `/resume` inside a terminal), and the
+   *  move — of that session, or of a row that would pass it — would not read as intended: see
    *  reorder.ts's `planMove`. */
-  twins: 'this session is shown by two terminals; close one to move it',
+  twins: 'a session here is shown by two terminals; close one of them first',
 } as const;
 
 /** A move's outcome: the slots that change, by terminal id, or the line saying why nothing does. */

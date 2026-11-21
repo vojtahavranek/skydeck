@@ -50,9 +50,9 @@ export interface Reorder {
  * The move of `sessionId`'s row of Open one place in `direction` over the view model's input: the
  * rule's new order (`reorderedRows`) and its slots (`assignSlots`), checked by building Open again
  * with those slots applied. When that is not the intended order with its numbers ascending — two
- * terminals of the window show one session (a `/resume` inside a terminal), and the row would go to
- * the other one with its own slot — the move is refused with `REORDER_REFUSALS.twins`; trying again
- * would not help. The claim of a row by a terminal (`build.ts`) is not changed for it.
+ * terminals of the window show a session of Open (a `/resume` inside a terminal), the moved one or
+ * one its row would pass, and that session's row would go to its other terminal with its own slot
+ * — the move is refused with `REORDER_REFUSALS.twins`; trying again would not help. The claim of a row by a terminal (`build.ts`) is not changed for it.
  */
 export function planMove(
   input: Omit<ViewInput, 'view' | 'selected'>,
