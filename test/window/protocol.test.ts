@@ -1473,3 +1473,28 @@ describe("parsePageMessage: F36's acts (S2 12.13)", () => {
     assert.deepEqual(JSON.parse(JSON.stringify(messages)), messages);
   });
 });
+
+describe("parsePageMessage: F37's reorder (S2 12.9)", () => {
+  const up: PageMessage = { t: 'act', id: 7, kind: 'reorder', sessionId: S1, direction: 'up' };
+  const down: PageMessage = { t: 'act', id: 8, kind: 'reorder', sessionId: S1, direction: 'down' };
+
+  test('act reorder up and down → ok and equal', () => {
+    assert.deepEqual(parsePageMessage(JSON.stringify(up)), { ok: true, value: up });
+    assert.deepEqual(parsePageMessage(JSON.stringify(down)), { ok: true, value: down });
+  });
+
+  test('another direction, a missing or an extra field, a session id that is not one → refused', () => {
+    for (const direction of ['left', 'UP', '', 1, -1, null, true]) {
+      refused(page({ ...up, direction }));
+    }
+    for (const field of Object.keys(up)) {
+      const copy: Record<string, unknown> = { ...up };
+      delete copy[field];
+      refused(page(copy));
+    }
+    refused(page({ ...up, [MARKER]: 1 }));
+    refused(page({ ...up, by: 1 }));
+    refused(page({ ...up, sessionId: 'S1' }));
+    refused(page({ ...up, sessionId: `${S1}0` }));
+  });
+});

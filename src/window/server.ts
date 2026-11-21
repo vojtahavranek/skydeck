@@ -78,6 +78,7 @@ import type { Seen } from './seen.ts';
 import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
 import { readMovedSlots, writeMovedSlots } from './moved-slots.ts';
+import { createReorder } from './reorder.ts';
 import { createRegistry } from './terminals.ts';
 import type { Registry } from './terminals.ts';
 import { createTick } from './tick.ts';
@@ -563,6 +564,12 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     });
     // F36 (S2 12.13): the settings screen; one per server, whose first change keeps the copy.
     const settings = createSettings({ deck, log });
+    const reorder = createReorder({
+      registry: created,
+      rows: () => tick?.rows() ?? NO_ROWS,
+      elsewhere: () => tick?.elsewhere() ?? new Map(),
+      nowNs: () => clock.nowNs(),
+    });
     const acting = createActions({
       deck,
       hub: created,
@@ -582,6 +589,8 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       settingsChanged: (payload) => {
         pages.settings(payload);
       },
+      // F37 (S2 12.9): a session of Open moved by hand, for the page's last view.
+      reorder: (page, sessionId, direction) => reorder.reorder(page.view, sessionId, direction),
     });
     // Plan C7, S2 8.2.6: what a terminal the server opens for a command or a restore starts at —
     // the area the page that had focus last reported, read when the terminal is opened.

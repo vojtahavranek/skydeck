@@ -4,7 +4,7 @@
  * actions implement `ActionHandler`. Types only.
  */
 import type { KeeperExit } from './frames.ts';
-import type { ActMessage, ResultMessage, ThemePayload } from './protocol.ts';
+import type { ActMessage, ResultMessage, ThemePayload, ViewMessage } from './protocol.ts';
 
 export type TerminalState =
   'starting' | 'running' | 'ended' | 'lost' | 'not-started' | 'reconnecting' | 'newer-keeper';
@@ -79,6 +79,8 @@ export interface PageInfo {
   windowId: string;
   focused: boolean;
   area: { cols: number; rows: number } | null;
+  /** F37: the page's last `view` (its filter and chips); absent for a caller that has none. */
+  view?: ViewMessage;
 }
 
 export interface ActionHandler {
