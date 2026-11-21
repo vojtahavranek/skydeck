@@ -1973,7 +1973,7 @@ install would leave).
    the path down and stop. Else type `y` and Enter. Expected:
 
    ```
-     turned off  in /home/<you>/.claude.json
+     turned off  the ← shortcut in /home/<you>/.claude.json
      backup      /home/<you>/.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>
      note        only for sessions started from now on; a session already running keeps it until it is started again
 

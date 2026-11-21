@@ -27,7 +27,13 @@ import {
   readLeftArrow,
   turnLeftArrowOff,
 } from '../../claude/global-config.ts';
-import { addHookEntries, hookEntry, rewriteReport, settingsPath } from '../../claude/settings.ts';
+import {
+  addHookEntries,
+  hookEntry,
+  hookEntryLine,
+  rewriteReport,
+  settingsPath,
+} from '../../claude/settings.ts';
 import type { RewriteReport, SettingsEdit } from '../../claude/settings.ts';
 import { SkydeckError } from '../../platform/errors.ts';
 import type { Places } from '../../platform/paths.ts';
@@ -335,7 +341,7 @@ function readSettings(files: Files, path: string): string | null {
 
 /**
  * The exact groups that will be appended, by event: each entry on one line, its event, its whole
- * command and its timeout (entryLine). An entry the line cannot show whole, a command with a
+ * command and its timeout (hookEntryLine). An entry the line cannot show whole, a command with a
  * character a terminal would act on above all, is shown as JSON instead: jsonText escapes, rather
  * than drops, such a character, so what is shown is what is written (principle 2).
  *
@@ -353,7 +359,7 @@ function showChange(ctx: Context, out: Output, hookPath: string, prepared: Prepa
   out.raw('stderr', '\n');
   const entries = prepared.edit.events.map((event) => {
     const entry = hookEntry(hookPath, event);
-    return { event, entry, line: entryLine(entry) };
+    return { event, entry, line: hookEntryLine(entry) };
   });
   const eventWidth = Math.max(...entries.map(({ event }) => event.length));
   const commandWidth = Math.max(...entries.map(({ line }) => line?.command.length ?? 0));
@@ -380,38 +386,6 @@ function showChange(ctx: Context, out: Output, hookPath: string, prepared: Prepa
         `the file as it is now is kept in ${backup}`,
     );
   }
-}
-
-/**
- * The one line of an entry: its command and timeout, when they are all the entry holds (one hook
- * of type `command`) and the command reads the same on a terminal as in the file. null otherwise:
- * the entry is then shown as JSON.
- */
-function entryLine(entry: unknown): { command: string; timeout: number } | null {
-  if (!isPlain(entry, ['hooks']) || !Array.isArray(entry['hooks']) || entry['hooks'].length !== 1) {
-    return null;
-  }
-  const hook: unknown = entry['hooks'][0];
-  if (!isPlain(hook, ['type', 'command', 'timeout']) || hook['type'] !== 'command') {
-    return null;
-  }
-  const { command, timeout } = hook;
-  if (typeof command !== 'string' || typeof timeout !== 'number' || !Number.isFinite(timeout)) {
-    return null;
-  }
-  if (command === '' || command.trim() !== command || sanitize(command) !== command) {
-    return null;
-  }
-  return { command, timeout };
-}
-
-/** An object with exactly these keys. */
-function isPlain(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return false;
-  }
-  const own = Object.keys(value).sort();
-  return own.length === keys.length && [...keys].sort().every((key, i) => own[i] === key);
 }
 
 /**
@@ -599,7 +573,7 @@ async function offerLeftArrowOff(out: Output, deck: Deck, changes: Change[]): Pr
     );
     switch (result.kind) {
       case 'written':
-        out.result(LEFT_ARROW_WIDTH, 'turned off', `in ${path}`);
+        out.result(LEFT_ARROW_WIDTH, 'turned off', `the ← shortcut in ${path}`);
         out.result(LEFT_ARROW_WIDTH, 'backup', result.backup, true);
         note(
           'only for sessions started from now on; a session already running keeps it until it is started again',

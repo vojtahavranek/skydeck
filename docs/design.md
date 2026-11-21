@@ -947,8 +947,12 @@ could not be resumed; see above`).
   writes to it, which does not count), each link made or pointed anew, the settings file, the
   global config file — each followed by its backup when it had one; a run that changed none of
   them prints the one line `nothing was changed`. Last, `Next`: the four things to do next,
-  numbered, and the guide's path. Explanations, the entries and the questions go to stderr,
-  results, the summary and Next to stdout. On a terminal (that stream a terminal, `NO_COLOR`
+  numbered, and the guide's path. The sections that ask (Hooks with its entries, Old sessions, the
+  ← shortcut while it is on) write their heading, explanation and question to stderr; the sections
+  that do not ask (Hooks with `hook entries already present in <file>`, Window, the ← shortcut
+  with `It is off.` or `left <file> alone (…)`), the results, the summary and Next go to stdout,
+  and so does every line that went there before the sections; a failure of the ← step is a result
+  on stderr. On a terminal (that stream a terminal, `NO_COLOR`
   unset or empty, `TERM` not `dumb`) headings, questions and `skydeck is installed` are bold and
   the backup and link lines dim; otherwise there is no colour. The first scan's progress line
   (5.6) is cleared as for every command.

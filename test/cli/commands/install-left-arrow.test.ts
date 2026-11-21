@@ -128,7 +128,9 @@ describe('install: the ← shortcut, when it is on (L2)', () => {
     const out = installStdout(r.stdout);
     assert.ok(
       out.before.endsWith(
-        result('turned off', `in ${path}`) + result('backup', backupOf(path)) + FROM_NOW_ON,
+        result('turned off', `the ← shortcut in ${path}`) +
+          result('backup', backupOf(path)) +
+          FROM_NOW_ON,
       ),
       r.stdout,
     );

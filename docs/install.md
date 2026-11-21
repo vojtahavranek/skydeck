@@ -282,7 +282,7 @@ detaches. After the `y`:
 
 ```
 > Turn the shortcut off? [y/N] y
-  turned off  in /home/you/.claude.json
+  turned off  the ← shortcut in /home/you/.claude.json
   backup      /home/you/.claude.json.skydeck-backup-20261113T090105Z
   note        only for sessions started from now on; a session already running keeps it until it is started again
 ```
@@ -2106,14 +2106,16 @@ resize. It installs nothing; from then on the terminal's size changes only with 
 
 ## Checking: `skydeck doctor`
 
-`doctor` prints one line per check, `ok`, `info` or `problem`, and exits 1 when any line is a
-problem. It does not read new sessions in and creates nothing (but the copy of the database, when
+`doctor` prints one line per check, `ok`, `info` or `problem`, under the heading of its group
+(Versions, Recording, Claude Code, GitHub, Window; a group with no line has no heading), then a
+blank line and the verdict: `no problems`, or `1 problem` / `<n> problems` with each problem line
+again. It exits 1 when any line is a problem. It does not read new sessions in and creates nothing (but the copy of the database, when
 it is the first command to open one that an update upgrades: "Going back"), so it can run on a
 broken installation.
 
 | Check | A `problem` means |
 |---|---|
-| skydeck, Claude Code, system | Never a problem: the first three lines say what runs, so that a report of a problem can say it too. `skydeck` is the line `skydeck --version` prints. `Claude Code` is the first line that `<claudeCommand> --version` prints, without the ` (Claude Code)` at its end (at most 60 characters), or `Claude Code: version not read (<why>)`: `not installed`, `timed out after 5 s`, `exited <n>`, `ended by a signal`, `printed no version`, `could not be started: <code>` (such as `EACCES`), or `the configuration cannot be read` (then nothing is started). `system` is the distribution's name (`PRETTY_NAME` in `/etc/os-release`) and the kernel's release (on WSL it ends in `WSL2`), `unknown` for what cannot be read. |
+| skydeck, Claude Code, system | Never a problem: the three lines under Versions, first of all, say what runs, so that a report of a problem can say it too. `skydeck` is the line `skydeck --version` prints. `Claude Code` is the first line that `<claudeCommand> --version` prints, without the ` (Claude Code)` at its end (at most 60 characters), or `Claude Code: version not read (<why>)`: `not installed`, `timed out after 5 s`, `exited <n>`, `ended by a signal`, `printed no version`, `could not be started: <code>` (such as `EACCES`), or `the configuration cannot be read` (then nothing is started). `system` is the distribution's name (`PRETTY_NAME` in `/etc/os-release`) and the kernel's release (on WSL it ends in `WSL2`), `unknown` for what cannot be read. |
 | hook entries | `SessionStart` or `SessionEnd` has no entry in the settings file that is exactly what install writes for `<dataDir>/skydeck-hook`. Run `skydeck install`. |
 | the hook link | `<dataDir>/skydeck-hook` does not resolve to a file. Run `bin/skydeck install` from the checkout. |
 | Node.js | The Node.js that runs `doctor` is older than 24.12. |

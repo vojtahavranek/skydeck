@@ -108,7 +108,7 @@ describe('install: the whole output, in the order a terminal shows it', () => {
         '  agent view itself stays (claude agents, /bg).',
         '',
         '> Turn the shortcut off? [y/N] ',
-        `  turned off  in ${global}`,
+        `  turned off  the ← shortcut in ${global}`,
         `  backup      ${global}.skydeck-backup-20261112T090000Z`,
         '  note        only for sessions started from now on; a session already running keeps it until it is started again',
         '',
@@ -216,6 +216,39 @@ describe('install: colour (only on a terminal, never in foreign text)', () => {
     assert.match(b.stdout, /^\x1b\[1mskydeck is installed\x1b\[22m$/m);
     const sandbox = (text: string, d: TestPlatform): string => text.replaceAll(d.sandbox.root, '');
     assert.equal(sandbox(b.text.replaceAll(OURS, ''), coloured), sandbox(a.text, plain));
+  });
+
+  test('only stdout a terminal: results, the summary and Next coloured there; stderr has none', async (t) => {
+    const d = everyQuestion(t, { TERM: 'xterm' });
+
+    const r = await inOrder(withPython(d), { lines: ['y', 'y', 'y'], stdoutTTY: true });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.doesNotMatch(r.stderr, /\x1b/);
+    assert.match(r.stderr, /^Hooks\n/);
+    assert.match(r.stderr, /\n> Add them\? \[y\/N\] \n/);
+    assert.match(r.stdout, /^\x1b\[2m {2}linked {2}\S.*\x1b\[22m$/m);
+    assert.match(r.stdout, /^\x1b\[2m {2}backup {6}\S.*\x1b\[22m$/m);
+    assert.match(r.stdout, /^ {2}marked {2}2 sessions as done/m);
+    assert.match(r.stdout, /^\x1b\[1mChanged\x1b\[22m$/m);
+    assert.match(r.stdout, /^\x1b\[1mNext\x1b\[22m$/m);
+  });
+
+  test('only stderr a terminal: headings and questions bold there; stdout has none', async (t) => {
+    const d = everyQuestion(t, { TERM: 'xterm' });
+
+    const r = await inOrder(withPython(d), { lines: ['y', 'y', 'y'], stderrTTY: true });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.doesNotMatch(r.stdout, /\x1b/);
+    assert.match(r.stdout, /^ {2}linked {2}\S/m);
+    assert.match(r.stdout, /^Changed$/m);
+    assert.match(r.stderr, /^\x1b\[1mHooks\x1b\[22m\n/);
+    assert.match(r.stderr, /^\x1b\[1mOld sessions\x1b\[22m$/m);
+    assert.match(r.stderr, /^\x1b\[1m> Add them\? \[y\/N\]\x1b\[22m $/m);
+    assert.match(r.stderr, /^\x1b\[1m> Turn the shortcut off\? \[y\/N\]\x1b\[22m $/m);
+    // The rest of stderr is plain: the explanation lines and the entries.
+    assert.match(r.stderr, /^ {2}skydeck adds these hook entries to \S+$/m);
   });
 
   for (const [why, env, options] of [
