@@ -1258,8 +1258,21 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
     async (t) => {
       const { page, d, problems } = await opened(t, chromium);
       await noteRedraws(page);
+      // B shown first, so that it is on the page, hidden, at the click; then A shown.
+      await clickRow(page, S2);
+      await untilShown(page, TERM_B);
       await clickRow(page, S1);
       await untilShown(page, TERM_A);
+      assert.equal(
+        await readPage(
+          page,
+          (term) =>
+            document.querySelector<HTMLElement>(`#terminal .tv-term[data-term="${term}"]`)?.hidden,
+          TERM_B,
+        ),
+        true,
+        'B is on the page and hidden at the click',
+      );
       const light = await termColours(page, TERM_A);
       const from = d.sent.length;
       await clickPalette(page); // light Iris
