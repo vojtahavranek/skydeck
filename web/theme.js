@@ -1,128 +1,18 @@
-// The title bar's theme switch (follow-up F13; S2 12.1): `◐ Auto`, `◐ Light` or `◐ Dark`; a click
-// goes to the next state (web/theme-text.js), puts it on <html data-theme> — which the style
-// sheets read (style.css says how) — and keeps it in the page's localStorage, one key, which
-// web/theme-early.js reads before the next load's first paint. Another window of the profile
-// follows a change at once (the `storage` event). Storage that throws or is missing changes
-// nothing but the memory: the switch works for the life of the page. Nothing of it goes to the
-// server but the colours (`changed`, app.js).
+// The window's theme (follow-up F13; S2 12.1), chosen in the settings screen's Appearance (F39,
+// S2 12.13): its mode — Auto, Light or Dark — and, for each scheme, its colour theme. A choice is
+// put on <html> at once — `data-theme` (none for Auto), `data-palette-light`, `data-palette-dark`
+// (none for the default) —, which the style sheets read (style.css says how), and kept in the
+// page's localStorage under the keys of web/theme-text.js, which web/theme-early.js reads before
+// the next load's first paint. Another window of the profile follows a change at once (the
+// `storage` event), and while the mode is Auto the page follows the system's scheme. Storage that
+// throws or is missing changes nothing but the memory: a choice holds for the life of the page.
+// Nothing of it goes to the server but the colours (`changed`, app.js).
 //
-// The button takes no keyboard on a click (the title bar's mousedown is cancelled, app.js), so the
-// keyboard stays where it was, as after `Switch…`.
+// The colour theme shown and changed is the one of the scheme the page shows now (`scheme()`),
+// so that light and dark each keep their own, as Windows Terminal's colour schemes do.
 
 /** @import { Palette, Scheme, Theme } from './theme-text.js' */
-import {
-  nextPalette,
-  nextTheme,
-  PALETTE_KEYS,
-  paletteOf,
-  PALETTES,
-  paletteTitle,
-  paletteWord,
-  THEME_KEY,
-  themeOf,
-  themeTitle,
-  themeWord,
-} from './theme-text.js';
-
-/** @type {readonly Theme[]} */
-const THEMES = ['system', 'light', 'dark'];
-
-/** The stored state; the system's when storage throws or is missing. @returns {Theme} */
-function readStored() {
-  try {
-    return themeOf(localStorage.getItem(THEME_KEY));
-  } catch {
-    return 'system';
-  }
-}
-
-/** Keeps `theme`: its value, or no key for the system's. Storage that refuses keeps nothing. @param {Theme} theme */
-function store(theme) {
-  try {
-    if (theme === 'system') {
-      localStorage.removeItem(THEME_KEY);
-    } else {
-      localStorage.setItem(THEME_KEY, theme);
-    }
-  } catch {
-    // The choice holds for the life of the page.
-  }
-}
-
-/**
- * @param {HTMLButtonElement} button  #theme-button (index.html's title bar), with its `.theme-word`
- * @param {{ changed(): void }} deps  `changed` once the page's colours may have changed: after a
- *   click, after another window's change, and after a change of the system's scheme while the page
- *   follows it
- */
-export function createThemeSwitch(button, deps) {
-  const root = document.documentElement;
-  const word = /** @type {HTMLElement} */ (button.querySelector('.theme-word'));
-  // The widest of the three words is the word's room, so that a click moves nothing in the title
-  // bar (measured once, in the page's own font).
-  let widest = 0;
-  for (const theme of THEMES) {
-    word.textContent = themeWord(theme);
-    widest = Math.max(widest, word.getBoundingClientRect().width);
-  }
-  word.style.minWidth = `${Math.ceil(widest)}px`;
-
-  /** @type {Theme} */
-  let current = 'system';
-  /** @param {Theme} theme */
-  const apply = (theme) => {
-    current = theme;
-    if (theme === 'system') {
-      delete root.dataset['theme'];
-    } else {
-      root.dataset['theme'] = theme;
-    }
-    word.textContent = themeWord(theme);
-    button.title = themeTitle(theme);
-  };
-  // web/theme-early.js applied the stored choice before the first paint; read again, so that a
-  // change another window made since is not missed.
-  apply(readStored());
-
-  // A held key acts once, as everywhere in the page (S2 12.9): the repeats of a held Enter, which
-  // would each press the button, do nothing (a held Space presses it once, at its release); a held
-  // Tab walks on, as it does over the banner's controls.
-  button.addEventListener('keydown', (event) => {
-    if (event.repeat && event.key === 'Enter') {
-      event.preventDefault();
-    }
-  });
-  button.addEventListener('click', () => {
-    const next = nextTheme(current);
-    apply(next);
-    store(next);
-    deps.changed();
-  });
-  addEventListener('storage', (event) => {
-    if (event.key !== null && event.key !== THEME_KEY) {
-      return;
-    }
-    const stored = readStored();
-    if (stored !== current) {
-      apply(stored);
-      deps.changed();
-    }
-  });
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
-    if (current === 'system') {
-      deps.changed();
-    }
-  });
-}
-
-// The title bar's second switch, the colour themes (S2 12.1): `✦ Default`, `✦ Iris`, …; it shows
-// and a click changes the theme of the scheme the page shows now (web/theme-text.js PALETTES),
-// so that light and dark each keep their own, as Windows Terminal's colour schemes do. Each is put
-// on <html data-palette-light> or <html data-palette-dark> (none for the default), which the style
-// sheets read, and kept in the page's localStorage under its scheme's key (PALETTE_KEYS), which
-// web/theme-early.js reads before the next load's first paint. Another window of the profile
-// follows a change at once; storage that throws or is missing keeps the choice for the life of the
-// page, as the theme switch does.
+import { PALETTE_KEYS, paletteOf, PALETTES, THEME_KEY, themeOf } from './theme-text.js';
 
 /** @type {readonly Scheme[]} */
 const SCHEMES = ['light', 'dark'];
@@ -130,36 +20,23 @@ const SCHEMES = ['light', 'dark'];
 /** The dataset name of each scheme's attribute. @type {Readonly<Record<Scheme, string>>} */
 const PALETTE_ATTRIBUTES = { light: 'paletteLight', dark: 'paletteDark' };
 
-/** The scheme the page shows: the theme switch's forced one, else the system's. @returns {Scheme} */
-function shownScheme() {
-  const forced = document.documentElement.dataset['theme'];
-  if (forced === 'light' || forced === 'dark') {
-    return forced;
-  }
-  return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-/** The stored theme of `scheme`; the default when storage throws or is missing.
- *  @param {Scheme} scheme
- *  @returns {Palette} */
-function readPalette(scheme) {
+/** @param {string} key @returns {string | null} the stored value; null when storage throws */
+function read(key) {
   try {
-    return paletteOf(scheme, localStorage.getItem(PALETTE_KEYS[scheme]));
+    return localStorage.getItem(key);
   } catch {
-    return 'default';
+    return null;
   }
 }
 
-/** Keeps `palette` for `scheme`: its name, or no key for the default. Storage that refuses keeps
- *  nothing.
- *  @param {Scheme} scheme
- *  @param {Palette} palette */
-function storePalette(scheme, palette) {
+/** Keeps `value` under `key`, or no key for null. Storage that refuses keeps nothing.
+ *  @param {string} key @param {string | null} value */
+function write(key, value) {
   try {
-    if (palette === 'default') {
-      localStorage.removeItem(PALETTE_KEYS[scheme]);
+    if (value === null) {
+      localStorage.removeItem(key);
     } else {
-      localStorage.setItem(PALETTE_KEYS[scheme], palette);
+      localStorage.setItem(key, value);
     }
   } catch {
     // The choice holds for the life of the page.
@@ -167,26 +44,50 @@ function storePalette(scheme, palette) {
 }
 
 /**
- * @param {HTMLButtonElement} button  #palette-button (index.html's title bar), with its `.theme-word`
- * @param {{ changed(): void }} deps  `changed` once the page's colours may have changed: after a
- *   click, and after another window's change of the theme of the scheme the page shows
+ * The theme: what the page shows and keeps, and what the settings screen changes.
+ * @typedef {object} ThemeState
+ * @property {() => Theme} mode
+ * @property {(theme: Theme) => void} setMode
+ * @property {() => Scheme} scheme  the scheme the page shows: the mode's forced one, else the system's
+ * @property {() => Palette} palette  the colour theme of the shown scheme
+ * @property {() => readonly Palette[]} palettes  the shown scheme's colour themes, the default first
+ * @property {(palette: Palette) => void} setPalette  of the shown scheme
+ * @property {(listener: () => void) => void} watch  `listener` runs after every change of what the
+ *   four readers answer: a choice here, another window's, a change of the system's scheme
  */
-export function createPaletteSwitch(button, deps) {
-  const root = document.documentElement;
-  const word = /** @type {HTMLElement} */ (button.querySelector('.theme-word'));
-  // The widest of the words is the word's room, so that a click moves nothing in the title bar.
-  let widest = 0;
-  for (const palette of new Set(SCHEMES.flatMap((scheme) => PALETTES[scheme]))) {
-    word.textContent = paletteWord(palette);
-    widest = Math.max(widest, word.getBoundingClientRect().width);
-  }
-  word.style.minWidth = `${Math.ceil(widest)}px`;
 
+/**
+ * @param {{ changed(): void }} deps  `changed` once the page's colours may have changed: after a
+ *   choice, after another window's change, and after a change of the system's scheme while the
+ *   page follows it
+ * @returns {ThemeState}
+ */
+export function createTheme(deps) {
+  const root = document.documentElement;
+  const dark = matchMedia('(prefers-color-scheme: dark)');
+  /** @type {Set<() => void>} */
+  const listeners = new Set();
+  const shown = () => {
+    for (const listener of listeners) listener();
+  };
+
+  /** @type {Theme} */
+  let mode = 'system';
   /** @type {Record<Scheme, Palette>} */
-  const current = { light: 'default', dark: 'default' };
+  const palettes = { light: 'default', dark: 'default' };
+
+  /** @param {Theme} theme */
+  const applyMode = (theme) => {
+    mode = theme;
+    if (theme === 'system') {
+      delete root.dataset['theme'];
+    } else {
+      root.dataset['theme'] = theme;
+    }
+  };
   /** @param {Scheme} scheme @param {Palette} palette */
-  const apply = (scheme, palette) => {
-    current[scheme] = palette;
+  const applyPalette = (scheme, palette) => {
+    palettes[scheme] = palette;
     const name = PALETTE_ATTRIBUTES[scheme];
     if (palette === 'default') {
       delete root.dataset[name];
@@ -194,50 +95,64 @@ export function createPaletteSwitch(button, deps) {
       root.dataset[name] = palette;
     }
   };
-  const show = () => {
-    const scheme = shownScheme();
-    word.textContent = paletteWord(current[scheme]);
-    button.title = paletteTitle(scheme, current[scheme]);
-  };
+  /** @returns {Scheme} */
+  const scheme = () => (mode === 'system' ? (dark.matches ? 'dark' : 'light') : mode);
+
   // web/theme-early.js applied the stored choices before the first paint; read again, so that a
   // change another window made since is not missed.
-  for (const scheme of SCHEMES) {
-    apply(scheme, readPalette(scheme));
+  applyMode(themeOf(read(THEME_KEY)));
+  for (const one of SCHEMES) {
+    applyPalette(one, paletteOf(one, read(PALETTE_KEYS[one])));
   }
-  show();
 
-  // A held Enter acts once, as on the theme switch.
-  button.addEventListener('keydown', (event) => {
-    if (event.repeat && event.key === 'Enter') {
-      event.preventDefault();
-    }
-  });
-  button.addEventListener('click', () => {
-    const scheme = shownScheme();
-    const next = nextPalette(scheme, current[scheme]);
-    apply(scheme, next);
-    storePalette(scheme, next);
-    show();
-    deps.changed();
-  });
   addEventListener('storage', (event) => {
-    if (event.key !== null && !SCHEMES.some((scheme) => PALETTE_KEYS[scheme] === event.key)) {
+    const key = event.key;
+    if (key !== null && key !== THEME_KEY && !SCHEMES.some((one) => PALETTE_KEYS[one] === key)) {
       return;
     }
-    let shownChanged = false;
-    for (const scheme of SCHEMES) {
-      const stored = readPalette(scheme);
-      if (stored !== current[scheme]) {
-        apply(scheme, stored);
-        shownChanged ||= scheme === shownScheme();
-      }
+    const before = { scheme: scheme(), palette: palettes[scheme()], mode };
+    applyMode(themeOf(read(THEME_KEY)));
+    for (const one of SCHEMES) {
+      applyPalette(one, paletteOf(one, read(PALETTE_KEYS[one])));
     }
-    show();
-    if (shownChanged) {
+    // A change of the mode tells the server even when the scheme stays (Auto under a dark system
+    // and Dark), as a choice here does; a change of the other scheme's colour theme does not.
+    const now = scheme();
+    if (now !== before.scheme || palettes[now] !== before.palette || mode !== before.mode) {
       deps.changed();
+      shown();
     }
   });
-  // The scheme shown changes with the theme switch and with the system's: the word follows it.
-  new MutationObserver(show).observe(root, { attributes: true, attributeFilter: ['data-theme'] });
-  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', show);
+  dark.addEventListener('change', () => {
+    if (mode === 'system') {
+      deps.changed();
+      shown();
+    }
+  });
+
+  return {
+    mode: () => mode,
+    setMode(theme) {
+      applyMode(theme);
+      write(THEME_KEY, theme === 'system' ? null : theme);
+      deps.changed();
+      shown();
+    },
+    scheme,
+    palette: () => palettes[scheme()],
+    palettes: () => PALETTES[scheme()],
+    setPalette(palette) {
+      const now = scheme();
+      if (!PALETTES[now].includes(palette)) {
+        return;
+      }
+      applyPalette(now, palette);
+      write(PALETTE_KEYS[now], palette === 'default' ? null : palette);
+      deps.changed();
+      shown();
+    },
+    watch(listener) {
+      listeners.add(listener);
+    },
+  };
 }

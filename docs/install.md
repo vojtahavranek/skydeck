@@ -510,7 +510,7 @@ The file is `<configDir>/config.json` (default `~/.config/skydeck/config.json`).
 until you write it (by hand, or with a change in the window's Settings, below), and every key is
 optional. Unknown keys are an error, so a typo is not silently ignored.
 
-**In the window: Settings.** `Settings` in the window's title bar (or `> settings` in the quick
+**In the window: Settings.** The gear in the window's title bar (or `> settings` in the quick
 switcher, Ctrl+Shift+P) shows every key, its value, its default and whether the file sets it. The
 keys marked `change` below are changed there, one at a time: `Save` (or Enter in its field), or
 `Default` to remove the key from the file. A key marked `shown` names a program, a folder or the
@@ -1833,18 +1833,19 @@ manifest names no start address).
 
 #### Colours
 
-Two buttons at the right of the title bar, before `Switch…`, choose the window's colours. Every
-window of the same Edge profile follows a change at once, and the choice holds across restarts.
+The gear at the right end of the title bar opens Settings; its first group, **Appearance**, chooses
+the window's colours, and a choice applies at once. Every window of the same Edge profile follows a
+change at once, and the choice holds across restarts (it is kept in the window's Edge profile, not
+in `config.json`).
 
-- `◐ Auto`, `◐ Light`, `◐ Dark`: light or dark as Windows is (Auto), or always light or dark.
-- `✦ Default`, `✦ Iris`, `✦ Pleiades`: the colour theme of the light or dark the window shows now,
-  for the list and the terminals alike. Light and dark each keep their own: light has Default and
-  Iris, dark has Default, Iris and Pleiades (after VS Code's Andromeda theme). A click goes to the
-  next theme.
+- **Mode**: `Auto`, `Light`, `Dark`: light or dark as Windows is (Auto), or always light or dark.
+- **Colour theme**: the colour theme of the light or dark the window shows now, for the list and
+  the terminals alike. Light and dark each keep their own: light has Default and Iris, dark has
+  Default, Iris and Pleiades (after VS Code's Andromeda theme).
 
 **Claude Code's own theme.** Claude Code draws parts of its screen in the colours of its own theme
 (`/theme`), whatever the window shows. Set it to **Auto (match terminal)**, so that it picks its
-light or dark theme to match the window's. A Claude Code that runs does not follow a later switch
+light or dark theme to match the window's. A Claude Code that runs does not follow a later change
 of the window between light and dark: after one, start or resume the session again.
 
 ### Known limits of stage A

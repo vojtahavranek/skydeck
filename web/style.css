@@ -369,34 +369,6 @@ kbd {
   border-radius: 10px;
   padding: 2px 8px;
 }
-/* The title bar's theme switch (follow-up F13, web/theme.js), drawn as `Switch…` is (search.css).
-   Its word keeps the room of the widest of the three, so that a click moves nothing. */
-.theme-button {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 8px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: none;
-  color: var(--dim);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-.theme-button:hover {
-  border-color: var(--line);
-  color: var(--text);
-}
-.theme-button:focus-visible {
-  outline: 2px solid var(--selline);
-  outline-offset: 1px;
-}
-.theme-word {
-  display: inline-block;
-  text-align: left;
-}
-
 .bar {
   flex: none;
   padding: 8px 12px;

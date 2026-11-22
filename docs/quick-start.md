@@ -153,7 +153,7 @@ The pull requests a session touched are attached by themselves. To attach one yo
 with `gh`: `PR · failing`, `PR · review`, `PR · approved` and so on.
 
 For the ticket, press `t` (or **+ ticket** in the header) and paste its link. A key alone, such as
-`ABC-123`, works once skydeck knows how a key becomes a link: open **Settings** in the title bar,
+`ABC-123`, works once skydeck knows how a key becomes a link: open **Settings** with the gear at the right end of the title bar,
 type `https://tickets.example.com/browse/{key}` into `ticketUrl` and press Enter (it applies at
 once). Settings shows every setting of `~/.config/skydeck/config.json`; those that name a program,
 a folder or the port you change in the file itself (and then run `skydeck window --restart`). The ticket's status shows as a chip when the ticket is a GitHub issue,

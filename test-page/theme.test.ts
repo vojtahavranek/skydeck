@@ -1,18 +1,19 @@
-// The title bar's theme switch (follow-up F13; S2 12.1, 7.2): a button beside `Switch…` that
-// goes Auto → Light → Dark → Auto, remembered in the page's localStorage and applied before the
-// first paint (web/theme-early.js); forced dark is exactly the system's dark and forced light the
+// The window's theme (follow-up F13; S2 12.1, 7.2), chosen from F39 in Settings' Appearance (the
+// title bar's gear): its Mode — Auto, Light or Dark —, remembered in the page's localStorage and
+// applied before the first paint (web/theme-early.js); forced dark is exactly the system's dark and forced light the
 // system's light, for every custom property of the three style sheets that have a dark scheme;
-// every terminal of the page is repainted at a click; a second page of the profile follows (the
-// `storage` event); a click leaves the keyboard where it was; a stored value that is no choice, or
-// storage that throws or is missing, is the system's. The page tells the server its colours again
+// every terminal of the page is repainted at a pick; a second page of the profile follows (the
+// `storage` event); a click on the gear takes no keyboard, and after a pick Esc gives the keyboard
+// back where it was; a stored value that is no choice, or storage that throws or is missing, is the
+// system's. The page tells the server its colours again
 // (`theme`), and the server answers OSC 10 / 11 from them. The page has web/'s real modules, on a
 // scripted stand-in server (helpers/shell.ts) and, for the answers, on a real test server with the
 // stand-in program.
 //
-// The colour themes' switch before it (S2 12.1): `✦` and the theme of the scheme the page shows,
-// a click going through that scheme's themes, each scheme keeping its own; each theme's values the
+// The Colour theme below it (S2 12.1): the theme of the scheme the page shows, offering that
+// scheme's themes, each scheme keeping its own; each theme's values the
 // same forced as by the system, a light theme leaving the dark scheme as it is; every terminal
-// repainted at a click and the server told the colours; the choices on <html> from the first
+// repainted at a pick and the server told the colours; the choices on <html> from the first
 // painted frame after a reload, and a second page of the profile following at once.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -23,14 +24,7 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 
 import { sleep } from '../test/helpers/keeper.ts';
 import { S1, S2 } from '../test/helpers/platform.ts';
-import {
-  PALETTE_KEYS,
-  paletteTitle,
-  paletteWord,
-  THEME_KEY,
-  themeTitle,
-  themeWord,
-} from '../web/theme-text.js';
+import { PALETTE_KEYS, PALETTES, paletteWord, THEME_KEY, themeWord } from '../web/theme-text.js';
 import type { Palette, Theme } from '../web/theme-text.js';
 import { browser, newContext, newPage } from './helpers/browser.ts';
 import {
@@ -181,18 +175,18 @@ async function systemScheme(page: Page, scheme: Scheme): Promise<void> {
   );
 }
 
-/** What the switch shows and keeps: the word, the title, `<html data-theme>`, the stored value. */
+/** What Settings' Mode shows and the page keeps: its value and word, `<html data-theme>`, the
+ *  stored value. The dialog is made once, so its controls are there while it is closed too. */
 async function switchState(page: Page): Promise<{
+  mode: string;
   word: string;
-  glyph: string;
-  title: string;
   attribute: string | null;
   stored: string | null;
 }> {
   return readPage(
     page,
     (key) => {
-      const button = document.getElementById('theme-button');
+      const select = document.getElementById('settings-mode') as HTMLSelectElement | null;
       let stored: string | null = null;
       try {
         stored = localStorage.getItem(key);
@@ -200,9 +194,8 @@ async function switchState(page: Page): Promise<{
         stored = 'throws';
       }
       return {
-        word: button?.querySelector('.theme-word')?.textContent ?? '',
-        glyph: button?.querySelector('.theme-glyph')?.textContent ?? '',
-        title: button?.getAttribute('title') ?? '',
+        mode: select?.value ?? '',
+        word: select?.selectedOptions[0]?.textContent ?? '',
         attribute: document.documentElement.getAttribute('data-theme'),
         stored,
       };
@@ -211,18 +204,40 @@ async function switchState(page: Page): Promise<{
   );
 }
 
-/** Asserts what the switch shows in `theme`. */
+/** Asserts what Mode shows in `theme`, and <html data-theme>. */
 async function shows(page: Page, theme: Theme, where: string): Promise<void> {
   const now = await switchState(page);
-  assert.equal(now.word, themeWord(theme), `${where}: the word`);
-  assert.equal(now.title, themeTitle(theme), `${where}: the title`);
-  assert.equal(now.glyph, '◐', `${where}: the half circle`);
+  assert.equal(now.mode, theme, `${where}: Mode's value`);
+  assert.equal(now.word, themeWord(theme), `${where}: Mode's word`);
   assert.equal(now.attribute, theme === 'system' ? null : theme, `${where}: <html data-theme>`);
 }
 
-/** A mouse click on the switch, as the user's (mousedown, mouseup, click). */
-async function clickSwitch(page: Page): Promise<void> {
-  await page.locator('#theme-button').click();
+/** Whether the settings screen is shown. */
+function settingsShown(page: Page): Promise<boolean> {
+  return readPage(page, () => document.getElementById('settings')?.hidden === false, null);
+}
+
+/** Opens Settings with a mouse click on the title bar's gear, as the user's. */
+async function openSettings(page: Page): Promise<void> {
+  await page.locator('#settings-button').click();
+  await until(() => settingsShown(page), 'Settings is open');
+}
+
+/** In Settings (opened by the gear), picks `value` in the control `selector`, then Esc closes it. */
+async function pick(page: Page, selector: string, value: string): Promise<void> {
+  await openSettings(page);
+  await page.locator(selector).selectOption(value);
+  await page.keyboard.press('Escape');
+  await until(async () => !(await settingsShown(page)), 'Settings is closed');
+}
+
+/** The mode after each: Auto → Light → Dark → Auto (the order the old switch clicked through). */
+const NEXT: Readonly<Record<Theme, Theme>> = { system: 'light', light: 'dark', dark: 'system' };
+
+/** Picks the next mode after the one shown (NEXT) in Settings, and closes it. */
+async function nextMode(page: Page): Promise<void> {
+  const now = (await switchState(page)).mode as Theme;
+  await pick(page, '#settings-mode', NEXT[now]);
 }
 
 /**
@@ -414,12 +429,11 @@ function themesSent(d: Deck, from: number): { n: number; message: Message }[] {
   return d.sent.slice(from).filter((entry) => entry.message['t'] === 'theme');
 }
 
-/** What the colour themes' switch shows and keeps: the word, the glyph, the title, the two
+/** What Settings' Colour theme shows and the page keeps: its value, its options' words, the two
  *  attributes on <html> and the two stored values. */
 async function paletteState(page: Page): Promise<{
-  word: string;
-  glyph: string;
-  title: string;
+  value: string;
+  words: string[];
   light: string | null;
   dark: string | null;
   storedLight: string | null;
@@ -428,7 +442,7 @@ async function paletteState(page: Page): Promise<{
   return readPage(
     page,
     (keys) => {
-      const button = document.getElementById('palette-button');
+      const select = document.getElementById('settings-palette') as HTMLSelectElement | null;
       const stored = (key: string): string | null => {
         try {
           return localStorage.getItem(key);
@@ -437,9 +451,8 @@ async function paletteState(page: Page): Promise<{
         }
       };
       return {
-        word: button?.querySelector('.theme-word')?.textContent ?? '',
-        glyph: button?.querySelector('.theme-glyph')?.textContent ?? '',
-        title: button?.getAttribute('title') ?? '',
+        value: select?.value ?? '',
+        words: [...(select?.options ?? [])].map((option) => option.textContent ?? ''),
         light: document.documentElement.getAttribute('data-palette-light'),
         dark: document.documentElement.getAttribute('data-palette-dark'),
         storedLight: stored(keys.light),
@@ -450,7 +463,7 @@ async function paletteState(page: Page): Promise<{
   );
 }
 
-/** Asserts what the colour themes' switch shows: `palette`, of `scheme`. */
+/** Asserts what Colour theme shows: `palette`, among the themes of `scheme`. */
 async function showsPalette(
   page: Page,
   scheme: Scheme,
@@ -458,9 +471,8 @@ async function showsPalette(
   where: string,
 ): Promise<void> {
   const now = await paletteState(page);
-  assert.equal(now.word, paletteWord(palette), `${where}: the word`);
-  assert.equal(now.title, paletteTitle(scheme, palette), `${where}: the title`);
-  assert.equal(now.glyph, '✦', `${where}: the star`);
+  assert.equal(now.value, palette, `${where}: its value`);
+  assert.deepEqual(now.words, PALETTES[scheme].map(paletteWord), `${where}: ${scheme}'s themes`);
 }
 
 /** Asserts the two attributes on <html> and the two stored values. */
@@ -478,80 +490,113 @@ async function keeps(
   );
 }
 
-/** A mouse click on the colour themes' switch. */
-async function clickPalette(page: Page): Promise<void> {
-  await page.locator('#palette-button').click();
+/** Picks the shown scheme's next colour theme in Settings (after the last, the default), and
+ *  closes it. The choices are read once Settings is open, which draws them as the page is now. */
+async function nextPalette(page: Page): Promise<void> {
+  await openSettings(page);
+  const { value, values } = await readPage(
+    page,
+    () => {
+      const select = document.getElementById('settings-palette') as HTMLSelectElement;
+      return { value: select.value, values: [...select.options].map((option) => option.value) };
+    },
+    null,
+  );
+  await page
+    .locator('#settings-palette')
+    .selectOption(values[(values.indexOf(value) + 1) % values.length] ?? '');
+  await page.keyboard.press('Escape');
+  await until(async () => !(await settingsShown(page)), 'Settings is closed');
 }
 
 /** The terminal's colours of each theme (style.css), as the page reports them. */
 const LIGHT_IRIS_COLOURS = { fg: '#241523', bg: '#f6f2fd' };
 const DARK_IRIS_COLOURS = { fg: '#fffaff', bg: '#1d1929' };
 
-test("the title bar's theme switch (follow-up F13)", async (t) => {
+test("the window's theme, in Settings' Appearance (follow-up F13, F39)", async (t) => {
   const chromium = await browser(t);
 
   await t.test(
-    'the button sits in the title bar right before `Switch…`, in its style: a half circle and `Auto`; each click goes to the next state — Light, Dark, Auto — with its word and its hover title, keeps it in localStorage (`light`, `dark`, removed for Auto) and on <html data-theme>; `Switch…` does not move',
+    "the title bar has no theme button and no text `Settings`: after `Switch…` a gear, drawn inline, named and with the tooltip Settings, opens Settings, whose Appearance comes first, drawn without the server's answer; Mode offers Auto, Light and Dark, Auto at first; each pick applies at once and keeps it in localStorage (`light`, `dark`, removed for Auto) and on <html data-theme>",
     async (t) => {
       const { page, problems } = await opened(t, chromium);
-      const layout = await readPage(
+      const bar = await readPage(
         page,
         () => {
-          const button = document.getElementById('theme-button');
-          const sw = document.getElementById('switch-button');
-          const style = (element: Element | null): Record<string, string> => {
-            if (element === null) return {};
-            const s = getComputedStyle(element);
-            return {
-              fontSize: s.fontSize,
-              color: s.color,
-              background: s.backgroundColor,
-              border: s.borderTopColor + ' ' + s.borderTopWidth + ' ' + s.borderTopStyle,
-              radius: s.borderTopLeftRadius,
-              padding: s.padding,
-              cursor: s.cursor,
-            };
-          };
+          const gear = document.getElementById('settings-button');
           return {
-            parent: button?.parentElement?.className ?? null,
-            next: button?.nextElementSibling?.id ?? null,
-            type: button?.getAttribute('type') ?? null,
-            glyphHidden: button?.querySelector('.theme-glyph')?.getAttribute('aria-hidden') ?? null,
-            mine: style(button),
-            switch: style(sw),
+            old: ['theme-button', 'palette-button'].filter((id) => document.getElementById(id)),
+            texts: [...document.querySelectorAll('.titlebar button')].map((one) =>
+              (one.textContent ?? '').replace(/\s+/g, ' ').trim(),
+            ),
+            parent: gear?.parentElement?.className ?? null,
+            after: gear?.previousElementSibling?.id ?? null,
+            name: gear?.getAttribute('aria-label') ?? null,
+            title: gear?.getAttribute('title') ?? null,
+            type: gear?.getAttribute('type') ?? null,
+            text: gear?.textContent?.trim() ?? null,
+            drawing: gear?.querySelector('svg')?.getAttribute('aria-hidden') ?? null,
+            images: gear?.querySelectorAll('img, image, use').length ?? -1,
           };
         },
         null,
       );
-      assert.equal(layout.parent, 'titlebar');
-      assert.equal(layout.next, 'switch-button', 'right before Switch…');
-      assert.equal(layout.type, 'button');
-      assert.equal(layout.glyphHidden, 'true', 'the glyph is not read out');
-      assert.deepEqual(layout.mine, layout.switch, "the title bar's own style, as Switch…'s");
+      assert.deepEqual(bar.old, [], 'no theme button');
+      assert.ok(!bar.texts.includes('Settings'), `no text Settings: ${JSON.stringify(bar.texts)}`);
+      assert.equal(bar.parent, 'titlebar');
+      assert.equal(bar.after, 'switch-button', 'right after Switch…');
+      assert.equal(bar.name, 'Settings', 'its accessible name');
+      assert.equal(bar.title, 'Settings', 'its tooltip');
+      assert.equal(bar.type, 'button');
+      assert.equal(bar.text, '', 'no text, no emoji');
+      assert.equal(bar.drawing, 'true', 'an inline drawing, not read out');
+      assert.equal(bar.images, 0, 'no picture fetched');
+      assert.equal(
+        await page.getByRole('button', { name: 'Settings', exact: true }).getAttribute('id'),
+        'settings-button',
+      );
+
+      await openSettings(page);
+      const appearance = await readPage(
+        page,
+        () => {
+          const first = document.querySelector('#settings .settings-short-group');
+          return {
+            group: first?.querySelector('.settings-group')?.textContent ?? null,
+            labels: [...(first?.querySelectorAll('label') ?? [])].map((one) => one.textContent),
+            modes: [...(document.getElementById('settings-mode') as HTMLSelectElement).options].map(
+              (option) => [option.value, option.textContent],
+            ),
+            keyboard: document.activeElement?.id ?? null,
+          };
+        },
+        null,
+      );
+      // The stand-in never answers `act settings`: Appearance needs no answer.
+      assert.deepEqual(appearance, {
+        group: 'Appearance',
+        labels: ['Mode', 'Colour theme'],
+        modes: [
+          ['system', 'Auto'],
+          ['light', 'Light'],
+          ['dark', 'Dark'],
+        ],
+        keyboard: 'settings-mode',
+      });
+      await page.keyboard.press('Escape');
+      await until(async () => !(await settingsShown(page)), 'closed');
       await shows(page, 'system', 'at first');
       assert.equal((await switchState(page)).stored, null);
 
-      const switchAt = async (): Promise<number[]> =>
-        readPage(
-          page,
-          () => {
-            const box = document.getElementById('switch-button')?.getBoundingClientRect();
-            const mine = document.getElementById('theme-button')?.getBoundingClientRect();
-            return [box?.left ?? -1, box?.width ?? -1, mine?.left ?? -1, mine?.width ?? -1];
-          },
-          null,
-        );
-      const at = await switchAt();
       for (const [theme, stored] of [
         ['light', 'light'],
         ['dark', 'dark'],
         ['system', null],
         ['light', 'light'],
       ] as const) {
-        await clickSwitch(page);
-        await shows(page, theme, `after a click to ${theme}`);
+        await nextMode(page);
+        await shows(page, theme, `after a pick of ${theme}`);
         assert.equal((await switchState(page)).stored, stored, `${theme}: stored`);
-        assert.deepEqual(await switchAt(), at, `${theme}: neither button moves or changes width`);
       }
       assert.deepEqual(problems, []);
     },
@@ -573,28 +618,28 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       assert.equal(light['color-scheme'], 'light');
       assert.equal(dark['color-scheme'], 'dark');
 
-      await clickSwitch(page); // Light, under a dark system
+      await nextMode(page); // Light, under a dark system
       await shows(page, 'light', 'forced light');
       assert.deepEqual(await computed(page), light, 'forced light under a dark system');
-      await clickSwitch(page); // Dark, under a dark system
+      await nextMode(page); // Dark, under a dark system
       assert.deepEqual(await computed(page), dark, 'forced dark under a dark system');
       await systemScheme(page, 'light');
       assert.deepEqual(await computed(page), dark, 'forced dark under a light system');
-      await clickSwitch(page); // Auto
+      await nextMode(page); // Auto
       assert.deepEqual(await computed(page), light, 'Auto under a light system');
-      await clickSwitch(page); // Light, under a light system
+      await nextMode(page); // Light, under a light system
       assert.deepEqual(await computed(page), light, 'forced light under a light system');
       await systemScheme(page, 'dark');
       assert.deepEqual(await computed(page), light, 'forced light does not follow the system');
-      await clickSwitch(page);
-      await clickSwitch(page); // Auto, under a dark system
+      await nextMode(page);
+      await nextMode(page); // Auto, under a dark system
       assert.deepEqual(await computed(page), dark, 'Auto follows the system again');
       assert.deepEqual(problems, []);
     },
   );
 
   await t.test(
-    'at a click every terminal of the page is repainted in the new colours — background, text, the sixteen colours and the selection — as after a flip of the system: the shown one at once, a hidden one when it is shown again',
+    'at a pick every terminal of the page is repainted in the new colours — background, text, the sixteen colours and the selection — as after a flip of the system: the shown one at once, a hidden one when it is shown again',
     async (t) => {
       const { page, problems } = await opened(t, chromium);
       await noteRedraws(page);
@@ -627,31 +672,31 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       await selectFirstLine(page, TERM_B);
       assert.deepEqual(await termColours(page, TERM_B), light, 'B in the light colours');
 
-      await clickSwitch(page); // Light: nothing changes under a light system
+      await nextMode(page); // Light: nothing changes under a light system
       assert.deepEqual(await termColours(page, TERM_B), light);
-      await clickSwitch(page); // Dark, under a light system
+      await nextMode(page); // Dark, under a light system
       await until(
         async () => (await termColours(page, TERM_B)).background === dark.background,
-        'B repainted at the click',
+        'B repainted at the pick',
       );
       await untilRedrawn(page, TERM_B);
       assert.deepEqual(await termColours(page, TERM_B), dark, 'B in the dark colours');
       await clickRow(page, S1);
       await untilShown(page, TERM_A);
       await untilRedrawn(page, TERM_A);
-      assert.deepEqual(await termColours(page, TERM_A), dark, 'A, hidden at the click, is dark');
+      assert.deepEqual(await termColours(page, TERM_A), dark, 'A, hidden at the pick, is dark');
 
-      await clickSwitch(page); // Auto: the light system's again
+      await nextMode(page); // Auto: the light system's again
       await until(
         async () => (await termColours(page, TERM_A)).background === light.background,
-        'A repainted at the click',
+        'A repainted at the pick',
       );
       await untilRedrawn(page, TERM_A);
       assert.deepEqual(await termColours(page, TERM_A), light);
       await clickRow(page, S2);
       await untilShown(page, TERM_B);
       await untilRedrawn(page, TERM_B);
-      assert.deepEqual(await termColours(page, TERM_B), light, 'B, hidden at the click, is light');
+      assert.deepEqual(await termColours(page, TERM_B), light, 'B, hidden at the pick, is light');
       assert.deepEqual(problems, []);
     },
   );
@@ -689,17 +734,27 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
   );
 
   await t.test(
-    'a mouse click on the switch leaves the keyboard where it was: in the terminal (what is typed next goes to its program) and in the list; Enter on the switch, given the keyboard by Tab, goes on by one state, a held Enter or Space by one only, a held Tab or Shift+Tab walks on past it',
+    'a mouse click on the gear takes no keyboard from where it was before Settings opens; after a pick, Esc gives it back: to the terminal (what is typed next goes to its program) and to the list; the gear from the keyboard: Enter opens Settings, Esc gives the keyboard back to the gear',
     async (t) => {
       const { page, d, problems } = await opened(t, chromium);
       await clickRow(page, S1);
       await untilShown(page, TERM_A);
       await toZone(page, 'terminal');
       assert.equal(await active(page), 'in #terminal');
-      await clickSwitch(page);
-      await shows(page, 'light', 'clicked from the terminal');
+      const gear = await page.locator('#settings-button').boundingBox();
+      assert.ok(gear !== null, 'the gear is drawn');
+      await page.mouse.move(gear.x + gear.width / 2, gear.y + gear.height / 2);
+      await page.mouse.down();
+      assert.equal(await active(page), 'in #terminal', 'the press takes no keyboard');
+      await page.mouse.up();
+      await until(() => settingsShown(page), 'Settings opened by the click');
+      assert.equal(await active(page), '#settings-mode', 'then the keyboard is in Settings');
+      await page.locator('#settings-mode').selectOption('light');
+      await page.keyboard.press('Escape');
+      await until(async () => !(await settingsShown(page)), 'closed');
+      await shows(page, 'light', 'picked from the terminal');
       await sleep(100); // the page's own keyboard rules run after a mouseup (a timer of 0)
-      assert.equal(await active(page), 'in #terminal', 'the terminal keeps the keyboard');
+      assert.equal(await active(page), 'in #terminal', 'the terminal has the keyboard again');
       assert.equal(await zone(page), 'Focus: terminal');
       const from = d.sent.length;
       await page.keyboard.type('x');
@@ -716,65 +771,21 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
 
       await toZone(page, 'list');
       assert.equal(await active(page), '#list');
-      await clickSwitch(page);
-      await shows(page, 'dark', 'clicked from the list');
+      await nextMode(page);
+      await shows(page, 'dark', 'picked from the list');
       await sleep(100);
-      assert.equal(await active(page), '#list', 'the list keeps the keyboard');
+      assert.equal(await active(page), '#list', 'the list has the keyboard again');
       assert.equal(await zone(page), 'Focus: list');
 
-      await page.focus('#theme-button');
+      await page.focus('#settings-button');
       await page.keyboard.press('Enter');
-      await shows(page, 'system', 'Enter on the switch');
-      assert.equal(await active(page), '#theme-button');
-
-      // A held key acts once (S2 12.9): six keydowns of one held Enter, or of a held Space, go on
-      // by one state and tell the server once (review 2, C2).
-      for (const [key, theme] of [
-        ['Enter', 'light'],
-        ['Space', 'dark'],
-      ] as const) {
-        const before = d.sent.length;
-        for (let i = 0; i < 6; i++) await page.keyboard.down(key);
-        await page.keyboard.up(key);
-        await sleep(300);
-        await shows(page, theme, `a held ${key}`);
-        assert.equal(themesSent(d, before).length, 1, `a held ${key}: one theme message`);
-      }
-      // A held Tab or Shift+Tab walks on past the switch, as everywhere in the page (review 2, S5):
-      // only a held Enter's repeats are cancelled. What took the keyboard on the way is recorded:
-      // the walk went through the switch and on.
-      const walk = async (start: () => Promise<void>, shift: boolean): Promise<string[]> => {
-        await start();
-        await page.evaluate(() => {
-          const trail: string[] = [];
-          Reflect.set(globalThis, 'focusTrail', trail);
-          document.addEventListener('focusin', (event) => {
-            const target = event.target;
-            trail.push(
-              target instanceof HTMLElement && target.id !== '' ? `#${target.id}` : 'other',
-            );
-          });
-        });
-        if (shift) await page.keyboard.down('Shift');
-        for (let i = 0; i < 6; i++) await page.keyboard.down('Tab');
-        await page.keyboard.up('Tab');
-        if (shift) await page.keyboard.up('Shift');
-        return page.evaluate(() => [...(Reflect.get(globalThis, 'focusTrail') as string[])]);
-      };
-      for (const [what, start, shift] of [
-        // Backward from the list: the switch comes after `Switch…`.
-        ['Shift+Tab', () => page.focus('#list'), true],
-        // Forward from the page's last control (the key bar's `+ New`): Tab wraps through the
-        // document to the title bar, whose first control is the switch.
-        ['Tab', () => page.focus('#new-button'), false],
-      ] as const) {
-        const trail = await walk(start, shift);
-        const at = trail.indexOf('#theme-button');
-        assert.ok(at !== -1, `a held ${what} reaches the switch: ${trail.join(' ')}`);
-        assert.ok(trail.length > at + 1, `a held ${what} walks on past it: ${trail.join(' ')}`);
-        assert.notEqual(await active(page), '#theme-button', `a held ${what} does not stop there`);
-        await shows(page, 'dark', `a held ${what} changes no state`);
-      }
+      await until(() => settingsShown(page), 'Enter on the gear opens Settings');
+      assert.equal(await active(page), '#settings-mode');
+      await page.locator('#settings-mode').selectOption('system');
+      await page.keyboard.press('Escape');
+      await until(async () => !(await settingsShown(page)), 'closed');
+      await shows(page, 'system', 'picked from the keyboard');
+      assert.equal(await active(page), '#settings-button', 'back on the gear');
       assert.deepEqual(problems, []);
     },
   );
@@ -837,8 +848,8 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
     'the choice survives a reload, and no frame is drawn in the other theme: from the first painted frame on, every frame is in the stored theme, also while the early script and the page’s modules are each held back 600 ms; without the early script the first frames are the system’s (so the measure would see a flash)',
     async (t) => {
       const { page, d, problems } = await opened(t, chromium);
-      await clickSwitch(page);
-      await clickSwitch(page); // Dark, under a light system
+      await nextMode(page);
+      await nextMode(page); // Dark, under a light system
       await shows(page, 'dark', 'before the reload');
       await page.addInitScript(FRAMES);
       const darkBg = '#16181c';
@@ -871,8 +882,8 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
 
       // The other way round: forced light under a dark system.
       await systemScheme(page, 'dark');
-      await clickSwitch(page);
-      await clickSwitch(page); // Light
+      await nextMode(page);
+      await nextMode(page); // Light
       await shows(page, 'light', 'before the second reload');
       for (const held of [0, 600]) await reloadIn(held, lightBg, 'light');
 
@@ -896,7 +907,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
   );
 
   await t.test(
-    'a second page of the same profile follows a click at once (the storage event): its word, <html data-theme>, its colours, and it tells its server its colours',
+    'a second page of the same profile follows a pick at once (the storage event): its Mode, <html data-theme>, its colours, and it tells its server its colours',
     async (t) => {
       const context: BrowserContext = await newContext(chromium);
       t.after(() => context.close());
@@ -915,8 +926,8 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         ['system', DARK_COLOURS],
       ] as const) {
         const from = d.sent.length;
-        await clickSwitch(one);
-        await shows(one, theme, `the clicked page, ${theme}`);
+        await nextMode(one);
+        await shows(one, theme, `the picked page, ${theme}`);
         await until(
           async () => (await switchState(two)).word === themeWord(theme),
           `the second page shows ${theme}`,
@@ -943,7 +954,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
   );
 
   await t.test(
-    'a stored value that is neither `light` nor `dark` is the system’s, and a click still goes to Light and stores it',
+    'a stored value that is neither `light` nor `dark` is the system’s, and a pick still goes to Light and stores it',
     async (t) => {
       const { page, problems } = await opened(t, chromium, 'dark');
       const dark = await computed(page);
@@ -967,9 +978,9 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         await shows(page, 'system', JSON.stringify(value));
         assert.deepEqual(await computed(page), dark, `${JSON.stringify(value)}: the system's dark`);
       }
-      await clickSwitch(page);
-      await shows(page, 'light', 'a click');
-      assert.equal((await switchState(page)).stored, 'light', 'the click stores its choice');
+      await nextMode(page);
+      await shows(page, 'light', 'a pick');
+      assert.equal((await switchState(page)).stored, 'light', 'the pick stores its choice');
       assert.deepEqual(problems, []);
     },
   );
@@ -989,7 +1000,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
     ],
   ] as const) {
     await t.test(
-      `${what}: the page follows the system; the button still works for the life of the page (and tells the server); a reload is the system's again`,
+      `${what}: the page follows the system; Mode still works for the life of the page (and tells the server); a reload is the system's again`,
       async (t) => {
         const page = await newPage(t, chromium);
         const problems = problemsOf(page);
@@ -1004,9 +1015,9 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         await shows(page, 'system', 'at the load');
         const light = await computed(page);
         const from = d.sent.length;
-        await clickSwitch(page);
-        await clickSwitch(page);
-        await shows(page, 'dark', 'two clicks');
+        await nextMode(page);
+        await nextMode(page);
+        await shows(page, 'dark', 'two picks');
         assert.notEqual((await computed(page))['--bg'], light['--bg'], 'the page is dark');
         assert.deepEqual(
           themesSent(d, from).map((entry) => entry.message['theme']),
@@ -1022,7 +1033,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
   }
 
   await t.test(
-    'the page tells the server its colours again (`theme`, exactly fg and bg): after each click whose colours are new or not, after a flip of the system while it follows the system, never after a flip while forced; a reconnect’s start carries the colours of the moment',
+    'the page tells the server its colours again (`theme`, exactly fg and bg): after each pick whose colours are new or not, after a flip of the system while it follows the system, never after a flip while forced; a reconnect’s start carries the colours of the moment',
     async (t) => {
       const { page, d, problems } = await opened(t, chromium);
       assert.deepEqual(d.starts()[0]?.['theme'], LIGHT_COLOURS, 'start: the light colours');
@@ -1037,10 +1048,10 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         );
         from = d.sent.length;
       };
-      await clickSwitch(page); // Light
-      await expect([LIGHT_COLOURS], 'a click to Light');
-      await clickSwitch(page); // Dark
-      await expect([DARK_COLOURS], 'a click to Dark');
+      await nextMode(page); // Light
+      await expect([LIGHT_COLOURS], 'a pick to Light');
+      await nextMode(page); // Dark
+      await expect([DARK_COLOURS], 'a pick to Dark');
       // Each flip is waited for until a `change` listener of the test's own has run (it was added
       // after the page's, so the page's has run too): two flips with no frame between them would
       // run no listener at all (review 2, S2).
@@ -1059,16 +1070,16 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       }
       await sleep(300);
       assert.deepEqual(themesSent(d, from), [], 'no message for flips while forced');
-      await clickSwitch(page); // Auto, light system
-      await expect([LIGHT_COLOURS], 'a click to Auto');
+      await nextMode(page); // Auto, light system
+      await expect([LIGHT_COLOURS], 'a pick to Auto');
       await systemScheme(page, 'dark');
       await expect([DARK_COLOURS], 'the system flips to dark');
       await systemScheme(page, 'light');
       await expect([LIGHT_COLOURS], 'and back');
 
       // A new connection: its start has the colours of now.
-      await clickSwitch(page);
-      await clickSwitch(page); // Dark
+      await nextMode(page);
+      await nextMode(page); // Dark
       const before = d.standin.connections.length;
       d.standin.connections.at(-1)?.ws.terminate();
       await until(() => d.standin.connections.length > before, 'the page connects again');
@@ -1082,7 +1093,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
   );
 
   await t.test(
-    "on a real server, a program's OSC 10 and OSC 11 questions are answered with the colours of the page's switch: light at first, dark after the clicks to Dark, light again at Auto (the stand-in's /query)",
+    "on a real server, a program's OSC 10 and OSC 11 questions are answered with the colours of the page's Mode: light at first, dark after the picks to Dark, light again at Auto (the stand-in's /query)",
     async (t) => {
       const l = await launched(t, chromium);
       await systemScheme(l.page, 'light');
@@ -1113,91 +1124,45 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         return { fg: colour('OSC 10'), bg: colour('OSC 11') };
       };
       assert.deepEqual(await asked(), LIGHT_COLOURS, 'at first: the light colours');
-      await clickSwitch(l.page);
-      await clickSwitch(l.page); // Dark
-      assert.equal(await active(l.page), 'in #terminal', 'the clicks left the keyboard there');
-      assert.deepEqual(await asked(), DARK_COLOURS, 'after the clicks to Dark');
-      await clickSwitch(l.page); // Auto, light system
+      await nextMode(l.page);
+      await nextMode(l.page); // Dark
+      assert.equal(await active(l.page), 'in #terminal', 'the picks left the keyboard there');
+      assert.deepEqual(await asked(), DARK_COLOURS, 'after the picks to Dark');
+      await nextMode(l.page); // Auto, light system
       assert.deepEqual(await asked(), LIGHT_COLOURS, 'at Auto');
       assert.deepEqual(l.problems, []);
     },
   );
 
   await t.test(
-    'the colour themes’ switch stands right before the theme switch, drawn as it is, ✦ and the default at first; a click goes through the themes of the scheme the page shows, each kept under its scheme’s key and put on <html>, each scheme keeping its own; the word follows the scheme shown; no click moves a button of the title bar',
+    'Colour theme, under Mode in Appearance, shows the default at first and offers the themes of the scheme the page shows; a pick applies it, keeps it under its scheme’s key and puts it on <html>, each scheme keeping its own; it follows the scheme shown, as Mode or the system changes it',
     async (t) => {
       const { page, problems } = await opened(t, chromium);
-      const layout = await readPage(
-        page,
-        () => {
-          const button = document.getElementById('palette-button');
-          const style = (element: Element | null): Record<string, string> => {
-            if (element === null) return {};
-            const s = getComputedStyle(element);
-            return {
-              fontSize: s.fontSize,
-              color: s.color,
-              border: s.borderTopColor + ' ' + s.borderTopWidth + ' ' + s.borderTopStyle,
-              radius: s.borderTopLeftRadius,
-              padding: s.padding,
-              cursor: s.cursor,
-            };
-          };
-          return {
-            parent: button?.parentElement?.className ?? null,
-            next: button?.nextElementSibling?.id ?? null,
-            type: button?.getAttribute('type') ?? null,
-            glyphHidden: button?.querySelector('.theme-glyph')?.getAttribute('aria-hidden') ?? null,
-            mine: style(button),
-            theme: style(document.getElementById('theme-button')),
-          };
-        },
-        null,
-      );
-      assert.equal(layout.parent, 'titlebar');
-      assert.equal(layout.next, 'theme-button', 'right before the theme switch');
-      assert.equal(layout.type, 'button');
-      assert.equal(layout.glyphHidden, 'true', 'the glyph is not read out');
-      assert.deepEqual(layout.mine, layout.theme, "the theme switch's style");
       await showsPalette(page, 'light', 'default', 'at first');
       await keeps(page, null, null, 'at first');
 
-      const buttonsAt = async (): Promise<number[]> =>
-        readPage(
-          page,
-          () =>
-            ['palette-button', 'theme-button', 'switch-button'].flatMap((id) => {
-              const box = document.getElementById(id)?.getBoundingClientRect();
-              return [box?.x ?? -1, box?.width ?? -1];
-            }),
-          null,
-        );
-      const at = await buttonsAt();
+      await nextPalette(page);
+      await showsPalette(page, 'light', 'iris', 'light, a pick');
+      await keeps(page, 'iris', null, 'light, a pick');
 
-      await clickPalette(page);
-      await showsPalette(page, 'light', 'iris', 'light, a click');
-      await keeps(page, 'iris', null, 'light, a click');
-      assert.deepEqual(await buttonsAt(), at, 'light Iris: no button moves');
-
-      await clickSwitch(page);
-      await clickSwitch(page); // Dark, under a light system
+      await nextMode(page);
+      await nextMode(page); // Dark, under a light system
       await showsPalette(page, 'dark', 'default', 'forced dark: its own choice');
-      await clickPalette(page);
-      await showsPalette(page, 'dark', 'iris', 'dark, a click');
-      await clickPalette(page);
-      await showsPalette(page, 'dark', 'pleiades', 'dark, two clicks');
+      await nextPalette(page);
+      await showsPalette(page, 'dark', 'iris', 'dark, a pick');
+      await nextPalette(page);
+      await showsPalette(page, 'dark', 'pleiades', 'dark, two picks');
       await keeps(page, 'iris', 'pleiades', 'each scheme its own');
-      assert.deepEqual(await buttonsAt(), at, 'Pleiades: no button moves');
 
-      await clickSwitch(page); // Auto, under a light system
+      await nextMode(page); // Auto, under a light system
       await showsPalette(page, 'light', 'iris', 'Auto under a light system');
       await systemScheme(page, 'dark');
       await until(
-        async () => (await paletteState(page)).word === paletteWord('pleiades'),
-        'the word follows the system',
+        async () => (await paletteState(page)).value === 'pleiades',
+        'it follows the system',
       );
       await showsPalette(page, 'dark', 'pleiades', 'Auto under a dark system');
-      await clickPalette(page);
+      await nextPalette(page);
       await showsPalette(page, 'dark', 'default', 'dark, back to the default');
       await keeps(page, 'iris', null, 'the default is no attribute and no key');
       assert.deepEqual(problems, []);
@@ -1212,13 +1177,13 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       await systemScheme(page, 'dark');
       const dark = await computed(page);
       await systemScheme(page, 'light');
-      await clickPalette(page); // light Iris
+      await nextPalette(page); // light Iris
       const lightIris = await computed(page);
       await systemScheme(page, 'dark');
       assert.deepEqual(await computed(page), dark, 'light Iris leaves the dark scheme as it is');
-      await clickPalette(page); // dark Iris
+      await nextPalette(page); // dark Iris
       const darkIris = await computed(page);
-      await clickPalette(page); // Pleiades
+      await nextPalette(page); // Pleiades
       const pleiades = await computed(page);
 
       const own = [
@@ -1248,24 +1213,24 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
         'Pleiades: dark text on its accent',
       );
 
-      await clickSwitch(page); // Light, under a dark system
+      await nextMode(page); // Light, under a dark system
       assert.deepEqual(await computed(page), lightIris, 'forced light under a dark system');
-      await clickSwitch(page); // Dark, under a dark system
+      await nextMode(page); // Dark, under a dark system
       assert.deepEqual(await computed(page), pleiades, 'forced dark under a dark system');
       await systemScheme(page, 'light');
       assert.deepEqual(await computed(page), pleiades, 'forced dark under a light system');
-      await clickSwitch(page); // Auto, under a light system
+      await nextMode(page); // Auto, under a light system
       assert.deepEqual(await computed(page), lightIris, 'Auto under a light system');
       assert.deepEqual(problems, []);
     },
   );
 
   await t.test(
-    "at a click on the colour themes' switch every terminal of the page is repainted in the theme's colours — the shown one at once, a hidden one when it is shown again — and the server is told the colours",
+    "at a pick of a colour theme every terminal of the page is repainted in the theme's colours — the shown one at once, a hidden one when it is shown again — and the server is told the colours",
     async (t) => {
       const { page, d, problems } = await opened(t, chromium);
       await noteRedraws(page);
-      // B shown first, so that it is on the page, hidden, at the click; then A shown.
+      // B shown first, so that it is on the page, hidden, at the pick; then A shown.
       await clickRow(page, S2);
       await untilShown(page, TERM_B);
       await clickRow(page, S1);
@@ -1278,14 +1243,14 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
           TERM_B,
         ),
         true,
-        'B is on the page and hidden at the click',
+        'B is on the page and hidden at the pick',
       );
       const light = await termColours(page, TERM_A);
       const from = d.sent.length;
-      await clickPalette(page); // light Iris
+      await nextPalette(page); // light Iris
       await until(
         async () => (await termColours(page, TERM_A)).background !== light.background,
-        'A repainted at the click',
+        'A repainted at the pick',
       );
       await untilRedrawn(page, TERM_A);
       const iris = await termColours(page, TERM_A);
@@ -1297,13 +1262,13 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       await clickRow(page, S2);
       await untilShown(page, TERM_B);
       await untilRedrawn(page, TERM_B);
-      assert.deepEqual(await termColours(page, TERM_B), iris, 'B, hidden at the click, is Iris');
+      assert.deepEqual(await termColours(page, TERM_B), iris, 'B, hidden at the pick, is Iris');
       assert.deepEqual(problems, []);
     },
   );
 
   await t.test(
-    'the colour themes survive a reload: from the first painted frame on, every frame is in the stored theme, also while the early script and the modules are held back 600 ms; a second page of the same profile follows a click at once and tells its server its colours',
+    'the colour themes survive a reload: from the first painted frame on, every frame is in the stored theme, also while the early script and the modules are held back 600 ms; a second page of the same profile follows a pick at once and tells its server its colours',
     async (t) => {
       const context: BrowserContext = await newContext(chromium);
       t.after(() => context.close());
@@ -1315,7 +1280,7 @@ test("the title bar's theme switch (follow-up F13)", async (t) => {
       await open(d, one);
       await open(d, two, false); // the same profile: the key is stored already
       const from = d.sent.length;
-      await clickPalette(one); // dark Iris
+      await nextPalette(one); // dark Iris
       await until(async () => (await paletteState(two)).dark === 'iris', 'the second page follows');
       await showsPalette(two, 'dark', 'iris', 'the second page');
       assert.equal((await computed(two))['--bg'], (await computed(one))['--bg'], 'its colours');

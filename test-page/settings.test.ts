@@ -1,5 +1,5 @@
 // The settings screen in the page (follow-up F36, issue #164; S2 12.13): opened by the title bar's
-// `Settings` and by the switcher's `> settings`; the file's path on top, every setting in the
+// gear (F39) and by the switcher's `> settings`; the file's path on top, every setting in the
 // server's order under its group, a changeable one in a control that fits it with Save and
 // Default, a shown-only one as text with what it names; a save, a refusal beside the field, a
 // default; the keyboard (Tab stays inside, Enter saves the field, Esc closes, the keyboard goes
@@ -118,7 +118,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
   const chromium = await browser(t);
 
   await t.test(
-    "the title bar's Settings opens it: the file's path on top, every setting in the server's order under its group, a changeable one in its control, a shown-only one as text",
+    "the title bar's gear opens it: the file's path on top, every setting in the server's order under its group, a changeable one in its control, a shown-only one as text",
     async (t) => {
       const l = await launched(t, chromium, {
         config: { prRefreshMinutes: 7, window: { links: 'edge' } },
@@ -136,7 +136,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
           keys: [...document.querySelectorAll('#settings .setting')].map(
             (one) => (one as HTMLElement).dataset['key'],
           ),
-          groups: [...document.querySelectorAll('#settings .settings-group')].map(
+          groups: [...document.querySelectorAll('#settings .settings-list .settings-group')].map(
             (one) => one.textContent,
           ),
         }),

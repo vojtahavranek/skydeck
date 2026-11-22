@@ -203,7 +203,7 @@ Added to design 11:
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12); from follow-up F37 the move of a session of Open by hand and the slots it gives out (`slot-moves.ts`, 12.9, 7.6). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
 | `src/window/view/search/` | The rules of search as pure functions (stage E, plan E1): the filter's words and chips (12.8), the blocks (12.2; the code calls them stacks), the switcher's ranking (12.8); `build.ts` calls them. No pattern is ever built from a search text. | values: its own files and `text`'s `sanitize` only; types: sessions, `protocol.ts`, `hub.ts`, `view/sections.ts` |
-| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the stored choices of the theme switch and the colour themes' switch on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
+| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the stored choices of the theme's Mode and colour themes on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
 
@@ -873,8 +873,8 @@ the last focused page reports (the headless terminal has no colours); a reported
 only when it is exactly `#rrggbb`, else — and until a page has sent its theme — xterm.js's
 default colour is (foreground `#ffffff`, background `#000000`). A page reports its colours in
 `start` (8.2.2) and, from follow-up F13, again in `theme` (8.2.3) whenever they change while it is
-open: a click on the title bar's theme switch or its colour themes' switch (12.1), the same choice
-made in another window of the profile, or the system's scheme while the page follows it. The server
+open: a pick of Mode or Colour theme in the settings screen's Appearance (12.1, 12.13), the same
+choice made in another window of the profile, or the system's scheme while the page follows it. The server
 keeps each page's latest for that page's next `focus`, and answers from it at once while that page
 is the one that had focus last, also when its window has lost the focus since (the system's scheme
 is changed in Windows' settings, outside the window). So a program that asks after a change is told
@@ -1550,7 +1550,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `detach` | `term` | Stop it. |
 | `input` | `term`, `data` | Typed text (UTF-8) for the terminal; `binary: true` when `data` is a byte string from xterm.js's binary channel (mouse reports). Makes this page the size owner. |
 | `resize` | `term`, `cols`, `rows` | The page's fitted size (8.2.6). |
-| `theme` | `theme` (`fg`, `bg`: each a text, checked exactly as `start.theme`, 8.2.2) | From follow-up F13: the page's colours changed while it is open — a click on the title bar's theme switch or its colour themes' switch, the same choice made in another window of the profile, or the system's scheme while the page follows it (12.1). The server keeps them for the page's next `focus`, and answers OSC 10 and 11 from them at once while the page is the one that had focus last (7.2). |
+| `theme` | `theme` (`fg`, `bg`: each a text, checked exactly as `start.theme`, 8.2.2) | From follow-up F13: the page's colours changed while it is open — a pick of Mode or Colour theme in the settings screen's Appearance (from follow-up F39; before it the title bar's two switches), the same choice made in another window of the profile, or the system's scheme while the page follows it (12.1). The server keeps them for the page's next `focus`, and answers OSC 10 and 11 from them at once while the page is the one that had focus last (7.2). |
 | `act` | `id`, `kind`, and the fields of the next table | An action (11, 12). The server answers `result` with the same `id`. |
 
 | `act` kind | Fields | Effect |
@@ -1821,7 +1821,7 @@ starts with `xterm.js` and then changes wheel scrolling, glyph-atlas resets and 
 W5; the answer is a one-line change in the screen side.
 
 The colours OSC 10 and 11 are answered with are the page's (7.2). From follow-up F13 a program that
-asks after a click on the title bar's theme switch or its colour themes' switch (12.1), or after a
+asks after a pick of Mode or Colour theme in the settings screen (12.1), or after a
 change of the system's scheme, is told the colours its terminal has then. A program that asked
 before keeps what it was told until it asks again: nothing tells a running program that the colours
 changed — no notification of a theme change is sent to programs, which is not part of F13. Claude
@@ -2438,27 +2438,30 @@ fold; a session that needs you is counted there and in no other count, so that t
 order Ctrl+Shift+J goes, the server sends with each `list` (8.2.3 `needYou`): the page decides no
 rule (4.3; stage B, plan B7).
 
-**Settings** (follow-up F36): the title bar's last control, after `Switch…`, opens the settings
-screen (12.13).
+**Settings** (follow-up F36; from follow-up F39 a gear): the title bar's last control, after
+`Switch…`, opens the settings screen (12.13). It is a gear drawn inline (an SVG in the text's
+colour, so that it looks the same on every system; no font's emoji, no picture fetched), with the
+accessible name and the tooltip `Settings`; a click on it takes no keyboard (12.9) before the
+screen opens. The title bar holds no switch of the theme any more: the theme is chosen in the
+screen's Appearance (below, 12.13).
 
-**The theme switch** (follow-up F13, 2026-11-18: so that the theme can also be chosen by
-hand). The page is light or dark as the
+**The theme's mode** (follow-up F13, 2026-11-18: so that the theme can also be chosen by
+hand; from follow-up F39, 2026-11-22, chosen in the settings screen, no longer by the title bar's
+switch). The page is light or dark as the
 system is (Windows' Settings, Personalization, Colors: the `prefers-color-scheme` media query), and
-changes with it while it is open. A small button in the title bar, right before `Switch…` and drawn
-as it is, shows a half circle and the state's word: `Auto` (the system's, the default), `Light` or
-`Dark`. A click goes to the next (Auto → Light → Dark → Auto); its tooltip says the state and what
-a click does (`Theme: follows the system. Click for light.`, `Theme: light. Click for dark.`,
-`Theme: dark. Click to follow the system.`); its word keeps the room of the widest, so that a click
-moves nothing. Forced dark is exactly the system's dark and forced light exactly the system's
-light: every colour of the page and `color-scheme` (scroll bars, form controls); at a click every
+changes with it while it is open. The settings screen's first group, Appearance (12.13), has
+`Mode`, a choice of `Auto` (the system's, the default), `Light` and `Dark`; a pick applies at once.
+Forced dark is exactly the system's dark and forced light exactly the system's
+light: every colour of the page and `color-scheme` (scroll bars, form controls); at a pick every
 terminal of the page is repainted in the new colours — background, text, the cursor, the sixteen
-colours, the selection —, a hidden one too, as after a change of the system's scheme. A click moves
-no keyboard (the title bar takes none, 12.9) and changes no selection; there is no key chord, no
-`config.json` key and no command-line flag for it. The choice is the page's: one key of its
+colours, the selection —, a hidden one too, as after a change of the system's scheme. A pick
+changes no selection, and Esc gives the keyboard back where it was before the screen opened;
+there is no key chord, no `config.json` key and no command-line flag for it. The choice is the
+page's: one key of its
 `localStorage` (`skydeck-theme`, `light` or `dark`; none for Auto), so it holds across reloads and
 restarts of the window and in every window of the profile, and another window of the profile follows
 a change at once (the `storage` event). A stored value that is neither, or storage that throws or is
-missing, is Auto; the button then still works for the life of the page. A classic script of its own
+missing, is Auto; a pick then still works for the life of the page. A classic script of its own
 (`web/theme-early.js`, loaded in `<head>` ahead of the style sheets, which the policy allows as it
 is, 8.2.1) puts the stored choice on `<html data-theme>` before the first paint, so that no frame
 shows the other theme. Nothing of it is sent to or kept by the server but the colours, which the
@@ -2471,12 +2474,10 @@ equal declaration by declaration. Check W34.
 scheme has themes of its own, as Windows Terminal's light and dark colour schemes do: the default —
 skydeck's colours, as above — and Iris in both, after Windows Terminal's T3 Iris Light and Dark (the
 light one's lavender stronger); Pleiades in dark only, after VS Code's Andromeda theme (Eliver Lara,
-MIT). A second small button in the title bar, right before the theme switch and drawn as it is,
-shows a four-pointed star and the theme of the scheme the page shows now (`Default`, `Iris`,
-`Pleiades`). A click goes to that scheme's next theme, after the last back to the default, and
-leaves the other scheme's as it is; its tooltip says the scheme, its theme and what a click does
-(`Dark colours: Iris. Click for Pleiades.`); its word keeps the room of the widest, and follows the
-scheme shown when the theme switch or the system changes it. A theme changes the page's neutral
+MIT). Appearance's `Colour theme`, under `Mode`, shows the theme of the scheme the page shows now
+and offers that scheme's themes (`Default`, `Iris`, and in dark `Pleiades`); a pick applies it and
+leaves the other scheme's as it is (its hint: `Light and dark each keep their own.`); it follows
+the scheme shown when `Mode` or the system changes it. A theme changes the page's neutral
 colours — the backgrounds, lines, text, the selection, the accent and the text on it (`--on-accent`)
 — and the terminal's: background, text, cursor, the sixteen colours, the selection. The attention
 marks, the waiting and crash colours and the chips' tints stay the scheme's, and every contrast the
@@ -2491,7 +2492,7 @@ keeps the choice for the life of the page. In the style sheets that have themes 
 `terminal-view.css`) a light theme is a plain rule ahead of the dark scheme that sets only
 properties the dark scheme sets, so that dark overrides it whole; a dark theme is a dark block of
 its own, scoped as the default's, with its twin for forced dark; `test/web/theme.test.ts` holds that
-structure and the page suite the computed values. As for the theme switch, there is no key chord, no
+structure and the page suite the computed values. As for the mode, there is no key chord, no
 `config.json` key and no command-line flag, and nothing of it goes to the server but the colours
 (8.2.3 `theme`).
 
@@ -3967,7 +3968,7 @@ skydeck's settings are `config.json`'s keys (16.4, design 9.1); the settings scr
 of them and changes the plain ones, one at a time, through the server. `doctor`, every command and
 editing the file by hand stay as they are, and the file's format does not change.
 
-- **Opening it.** `Settings`, the title bar's last control, or the quick switcher's command
+- **Opening it.** The gear, the title bar's last control (12.1; follow-up F39), or the quick switcher's command
   `> settings` (a start of it of at least one letter after the `>`, trimmed and in any case: `>s`,
   `> set`; the server's answer, `list.switcher.settings`, 8.2.3), with Enter or a click on its line
   `Settings: skydeck’s settings, the plain ones changed here`. Both pass the gate of a window chord
@@ -4913,13 +4914,13 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W31 | Czech and US layouts in the filter's and the switcher's fields: AltGr characters and dead keys type; Ctrl+Shift+P opens and closes the switcher on both. | E | 12.8, 12.9 |
 | W32 | `skydeck update` on the user's own installation, typed in a WSL terminal of the user's own with the window open: `--check` first (the list of new commits, or "up to date"; the window and the sessions stay as they are); then, only when it listed commits, the update itself: the window says for a few seconds that the server is not answering, then reloads itself; every session is there; no second window; `skydeck doctor` has no `problem` line that was not there before. It types into no session and presses no key in the window. | F8 | 16.5, 5.1 |
 | W33 | **Real claude**: `skydeck install` asks whether to turn Claude Code's ← shortcut off (its section `Claude Code's ← shortcut`, the explanation, and `> Turn the shortcut off? [y/N]`); `y` sets only `leftArrowOpensAgents` to `false` in `~/.claude.json`, after a backup, and `skydeck doctor` then says the shortcut is off; in a throwaway session of the window started after it, ← on its empty prompt leaves the terminal as it is (no agent view). It changes that one key of the user's on purpose and prints neither file. | F11 | 7.9 |
-| W34 | **Real claude**: the title bar's theme switch in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme "Auto (match terminal)" (looked at in `/theme`, never in its files), a new throwaway session started in each forced state picks the matching one, and whether one already running changes its theme at a switch is written down (not documented). At the end the switch, Windows' mode and Claude Code's theme are as they were. | F13 | 12.1, 7.2, 9.3 |
+| W34 | **Real claude**: the theme's Mode (Settings, Appearance; the title bar's switch before F39) in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme "Auto (match terminal)" (looked at in `/theme`, never in its files), a new throwaway session started in each forced state picks the matching one, and whether one already running changes its theme at a switch is written down (not documented). At the end Mode, Windows' mode and Claude Code's theme are as they were. | F13, F39 | 12.1, 7.2, 9.3 |
 | W35 | **Real claude**, a throwaway session started from the New form with `--model` and one more flag: the header's second line ends in those flags, in the short id's grey, after the short id, nothing else of the line moved; its tooltip says `Started with: …`; in a narrower window they are cut first; once it ended and was closed, the resume card's "Will run" has them and the header not; resumed, the header shows them again. | F16 | 12.5 |
 | W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (the header's flags, F16, and `skydeck show`); removed with ×, `Undo` puts it back at its place; with a session of the user's in a group selected, the form shows that group's chip, and a click puts the name into the Group field (nothing started). It types no prompt and changes no real session. | F15, F28 | 12.6, 10.2 |
 | W37 | A ticket on a throwaway session (follow-up F18): set by a whole link (`https://example.com/browse/TRY-1`, a host that opens nothing private), the header's third line starts with its chip `TRY-1 ↗`, its tooltip the address, a click opens it where links open (W12); set by a key only while `ticketUrl` is configured (else that step is skipped); removed with an empty text, the chip gone and `+ ticket` back; `skydeck show` prints `ticket:` while one is set. Every step checks the header's short id or the dialog's heading first; at the end the session has no ticket. | F18 | 12.5, 10.2 |
 | W38 | A ticket's status on the throwaway session (follow-up F19), asking no real tracker: a stand-in program the owner writes in a throwaway folder (`~/skydeck-try/status`, its three lines given) answers for a `ticketStatus` rule whose `match` is `https://example.com/try/`; the ticket `https://example.com/try/TRY-1` on the throwaway session shows `TRY-1 · In Progress ↗` in blue in the header and `In Progress` in the row's small chip; the answer changed to each category and ↻ pressed in the ticket dialog: `blocked` red, `review` amber, `doing` blue, `done` green, `todo` and `closed` grey; a failure (the program made not executable) keeps the old status and its tooltip says `status not read: …`; `skydeck show` prints `ticket:` with ` · <status>`. Every step checks the header's short id or the dialog's heading first; at the end the ticket is removed, `config.json` is as it was (restored from a copy), and the stand-in is deleted. | F19 | 12.5, 12.2, 12.3, 10.2 |
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
-| W41 | The settings screen on the owner's own `config.json`, copied aside first: `Settings` in the title bar shows the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36 | 12.13 |
+| W41 | The settings screen on the owner's own `config.json`, copied aside first: the title bar's gear opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36 | 12.13 |
 | W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last slotted row and under a filter; `skydeck window --restart` keeps the order. The restore order only where W16's drill runs anyway. | F37 | 7.6, 12.9 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a

@@ -1,8 +1,12 @@
 // Follow-up F36 (S2 12.13): the settings screen, a dialog over the page in the manner of stage D's
 // dialogs (web/edit.js, edit.css; modal: app.js makes the page inert under it, D2). It is opened by
-// the title bar's `Settings` and by the quick switcher's command `> settings`.
+// the title bar's gear (F39) and by the quick switcher's command `> settings`.
 //
-// The file's path stands at the top, with where its copy is kept; then every setting in the
+// Follow-up F39: at its top the short screen's groups (web/settings-short.js), drawn at once: the
+// Appearance group's Mode and Colour theme are the page's own (web/theme.js) and need no server;
+// a pick applies and keeps it at once.
+//
+// Then the file's path stands, with where its copy is kept; then every setting in the
 // server's order, under its group's heading: its name as in the file, its meaning, its value in a
 // control that fits its type (a number field, a text field, a choice), the default and whether the
 // file sets it, when a change applies, and — when the running server uses another value —
@@ -24,6 +28,9 @@
 // control's value or as text, each isolated for right-to-left text.
 
 /** @import { ResultMessage, SettingPayload, SettingsPayload } from '../src/window/protocol.ts' */
+/** @import { ThemeState } from './theme.js' */
+/** @import { LocalEntry } from './settings-short.js' */
+import { SHORT } from './settings-short.js';
 import {
   appliesText,
   controlText,
@@ -36,11 +43,13 @@ import {
   shownOnlyText,
   valueToSend,
 } from './settings-text.js';
+import { MODES, paletteWord, themeWord } from './theme-text.js';
 
 /**
  * @typedef {object} SettingsDeps
  * @property {(action: Record<string, unknown> & { kind: string }) => Promise<ResultMessage>} act
  * @property {() => void} closed called once whenever the dialog closes, whatever closed it
+ * @property {ThemeState} theme  the Appearance group's mode and colour theme
  */
 
 /**
@@ -99,6 +108,28 @@ function setText(target, text) {
  */
 
 /**
+ * Puts `values` into `select` as its options, each with its word, unless it holds exactly those.
+ * @template {string} T
+ * @param {HTMLSelectElement} select
+ * @param {readonly T[]} values
+ * @param {(value: T) => string} word
+ */
+function setOptions(select, values, word) {
+  const now = [...select.options].map((option) => option.value);
+  if (now.length === values.length && now.every((value, at) => value === values[at])) {
+    return;
+  }
+  select.replaceChildren(
+    ...values.map((value) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = word(value);
+      return option;
+    }),
+  );
+}
+
+/**
  * @param {HTMLElement} root  #settings
  * @param {SettingsDeps} deps
  */
@@ -128,9 +159,80 @@ export function createSettingsDialog(root, deps) {
   const close = button('settings-close', SETTINGS_TEXTS.close);
   const actions = element('div', 'edit-actions settings-actions');
   actions.append(close);
-  box.append(heading, fileLine, copyLine, noFile, problem, help, status, list, actions);
+
+  // F39: the short screen, its groups in the table's order.
+  const short = element('div', 'settings-short');
+  /** The Appearance group's two controls, drawn from the theme (`drawLocal`). */
+  /** @type {Map<LocalEntry['local'], HTMLSelectElement>} */
+  const locals = new Map();
+  for (const group of SHORT) {
+    const section = element('section', 'settings-short-group');
+    section.dataset['group'] = group.id;
+    const title = element('div', 'settings-group', group.title);
+    title.id = `settings-group-${group.id}`;
+    section.setAttribute('aria-labelledby', title.id);
+    section.append(title);
+    for (const entry of group.entries) {
+      section.append(makeLocal(entry));
+    }
+    short.append(section);
+  }
+
+  box.append(heading, short, fileLine, copyLine, noFile, problem, help, status, list, actions);
   root.replaceChildren(scrim, box);
   root.hidden = true;
+
+  /**
+   * One choice of the page's own, made once: its label, its choice, its hint. A pick applies it.
+   * @param {LocalEntry} entry
+   * @returns {HTMLElement}
+   */
+  function makeLocal(entry) {
+    const rowRoot = element('div', 'short-setting');
+    rowRoot.dataset['local'] = entry.local;
+    const id = `settings-${entry.local}`;
+    const label = /** @type {HTMLLabelElement} */ (element('label', 'short-label', entry.label));
+    label.htmlFor = id;
+    const select = document.createElement('select');
+    select.className = 'edit-field short-control';
+    select.id = id;
+    const line = element('div', 'short-line');
+    line.append(label, select);
+    rowRoot.append(line);
+    if (entry.hint !== null) {
+      const hint = element('div', 'short-hint', entry.hint);
+      hint.id = `${id}-hint`;
+      select.setAttribute('aria-describedby', hint.id);
+      rowRoot.append(hint);
+    }
+    select.addEventListener('change', () => {
+      if (entry.local === 'mode') {
+        const mode = MODES.find((one) => one === select.value);
+        if (mode !== undefined) deps.theme.setMode(mode);
+      } else {
+        const palette = deps.theme.palettes().find((one) => one === select.value);
+        if (palette !== undefined) deps.theme.setPalette(palette);
+      }
+    });
+    locals.set(entry.local, select);
+    return rowRoot;
+  }
+
+  /** The Appearance group as the theme is now: the mode, the shown scheme's themes and its one. */
+  const drawLocal = () => {
+    const mode = locals.get('mode');
+    if (mode !== undefined) {
+      setOptions(mode, MODES, themeWord);
+      mode.value = deps.theme.mode();
+    }
+    const palette = locals.get('palette');
+    if (palette !== undefined) {
+      setOptions(palette, deps.theme.palettes(), paletteWord);
+      palette.value = deps.theme.palette();
+    }
+  };
+  drawLocal();
+  deps.theme.watch(drawLocal);
 
   let shown = false;
   /** Opens counted, so that the answer of an earlier open draws nothing after a close. */
@@ -411,8 +513,10 @@ export function createSettingsDialog(root, deps) {
       const fresh = new Set(rows.keys());
       status.hidden = false;
       setText(status, SETTINGS_TEXTS.reading);
+      drawLocal();
       root.hidden = false;
-      box.focus();
+      // The short screen's first choice is the page's own, drawn already: the keyboard starts there.
+      (focusable()[0] ?? box).focus();
       void deps.act({ kind: 'settings' }).then((result) => {
         if (!shown || open !== opens) {
           return;
