@@ -1,6 +1,6 @@
 // The colour schemes of a style sheet of web/, as the page computes them, for the tests that
 // measure its variables: skydeck's own light (`:root`) and dark (the dark block; forced dark is its
-// twin, test/web/theme.test.ts), and each colour theme of the title bar's second switch
+// twin, test/web/theme.test.ts), and each colour theme of Settings' Colour theme
 // (web/theme-text.js PALETTES) laid over the scheme it belongs to, as style.css says: the scheme's
 // values, with the theme's own in their place.
 import assert from 'node:assert/strict';

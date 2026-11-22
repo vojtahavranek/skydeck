@@ -157,6 +157,7 @@ function refusalOf(result) {
  * @property {HTMLElement} note  then: that it is changed in the file
  * @property {HTMLElement | null} hint
  * @property {HTMLElement} mark  `after a restart`
+ * @property {HTMLElement} markText  its words
  * @property {HTMLElement} message  the answer's words
  * @property {string} drawn  the control's value as last drawn (another: the user changed it)
  * @property {boolean} ever  drawn from a screen once (until then hidden, nothing to keep)
@@ -339,7 +340,11 @@ export function createSettingsDialog(root, deps) {
     const value = element('bdi', 'setting-value short-value');
     value.dir = 'auto';
     value.hidden = true;
-    const mark = element('span', 'short-mark', SETTINGS_TEXTS.afterRestart);
+    // The mark wraps inside its room beside the control (a running address can be long); its
+    // ground is on its words only.
+    const mark = element('span', 'short-mark');
+    const markText = element('span', 'short-mark-text', SETTINGS_TEXTS.afterRestart);
+    mark.append(markText);
     mark.id = `${id}-mark`;
     mark.hidden = true;
     const message = element('span', 'short-message');
@@ -365,6 +370,7 @@ export function createSettingsDialog(root, deps) {
       note,
       hint,
       mark,
+      markText,
       message,
       drawn: '',
       ever: false,
@@ -563,7 +569,7 @@ export function createSettingsDialog(root, deps) {
       const marked = setting.applies === 'restart' || pendingLine !== null;
       row.mark.hidden = !marked;
       // While the running server uses another value, the mark says which, in the control's words.
-      setText(row.mark, restartText(row.entry, setting));
+      setText(row.markText, restartText(row.entry, setting));
       row.mark.title = pendingLine ?? '';
       // The control is described by its hint, and by the mark while it is shown.
       const described = [row.hint?.id, marked ? row.mark.id : undefined].filter(Boolean).join(' ');
@@ -711,8 +717,11 @@ export function createSettingsDialog(root, deps) {
       if (valueOf(row) !== text) {
         // Changed again meanwhile: the new value is sent; the control keeps it.
         if (result.settings !== undefined) draw(result.settings);
-        void sendShort(row, false);
-        return;
+        if (valueOf(row) !== row.drawn) {
+          void sendShort(row, false);
+          return;
+        }
+        // Changed back to what the file holds: nothing to send; the answer is the outcome.
       }
       // Asked again for the value just answered (Enter, then leaving it): its answer is the outcome.
     }

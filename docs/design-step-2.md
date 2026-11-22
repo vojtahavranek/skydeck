@@ -1436,8 +1436,8 @@ the server's proof.
 6. Only then the page sends `{ "t": "start", "assetVersion": "<the version it was loaded with>",
    "windowId": "<random per page>", "focused": true, "theme": { "fg": "…", "bg": "…" } }`, and the
    connection is open for 8.2.3's messages. `theme` is the terminal's foreground and background
-   as the page draws them at that moment (the system's scheme, or the title bar's switch, 12.1);
-   a later change is sent as 8.2.3's `theme` (follow-up F13). A page whose `assetVersion` is not the server's
+   as the page draws them at that moment (the system's scheme, or the one Settings' Mode forces,
+   12.1); a later change is sent as 8.2.3's `theme` (follow-up F13). A page whose `assetVersion` is not the server's
    reloads itself (it was loaded from an older server), without sending `start`. It does so once
    per version of the server's (it remembers that version for the tab): a page that still differs
    after that reload is not served by that server at all — most likely something else answers the

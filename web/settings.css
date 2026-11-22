@@ -230,11 +230,20 @@
   outline: 2px solid var(--selline);
   outline-offset: 2px;
 }
+/* The mark keeps to the room beside its control and wraps there, however long a running value it
+   names; its ground is on its words, line by line. */
 .short-mark {
+  flex: 1 1 120px;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.short-mark-text {
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--wait-bg);
-  color: var(--text);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 .short-message {
   flex: 1 1 160px;

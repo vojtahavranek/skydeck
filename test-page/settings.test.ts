@@ -666,7 +666,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
               `${at.ticket} .short-message`,
               `${at.ticket} .short-hint`,
               `${at.links} .short-message`,
-              `${at.keepAlive} .short-mark`,
+              `${at.keepAlive} .short-mark-text`,
               '#settings .settings-advanced-button',
               '#settings .settings-file',
               '#settings .settings-path',
@@ -1162,13 +1162,18 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
         '',
         'a save at Close that worked says nothing',
       );
-      // A refused one: the key bar says so, the file unchanged.
+      // The next opening, its answer held back: leaving the field before the answer came sends
+      // the saved text nothing again.
+      await holdBack(l.page, 'settings', 500);
+      const afterSave = await sets();
       await l.page.locator('#settings-button').click();
+      await ticket.focus();
+      await l.page.keyboard.press('Tab');
       await opened(l.page);
-      await until(
-        async () => (await ticket.inputValue()) === 'https://tickets.example.com/{key}',
-        'the screen drawn from the file',
-      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(await sets(), afterSave, 'the text saved at Close is not sent again');
+      assert.equal(await ticket.inputValue(), 'https://tickets.example.com/{key}');
+      // A refused one: the key bar says so, the file unchanged.
       const saved = readFileSync(l.d.deck.places.configPath, 'utf8');
       await ticket.fill('nope');
       await l.page.locator('#settings .settings-close').click();
@@ -1179,11 +1184,21 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
         /^Ticket address was not saved: "ticketUrl" must be null or an http or https address/,
       );
       assert.equal(readFileSync(l.d.deck.places.configPath, 'utf8'), saved, 'nothing changed');
+      // The next opening shows the file's value, not the refused text, and leaving it sends
+      // nothing.
+      const afterRefusal = await sets();
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      assert.equal(await ticket.inputValue(), 'https://tickets.example.com/{key}', "the file's");
+      await ticket.focus();
+      await l.page.keyboard.press('Tab');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(await sets(), afterRefusal, 'nothing sent');
       assert.deepEqual(l.problems, []);
     },
   );
   await t.test(
-    'a change made while an answer waits: Enter then Tab, or Enter twice, in Ticket address, and a choice picked B, A or B, A, B, end in the file and in `Saved.`',
+    'a change made while an answer waits: Enter then Tab, or Enter twice, in Ticket address, and a choice picked B, A or B, A, B, end in the file and in `Saved.`; with a broken file, two picks ending on the value in use end in the refusal',
     async (t) => {
       const l = await launched(t, chromium, {
         config: { ticketUrl: 'https://t.example.com/{key}' },
@@ -1215,6 +1230,26 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
         assert.equal(await terminal.inputValue(), end);
       }
       assert.ok((await sets()) >= 5, `each change sent: ${await sets()}`);
+
+      // A broken file refuses the first of two picks, the second being the value in use: the
+      // refusal is the outcome, the control shows the value in use.
+      writeFileSync(l.d.deck.places.configPath, '{ "terminal": "here", }');
+      const keepAlive = l.page.locator(shortControl('window.keepAlive'));
+      const was = await keepAlive.isChecked();
+      await keepAlive.click();
+      await keepAlive.click();
+      await shortSays(
+        l.page,
+        'window.keepAlive',
+        /mend the file by hand first: nothing was changed$/,
+      );
+      assert.equal(await keepAlive.isChecked(), was);
+      const links = l.page.locator(shortControl('window.links'));
+      const in_use = await links.inputValue();
+      await links.selectOption(in_use === 'edge' ? 'default' : 'edge');
+      await links.selectOption(in_use);
+      await shortSays(l.page, 'window.links', /mend the file by hand first: nothing was changed$/);
+      assert.equal(await links.inputValue(), in_use);
       assert.deepEqual(l.problems, []);
     },
   );
@@ -1380,6 +1415,41 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
       await onSwitch.click();
       await shortSays(on.page, 'window.keepAlive', 'Saved.');
       assert.equal(await mark(on.page), 'after a restart: still on until then');
+    },
+  );
+  await t.test(
+    'a long running ticket address waiting for a restart: its mark wraps beside the field, the dialog does not scroll sideways',
+    async (t) => {
+      const long = `https://tickets.example.com/${'a'.repeat(400)}/{key}`;
+      const l = await launched(t, chromium, { config: { ticketUrl: long } });
+      writeFileSync(
+        l.d.deck.places.configPath,
+        JSON.stringify({ ...configOf(l), ticketUrl: 'https://short.example.com/{key}' }),
+      );
+      await l.page.setViewportSize({ width: 1000, height: 700 });
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      const box = await readPage(
+        l.page,
+        (at) => {
+          const dialog = document.querySelector('#settings .settings-dialog') as HTMLElement;
+          const mark = document.querySelector(`${at} .short-mark`) as HTMLElement;
+          const field = document.querySelector(`${at} input`) as HTMLElement;
+          return {
+            text: mark.textContent,
+            wide: dialog.scrollWidth > dialog.clientWidth,
+            besideField: mark.getBoundingClientRect().left >= field.getBoundingClientRect().right,
+            inside: mark.getBoundingClientRect().right <= dialog.getBoundingClientRect().right,
+          };
+        },
+        short('ticketUrl'),
+      );
+      assert.equal(box.text, `after a restart: still “${long}” until then`);
+      assert.deepEqual(
+        { wide: box.wide, besideField: box.besideField, inside: box.inside },
+        { wide: false, besideField: true, inside: true },
+      );
+      assert.deepEqual(l.problems, []);
     },
   );
 });
