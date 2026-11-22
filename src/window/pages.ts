@@ -572,7 +572,12 @@ export function createPages(deps: PagesDeps): Pages {
   };
 
   const onAct = (conn: Connection, action: ActMessage): void => {
-    const page: PageInfo = { windowId: conn.windowId, focused: conn.focused, area: conn.area };
+    const page: PageInfo = {
+      windowId: conn.windowId,
+      focused: conn.focused,
+      area: conn.area,
+      view: conn.view,
+    };
     let answer: Promise<ResultMessage>;
     try {
       answer = deps.actions.act(page, action);

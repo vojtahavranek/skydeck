@@ -847,7 +847,8 @@ effect.
 ### Using the window
 
 - **The list**, on the left, has three sections: **Open** (running or starting, in the window or in
-  another terminal; the window's terminals carry the slots 1–9), **Recent** (not running, last
+  another terminal; the window's terminals carry the slots 1–9, read top to bottom; Shift+↑ and
+  Shift+↓ move the selected one, see Keys), **Recent** (not running, last
   active in the last 7 days) and **Earlier** (folded; a click on its header unfolds it). Done
   sessions are hidden: the footer's `show`, or `a`, shows them. While there is no session at all
   (none yet, or the last one done or gone), the list says so under Open and names the two ways to
@@ -897,7 +898,14 @@ effect.
   terminal, Ctrl+Shift+C copies from the terminal (plain Ctrl+C interrupts the program), and
   Ctrl+Shift+V is Claude Code's own image paste (it reads the Windows clipboard itself; Ctrl+V
   pastes text). The key bar at the bottom says where the keyboard is (`Focus: list`,
-  `Focus: terminal`).
+  `Focus: terminal`). In the list, **Shift+↑ or Shift+K moves the selected session of Open one
+  place up, Shift+↓ or Shift+J one place down**; the slot numbers follow, so Ctrl+Shift+1…9 go to
+  the row that shows that number, every open window shows the new order, and it stays after a
+  reload and `skydeck window --restart`. A block moves as one, and inside a block a session trades
+  places with its neighbour. A session without a slot (the tenth terminal, one running in another
+  terminal or in Claude Code's background), one under Recent or Earlier, and any session while a
+  filter or a chip is set do not move: the key bar says why. Caps Lock alone moves nothing (Shift
+  must be held).
 
 #### Editing a session (stage D)
 
@@ -1461,7 +1469,11 @@ a WSL terminal of your own, run `skydeck window`:
   those that ended within two minutes of that boot's last event; the others are listed unticked),
   and the buttons `Restore 3` (the number counts the ticked ones) and `Not now`. The time reads
   `today at 18:02`, `yesterday at 18:02`, `on 12 Nov at 18:02` or `on 12 Nov 2025 at 18:02`, in the
-  page's (Windows') time zone, and follows the clock: `today` becomes `yesterday` at midnight.
+  page's (Windows') time zone, and follows the clock: `today` becomes `yesterday` at midnight. The
+  sessions are listed, and restored, in the order of the slots they last had in the window, so they
+  come back in the same order under Open, each taking the lowest free number in that order; the
+  others follow. `skydeck
+  restore` uses the same order.
 - **`Restore 3`** starts the ticked sessions as `skydeck restore` does — each through the same
   checks, `restoreBatch` at a time, the memory check before each batch — but in the window: they
   show under Open as `starting…`, then run, each in the next free slot. Nothing is selected and the
@@ -1650,7 +1662,8 @@ Recent only recent ones (not running, last active in the last 7 days), so a grou
 two sections is two blocks. Every session of the group is in its block, one that has a terminal of
 the window and one that needs you too. A block sits where its first session sits in the section's
 order (under Open: by slot), and the others follow it in that order, so the slot numbers under Open
-can run `1 3 2`. A group is its exact text: `ORB-1` and `orb-1` are two. A session whose group no
+can run `1 3 2` — until you move a session (Shift+↑ or Shift+↓, "Using the window"), which gives the
+numbers out again top to bottom. A group is its exact text: `ORB-1` and `orb-1` are two. A session whose group no
 other session of its section has, or that has no group, is listed as before. A section's count
 counts every session in it, those of a closed block too.
 

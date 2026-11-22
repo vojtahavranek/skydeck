@@ -52,6 +52,10 @@ const SECTIONS = [
     title: 'In the list',
     lines: [
       [['↑', '↓', 'j', 'k'], 'move'],
+      [
+        ['Shift+↑', 'Shift+↓', 'Shift+K', 'Shift+J'],
+        'move the session up or down in Open; the slot numbers follow',
+      ],
       [['Home', 'End', 'PgUp', 'PgDn'], 'the first, the last, a page up, a page down'],
       [['←', '→'], 'fold or unfold Earlier; close or open a group'],
       [['Enter'], 'show a running session’s terminal; resume one that is not running'],

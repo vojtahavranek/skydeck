@@ -511,6 +511,30 @@ export function buildListMessage(
 }
 
 /**
+ * F37 (S2 12.9): Open's rows as any page can draw them, the order a move is computed over —
+ * `buildListMessage` with a neutral view: no filter, no chip, every block open, nothing selected,
+ * done ones shown (so that every row a page draws under Open is in it; what showing done ones adds
+ * are empty copies the list otherwise hides, which never have a slot). Each row of a block carries
+ * its `stack`.
+ */
+export function openRows(input: Omit<ViewInput, 'view' | 'selected'>): RowPayload[] {
+  const message = buildListMessage({
+    ...input,
+    selected: null,
+    view: {
+      filter: '',
+      unfolded: [],
+      showDone: true,
+      selected: null,
+      chips: [],
+      closed: [],
+      switcher: null,
+    },
+  });
+  return message.sections.find((section) => section.name === 'open')?.rows ?? [];
+}
+
+/**
  * E9's input: every row listed with done ones shown, Open's in Open's order and then the others
  * most recent first, each once with its payload (the list's, without a stack) and what hides it;
  * `needOrder` is B6's order (`attentionOrder`) over those that need you.

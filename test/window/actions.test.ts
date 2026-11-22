@@ -1846,3 +1846,75 @@ test("resume is refused while a lost terminal's program may still run (task 82):
   assert.equal((await h.act(resume(S1, 4))).ok, true);
   assert.deepEqual(h.hub.closed, ['aaaaaaaaaaa1']);
 });
+
+// --- F37: reorder ------------------------------------------------------------------------------
+
+describe('reorder (F37, S2 12.9)', () => {
+  const up: ActMessage = { t: 'act', id: 41, kind: 'reorder', sessionId: S1, direction: 'up' };
+  const down: ActMessage = { t: 'act', id: 42, kind: 'reorder', sessionId: S2, direction: 'down' };
+
+  test("without its dep: 'skydeck cannot do that action', nothing told", async (t) => {
+    const d = testDeck(t);
+    const h = harness(d);
+    assert.deepEqual(await h.act(up), refused(41, 'skydeck cannot do that action'));
+    assert.deepEqual(h.told, []);
+  });
+
+  /** Actions whose `reorder` records its calls (with the page's view) and answers `answer`. */
+  function withReorder(
+    d: TestDeck,
+    answer: () => { ok: true } | { ok: false; error: string },
+  ): {
+    act(action: ActMessage, page?: PageInfo): Promise<ResultMessage>;
+    calls: string[];
+    logs: string[];
+    told: string[];
+  } {
+    const h = harness(d);
+    const calls: string[] = [];
+    const actions = createActions({
+      deck: d.deck,
+      hub: h.hub,
+      terminalFor: () => {
+        throw new Error('no terminal is built for a reorder');
+      },
+      openLink: async () => true,
+      log: (line) => h.logs.push(line),
+      changed: () => h.told.push('changed'),
+      prs: { fetch: () => undefined, refresh: () => undefined },
+      reorder(page, sessionId, direction) {
+        calls.push(`${sessionId} ${direction} filter=${page.view?.filter ?? 'none'}`);
+        return answer();
+      },
+    });
+    return {
+      act: (action, page = PAGE) => actions.act(page, action),
+      calls,
+      logs: h.logs,
+      told: h.told,
+    };
+  }
+
+  test('reaches its dep with the page (its view), the session and the direction; ok answers ok, nothing told', async (t) => {
+    const d = testDeck(t);
+    const h = withReorder(d, () => ({ ok: true }));
+    const view = { t: 'view' as const, filter: 'orb', unfolded: [], showDone: false, selected: S1 };
+    assert.deepEqual(await h.act(up, { ...PAGE, view }), ok(41));
+    assert.deepEqual(await h.act(down), ok(42));
+    assert.deepEqual(h.calls, [`${S1} up filter=orb`, `${S2} down filter=none`]);
+    assert.deepEqual(h.told, [], "the registry's change tells the lists, not the act");
+  });
+
+  test("a refusal is the result's one line; a busy store is the busy line", async (t) => {
+    const d = testDeck(t);
+    const refusing = withReorder(d, () => ({ ok: false, error: 'already at the top of Open' }));
+    assert.deepEqual(await refusing.act(up), refused(41, 'already at the top of Open'));
+    const busy = withReorder(d, () => {
+      throw Object.assign(new Error('database is locked'), {
+        code: 'ERR_SQLITE_ERROR',
+        errcode: 5,
+      });
+    });
+    assert.deepEqual(await busy.act(up), refused(41, "skydeck's database is busy; try again"));
+  });
+});

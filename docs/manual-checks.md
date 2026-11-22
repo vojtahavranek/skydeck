@@ -21,7 +21,8 @@ F13), at "The window's theme"; W35 checks the flags a session was started with i
 flags (follow-up F15) and its group chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
 session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status"; W40 checks
 a copy that Claude Code's background feature makes (follow-up F33), at "A copy made in agent view";
-W41 checks the window's settings screen (follow-up F36), at "The settings screen".
+W41 checks the window's settings screen (follow-up F36), at "The settings screen"; W42 checks
+moving a session of Open by hand (follow-up F37), at "Moving a session in Open".
 
 Setup:
 
@@ -2825,5 +2826,48 @@ Setup: skydeck updated to a commit that has follow-up F36 (`skydeck update`, W32
 
 Write down: what step 1 found; for each step whether it went as expected, and the words where they
 differ; whether the dialog, its fields and its buttons read well in your theme.
+
+Not tried before this check was written: all of it, in Edge.
+
+## Moving a session in Open
+
+The check of moving a session of Open by key (follow-up F37; design-step-2.md 12.9, 7.6;
+[install.md](install.md), "Using the window"): W42, in your window, on three throwaway sessions
+only. The tests move rows in headless Chromium against a test server with the stand-in; only here do
+the keys meet Edge, your layouts and the real Claude Code. The restore order after a reboot (design
+7.8) is looked at only where W16's drill runs anyway.
+
+## W42. Three throwaway sessions moved up and down (real claude)
+
+Setup: skydeck updated to a commit that has follow-up F37 (`skydeck update`, W32), then the window
+open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Close every other
+terminal of the window first, or read the slots below as the ones after them.
+
+1. **Three throwaway sessions.** Three times: Ctrl+Shift+N, the throwaway folder's full path in the
+   directory field (`/home/<you>/skydeck-try`), a label `move-1`, `move-2`, `move-3` in turn, Enter.
+   Expected: under Open `move-1`, `move-2`, `move-3` in this order with the numbers 1, 2, 3 (or the
+   three slots that were free, ascending).
+2. **Up with Shift+↑, on a US layout.** Click `move-3`, press Ctrl+Shift+L (`Focus: list`), then
+   Shift+↑. Expected: `move-3` is the second row and has the number 2, `move-2` the third with 3; the
+   selection and `Focus: list` stay on `move-3`. Ctrl+Shift+2 shows `move-3`'s terminal,
+   Ctrl+Shift+3 `move-2`'s, Ctrl+Shift+1 `move-1`'s.
+3. **The letters.** Click `move-3` (the second row), then Ctrl+Shift+L (`Focus: list`): Shift+K
+   moves it to the top (number 1), Shift+J back down one place, Shift+↓ down again. Then turn Caps
+   Lock on and press `k` and `K` without Shift: nothing moves, neither the selection nor a row;
+   Shift+K under Caps Lock moves `move-3` up. Turn Caps Lock off.
+4. **The Czech layout.** Switch Windows to the Czech layout (W8) and do step 3 again. Expected: the
+   same. Switch back.
+5. **What does not move.** On the top row Shift+↑: the key bar says `already at the top of Open`,
+   nothing moves. On the last of the three Shift+↓: `already the last session with a slot under
+   Open`. Press `/`, type `move`, Enter (the filter), then Shift+↑ on a row: `clear the filter first:
+   sessions move only while no filter or chip is set`, nothing moves; Esc clears the filter.
+6. **A restart.** Write down the order and the numbers. In W, a WSL terminal of your own: `skydeck
+   window --restart`. Expected: once the window is back, the same order and the same numbers, and
+   each Ctrl+Shift+1…3 shows the terminal of the row that has that number.
+7. **The end.** For each throwaway session: type `/exit` in its terminal, then `d` in the list to
+   mark it done.
+
+Write down: for each step whether it went as expected, and the words where they differ; your Edge
+version and your two layouts.
 
 Not tried before this check was written: all of it, in Edge.
