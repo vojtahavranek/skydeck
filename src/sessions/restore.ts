@@ -17,6 +17,7 @@ import { buildList, flatRows } from './list.ts';
 import type { ListRow } from './list.ts';
 import { loadRows } from './load.ts';
 import { refresh } from './refresh.ts';
+import { inRememberedOrder, readRememberedSlots } from './restore-order.ts';
 import { prepareResumeById } from './resume-by-id.ts';
 import {
   checkResumable,
@@ -157,7 +158,9 @@ export interface RestorePlan {
 
 /**
  * The plan of a restore, shared by the command and the window's server (S2 11.1): planRestore over
- * `rows` (default loadRows(deck)) in list order (`ls --all`), with the boot id the rows were derived
+ * `rows` (default loadRows(deck)) in list order (`ls --all`), its entries then put in the order of
+ * the slots their sessions last had in the window in their boot (F37, `inRememberedOrder` over the
+ * store's `window_restore_order`; the others after, in list order), with the boot id the rows were derived
  * with as the current one — never a second read, so a read that failed for the rows and one that
  * worked are not mixed (design 7.6) —, and the latest earlier boot. Without that boot id it refuses
  * (SkydeckError): every process would look dead, so this boot's running sessions would be offered,
@@ -184,7 +187,10 @@ export function restorePlan(
   );
   const events = deck.store.events();
   return {
-    entries: planRestore(inOrder, events, bootId, all),
+    entries: inRememberedOrder(
+      planRestore(inOrder, events, bootId, all),
+      readRememberedSlots(deck.store),
+    ),
     earlier: latestEarlierBoot(events, bootId),
   };
 }

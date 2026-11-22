@@ -34,7 +34,7 @@
  * @typedef {{ kind: 'move', by: 1 | -1 | 'home' | 'end' | 'page-up' | 'page-down' }
  *   | { kind: 'fold' } | { kind: 'unfold' } | { kind: 'enter' } | { kind: 'filter' }
  *   | { kind: 'show-done' } | { kind: 'escape' } | { kind: 'reload' }
- *   | { kind: 'edit', what: EditWhat } | { kind: 'done' }} ListAction
+ *   | { kind: 'edit', what: EditWhat } | { kind: 'done' } | { kind: 'reorder', by: 1 | -1 }} ListAction
  */
 
 /**
@@ -123,6 +123,9 @@ export function terminalKey(e) {
  * BrowserRefresh key alone, with Shift or with Ctrl (S2 12.9, 15.3). The keys of stage D (plan D
  * 2.4): `l` and F2 edit the label, `g` the group, `n` the note, `p` the pull requests; `d` marks
  * done, or undone for a done row (app.js decides which). Follow-up F18: `t` edits the ticket.
+ * Follow-up F37: Shift+↑ and Shift+K move the selected session of Open one place up, Shift+↓ and
+ * Shift+J one place down (`reorder`) — Shift alone with the key that types k/K or j/J, so Shift+k
+ * under Caps Lock too; Caps Lock alone (`K` without Shift) moves nothing.
  * @param {KeyLike} e
  * @returns {ListAction | null}
  */
@@ -132,6 +135,16 @@ export function listKey(e) {
   }
   if (e.ctrlKey || e.altKey || e.metaKey) {
     return null;
+  }
+  if (hasOnly(e, 'shift')) {
+    switch (lowerKey(e)) {
+      case 'k':
+      case 'arrowup':
+        return { kind: 'reorder', by: -1 };
+      case 'j':
+      case 'arrowdown':
+        return { kind: 'reorder', by: 1 };
+    }
   }
   switch (e.key) {
     case 'j':

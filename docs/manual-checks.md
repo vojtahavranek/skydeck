@@ -21,7 +21,8 @@ F13), at "The window's theme"; W35 checks the flags a session was started with i
 flags (follow-up F15) and its group chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
 session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status"; W40 checks
 a copy that Claude Code's background feature makes (follow-up F33), at "A copy made in agent view";
-W41 checks the window's settings screen (follow-up F36), at "The settings screen"; W43 checks the
+W41 checks the window's settings screen (follow-up F36), at "The settings screen"; W42 checks
+moving a session of Open by hand (follow-up F37), at "Moving a session in Open"; W43 checks the
 window's notice of a newer skydeck (follow-up F38), at "The update notice".
 
 Setup:
@@ -65,27 +66,33 @@ question for good.
 
 Expected:
 
-- Before the question, the two hook entries (`SessionStart` and `SessionEnd`) are printed: exactly what
-  is going to be added. When the file is not in skydeck's formatting (four-space indentation, no
-  newline at the end), one more line follows: `the rest of the file will be rewritten in skydeck's
-  formatting; the file as it is now is kept in <backup path>`.
-- Three `linked ...` lines (fewer when links already exist), then
-  `added the hook entries to ...; the file as it was is kept in ...settings.json.skydeck-backup-<UTC time>`,
-  then the question about old sessions if it is asked (after the line `"Done" only hides a
-  session from skydeck's list: …`), then `skydeck is installed` and five lines on what to do next,
-  the last naming the README of your checkout.
+- No `ExperimentalWarning` line anywhere. A section `Hooks`: before the question, the two hook
+  entries (`SessionStart` and `SessionEnd`), one line each with the whole command and `timeout 5
+  s`: exactly what is going to be added, no JSON. When the file is not in skydeck's formatting
+  (four-space indentation, no newline at the end), one more line follows: `the rest of the file
+  will be rewritten in skydeck's formatting; the file as it is now is kept in <backup path>`. The
+  question is on a line of its own, `> Add them? [y/N]`, after a blank line.
+- Under it three `linked ... -> ...` lines (fewer when links already exist), then
+  `added   the hook entries to ...` and `backup  ...settings.json.skydeck-backup-<UTC time>`,
+  then the section `Old sessions` if its question is asked, the section `Claude Code's ← shortcut`,
+  `Changed` with every file this install changed and its backup, `skydeck is installed`, and
+  `Next` with what to do next, its last line naming the README of your checkout. Each section has
+  a blank line before it; on a terminal the headings and questions are bold.
 - The backup exists, is readable by you only (`ls -l` shows `-rw-------`) and is the file you copied:
   `cmp /tmp/settings.before.json ~/.claude/settings.json.skydeck-backup-*` prints nothing (with
   more than one backup, name the one that was printed).
 - `~/.claude/settings.json` still has everything it had, plus the two entries. Its layout may
   change: it is written with two-space indentation and a newline at the end.
-- `skydeck doctor` prints no line that starts with `problem`, and `echo $?` right after it prints
-  `0`. (It needs `gh` logged in.)
-- `bin/skydeck install` a second time prints `hook entries already present` and makes no new backup.
+- `skydeck doctor` prints its lines under the headings Versions, Recording, Claude Code, GitHub and
+  Window, no line that starts with `problem`, and `no problems` last; `echo $?` right after it
+  prints `0`. (It needs `gh` logged in.) In a terminal the headings are bold and each `ok` green;
+  `skydeck doctor | cat` and `NO_COLOR=1 skydeck doctor` show the same lines without colour.
+- `bin/skydeck install` a second time prints `hook entries already present in ...` and
+  `nothing was changed`, and makes no new backup.
 
 With no settings file (only the folder `~/.claude`): skip the `cp` and every `cmp` and `ls -l` of the
-backup. The entries are shown and the question asked as above, and the line is
-`added the hook entries to <settings file> (a new file)`. No backup is made.
+backup. The entries are shown (after `(a new file):`) and the question asked as above, and the
+line is `added   the hook entries to <settings file> (a new file)`. No backup is made.
 
 ## 2. Session start
 
@@ -525,13 +532,19 @@ edit in the prompt).
 
 Write down every key that arrived wrong or did something else.
 
-## W9. Claude Code's symbols are drawn (real claude)
+## W9. Claude Code's symbols and emoji are drawn (real claude)
 
 In the throwaway session, send a prompt that makes Claude Code use a tool (`list the files here`).
 Its tool lines start with `⏺`, their results with `⎿`; Shift+Tab shows `⏵⏵` in the mode line.
-Expected: drawn as symbols, not as empty boxes.
+Expected: drawn as symbols, not as empty boxes, and in the colours Claude Code gives them: a
+finished tool's `⏺` is green (red after a failed one), never a colour emoji (a blue button).
 
-Write down which symbols show as boxes.
+Then send `print 🔴 🟠 🟡 ⚪ 🤷‍♂️ 👨‍👩‍👧 on one line, with a space between them`. Expected: the four
+circles red, orange, yellow and white, told apart at a glance (not four grey discs); the shrug and
+the family each one picture, two cells wide, not their parts squashed together (#154).
+
+Write down which symbols show as boxes or as colour emoji, and which emoji show in one colour or
+in parts.
 
 ## W10. Emoji line up (real claude)
 
@@ -1949,28 +1962,39 @@ Then type `ls -la ~ | grep -F claude.json` and write down what it lists: names, 
 only (it also lists a `..claude.json.<12 hex digits>.tmp`, with two dots, that an interrupted
 install would leave).
 
-1. **The question.** In W, type `skydeck install`. Expected, among its usual lines (`hook entries
-   already present`, perhaps the python3 line): the three lines and the question
+1. **The question.** In W, type `skydeck install`. Expected, after its usual sections (Hooks with
+   `hook entries already present in …`, perhaps Window with the python3 line): the section and
+   the question
 
    ```
-   Claude Code's ← shortcut is on: ← on an empty prompt sends the session to the background and opens agent view.
-   ← also closes a group in skydeck's list, so a ← meant for the list can send a window terminal's session away.
-   Turning it off sets only leftArrowOpensAgents in /home/<you>/.claude.json, after a backup; agent view itself stays (claude agents, /bg).
-   Turn the shortcut off? [y/N]
+   Claude Code's ← shortcut
+     It is on: ← on an empty prompt sends the session to the background and opens
+     agent view. ← also closes a group in skydeck's list, so a ← meant for the list
+     can send a window terminal's session away. Turning it off sets only
+     leftArrowOpensAgents in /home/<you>/.claude.json, after a backup;
+     agent view itself stays (claude agents, /bg).
+
+   > Turn the shortcut off? [y/N]
    ```
 
-   Read them. When the third line names a file other than your `~/.claude.json`, type `n`, write
+   Read them. When the fourth line names a file other than your `~/.claude.json`, type `n`, write
    the path down and stop. Else type `y` and Enter. Expected:
 
    ```
-   turned Claude Code's ← shortcut off in /home/<you>/.claude.json; the file as it was is kept in /home/<you>/.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>
-   the shortcut is off for sessions started from now on; a session already running keeps it until it is started again
+     turned off  the ← shortcut in /home/<you>/.claude.json
+     backup      /home/<you>/.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>
+     note        only for sessions started from now on; a session already running keeps it until it is started again
+
+   Changed
+     ← shortcut  /home/<you>/.claude.json
+     backup      /home/<you>/.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>
+
    skydeck is installed
    ```
 
-   then the five lines on what to do next, and `echo $?` prints `0`. Any other line about the shortcut (`… kept changing while skydeck
-   wrote it …`, `could not turn Claude Code's ← shortcut off: …`, `… left … alone (…)`): write it
-   down. The file is then as it was; leave out the rest of the check, and turn the shortcut off
+   then Next with what to do next, and `echo $?` prints `0`. Any other line about the shortcut
+   (`… kept changing while skydeck wrote it …`, `could not turn Claude Code's ← shortcut off: …`,
+   `… left … alone (…)`): write it down. The file is then as it was; leave out the rest of the check, and turn the shortcut off
    with `/config` in Claude Code ("← opens agents") if you want it off.
 2. **What changed.** In W, `ls -la ~ | grep -F claude.json`. Expected: no
    `..claude.json.<12 hex digits>.tmp` that was not there in the setup; `.claude.json` with mode
@@ -2803,6 +2827,49 @@ Setup: skydeck updated to a commit that has follow-up F36 (`skydeck update`, W32
 
 Write down: what step 1 found; for each step whether it went as expected, and the words where they
 differ; whether the dialog, its fields and its buttons read well in your theme.
+
+Not tried before this check was written: all of it, in Edge.
+
+## Moving a session in Open
+
+The check of moving a session of Open by key (follow-up F37; design-step-2.md 12.9, 7.6;
+[install.md](install.md), "Using the window"): W42, in your window, on three throwaway sessions
+only. The tests move rows in headless Chromium against a test server with the stand-in; only here do
+the keys meet Edge, your layouts and the real Claude Code. The restore order after a reboot (design
+7.8) is looked at only where W16's drill runs anyway.
+
+## W42. Three throwaway sessions moved up and down (real claude)
+
+Setup: skydeck updated to a commit that has follow-up F37 (`skydeck update`, W32), then the window
+open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Close every other
+terminal of the window first, or read the slots below as the ones after them.
+
+1. **Three throwaway sessions.** Three times: Ctrl+Shift+N, the throwaway folder's full path in the
+   directory field (`/home/<you>/skydeck-try`), a label `move-1`, `move-2`, `move-3` in turn, Enter.
+   Expected: under Open `move-1`, `move-2`, `move-3` in this order with the numbers 1, 2, 3 (or the
+   three slots that were free, ascending).
+2. **Up with Shift+↑, on a US layout.** Click `move-3`, press Ctrl+Shift+L (`Focus: list`), then
+   Shift+↑. Expected: `move-3` is the second row and has the number 2, `move-2` the third with 3; the
+   selection and `Focus: list` stay on `move-3`. Ctrl+Shift+2 shows `move-3`'s terminal,
+   Ctrl+Shift+3 `move-2`'s, Ctrl+Shift+1 `move-1`'s.
+3. **The letters.** Click `move-3` (the second row), then Ctrl+Shift+L (`Focus: list`): Shift+K
+   moves it to the top (number 1), Shift+J back down one place, Shift+↓ down again. Then turn Caps
+   Lock on and press `k` and `K` without Shift: nothing moves, neither the selection nor a row;
+   Shift+K under Caps Lock moves `move-3` up. Turn Caps Lock off.
+4. **The Czech layout.** Switch Windows to the Czech layout (W8) and do step 3 again. Expected: the
+   same. Switch back.
+5. **What does not move.** On the top row Shift+↑: the key bar says `already at the top of Open`,
+   nothing moves. On the last of the three Shift+↓: `already the last session with a slot under
+   Open`. Press `/`, type `move`, Enter (the filter), then Shift+↑ on a row: `clear the filter first:
+   sessions move only while no filter or chip is set`, nothing moves; Esc clears the filter.
+6. **A restart.** Write down the order and the numbers. In W, a WSL terminal of your own: `skydeck
+   window --restart`. Expected: once the window is back, the same order and the same numbers, and
+   each Ctrl+Shift+1…3 shows the terminal of the row that has that number.
+7. **The end.** For each throwaway session: type `/exit` in its terminal, then `d` in the list to
+   mark it done.
+
+Write down: for each step whether it went as expected, and the words where they differ; your Edge
+version and your two layouts.
 
 Not tried before this check was written: all of it, in Edge.
 

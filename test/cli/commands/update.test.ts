@@ -12,6 +12,7 @@ import type { Net, Platform } from '../../../src/platform/types.ts';
 import { SkydeckError } from '../../../src/platform/errors.ts';
 import { SCHEMA_VERSION } from '../../../src/store/migrations.ts';
 import { DatabaseNewerError, openStore } from '../../../src/store/store.ts';
+import { reportLines } from '../../helpers/doctor.ts';
 import { capture } from '../../helpers/capture.ts';
 import type { Run } from '../../helpers/install.ts';
 import { run } from '../../helpers/install.ts';
@@ -979,13 +980,8 @@ describe('skydeck update: the database at step 1 (ruled by the plan owner)', () 
     assert.equal(doctor.code, 1);
     assert.ok(
       // After the three version lines of follow-up F20.
-      doctor.stdout
-        .split('\n')
-        .slice(3)
-        .join('\n')
-        .startsWith(
-          `problem  database ${tp.places.dbPath} cannot be opened (${line}); the checks that need it are skipped\n`,
-        ),
+      reportLines(doctor.stdout)[3] ===
+        `problem  database ${tp.places.dbPath} cannot be opened (${line}); the checks that need it are skipped`,
       doctor.stdout,
     );
     // The type that tells it apart for skydeck update keeps the name a reader prints.

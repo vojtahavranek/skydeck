@@ -544,6 +544,9 @@ addEventListener('mouseup', () => {
 
 /** @type {ReturnType<typeof setTimeout> | null} */
 let keyMessageTimer = null;
+/** F37: this page's `reorder` waits for its answer; a press meanwhile does nothing (a held key
+ *  moves the session at the round trip's pace). */
+let reordering = false;
 /** @param {string} text */
 function say(text) {
   dom.keyMessage.textContent = text;
@@ -2205,6 +2208,33 @@ function doListKey(action, event) {
       } else {
         markDone(row.id, true);
       }
+      return true;
+    }
+    case 'reorder': {
+      // F37 (S2 12.9): the selected session of Open one place up or down; the server moves it (or
+      // says why not). The selection, by id, and the keyboard stay with it.
+      const row = selectedRow();
+      if (row === undefined) {
+        say('no session selected');
+        return true;
+      }
+      if (reordering) {
+        return true;
+      }
+      reordering = true;
+      const sessionId = row.id;
+      void act({ kind: 'reorder', sessionId, direction: action.by < 0 ? 'up' : 'down' }).then(
+        (result) => {
+          reordering = false;
+          if (!result.ok) {
+            say(result.error ?? result.lines[0] ?? 'the session was not moved');
+            return;
+          }
+          list.follow(sessionId);
+          // The list of the new order can come up to a second after the answer (as for F15's).
+          sendView();
+        },
+      );
       return true;
     }
     case 'escape':

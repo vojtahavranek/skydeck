@@ -1,5 +1,7 @@
 // `skydeck doctor` (design 8): checks the installation and reports one line per check, `ok`, `info`
-// or `problem`, exiting 1 when anything is a problem. It does not refresh: the spool is counted as
+// or `problem`, under the heading of its group (Versions, Recording, Claude Code, GitHub, Window),
+// and ends with a verdict: `no problems`, or how many there are and each problem line again. It
+// exits 1 when anything is a problem. It does not refresh: the spool is counted as
 // it is, and what the last refresh skipped is read from kv where that refresh recorded it. It
 // creates nothing, and it reports what it can however broken the rest is (ruled by the plan
 // owner): a configuration that cannot be read, or a database that is missing or cannot be opened,
@@ -37,6 +39,7 @@ import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
 import { sayMigrated } from '../deck.ts';
 import { EXIT } from '../exit.ts';
+import { styleFor } from '../style.ts';
 import { checkoutFacts } from '../version.ts';
 import { WINDOW_CHECKS, windowView } from '../window-checks.ts';
 import type { WindowCheck, WindowView } from '../window-checks.ts';
@@ -60,6 +63,9 @@ const SPEC: ArgSpec = {
 type Kind = 'ok' | 'info' | 'problem';
 type Report = (kind: Kind, text: string) => void;
 
+/** The groups of the report, in the order they are printed; each check names its own. */
+type Group = 'Versions' | 'Recording' | 'Claude Code' | 'GitHub' | 'Window';
+
 /** What the checks look at; `config` and `store` are null when they could not be had. */
 interface Facts {
   platform: Platform;
@@ -73,10 +79,11 @@ type Async = void | Promise<void>;
  * A check that needs the configuration (for claudeHome or the terminal) or the database is skipped
  * when that could not be had: a problem line has already said why.
  */
-type Check =
-  | { name: string; needs: 'nothing'; run(facts: Facts, report: Report): Async }
-  | { name: string; needs: 'config'; run(facts: Facts & { config: Config }, report: Report): Async }
-  | { name: string; needs: 'store'; run(facts: Facts & { store: Store }, report: Report): Async };
+type Check = { name: string; group: Group } & (
+  | { needs: 'nothing'; run(facts: Facts, report: Report): Async }
+  | { needs: 'config'; run(facts: Facts & { config: Config }, report: Report): Async }
+  | { needs: 'store'; run(facts: Facts & { store: Store }, report: Report): Async }
+);
 
 /** More waiting spool files than this means nothing has read the spool for a long time. */
 const SPOOL_LIMIT = 1000;
@@ -96,17 +103,31 @@ export const command: Command = {
       ctx.io.stdout(SPEC.usage);
       return EXIT.ok;
     }
-    let problems = 0;
-    const report: Report = (kind, text) => {
-      if (kind === 'problem') {
-        problems++;
-      }
-      // Paths, log lines, messages and program output are foreign text (design 7.4).
-      ctx.io.stdout(`${kind.padEnd(9)}${sanitize(text)}\n`);
-    };
     const { platform } = ctx;
+    const style = styleFor(ctx.io, platform.env, 'stdout');
+    const problems: string[] = [];
+    let shownGroup: Group | null = null;
+    // A group's heading comes with its first line, so a group without lines has none.
+    const reportIn =
+      (group: Group): Report =>
+      (kind, text) => {
+        if (group !== shownGroup) {
+          ctx.io.stdout(`${shownGroup === null ? '' : '\n'}${style.bold(group)}\n`);
+          shownGroup = group;
+        }
+        // Paths, log lines, messages and program output are foreign text (design 7.4): the colour
+        // goes on the kind only, around text skydeck wrote.
+        const word =
+          kind === 'ok' ? style.green(kind) : kind === 'problem' ? style.red(kind) : kind;
+        const line = `${word}${' '.repeat(9 - kind.length)}${sanitize(text)}`;
+        if (kind === 'problem') {
+          problems.push(line);
+        }
+        ctx.io.stdout(`${line}\n`);
+      };
     const { places, config, problem } = readConfiguration(platform);
-    const commit = await reportVersions(platform, config, report);
+    const commit = await reportVersions(platform, config, reportIn('Versions'));
+    const report = reportIn('Recording');
     if (problem !== null) {
       report('problem', problem);
     }
@@ -115,6 +136,7 @@ export const command: Command = {
     if (store !== null) sayMigrated(ctx, store);
     try {
       for (const check of CHECKS) {
+        const report = reportIn(check.group);
         try {
           await runCheck(check, { platform, places, config, store }, report);
         } catch (error) {
@@ -125,8 +147,9 @@ export const command: Command = {
         }
       }
       const view = windowView({ platform, places, config, store, commit });
+      const inWindow = reportIn('Window');
       const windowReport: Report = (kind, text) => {
-        report(kind === 'problem' && !view.used ? 'info' : kind, text);
+        inWindow(kind === 'problem' && !view.used ? 'info' : kind, text);
       };
       for (const check of WINDOW_CHECKS) {
         try {
@@ -142,7 +165,12 @@ export const command: Command = {
         // nothing was left to write; an error here must not hide the report
       }
     }
-    return problems > 0 ? EXIT.failure : EXIT.ok;
+    const verdict = problems.length === 0 ? 'no problems' : plural(problems.length, 'problem');
+    ctx.io.stdout(`\n${style.bold(verdict)}\n`);
+    for (const line of problems) {
+      ctx.io.stdout(`${line}\n`);
+    }
+    return problems.length > 0 ? EXIT.failure : EXIT.ok;
   },
 };
 
@@ -308,21 +336,25 @@ async function runWindowCheck(check: WindowCheck, view: WindowView, report: Repo
   await check.run(view, report);
 }
 
+/**
+ * In the order of the report; a group's checks stand together. The terminal is the Window's: it
+ * says where sessions start, and the window's own checks follow it.
+ */
 const CHECKS: readonly Check[] = [
-  { name: 'hook entries', needs: 'config', run: checkHookEntries },
-  { name: 'hook link', needs: 'nothing', run: checkHookLink },
-  { name: 'Node.js', needs: 'nothing', run: checkNode },
-  { name: 'database', needs: 'store', run: checkDatabase },
-  { name: 'spool', needs: 'nothing', run: checkSpool },
-  { name: 'last event', needs: 'store', run: checkLastEvent },
-  { name: 'spool/bad', needs: 'nothing', run: checkBadFiles },
-  { name: 'hook.log', needs: 'nothing', run: checkHookLog },
-  { name: 'scripted runs', needs: 'store', run: checkScripted },
-  { name: 'last refresh', needs: 'store', run: checkRefreshProblems },
-  { name: "Claude Code's folders", needs: 'config', run: checkClaudeFolders },
-  { name: "Claude Code's ← shortcut", needs: 'config', run: checkLeftArrow },
-  { name: 'gh', needs: 'nothing', run: checkGh },
-  { name: 'terminal', needs: 'config', run: checkTerminal },
+  { name: 'hook entries', group: 'Recording', needs: 'config', run: checkHookEntries },
+  { name: 'hook link', group: 'Recording', needs: 'nothing', run: checkHookLink },
+  { name: 'Node.js', group: 'Recording', needs: 'nothing', run: checkNode },
+  { name: 'database', group: 'Recording', needs: 'store', run: checkDatabase },
+  { name: 'spool', group: 'Recording', needs: 'nothing', run: checkSpool },
+  { name: 'last event', group: 'Recording', needs: 'store', run: checkLastEvent },
+  { name: 'spool/bad', group: 'Recording', needs: 'nothing', run: checkBadFiles },
+  { name: 'hook.log', group: 'Recording', needs: 'nothing', run: checkHookLog },
+  { name: 'scripted runs', group: 'Recording', needs: 'store', run: checkScripted },
+  { name: 'last refresh', group: 'Recording', needs: 'store', run: checkRefreshProblems },
+  { name: "Claude Code's folders", group: 'Claude Code', needs: 'config', run: checkClaudeFolders },
+  { name: "Claude Code's ← shortcut", group: 'Claude Code', needs: 'config', run: checkLeftArrow },
+  { name: 'gh', group: 'GitHub', needs: 'nothing', run: checkGh },
+  { name: 'terminal', group: 'Window', needs: 'config', run: checkTerminal },
 ];
 
 /** Design 8: both hook entries present, one problem line per event without its entry. */

@@ -306,10 +306,13 @@ describe('listKey (S2 12.9)', () => {
     assert.equal(listKey(ev('ů', 'Semicolon')), null);
   });
 
-  test('upper-case letters are not the list keys (as in step 1)', () => {
-    assert.equal(listKey(ev('J', 'KeyJ', 'shift')), null);
+  test('upper-case letters are not the list keys (as in step 1), but Shift+J and Shift+K (F37)', () => {
     assert.equal(listKey(ev('A', 'KeyA', 'shift')), null);
     assert.equal(listKey(ev('L', 'KeyL', 'shift')), null);
+    assert.deepEqual(listKey(ev('J', 'KeyJ', 'shift')), { kind: 'reorder', by: 1 });
+    // Caps Lock alone types J and K without Shift: they move nothing.
+    assert.equal(listKey(ev('J', 'KeyJ')), null);
+    assert.equal(listKey(ev('K', 'KeyK')), null);
   });
 
   test('Ctrl, Alt or Meta with a list key is no list key', () => {
@@ -325,11 +328,45 @@ describe('listKey (S2 12.9)', () => {
     }
   });
 
-  test('Shift with a named key is no list key', () => {
-    assert.equal(listKey(ev('ArrowDown', 'ArrowDown', 'shift')), null);
+  test('Shift with a named key is no list key (but Shift+↑ and Shift+↓, F37)', () => {
     assert.equal(listKey(ev('Enter', 'Enter', 'shift')), null);
     assert.equal(listKey(ev('Escape', 'Escape', 'shift')), null);
     assert.equal(listKey(ev('F2', 'F2', 'shift')), null);
+  });
+
+  // Follow-up F37: a session of Open one place up or down, on a US and a Czech layout (j and k sit
+  // on the same keys on both; a letter is matched by the character typed).
+  for (const layout of ['US', 'Czech']) {
+    test(`${layout}: Shift+↑ and Shift+K move up, Shift+↓ and Shift+J move down (F37)`, () => {
+      const up = { kind: 'reorder', by: -1 };
+      const down = { kind: 'reorder', by: 1 };
+      assert.deepEqual(listKey(ev('ArrowUp', 'ArrowUp', 'shift')), up);
+      assert.deepEqual(listKey(ev('ArrowDown', 'ArrowDown', 'shift')), down);
+      assert.deepEqual(listKey(ev('K', 'KeyK', 'shift')), up);
+      assert.deepEqual(listKey(ev('J', 'KeyJ', 'shift')), down);
+      // Shift under Caps Lock types the lower-case letter: still Shift with that key.
+      assert.deepEqual(listKey(ev('k', 'KeyK', 'shift')), up);
+      assert.deepEqual(listKey(ev('j', 'KeyJ', 'shift')), down);
+      // Matched by the character: Dvorak's physical V key types k.
+      assert.deepEqual(listKey(ev('K', 'KeyV', 'shift')), up);
+    });
+  }
+
+  test('F37: Ctrl, Alt or Meta with the move keys is nothing; j, k, ↑ and ↓ alone still move the selection', () => {
+    for (const mod of ['ctrl', 'alt', 'meta'] as const) {
+      for (const [key, code] of [
+        ['K', 'KeyK'],
+        ['J', 'KeyJ'],
+        ['ArrowUp', 'ArrowUp'],
+        ['ArrowDown', 'ArrowDown'],
+      ] as const) {
+        assert.equal(listKey(ev(key, code, mod, 'shift')), null, `${mod}+Shift+${key}`);
+      }
+    }
+    assert.deepEqual(listKey(ev('j', 'KeyJ')), { kind: 'move', by: 1 });
+    assert.deepEqual(listKey(ev('k', 'KeyK')), { kind: 'move', by: -1 });
+    assert.deepEqual(listKey(ev('ArrowDown', 'ArrowDown')), { kind: 'move', by: 1 });
+    assert.deepEqual(listKey(ev('ArrowUp', 'ArrowUp')), { kind: 'move', by: -1 });
   });
 
   test('other reload-looking keys are not the list’s', () => {

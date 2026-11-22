@@ -24,6 +24,7 @@ import { formatPidLine } from '../../src/window/pidline.ts';
 import type { PidLine } from '../../src/window/pidline.ts';
 import { resolveRuntimeDir, runtimeFiles } from '../../src/window/runtime.ts';
 import type { RuntimeFiles } from '../../src/window/runtime.ts';
+import { reportLines } from './doctor.ts';
 import { testDeck } from './deck.ts';
 import type { RealTestDeck } from './deck.ts';
 import { run } from './install.ts';
@@ -118,7 +119,11 @@ export async function runOn(
   override: Partial<Platform> = {},
 ): Promise<Lines> {
   const r = await run({ ...m.platform, ...override }, argv);
-  const lines = r.stdout.split('\n').filter((line) => line !== '');
+  // doctor's check lines, without its headings and its verdict, which repeats the problem lines.
+  const lines =
+    argv[0] === 'doctor'
+      ? reportLines(r.stdout)
+      : r.stdout.split('\n').filter((line) => line !== '');
   return { ...r, lines, problems: lines.filter((line) => line.startsWith('problem  ')) };
 }
 

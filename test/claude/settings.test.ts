@@ -7,6 +7,7 @@ import {
   cleanupPeriodDays,
   hookCommand,
   hookEntry,
+  hookEntryLine,
   hookStatus,
   removeHookEntries,
   rewriteReport,
@@ -476,4 +477,46 @@ describe('settings: cleanupPeriodDays', () => {
     assert.equal(cleanupPeriodDays('null'), 30);
     assert.equal(cleanupPeriodDays('{}'), 30);
   });
+});
+
+describe('settings: hookEntryLine, the one line install shows of an entry', () => {
+  const COMMAND = hookCommand('/data/skydeck-hook', 'SessionStart');
+  const hook = (fields: Record<string, unknown> = {}) => ({
+    type: 'command',
+    command: COMMAND,
+    timeout: 5,
+    ...fields,
+  });
+
+  test('the entry install writes: its command and timeout, as they are in the file', () => {
+    assert.deepEqual(hookEntryLine(hookEntry('/data/skydeck-hook', 'SessionStart')), {
+      command: COMMAND,
+      timeout: 5,
+    });
+  });
+
+  const { timeout: _left, ...noTimeout } = hook();
+  for (const [why, entry] of [
+    ['an extra key on the entry', { hooks: [hook()], matcher: '*' }],
+    ['an extra key on the hook', { hooks: [hook({ async: true })] }],
+    ['two hooks', { hooks: [hook(), hook()] }],
+    ['no hook', { hooks: [] }],
+    ['hooks that are not an array', { hooks: hook() }],
+    ['a type that is not command', { hooks: [hook({ type: 'prompt' })] }],
+    ['no timeout', { hooks: [noTimeout] }],
+    ['a timeout that is not finite', { hooks: [hook({ timeout: Infinity })] }],
+    ['a timeout that is not a number', { hooks: [hook({ timeout: '5' })] }],
+    ['a command with a space at its start', { hooks: [hook({ command: ` ${COMMAND}` })] }],
+    ['a command with a space at its end', { hooks: [hook({ command: `${COMMAND} ` })] }],
+    ['an empty command', { hooks: [hook({ command: '' })] }],
+    ['a command with a control character', { hooks: [hook({ command: `a\u009bb` })] }],
+    ['a command with a line break', { hooks: [hook({ command: 'a\nb' })] }],
+    ['a command that is not a string', { hooks: [hook({ command: 7 })] }],
+    ['not an object', [hook()]],
+    ['null', null],
+  ] as const) {
+    test(`${why}: null, so the entry is shown as JSON`, () => {
+      assert.equal(hookEntryLine(entry), null);
+    });
+  }
 });

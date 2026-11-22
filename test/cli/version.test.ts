@@ -381,12 +381,7 @@ describe('the version line: bin/skydeck of a checkout', () => {
         encoding: 'utf8',
         timeout: 30_000,
       });
-      // Node 24.12 warns once that node:sqlite is experimental, on every run; that is not ours.
-      const stderr = r.stderr
-        .split('\n')
-        .filter((line) => line !== '' && !/ExperimentalWarning|--trace-warnings/.test(line))
-        .join('\n');
-      return { status: r.status, stdout: r.stdout, stderr };
+      return { status: r.status, stdout: r.stdout, stderr: r.stderr.trimEnd() };
     };
     return { checkout, elsewhere, launch };
   }

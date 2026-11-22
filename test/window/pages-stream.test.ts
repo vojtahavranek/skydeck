@@ -955,12 +955,16 @@ describe('pages: messages', () => {
     );
   });
 
-  test('act → the handler result with the same id; the handler gets the page', async (t) => {
+  test('act → the handler result with the same id; the handler gets the page (F37: its last view too)', async (t) => {
     const f = await startPages(t);
     const { client } = await openPage(t, f, { windowId: '00000000000000aa', focused: true });
     client.send({ t: 'focus', focused: true, selected: null, area: { cols: 120, rows: 40 } });
+    const view = { t: 'view', filter: 'orb', unfolded: [], showDone: false, selected: null };
+    client.send(view);
     client.send({ t: 'act', id: 7, kind: 'close-terminal', term: T1 });
-    assert.deepEqual(await client.nextText(), {
+    let result = await client.nextText();
+    while ((result as { t?: unknown }).t === 'list') result = await client.nextText(); // the view's
+    assert.deepEqual(result, {
       t: 'result',
       id: 7,
       ok: true,
@@ -970,7 +974,12 @@ describe('pages: messages', () => {
     });
     assert.deepEqual(f.actions.calls, [
       {
-        page: { windowId: '00000000000000aa', focused: true, area: { cols: 120, rows: 40 } },
+        page: {
+          windowId: '00000000000000aa',
+          focused: true,
+          area: { cols: 120, rows: 40 },
+          view,
+        },
         action: { t: 'act', id: 7, kind: 'close-terminal', term: T1 },
       },
     ]);

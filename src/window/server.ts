@@ -77,6 +77,9 @@ import { createSettings } from './settings.ts';
 import type { Seen } from './seen.ts';
 import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
+import { readMovedSlots, writeMovedSlots } from './moved-slots.ts';
+import { createReorder } from './reorder.ts';
+import { createSlotMemory } from './slot-memory.ts';
 import { createRegistry } from './terminals.ts';
 import type { Registry } from './terminals.ts';
 import { createTick } from './tick.ts';
@@ -489,6 +492,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       keeperFile: files.keeperFile(build),
       keepersLog,
       log,
+      // F37 (S2 7.6): the slots moved by hand, applied at each keeper's hello.
+      movedSlots: readMovedSlots(deck.store),
+      persistSlots: (moved) => {
+        writeMovedSlots(deck.store, moved);
+      },
       events: {
         hello(term, hello, origin) {
           hellos.set(term.id, hello);
@@ -566,6 +574,17 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       },
       log,
     });
+    // F37 (design 7.8): the slots each session last had in this boot, a restore's order.
+    const slotMemory = createSlotMemory({ store: deck.store, bootId: own.bootId, log: quietLog });
+    const reorder = createReorder({
+      registry: created,
+      rows: () => tick?.rows() ?? NO_ROWS,
+      elsewhere: () => tick?.elsewhere() ?? new Map(),
+      nowNs: () => clock.nowNs(),
+      remember: () => {
+        slotMemory.update(created.list());
+      },
+    });
     const acting = createActions({
       deck,
       hub: created,
@@ -586,6 +605,8 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         pages.settings(payload);
       },
       updates,
+      // F37 (S2 12.9): a session of Open moved by hand, for the page's last view.
+      reorder: (page, sessionId, direction) => reorder.reorder(page.view, sessionId, direction),
     });
     // Plan C7, S2 8.2.6: what a terminal the server opens for a command or a restore starts at —
     // the area the page that had focus last reported, read when the terminal is opened.
@@ -773,6 +794,8 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       afterRefresh: () => {
         pageMark.update(pages.count()); // plan C20; it never throws
         decidePostponed();
+        created.flushSlots(); // F37: a write of the moved slots that failed; it never throws
+        slotMemory.update(created.list()); // F37: the restore's order; it never throws
       },
       storeNewer,
       attention: attending.tick,

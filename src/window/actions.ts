@@ -6,7 +6,8 @@
  * 12.6); since F18 set or remove the session's ticket (S2 12.5); since F30 end a session's program and
  * mark it done, on the user's word in the page's dialog (`end-session`, end-session.ts); since F36
  * read the settings screen and change one setting of config.json (`settings`, `setting-set`,
- * `setting-default`, settings.ts: no path, no program, no key outside its table's changeable ones). Every field of an action is the page's — any page that passed the handshake — so each
+ * `setting-default`, settings.ts: no path, no program, no key outside its table's changeable ones);
+ * since F37 move a session of Open one place up or down (`reorder`, reorder.ts). Every field of an action is the page's — any page that passed the handshake — so each
  * one is checked here again and goes through step 1's own rules: a resume
  * names a session and nothing more (the guard, the lock and the command builder decide the rest,
  * S2 11.1), a new session's directory, label, group and flags are checked as `skydeck new` checks
@@ -39,7 +40,7 @@ import { isBusy } from './busy.ts';
 import { createEndings } from './end-session.ts';
 import { splitFlags } from './flags.ts';
 import { addFavourite, removeFavourite } from './favourites.ts';
-import type { ActionHandler, TerminalHub } from './hub.ts';
+import type { ActionHandler, PageInfo, TerminalHub } from './hub.ts';
 import { createLaunches } from './launches.ts';
 import type { Launched } from './launches.ts';
 import type { PrFetches } from './pr-fetches.ts';
@@ -83,6 +84,13 @@ export interface ActionDeps {
   /** F38: the check for a newer skydeck (updates.ts, one per server). Absent: its kinds answer
    *  "skydeck cannot do that action". */
   updates?: Pick<Updates, 'check' | 'look'>;
+  /** F37 (S2 12.9): `act reorder` for the page that sent it (reorder.ts); a busy store is thrown.
+   *  Absent: the kind answers "skydeck cannot do that action". */
+  reorder?(
+    page: PageInfo,
+    sessionId: string,
+    direction: 'up' | 'down',
+  ): { ok: true } | { ok: false; error: string };
 }
 
 /** A result without its `t` and `id`, which `act` adds. */
@@ -375,7 +383,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
     }
   }
 
-  async function run(action: ActMessage): Promise<Answer> {
+  async function run(page: PageInfo, action: ActMessage): Promise<Answer> {
     switch (action.kind) {
       case 'resume':
         return answerOf(
@@ -450,6 +458,11 @@ export function createActions(deps: ActionDeps): ActionHandler {
         const update = await (action.kind === 'update-check' ? updates.check() : updates.look());
         return { ...DONE, update };
       }
+      case 'reorder':
+        // Its slots' change pushes every page's list (the registry's change): no `changed()`.
+        return deps.reorder === undefined
+          ? refusal(NOT_AN_ACTION)
+          : answered(deps.reorder(page, action.sessionId, action.direction));
     }
   }
 
@@ -473,7 +486,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
     return { ...DONE, settings: outcome.payload };
   }
 
-  async function answer(given: ActMessage): Promise<Answer> {
+  async function answer(page: PageInfo, given: ActMessage): Promise<Answer> {
     const check = checked(given);
     if (!check.ok) {
       log(`act: refused an action that is not valid (${check.kind})`);
@@ -481,7 +494,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
     }
     const action = check.action;
     try {
-      return await run(action);
+      return await run(page, action);
     } catch (error) {
       if (error instanceof SkydeckError) return refusedBy(error);
       const kind = failureKind(error);
@@ -496,8 +509,8 @@ export function createActions(deps: ActionDeps): ActionHandler {
   }
 
   return {
-    async act(_page, given) {
-      const { ok, lines, error, sessionId, ended, settings, update } = await answer(given);
+    async act(page, given) {
+      const { ok, lines, error, sessionId, ended, settings, update } = await answer(page, given);
       // Every text of a result passes the sanitiser step 1 prints with (ruled, review 2 of task
       // 32): whatever a message quotes, no escape sequence or line break reaches the page.
       return {

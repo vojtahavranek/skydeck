@@ -164,7 +164,11 @@ export interface ResizeMessage {
  *  F38 (S2 16.5): `update-check` is Check now (a check for a newer skydeck, with the network,
  *  whatever the switch says; answered when it has ended), `update-look` the dialog's look without
  *  the network. Neither carries a field: the checkout, its remote and the program are the
- *  server's. The result's `update` is the state. */
+ *  server's. The result's `update` is the state.
+ *
+ *  F37 (S2 12.9): `reorder` moves the session's row of Open one place up or down; the server
+ *  computes the move over Open as it draws it and gives the slots out again
+ *  (src/window/reorder.ts), refusing it while the page's last `view` sets a filter or a chip. */
 export type ActMessage =
   | { t: 'act'; id: number; kind: 'resume'; sessionId: string; cols: number; rows: number }
   | {
@@ -198,7 +202,8 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'settings' }
   | { t: 'act'; id: number; kind: 'setting-set'; key: string; value: string | number | null }
   | { t: 'act'; id: number; kind: 'setting-default'; key: string }
-  | { t: 'act'; id: number; kind: 'update-check' | 'update-look' };
+  | { t: 'act'; id: number; kind: 'update-check' | 'update-look' }
+  | { t: 'act'; id: number; kind: 'reorder'; sessionId: string; direction: 'up' | 'down' };
 /** Follow-up F13: the page's colours changed while it is open — the title bar's theme switch was
  *  clicked here or in another window of the profile, or the system's scheme changed while the page
  *  follows it. The same colours as `start.theme`, checked the same way; the server answers OSC 10
@@ -1036,6 +1041,14 @@ const ACTS: Readonly<Record<string, Check>> = {
   // F38 (S2 16.5): Check now and the dialog's look; no field: what is looked at is the server's.
   'update-check': object({ t: ANY, id: COUNT, kind: ANY }),
   'update-look': object({ t: ANY, id: COUNT, kind: ANY }),
+  // F37 (S2 12.9): a session of Open one place up or down.
+  reorder: object({
+    t: ANY,
+    id: COUNT,
+    kind: ANY,
+    sessionId: SESSION,
+    direction: oneOf('up', 'down'),
+  }),
 };
 
 const INPUT_SHAPE = object({ t: ANY, term: TERM, data: STRING, binary: TRUE }, ['binary']);
