@@ -1,9 +1,13 @@
-// What the window's check for a newer skydeck stores (F38; S2 10.2, 16.5): one `kv` entry,
-// `window_update_check`, written by the server only and read by it and by doctor, which uses no
-// network. The entry names its checkout (`root`): one database serves every checkout of the user,
-// and an entry of another checkout is none to a reader of this one. The readers are strict: a
-// value that is not exactly such a record reads as none. Every line of git's or of a refusal is
-// clipped to LINE_MAX before it is stored, and sanitised and clipped again in the page's payload.
+// What the window's check for a newer skydeck stores (F38; S2 10.2, 16.5): two `kv` entries.
+// `window_update_check` is written by the server only and read by it and by doctor, which uses no
+// network. `window_update_run` is the one update started from a window: `applying` written by the
+// server that starts it, then the outcome of the merge written by `skydeck update --from-window`
+// before the window is brought back, read (and removed) by the server that follows. Each entry
+// names its checkout (`root`): one database serves every checkout of the user, and an entry of
+// another checkout is none to a reader of this one. The readers are strict: a value that is not
+// exactly such a record reads as none. Every line of git's or of a refusal is clipped to LINE_MAX
+// (a run entry's to RUN_LINE_MAX) before it is stored, and sanitised and clipped again in the
+// page's payload.
 import type { Files } from '../platform/types.ts';
 import type { Store } from '../store/store.ts';
 import { sanitize } from '../text/sanitize.ts';
@@ -12,6 +16,9 @@ import { clipLine } from './git.ts';
 import { counted } from './look.ts';
 
 export const CHECK_KEY = 'window_update_check';
+export const RUN_KEY = 'window_update_run';
+/** The longest line a run entry keeps: the command's own lines are longer than git's. */
+export const RUN_LINE_MAX = 600;
 
 /** What the last look said. */
 export type CheckOutcome =
@@ -60,7 +67,8 @@ export function checkoutRoot(files: Files, path: string): string {
 }
 
 const DECIMAL = /^(0|[1-9][0-9]*)$/;
-const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+/** A full commit id: 40 lower-case hexadecimal digits (SHA-1), or 64 (SHA-256). */
+export const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -206,4 +214,65 @@ export function checkPayload(record: CheckRecord): UpdateCheckPayload {
         blocked: outcome.blocked === null ? null : payloadText(outcome.blocked),
       };
   }
+}
+
+/**
+ * The one update started from a window (S2 16.5 "Update now"): `applying` while the updater
+ * runs, then the outcome of its merge — `applied`, or `failed` with the command's line. `to` is
+ * the commit the window listed; `atNs` when the entry was written.
+ */
+export type RunRecord =
+  | { v: 1; root: string; state: 'applying' | 'applied'; to: string; atNs: string }
+  | { v: 1; root: string; state: 'failed'; to: string; line: string; atNs: string };
+
+/** `value` when it is exactly a RunRecord, else null. */
+function asRun(value: unknown): RunRecord | null {
+  if (!isObject(value)) return null;
+  const { v, root, state, to, line, atNs } = value;
+  const keys =
+    state === 'failed'
+      ? ['v', 'root', 'state', 'to', 'line', 'atNs']
+      : ['v', 'root', 'state', 'to', 'atNs'];
+  if (
+    !hasKeys(value, keys) ||
+    v !== 1 ||
+    !isText(root) ||
+    root === '' ||
+    !(state === 'applying' || state === 'applied' || state === 'failed') ||
+    !isCommit(to) ||
+    (state === 'failed' && !isText(line)) ||
+    !isDecimal(atNs)
+  ) {
+    return null;
+  }
+  return value as unknown as RunRecord;
+}
+
+/** The stored run entry whatever checkout it names; null: none, or not one. */
+export function readRunEntry(store: Store): RunRecord | null {
+  const text = store.getKv(RUN_KEY);
+  if (text === null) return null;
+  try {
+    return asRun(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
+/** The stored run entry of the checkout `root` (checkoutRoot's answer); another checkout's is none. */
+export function readRun(store: Store, root: string): RunRecord | null {
+  const record = readRunEntry(store);
+  return record !== null && record.root === root ? record : null;
+}
+
+/** Stores `record`, its line clipped to RUN_LINE_MAX; a store that fails throws (the caller catches). */
+export function writeRun(store: Store, record: RunRecord): void {
+  const stored: RunRecord =
+    record.state === 'failed' ? { ...record, line: clipLine(record.line, RUN_LINE_MAX) } : record;
+  store.setKv(RUN_KEY, JSON.stringify(stored));
+}
+
+/** Removes the run entry; a store that fails throws (the caller catches). */
+export function clearRun(store: Store): void {
+  store.deleteKv(RUN_KEY);
 }

@@ -1,5 +1,6 @@
-// The stored outcome of the window's check for a newer skydeck (F38; src/update/record.ts): the
-// strict reader, the checkout's root, and the texts as the page gets them.
+// The stored outcome of the window's check for a newer skydeck, and the entry of an update started
+// from the window (F38; src/update/record.ts): the strict readers, the checkout's root, and the
+// texts as the page gets them.
 import assert from 'node:assert/strict';
 import { mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -10,11 +11,16 @@ import {
   CHECK_KEY,
   checkoutRoot,
   checkPayload,
+  clearRun,
   readCheck,
   readCheckEntry,
+  readRun,
+  readRunEntry,
+  RUN_KEY,
   writeCheck,
+  writeRun,
 } from '../../src/update/record.ts';
-import type { CheckRecord } from '../../src/update/record.ts';
+import type { CheckRecord, RunRecord } from '../../src/update/record.ts';
 import { testDeck } from '../helpers/deck.ts';
 import { sandbox } from '../helpers/sandbox.ts';
 import { NEW, OLD } from '../helpers/update.ts';
@@ -128,6 +134,77 @@ describe('the check entry in kv', () => {
       assert.equal(line?.length, 300);
       assert.ok(line?.endsWith('…'));
     }
+  });
+});
+
+describe('the run entry in kv (milestone 2)', () => {
+  const AT = '1794474000000000000';
+  const entries: RunRecord[] = [
+    { v: 1, root: ROOT, state: 'applying', to: NEW, atNs: AT },
+    { v: 1, root: ROOT, state: 'applied', to: NEW, atNs: AT },
+    {
+      v: 1,
+      root: ROOT,
+      state: 'failed',
+      to: NEW,
+      line: 'the update could not be applied',
+      atNs: AT,
+    },
+  ];
+
+  test('a round trip of each state, by its root; another root is none to readRun; clearRun removes it', (t) => {
+    const d = testDeck(t);
+    const { store } = d.deck;
+    for (const entry of entries) {
+      writeRun(store, entry);
+      assert.deepEqual(readRun(store, ROOT), entry, entry.state);
+      assert.deepEqual(readRunEntry(store), entry);
+      assert.equal(readRun(store, '/elsewhere'), null);
+    }
+    clearRun(store);
+    assert.equal(store.getKv(RUN_KEY), null);
+    assert.equal(readRunEntry(store), null);
+  });
+
+  test('a value that is not exactly a run entry reads as none', (t) => {
+    const d = testDeck(t);
+    const { store } = d.deck;
+    const base = { v: 1, root: ROOT, state: 'applied', to: NEW, atNs: AT };
+    for (const value of [
+      'not json',
+      'null',
+      '[]',
+      JSON.stringify({ ...base, v: 2 }),
+      JSON.stringify({ ...base, root: '' }),
+      JSON.stringify({ ...base, state: 'done' }),
+      JSON.stringify({ ...base, to: NEW.slice(0, 7) }),
+      JSON.stringify({ ...base, to: NEW.toUpperCase() }),
+      JSON.stringify({ ...base, atNs: '-1' }),
+      JSON.stringify({ ...base, extra: 1 }),
+      JSON.stringify({ ...base, line: 'a line on an entry that is not failed' }),
+      JSON.stringify({ ...base, state: 'failed' }), // a failed entry without its line
+      JSON.stringify({ ...base, state: 'failed', line: 3 }),
+    ]) {
+      store.setKv(RUN_KEY, value);
+      assert.equal(readRunEntry(store), null, value);
+    }
+  });
+
+  test("a failed entry's line is clipped to 600 characters as it is stored", (t) => {
+    const d = testDeck(t);
+    const { store } = d.deck;
+    writeRun(store, {
+      v: 1,
+      root: ROOT,
+      state: 'failed',
+      to: NEW,
+      line: 'x'.repeat(5000),
+      atNs: AT,
+    });
+    const read = readRunEntry(store);
+    const line = read?.state === 'failed' ? read.line : '';
+    assert.equal(line.length, 600);
+    assert.ok(line.endsWith('…'));
   });
 });
 

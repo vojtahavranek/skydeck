@@ -15,12 +15,20 @@
 // (statically, so it is loaded before the command runs), no `import()` and no read of the
 // checkout's files follows the merge, and all the new code must do is done by the child.
 //
+// `--from-window <commit>` (F38, S2 16.5 "Update now"; not in the usage text) is how the window's
+// server applies an update: it starts this command detached, its output appended to the update's
+// log. Three things change and nothing else: the look makes no fetch (nothing can wait at a
+// prompt, the network is not used) and the upstream must be at <commit>, the one the window
+// listed; and the outcome of the merge — never of the bring-back — is written to `kv
+// window_update_run` before the window is brought back, for the server that follows (a refusal
+// before the merge too, and a checkout already at <commit>). Nothing is recorded after it.
+//
 // Standard output carries the report and the result line; every other line goes to standard
 // error with the `skydeck: ` prefix. Foreign text (a branch, a remote, a path, a commit's subject,
 // git's message) is sanitised.
 import { join, resolve } from 'node:path';
 
-import { SkydeckError } from '../../platform/errors.ts';
+import { SkydeckError, UsageError } from '../../platform/errors.ts';
 import type { RunResult } from '../../platform/types.ts';
 import { DatabaseNewerError } from '../../store/store.ts';
 import { sanitize } from '../../text/sanitize.ts';
@@ -38,6 +46,7 @@ import {
 import type { Git } from '../../update/git.ts';
 import { lookForUpdate, report, short } from '../../update/look.ts';
 import type { Update } from '../../update/look.ts';
+import { checkoutRoot, COMMIT_ID, writeRun } from '../../update/record.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
@@ -57,7 +66,8 @@ reloads itself; the sessions in it keep running.
 
   --check   only look: fetch, and list the new commits; nothing else changes
 `,
-  flags: { check: { type: 'boolean' } },
+  // F38: --from-window is the window's server's alone, so the usage text does not name it.
+  flags: { check: { type: 'boolean' }, 'from-window': { type: 'string' } },
   min: 0,
   max: 0,
 };
@@ -75,39 +85,120 @@ export const command: Command = {
       return EXIT.ok;
     }
     const check = parsed.flags.check === true;
-    // U2 1: the server it restarts would give every session in the window this environment.
-    if (!check && ctx.platform.env.CLAUDECODE !== undefined) {
-      throw new SkydeckError(IN_CLAUDE_CODE);
-    }
-    const git = gitOn(ctx.platform, ctx.platform.appRoot);
-    const say = (line: string): void => ctx.io.stdout(`${line}\n`);
-    const update = await whatIsNew(ctx, git);
-    if (update.newId === update.oldId) {
-      say(
-        `skydeck is up to date (${sanitize(update.branch)} at ${short(update.oldId)}, as ${sanitize(update.upstream)})`,
-      );
-      return EXIT.ok;
-    }
-    for (const line of report(update)) say(line);
+    const fromWindow = parsed.flags['from-window'];
+    if (typeof fromWindow !== 'string') return update(ctx, check, null, NO_RECORD);
     if (check) {
-      say('run skydeck update to apply it');
-      return EXIT.ok;
+      throw new UsageError(`--from-window cannot be used with --check\n${SPEC.usage}`);
     }
-    return apply(ctx, git, update);
+    if (!COMMIT_ID.test(fromWindow)) {
+      throw new UsageError(`--from-window takes a full commit id\n${SPEC.usage}`);
+    }
+    // F38: a refusal or a failed stop (a SkydeckError before the merge) is recorded here, then
+    // thrown on; what the merge ended with was recorded by apply (the first record is the one).
+    const record = windowRecord(ctx, fromWindow);
+    try {
+      return await update(ctx, false, fromWindow, record);
+    } catch (error) {
+      if (error instanceof SkydeckError) await record({ state: 'failed', line: error.message });
+      throw error;
+    }
   },
 };
 
+/** The command after its arguments; `to`: --from-window's commit (null: typed in a terminal). */
+async function update(
+  ctx: Context,
+  check: boolean,
+  to: string | null,
+  record: Recorder,
+): Promise<number> {
+  // U2 1: the server it restarts would give every session in the window this environment.
+  if (!check && ctx.platform.env.CLAUDECODE !== undefined) {
+    throw new SkydeckError(IN_CLAUDE_CODE);
+  }
+  const git = gitOn(ctx.platform, ctx.platform.appRoot);
+  const say = (line: string): void => ctx.io.stdout(`${line}\n`);
+  const found = await whatIsNew(ctx, git, to);
+  if (found.newId === found.oldId) {
+    say(
+      `skydeck is up to date (${sanitize(found.branch)} at ${short(found.oldId)}, as ${sanitize(found.upstream)})`,
+    );
+    // F38: the window's server would otherwise say that the update ended without saying how.
+    await record({
+      state: 'failed',
+      line: `nothing was applied: this checkout is already at ${short(found.oldId)}; run skydeck window in a terminal of your own to restart the window for it`,
+    });
+    return EXIT.ok;
+  }
+  for (const line of report(found)) say(line);
+  if (check) {
+    say('run skydeck update to apply it');
+    return EXIT.ok;
+  }
+  return apply(ctx, git, found, record);
+}
+
 /**
  * U2 2–8 in their order, then U4's facts: the look of src/update/look.ts in the command's order.
- * Every refusal is a SkydeckError; nothing is changed.
+ * Every refusal is a SkydeckError; nothing is changed. With `to` (--from-window) there is no
+ * fetch, and the upstream must be at `to`.
  */
-async function whatIsNew(ctx: Context, git: Git): Promise<Update> {
+async function whatIsNew(ctx: Context, git: Git, to: string | null): Promise<Update> {
   const looked = await lookForUpdate(git, ctx.platform.files, {
-    fetch: 'terminal',
+    fetch: to === null ? 'terminal' : 'none',
     tolerant: false,
   });
   if (looked.kind === 'cannot') throw new SkydeckError(looked.line);
-  return looked.update;
+  const found = looked.update;
+  if (to !== null && found.newId !== to) {
+    throw new SkydeckError(
+      `${sanitize(found.upstream)} is at ${short(found.newId)}, not at ${short(to)}, the commit the window listed; check again in the window; nothing was changed`,
+    );
+  }
+  return found;
+}
+
+/** How the merge ended, as `kv window_update_run` keeps it (F38). */
+type Outcome = { state: 'applied' } | { state: 'failed'; line: string };
+
+/**
+ * Records the outcome for the window's next server (F38); the typed command's records nothing.
+ * It never throws: a record that cannot be written is one line on stderr.
+ */
+type Recorder = (outcome: Outcome) => Promise<void>;
+
+const NO_RECORD: Recorder = () => Promise.resolve();
+
+/**
+ * --from-window's record: once, through withDeck (the old server is stopped or was never
+ * touched, and no code of the new commit has opened the database yet), the entry naming this
+ * checkout's root, read now, before any merge. A second call does nothing.
+ */
+function windowRecord(ctx: Context, to: string): Recorder {
+  const { platform } = ctx;
+  const root = checkoutRoot(platform.files, platform.appRoot);
+  let recorded = false;
+  return async (outcome) => {
+    if (recorded) return;
+    recorded = true;
+    try {
+      await withDeck(ctx, { refresh: false }, (deck) => {
+        const atNs = String(platform.clock.nowNs());
+        writeRun(
+          deck.store,
+          outcome.state === 'applied'
+            ? { v: 1, root, state: 'applied', to, atNs }
+            : { v: 1, root, state: 'failed', to, line: outcome.line, atNs },
+        );
+        return Promise.resolve();
+      });
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      ctx.io.stderr(
+        `skydeck: the window could not be told how the update ended (${sanitize(why)})\n`,
+      );
+    }
+  };
 }
 
 /** What step 1 did: whether it stopped a server, and the pages that server had. */
@@ -186,8 +277,11 @@ async function merge(git: Git, id: string): Promise<Merged> {
   return { kind: 'ended', result };
 }
 
-/** U5, in its order. */
-async function apply(ctx: Context, git: Git, update: Update): Promise<number> {
+/**
+ * U5, in its order. `record` gets the outcome of the merge once it is known, before the window is
+ * brought back (F38; a no-op for the typed command).
+ */
+async function apply(ctx: Context, git: Git, update: Update, record: Recorder): Promise<number> {
   const { platform } = ctx;
   // Everything steps 3 and 4 need from the platform is taken now, before the merge.
   const times = windowTimes(platform.env);
@@ -206,10 +300,10 @@ async function apply(ctx: Context, git: Git, update: Update): Promise<number> {
     const step1 = await stopForUpdate(ctx, times, hold);
     if (hold.interrupted()) {
       // A signal during the stop: no merge; the window back on the old code (ruled, S2).
+      const line = 'interrupted before the update was applied; the checkout was not changed';
+      await record({ state: 'failed', line });
       const back = await bringBack(ctx, hold, step1, launcher, cwd, env);
-      hold.err(
-        `interrupted before the update was applied; the checkout was not changed${unlessBack(back)}`,
-      );
+      hold.err(`${line}${unlessBack(back)}`);
       return EXIT.failure;
     }
 
@@ -222,19 +316,20 @@ async function apply(ctx: Context, git: Git, update: Update): Promise<number> {
     const notApplied = await failedMerge(git, update, merged, untrackedBefore);
     if (notApplied !== null) {
       if (!notApplied.asItWas) {
-        hold.err(
-          `the update could not be applied: ${notApplied.why}; the checkout may not be as it was: set it right as docs/install.md says ("Updating"), then run skydeck window`,
-        );
+        const line = `the update could not be applied: ${notApplied.why}; the checkout may not be as it was: set it right as docs/install.md says ("Updating"), then run skydeck window`;
+        await record({ state: 'failed', line });
+        hold.err(line);
         return EXIT.failure;
       }
+      const line = `the update could not be applied: ${notApplied.why}; the checkout is as it was`;
+      await record({ state: 'failed', line });
       const back = await bringBack(ctx, hold, step1, launcher, cwd, env);
-      hold.err(
-        `the update could not be applied: ${notApplied.why}; the checkout is as it was${unlessBack(back)}`,
-      );
+      hold.err(`${line}${unlessBack(back)}`);
       return EXIT.failure;
     }
 
     // 3. The window's server again, only when the stopped one had a page.
+    await record({ state: 'applied' });
     const done = await bringBack(ctx, hold, step1, launcher, cwd, env);
     // 4. The result.
     const id = short(update.newId);

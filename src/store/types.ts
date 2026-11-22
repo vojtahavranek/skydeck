@@ -197,6 +197,7 @@ export type KvKey =
   | 'window_pages_open' // "1" while the server has pages connected (plan C20)
   | 'window_favourites' // the new form's favourite flags: a JSON array of texts (S2 12.6, F15)
   | 'window_update_check' // F38: the last look for a newer skydeck, of one checkout (S2 10.2, 16.5)
+  | 'window_update_run' // F38: the one update started from a window, and its outcome (S2 16.5)
   | 'window_slots' // slots moved by hand: a JSON object, terminal id → slot 1–9 (S2 7.6, F37)
   // The slots the sessions last had in the window, per boot (the newest two): a restore's order
   // (design 7.8, F37). A JSON array of { bootId, sessions: { <session id>: <slot> } }.
