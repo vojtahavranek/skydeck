@@ -1053,6 +1053,24 @@ describe('real runner', () => {
       assert.equal(runs(second), true, 'the helper was not signalled');
     });
 
+    test('once answered, no timer of the run is left (the grace timer is cleared)', async (t) => {
+      const s = sandbox(t);
+      s.link('sh', 'sleep', 'touch');
+      const marker = join(s.root, 'termed');
+      const timers = (): number =>
+        process.getActiveResourcesInfo().filter((kind) => kind === 'Timeout').length;
+      const before = timers();
+
+      const result = await realPlatform().runner.run(
+        'sh',
+        looping(s, `trap "touch '${marker}'; exit 143" TERM`),
+        { env: s.env(), timeoutMs: 300, killGraceMs: 5000 },
+      );
+
+      assert.equal(result.timedOut, true);
+      assert.equal(timers(), before);
+    });
+
     test('without killGraceMs a timeout sends SIGKILL at once: a TERM trap never runs', async (t) => {
       const s = sandbox(t);
       s.link('sh', 'sleep', 'touch');

@@ -626,41 +626,107 @@ describe('a check that fails (review of milestone 1)', () => {
     assert.equal(w.fetches(), 2);
   });
 
-  test('a Check now that throws keeps what an earlier check found, the failure beside it', async (t) => {
-    const w = world(t);
-    await w.updates.check();
-    w.repo.quietFetch = () => Promise.reject(new Error('spawn git EAGAIN'));
-    w.d.clock.setNs(T0 + 5n);
+  /** An earlier server's stored entry: an update to NEW known, HEAD then at OLD. */
+  const earlier = (deck: Deck, root: string): void => {
+    writeCheck(deck.store, {
+      v: 1,
+      root,
+      lookedAtNs: '1',
+      checkedAtNs: '1',
+      fetchedAtNs: '1',
+      failure: null,
+      head: OLD,
+      outcome: {
+        kind: 'available',
+        upstream: 'origin/main',
+        count: 1,
+        to: NEW,
+        lines: ['1 new commit on origin/main (0123456..fedcba9):'],
+        blocked: null,
+      },
+    });
+  };
+
+  test("after an update, a new server's first check that throws shows no notice: a cannot with its line", async (t) => {
+    // The update was applied: HEAD is NEW, the upstream's commit too.
+    const w = world(t, {
+      repo: {
+        head: NEW,
+        fetched: NEW,
+        quietFetch: () => Promise.reject(new Error('spawn git EAGAIN')),
+      },
+      before: earlier,
+    });
 
     const answer = await w.updates.check();
 
-    assert.equal(answer.check?.state, 'available');
-    assert.equal(answer.fetchedAtNs, String(T0));
-    assert.equal(answer.checkedAtNs, String(T0 + 5n));
+    assert.deepEqual(answer.check, {
+      state: 'cannot',
+      summary: 'skydeck could not check for an update (Error)',
+    });
     assert.equal(answer.failure?.line, 'skydeck could not check for an update (Error)');
-    assert.deepEqual(w.stored()?.failure, answer.failure);
+    assert.equal(answer.fetchedAtNs, '1', 'the stored entry gives the last fetch time only');
+    assert.equal(w.stored()?.head, null);
+    assert.equal(w.stored()?.outcome.kind, 'cannot');
   });
 
-  test('a cannot that a git failure made is a failed check: the outcome before stands, the hour', async (t) => {
-    const w = world(t);
-    await w.updates.check();
-    w.repo.answers['rev-parse --show-toplevel'] = { code: null, timedOut: true };
-    w.d.clock.setNs(T0 + 7n);
+  test("after an update, a new server's first check whose git call times out shows no notice; the next comes an hour later", async (t) => {
+    const w = world(t, {
+      repo: {
+        head: NEW,
+        fetched: NEW,
+        answers: { 'symbolic-ref --quiet HEAD': { code: null, timedOut: true } },
+      },
+      before: earlier,
+    });
+
+    w.updates.tick();
+    await flush();
+
+    const line = 'git symbolic-ref failed: no answer within 10 s; nothing was changed';
+    assert.deepEqual(w.updates.payload().check, { state: 'cannot', summary: line });
+    assert.equal(w.updates.payload().failure?.line, line);
+    const calls = w.runner.calls.length;
+    w.d.clock.setNs(T0 + RETRY_AFTER_FAILURE_NS - 1n);
+    w.updates.tick();
+    await flush();
+    assert.equal(w.runner.calls.length, calls, 'not before the hour');
+    w.d.clock.setNs(T0 + RETRY_AFTER_FAILURE_NS);
+    w.updates.tick();
+    await flush();
+    assert.ok(w.runner.calls.length > calls, 'checked again after the hour');
+  });
+
+  test("a window's look that times out in the tolerant order: git's words, not that it is no checkout", async (t) => {
+    const w = world(t, {
+      repo: { answers: { 'rev-parse --show-toplevel': { code: null, timedOut: true } } },
+    });
 
     const answer = await w.updates.check();
 
-    assert.equal(answer.check?.state, 'available', 'a timeout tells nothing of the checkout');
-    assert.match(answer.failure?.line ?? '', /is not a git checkout/);
-    assert.equal(answer.failure?.atNs, String(T0 + 7n));
-    delete w.repo.answers['rev-parse --show-toplevel'];
-    w.d.clock.setNs(T0 + 7n + RETRY_AFTER_FAILURE_NS - 1n);
-    w.updates.tick();
-    await flush();
-    assert.equal(w.fetches(), 1, 'not before the hour');
-    w.d.clock.setNs(T0 + 7n + RETRY_AFTER_FAILURE_NS);
-    w.updates.tick();
-    await flush();
-    assert.equal(w.fetches(), 2, 'checked again after the hour (the timed-out look made none)');
+    assert.deepEqual(answer.check, {
+      state: 'cannot',
+      summary: 'git rev-parse failed: no answer within 10 s; nothing was changed',
+    });
+  });
+
+  test("the dialog's look whose git call fails replaces what was known: the notice goes", async (t) => {
+    const w = world(t);
+    const checked = await w.updates.check();
+    assert.equal(checked.check?.state, 'available');
+    w.repo.answers['merge-base --is-ancestor ' + OLD + ' ' + NEW] = {
+      code: 128,
+      stderr: 'fatal: bad object\n',
+    };
+
+    const looked = await w.updates.look();
+
+    assert.deepEqual(looked.check, {
+      state: 'cannot',
+      summary: 'git merge-base failed: fatal: bad object; nothing was changed',
+    });
+    assert.equal(w.stored()?.outcome.kind, 'cannot');
+    assert.equal(w.told.at(-1)?.check?.state, 'cannot');
   });
 
   test('a check that ends cannot by a state of the checkout: its own time, and no stale failure', async (t) => {

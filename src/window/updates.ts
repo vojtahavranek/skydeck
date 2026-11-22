@@ -8,10 +8,11 @@
  * - A check (network) is the look of src/update/look.ts with the quiet fetch, in the window's
  *   tolerant order; one at a time, a second request joins the first. A check fails when its fetch
  *   fails, when a git call of its look fails or times out (not a state of the checkout), or when
- *   it throws. A failure hides nothing: the outcome is what the look says without the network (or,
- *   when the look could tell nothing, the outcome before), so an update an earlier fetch brought
- *   stays shown, and the failure — its line and its time — is kept beside it until a check that
- *   ends without one. A failure makes no notice of its own.
+ *   it throws. A failed fetch hides nothing: the outcome is what the look says on the ref it has,
+ *   so an update an earlier fetch brought stays shown. A failed git call, or a check that threw,
+ *   shows no notice: the outcome is a `cannot` with its line (a notice always comes from a look
+ *   that ran to its end). The failure — its line and its time — is kept until a check that ends
+ *   without one. A failure makes no notice of its own.
  * - When: at every tick (each second) with the switch on, when none runs and this server has made
  *   no check yet ("at start") or its last one ended CHECK_EVERY_NS ago or more by the wall clock (or
  *   the clock stepped back behind it); after a check that failed the wait is
@@ -174,9 +175,12 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   };
 
   /**
-   * A check ended at `nowNs`: with its look, or with the line of what it threw. It failed when its
-   * fetch failed, when a git call of its look failed (`cannot` with `failed`) or when it threw;
-   * then the outcome before stands where the look could tell nothing, and the failure is kept.
+   * A check ended at `nowNs`: with its look, or with the line of what it threw. The outcome is
+   * this check's alone — a notice always comes from a look that ran to its end: one that threw,
+   * or whose git call failed, is a `cannot` with its line. It failed when its fetch failed, when a
+   * git call of its look failed (`cannot` with `failed`) or when it threw: the failure is kept
+   * and the next check comes after the hour. What was stored before gives only the time of the
+   * last fetch that worked.
    */
   const endCheck = (nowNs: Ns, ended: Looked | { thrown: string }): void => {
     const before = known();
@@ -187,22 +191,14 @@ export function createUpdates(deps: UpdatesDeps): Updates {
       : ended.kind === 'known'
         ? ended.fetchFailed
         : (ended.fetchFailed ?? (ended.failed ? ended.line : null));
-    const toldNothing = thrown || (ended.kind === 'cannot' && ended.failed);
     const fetchWorked = !thrown && ended.kind === 'known' && ended.fetchFailed === null;
-    const what: Pick<CheckRecord, 'lookedAtNs' | 'head' | 'outcome'> = !toldNothing
-      ? {
-          lookedAtNs: at,
-          head: ended.kind === 'cannot' ? ended.head : ended.update.oldId,
-          outcome: outcomeOf(ended),
-        }
-      : before !== null
-        ? { lookedAtNs: before.lookedAtNs, head: before.head, outcome: before.outcome }
-        : { lookedAtNs: at, head: null, outcome: { kind: 'cannot', line: failureLine ?? '' } };
     lastCheck = { atNs: nowNs, failed: failureLine !== null };
     keep({
       v: 1,
       root: root ?? '',
-      ...what,
+      lookedAtNs: at,
+      head: thrown ? null : ended.kind === 'cannot' ? ended.head : ended.update.oldId,
+      outcome: thrown ? { kind: 'cannot', line: ended.thrown } : outcomeOf(ended),
       checkedAtNs: at,
       fetchedAtNs: fetchWorked ? at : (before?.fetchedAtNs ?? null),
       failure: failureLine === null ? null : { atNs: at, line: failureLine },
@@ -280,8 +276,6 @@ export function createUpdates(deps: UpdatesDeps): Updates {
       const looked = await lookForUpdate(g, platform.files, { fetch: 'none', tolerant: true });
       if (stopped) return payload();
       const before = known();
-      // A look whose git failed tells nothing: what was known stands.
-      if (looked.kind === 'cannot' && looked.failed && before !== null) return payload();
       keep({
         v: 1,
         root: root ?? '',

@@ -2272,8 +2272,9 @@ never your files, the index or HEAD. It applies nothing.
 - **It never asks.** The check runs with no terminal, no askpass program and no credential
   manager's dialog (`GCM_INTERACTIVE=never`), so a remote that needs a passphrase or a login is a
   check that fails (the block and doctor say so), never a prompt; it gives up after 60 seconds and
-  is tried again an hour later. A check that fails hides nothing: an update an earlier check found
-  stays shown.
+  is tried again an hour later. A fetch that fails hides nothing: an update an earlier check found
+  stays shown. A git call that fails, or a check that cannot run git at all, shows no notice:
+  Settings and doctor say why.
 
 ### Updating by hand
 

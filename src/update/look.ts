@@ -173,11 +173,10 @@ async function look(
     files.realpath(topDir) === null ||
     files.realpath(topDir) !== files.realpath(root)
   ) {
-    // A rev-parse that timed out tells nothing about the checkout: a git failure.
-    cannot(
-      `${sanitize(root)} is not a git checkout; update it the way it was installed`,
-      top.timedOut,
-    );
+    // A rev-parse that timed out tells nothing about the checkout: for the window a git failure,
+    // in git's words; the command keeps its own line.
+    if (tolerant && top.timedOut) throw gitFailure(['rev-parse', '--show-toplevel'], top, GIT_MS);
+    cannot(`${sanitize(root)} is not a git checkout; update it the way it was installed`);
   }
   // 4: on a branch.
   const ref = await headRef(git);

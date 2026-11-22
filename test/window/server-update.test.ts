@@ -125,6 +125,29 @@ describe('the check on a running server', () => {
   });
 });
 
+describe('the upstream branch pruned away', () => {
+  test("a cannot with git's line, a failed check (the hour), and the dialog's look offers nothing", async (t) => {
+    const k = checked(t, 'off');
+    const server = await k.start();
+    const page = await connectTestPage(t, k.d, server.server);
+    k.c.push('a commit the check brings', { 'README.md': 'two\n' });
+    const found = await page.act({ kind: 'update-check' }, WAIT_MS);
+    assert.equal(found.update?.check?.state, 'available', JSON.stringify(found));
+
+    k.c.git(k.c.root, 'config', 'fetch.prune', 'true');
+    k.c.git(k.c.remote, 'update-ref', '-d', `refs/heads/${k.c.branch}`);
+    const pruned = await page.act({ kind: 'update-check' }, WAIT_MS);
+
+    const line = 'git rev-parse failed: fatal: Needed a single revision; nothing was changed';
+    assert.deepEqual(pruned.update?.check, { state: 'cannot', summary: line });
+    // A failed check: its line is kept, and the next check comes after the hour (updates.ts).
+    assert.equal(pruned.update?.failure?.line, line);
+    const looked = await page.act({ kind: 'update-look' }, WAIT_MS);
+    assert.deepEqual(looked.update?.check, { state: 'cannot', summary: line });
+    assert.equal(k.d.deck.store.getKv('window_update_check')?.includes('"available"'), false);
+  });
+});
+
 describe("the server's stop during a check", () => {
   test("a stop during the dialog's look: the git call that runs gets SIGTERM, no further one starts, the stop ends in time", async (t) => {
     const k = checked(t, 'off');

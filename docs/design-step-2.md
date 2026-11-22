@@ -4116,7 +4116,7 @@ editing the file by hand stay as they are, and the file's format does not change
 | **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s and stops reading a keeper whose records its screen side has not applied (7.3), so the keeper closes that connection at its send cap and the server reconnects; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
 | **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. The server's own connection waits at most 250 ms for another process's write lock (the commands wait 5 s), so a lock held for long never freezes the server: the piece of work that met it is given up and tried again — the tick's store work at the next tick, an action answers `skydeck's database is busy; try again`, a `hello` is closed with 1013 and the page tries again, and a found keeper's decision (7.3) is put off to the next refresh while its deadline allows; a start that meets it fails at once (5.2), leaving nothing behind (ruled, plan task 23). |
 | **skydeck is updated** | 16.5. |
-| **The check for a newer skydeck fails** (follow-up F38: no network, a remote that needs a login, a remote gone, git missing) | No notice of its own: an update an earlier fetch brought stays shown, and the settings screen's block and `doctor` say that the last check failed, when, and git's line (12.13, 16.3). It never asks for a password or a passphrase and never waits at a prompt; it ends after 60 seconds at most, and a failed check is tried again an hour later. A check that was cut can leave a ref's `.lock`; 16.5 says what then. |
+| **The check for a newer skydeck fails** (follow-up F38: no network, a remote that needs a login, a remote gone, git missing) | No notice of its own: after a failed fetch an update an earlier fetch brought stays shown; after a git call that failed or a check that threw none is shown; either way the settings screen's block and `doctor` say that the last check failed, when, and why (12.13, 16.3). It never asks for a password or a passphrase and never waits at a prompt; it ends after 60 seconds at most, and a failed check is tried again an hour later. A check that was cut can leave a ref's `.lock`; 16.5 says what then. |
 | **The key is wrong** (after `--new-secret`, a launch address used too late or given up, a stale bookmark) | The page says that its key is not valid and to run `skydeck window` again (8.2.2). |
 | **A launch token is presented twice** | Another program may have the secret: the alarm (8.2.2) — the page, the waiting `skydeck window` and `doctor` all say to run `skydeck window --new-secret`. |
 | **Something else answers on the port** (a program on the Windows side, 15.3) | An open window gets no server proof, sends nothing, and says `something answers on port <n> that is not skydeck's server`. |
@@ -4578,12 +4578,18 @@ available` (12.1), its dialog, the settings screen's block `Updates` and `Check 
   a stored outcome looks once without the network. One check runs at a time; a request while one
   runs joins it. The dialog's look (`act update-look`) runs without the network, so that what it
   says is true now (a change made, a branch switched, a `git pull` since the check).
-- **What a failed check leaves.** It hides nothing: what the look says without the network stands
-  — or, when the look could tell nothing (a git call failed, the check threw), what was known
-  before —, so an update an earlier fetch brought stays shown, and the failure — its line and its
-  time — is kept beside it for the settings screen and `doctor` until a check that ends without
-  one; a failed fetch is kept also when the look after it ends `this checkout changed while git
-  fetch ran`. A failure makes no notice of its own, and a look that cannot tell shows none. The
+- **What a failed check leaves.** A notice always comes from a look that ran to its end. A failed
+  fetch hides nothing: the look goes on with the remote-tracking ref it has, so an update an
+  earlier fetch brought stays shown. A git call that failed or timed out, or a check that threw (a
+  git that could not be started), shows no notice: the outcome is a `cannot` with its line (git's,
+  or `skydeck could not check for an update (<kind>)`), which replaces what was known — nothing of
+  an earlier check's or an earlier server's outcome is taken up again (the stored entry gives only
+  the time of the last fetch that worked) — and the dialog then says why. Either way the failure —
+  its line and its time — is kept for the settings screen and `doctor` until a check that ends
+  without one, and the next check comes after the hour; a failed fetch is kept also when the look
+  after it ends `this checkout changed while git fetch ran`. A failure makes no notice of its own,
+  and a look that cannot tell shows none. The dialog's look follows the same rule: one whose git
+  call fails is a `cannot` with git's line and replaces what was known. The
   settings screen gives the time the last check ended, whatever it found (`checkedAtNs`), and the
   time of the last fetch that worked for what is known (`fetchedAtNs`).
 - **What is stored.** `kv window_update_check` (10.2), naming the checkout it is of; a server sends
