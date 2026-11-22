@@ -1,11 +1,20 @@
 // Follow-up F38's words for the update notice (web/update-text.js): when the title bar's control
-// shows, what the dialog says for each answer of the server's look, and the settings screen's
-// block `Updates`.
+// shows, what the dialog says for each answer of the server's look, the settings screen's block
+// `Updates`, and (milestone 2) Update now, its running form and the bars.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import type { UpdateCheckPayload, UpdatePayload } from '../../src/window/protocol.ts';
-import { dialogLines, settingsLines, showsNotice, UPDATE_TEXTS } from '../../web/update-text.js';
+import {
+  awayParts,
+  dialogLines,
+  offersUpdateNow,
+  resultText,
+  runningLine,
+  settingsLines,
+  showsNotice,
+  UPDATE_TEXTS,
+} from '../../web/update-text.js';
 
 const SEC = 1_000_000_000n;
 const NOW = 1_794_474_000_000_000_000n;
@@ -174,5 +183,44 @@ describe("the settings screen's block", () => {
       'No check was made yet.',
       'Checking…',
     ]);
+  });
+});
+
+describe('Update now, its running form and the bars (milestone 2)', () => {
+  test('Update now is offered only for an update that can be applied as it is', () => {
+    assert.equal(offersUpdateNow(AVAILABLE), true);
+    assert.equal(offersUpdateNow({ ...AVAILABLE, blocked: 'changes' }), false);
+    assert.equal(offersUpdateNow(CURRENT), false);
+    assert.equal(offersUpdateNow({ state: 'cannot', summary: 'no' }), false);
+    assert.equal(offersUpdateNow(null), false);
+  });
+
+  test("the running form's line names the commit's short id", () => {
+    assert.equal(
+      runningLine(AVAILABLE.state === 'available' ? AVAILABLE.to : ''),
+      'skydeck is being updated to fedcba9. The window comes back by itself.',
+    );
+    assert.equal(UPDATE_TEXTS.beingUpdated, 'skydeck is being updated');
+  });
+
+  test("the bar while the server is away: the whole sentence, with the time, and the log's path before skydeck window", () => {
+    const log = '/home/you/.local/state/skydeck/update.log';
+    const parts = awayParts('14:02:11', log);
+    const sentence = parts.map((part) => part.text).join('');
+    assert.equal(
+      sentence,
+      "skydeck is being updated (since 14:02:11): the server restarts by itself and this window comes back; sessions keep running. If it is not back within two minutes, the update's log says why: /home/you/.local/state/skydeck/update.log — read it first; then, in a WSL terminal: skydeck window",
+    );
+    assert.ok(sentence.indexOf(log) < sentence.indexOf('skydeck window'));
+    assert.deepEqual(
+      parts.filter((part) => part.code === true).map((part) => part.text),
+      [log, 'skydeck window'],
+    );
+  });
+
+  test("the result bar gives the server's words: updated to <id>, or why not", () => {
+    assert.equal(resultText({ ok: true, text: 'updated to 5d6e7f8' }), 'updated to 5d6e7f8');
+    const why = 'the update could not be applied: error: a refusal; the checkout is as it was';
+    assert.equal(resultText({ ok: false, text: why }), why);
   });
 });

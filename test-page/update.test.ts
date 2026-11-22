@@ -248,13 +248,14 @@ test('the update notice (F38, S2 16.5)', async (t) => {
         await readPage(
           w.l.page,
           () =>
-            [...document.querySelectorAll('#update-dialog button')]
+            [...document.querySelectorAll<HTMLButtonElement>('#update-dialog button')]
+              .filter((b) => !b.hidden)
               .map((b) => b.textContent)
               .join('|'),
           null,
         ),
-        'Close',
-        'no button but Close: no Update now',
+        'Update now|Close',
+        'Update now (milestone 2) before Close',
       );
       await w.l.page.keyboard.press('Control+Shift+N');
       await showsText(w.l.page, '#key-message', /^close the dialog first \(Esc\)$/);
@@ -291,10 +292,14 @@ test('the update notice (F38, S2 16.5)', async (t) => {
       assert.equal(
         await readPage(
           w.l.page,
-          () => document.querySelectorAll('#update-dialog button').length,
+          () =>
+            [...document.querySelectorAll<HTMLButtonElement>('#update-dialog button')].filter(
+              (b) => !b.hidden,
+            ).length,
           null,
         ),
         1,
+        'Close alone: no Update now',
       );
       await closeDialog(w.l.page);
       assert.deepEqual(w.l.problems, []);
@@ -399,7 +404,7 @@ test('the update notice (F38, S2 16.5)', async (t) => {
   );
 
   await t.test(
-    "opened from the keyboard on its own control: the page inert, Tab stays on Close, the key help refused, another window's check drawn again; Esc gives the keyboard back to the control",
+    "opened from the keyboard on its own control: the page inert, Tab goes round Update now and Close, the key help refused, another window's check drawn again; Esc gives the keyboard back to the control",
     async (t) => {
       const w = await world(t, chromium);
       w.c.push('the first commit to bring', { 'a.txt': 'a\n' });
@@ -422,9 +427,16 @@ test('the update notice (F38, S2 16.5)', async (t) => {
       assert.equal(await inert(), true, 'the page under the dialog is inert');
       const holder = (): Promise<string> =>
         readPage(w.l.page, () => document.activeElement?.className ?? '', null);
-      for (const key of ['Tab', 'Shift+Tab', 'Tab']) {
+      // Milestone 2: Update now stands before Close; Tab and Shift+Tab stay on the two.
+      assert.equal(await holder(), 'update-close', 'the keyboard starts on Close');
+      for (const [key, on] of [
+        ['Tab', 'edit-save update-now'],
+        ['Shift+Tab', 'update-close'],
+        ['Tab', 'edit-save update-now'],
+        ['Tab', 'update-close'],
+      ] as const) {
         await w.l.page.keyboard.press(key);
-        assert.equal(await holder(), 'update-close', `${key} stays on Close`);
+        assert.equal(await holder(), on, `${key} goes to ${on}`);
       }
       await w.l.page.keyboard.press('Control+Shift+H');
       await showsText(w.l.page, '#key-message', /^close the dialog first \(Esc\)$/);

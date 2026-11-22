@@ -1,6 +1,7 @@
 // Follow-up F38's words for the update notice (S2 16.5, 12.1, 12.13), pure (no DOM): whether the
 // title bar's `Update available` shows, what the dialog it opens says for each answer of the
-// server's look, and the settings screen's block `Updates`. The page decides no rule: what is
+// server's look, the settings screen's block `Updates`, and (milestone 2) whether the dialog offers
+// `Update now`, its running form, and the bar while the server is away for an update. The page decides no rule: what is
 // known, and whether it can be applied, is the server's (src/window/updates.ts); these functions
 // only put its texts into sentences. Every text they return reaches the DOM as text.
 
@@ -18,10 +19,61 @@ export const UPDATE_TEXTS = {
   checking: 'Checking…',
   never: 'No check was made yet.',
   nothingFetched: 'Nothing was fetched before.',
-  /** The command the dialog gives: applying from the window is not offered here. */
+  /** The command the dialog gives beside `Update now`. */
   apply: 'To apply it, in a WSL terminal of your own: skydeck update',
   setRight: 'Once that is set right, in a WSL terminal of your own: skydeck update',
+  /** Milestone 2: the dialog's second click, and what a window chord says while an update runs. */
+  updateNow: 'Update now',
+  beingUpdated: 'skydeck is being updated',
 };
+
+/**
+ * Whether the dialog offers `Update now` for the look's answer: only for an update that can be
+ * applied as the checkout is (the server decides; it refuses any other).
+ * @param {UpdateCheckPayload | null} check
+ * @returns {boolean}
+ */
+export function offersUpdateNow(check) {
+  return check?.state === 'available' && check.blocked === null;
+}
+
+/**
+ * The dialog's running form while an update runs (every page, connected and told `applying`).
+ * @param {string} to the commit's full id
+ * @returns {string}
+ */
+export function runningLine(to) {
+  return `skydeck is being updated to ${to.slice(0, 7)}. The window comes back by itself.`;
+}
+
+/**
+ * S2 6.3's bar while the server is away for an update, in its parts: the text, the log, the text,
+ * the command. The log comes first and the command second: after a merge that was cut off the
+ * command starts nothing until the checkout is set right, and the log says so.
+ * @param {string} since the time the update started, as the page shows a time (HH:MM:SS)
+ * @param {string} log the update's log
+ * @returns {{ text: string; code?: boolean }[]}
+ */
+export function awayParts(since, log) {
+  return [
+    {
+      text: `skydeck is being updated (since ${since}): the server restarts by itself and this window comes back; sessions keep running. If it is not back within two minutes, the update's log says why: `,
+    },
+    { text: log, code: true },
+    { text: ' — read it first; then, in a WSL terminal: ' },
+    { text: 'skydeck window', code: true },
+  ];
+}
+
+/**
+ * The result bar's text: how the last update from the window ended, in the server's words
+ * (`updated to <id>`, or why not).
+ * @param {{ ok: boolean; text: string }} result
+ * @returns {string}
+ */
+export function resultText(result) {
+  return result.text;
+}
 
 /**
  * Whether a newer version is known: the title bar's control shows exactly then.

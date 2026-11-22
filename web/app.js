@@ -38,7 +38,13 @@
 // found; the title bar's `Update available` (before `Settings`) shows exactly while a newer version
 // is known (web/update-text.js), and its click, through `windowChordGate`, opens web/update.js's
 // dialog, modal as "Mark done" is (`close the dialog first (Esc)`). The settings screen's block
-// `Updates` follows every state.
+// `Updates` follows every state. Milestone 2: the dialog's `Update now` sends `act update-apply`;
+// while the server says `applying` and the page is connected, the dialog's running form is shown on
+// every page, the page inert, every window chord answered `skydeck is being updated`. One function,
+// liftUpdateLock(), lifts it when the connection is lost (S2 6.3's bar then names the update's log
+// first and `skydeck window` second), when it ends fatal, and at every welcome. The result bar
+// (`#update-result`) says how the last update from the window ended until its × (`act
+// update-seen`) dismisses it on every page.
 //
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
@@ -70,7 +76,7 @@ import { createSettingsDialog } from './settings.js';
 import { createPaletteSwitch, createThemeSwitch } from './theme.js';
 import { createToast } from './toast.js';
 import { createUpdateDialog } from './update.js';
-import { showsNotice } from './update-text.js';
+import { awayParts, resultText, showsNotice, UPDATE_TEXTS } from './update-text.js';
 
 // S2 8.2.2: before anything else.
 let token = takeToken();
@@ -123,6 +129,8 @@ const dom = {
   settingsButton: byId('settings-button'),
   updateDialog: byId('update-dialog'),
   updateButton: byId('update-button'),
+  updateResult: byId('update-result'),
+  updateResultText: byId('update-result-text'),
   toast: byId('toast'),
   notifyOn: /** @type {HTMLButtonElement} */ (byId('notify-on')),
   switcher: byId('switcher'),
@@ -233,6 +241,10 @@ const state = {
   settingsFrom: /** @type {Element | null} */ (null),
   /** F38: what had the keyboard when the update dialog opened: it gets it back. */
   updateFrom: /** @type {Element | null} */ (null),
+  /** F38, milestone 2: the update the last `update` said runs, while connected; null: none. */
+  updateApplying: /** @type {{ to: string; sinceNs: string } | null} */ (null),
+  /** F38: the update's log, as the last `update` named it (the bar while the server is away). */
+  updateLog: '',
 };
 
 /** @type {ReturnType<typeof createConnection> | null} */
@@ -509,6 +521,13 @@ byId('info-close').addEventListener('click', () => {
   dom.info.hidden = true;
   keepKeyboard(); // pressed from the keyboard: its holder is no longer visible
 });
+// F38: the result bar's × dismisses the result on every page (the server's `update` hides it).
+byId('update-result-close').addEventListener('click', () => {
+  void act({ kind: 'update-seen' }).then((result) => {
+    if (result.update !== undefined) updateState(result.update);
+    keepKeyboard();
+  });
+});
 // The page's chrome takes no keyboard on a mouse click (ruled, review 2 round three): a click on
 // the title bar, the key bar or the notice's × leaves the keyboard where it was — in the filter,
 // say, so that what the user types next does not land on the list. Their buttons still work, and
@@ -517,6 +536,7 @@ for (const chrome of [
   document.querySelector('.titlebar'),
   document.querySelector('.keybar'),
   byId('info-close'),
+  byId('update-result-close'),
 ]) {
   chrome?.addEventListener('mousedown', (event) => event.preventDefault());
 }
@@ -1064,8 +1084,71 @@ function broughtTakesKeyboard() {
  */
 function updateState(update) {
   dom.updateButton.hidden = !showsNotice(update);
+  state.updateLog = update.log;
+  showUpdateResult(update.result);
+  if (update.applying !== null && state.connected) {
+    applyingShown(update.applying);
+  } else if (state.updateApplying !== null) {
+    liftUpdateLock(); // refused before the stop: the server runs on, the bar gives the line
+  }
   updateDialog.update(update);
   settingsDialog.updateState(update);
+}
+
+/**
+ * Milestone 2: the result bar while the server says how the last update from the window ended.
+ * @param {{ ok: boolean; text: string } | null} result
+ */
+function showUpdateResult(result) {
+  if (result === null) {
+    dom.updateResult.hidden = true;
+    return;
+  }
+  dom.updateResultText.textContent = resultText(result);
+  dom.updateResult.hidden = false;
+}
+
+/**
+ * Milestone 2: an update runs. The dialog's running form over the inert page, whichever dialog
+ * was open; the keyboard is given back where it was once it is lifted.
+ * @param {{ to: string; sinceNs: string }} applying
+ */
+function applyingShown(applying) {
+  if (state.updateApplying === null && !updateDialog.shown()) {
+    help.hide();
+    state.updateFrom = document.activeElement;
+  }
+  state.updateApplying = applying;
+  appRoot.inert = true;
+  updateDialog.running(applying);
+}
+
+/**
+ * Milestone 2: the running form and the lock lifted, and the page's `applying` forgotten — at a
+ * lost connection, a fatal end and every welcome (the server's `update` after `start` says what
+ * holds now). A page without a server is never left inert.
+ */
+function liftUpdateLock() {
+  state.updateApplying = null;
+  updateDialog.running(null);
+}
+
+/**
+ * Milestone 2: S2 6.3's bar while the server is away for an update — the log first, then the
+ * command.
+ * @param {string} sinceNs
+ */
+function showUpdateAway(sinceNs) {
+  const since = clockTime(new Date(Number(BigInt(sinceNs) / 1_000_000n)));
+  dom.goneText.replaceChildren(
+    ...awayParts(since, state.updateLog).map((part) => {
+      if (part.code !== true) return part.text;
+      const code = document.createElement('code');
+      code.textContent = part.text;
+      return code;
+    }),
+  );
+  dom.gone.hidden = false;
 }
 
 /**
@@ -1087,7 +1170,7 @@ function openUpdate() {
  * when that is still there, else to the zone's holder (as the settings screen's close).
  */
 function updateClosed() {
-  appRoot.inert = false;
+  appRoot.inert = modal(); // milestone 2: the running form may have stood over another dialog
   const from = state.updateFrom;
   state.updateFrom = null;
   if (broughtTakesKeyboard()) {
@@ -1617,6 +1700,7 @@ function shownTerminal() {
  * @param {Date | null} lostSince
  */
 function welcomed(welcome, change, lostSince) {
+  liftUpdateLock(); // F38: the server's `update` after `start` says what holds now
   dom.gone.hidden = true;
   dom.problem.hidden = true;
   showKeepAlive(welcome.keepAlive.state === 'failed', welcome.keepAlive.error);
@@ -2059,6 +2143,10 @@ function xtermHasKeyboard() {
  * @returns {boolean} whether it may act
  */
 function windowChordGate(kind) {
+  if (updateDialog.runningShown()) {
+    say(UPDATE_TEXTS.beingUpdated); // F38, milestone 2: nothing acts while an update runs
+    return false;
+  }
   if (switcher.shown()) {
     if (kind === 'switcher' || kind === 'reload') {
       return true;
@@ -2664,11 +2752,19 @@ async function start() {
       lost: (since) => {
         dropPending();
         state.bringing = null; // the resume's terminal is no longer the page's own news (Z1)
-        showGone(since);
+        // F38: told that an update runs, the bar names its log first; the lock is lifted.
+        const applying = state.updateApplying;
+        liftUpdateLock();
+        if (applying === null) {
+          showGone(since);
+        } else {
+          showUpdateAway(applying.sinceNs);
+        }
         switcher.update(null); // E11: it says so; Enter does nothing, a kept Enter is dropped
       },
       fatal: (text) => {
         dropPending();
+        liftUpdateLock(); // F38: a page that cannot reconnect is never left inert
         dom.gone.hidden = true;
         showProblem(text);
         switcher.update(null);

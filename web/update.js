@@ -3,14 +3,21 @@
 // inert under it, D2). It asks the server to look again without the network (`act update-look`),
 // so that what it says is true now, and draws the answer: `skydeck update --check`'s lines, one per
 // line, and the command to run in a terminal (web/update-text.js), or why the update cannot be
-// applied as the checkout is, or why skydeck cannot tell. No button but `Close`, which has the
-// keyboard from the start. While it is shown an `update` message draws the answer again.
+// applied as the checkout is, or why skydeck cannot tell. `Close` has the keyboard from the start;
+// for an update that can be applied as it is, `Update now` stands before it (milestone 2) and
+// sends `act update-apply` with the commit the dialog drew; a refusal is drawn under the lines.
+// While it is shown an `update` message draws the answer again.
+//
+// Milestone 2's running form (`running`): while an update runs, every connected page shows the
+// dialog with one line and no button; Esc does not close it. app.js lifts it when the connection
+// is lost or ends fatal and at every welcome.
 //
 // It decides nothing (S2 4.3): what is known is the server's. Keys come from app.js's capture
-// phase (`key`): Esc closes; Tab and Shift+Tab stay on `Close`. Every text reaches the DOM as text.
+// phase (`key`): Esc closes; Tab and Shift+Tab go round the buttons. Every text reaches the DOM as
+// text.
 
 /** @import { ResultMessage, UpdatePayload } from '../src/window/protocol.ts' */
-import { dialogLines, UPDATE_TEXTS } from './update-text.js';
+import { dialogLines, offersUpdateNow, runningLine, UPDATE_TEXTS } from './update-text.js';
 
 /**
  * @typedef {object} UpdateDialogDeps
@@ -55,8 +62,13 @@ export function createUpdateDialog(root, deps) {
     element('button', 'update-close', UPDATE_TEXTS.close)
   );
   close.type = 'button';
+  const updateNow = /** @type {HTMLButtonElement} */ (
+    element('button', 'edit-save update-now', UPDATE_TEXTS.updateNow)
+  );
+  updateNow.type = 'button';
+  updateNow.hidden = true;
   const actions = element('div', 'edit-actions update-actions');
-  actions.append(close);
+  actions.append(updateNow, close);
   box.append(heading, lines, actions);
   root.replaceChildren(scrim, box);
   root.hidden = true;
@@ -66,6 +78,10 @@ export function createUpdateDialog(root, deps) {
   let opens = 0;
   /** Whether the look of this open has answered (until then an `update` message draws nothing). */
   let answered = false;
+  /** Milestone 2: the commit `Update now` applies (the one the dialog drew); null: not offered. */
+  let offered = /** @type {string | null} */ (null);
+  /** Milestone 2: the running form is shown. */
+  let runningForm = false;
 
   /** @param {string[]} texts */
   const draw = (texts) => {
@@ -78,11 +94,32 @@ export function createUpdateDialog(root, deps) {
     );
   };
 
+  /**
+   * The look's answer drawn, `Update now` offered for an update that can be applied as it is.
+   * @param {UpdatePayload} update
+   * @param {string[]} [after] lines under the answer (a refusal of `Update now`)
+   */
+  const drawAnswer = (update, after = []) => {
+    draw([...dialogLines(update.check), ...after]);
+    const check = update.check;
+    offered =
+      check !== null && check.state === 'available' && offersUpdateNow(check) ? check.to : null;
+    const had = document.activeElement === updateNow;
+    updateNow.hidden = offered === null;
+    if (had && updateNow.hidden) {
+      close.focus();
+    }
+  };
+
   const hide = () => {
     if (!shown) {
       return;
     }
     shown = false;
+    runningForm = false;
+    offered = null;
+    updateNow.hidden = true;
+    close.hidden = false;
     opens++;
     // The keyboard leaves the dialog before it is hidden: app.js gives it back.
     const holder = document.activeElement;
@@ -96,6 +133,35 @@ export function createUpdateDialog(root, deps) {
   close.addEventListener('click', hide);
   // A click acts without moving the keyboard off `Close` (D17).
   close.addEventListener('mousedown', (event) => event.preventDefault());
+  updateNow.addEventListener('mousedown', (event) => event.preventDefault());
+  // Milestone 2: the second click. The server looks again and refuses what it does not list; its
+  // `applying` brings the running form (app.js), a refusal is drawn under the answer.
+  updateNow.addEventListener('click', () => {
+    const to = offered;
+    if (!shown || runningForm || to === null) {
+      return;
+    }
+    const open = opens;
+    updateNow.disabled = true;
+    void deps.act({ kind: 'update-apply', to }).then((result) => {
+      updateNow.disabled = false;
+      if (result.update !== undefined) {
+        deps.answered(result.update);
+      }
+      if (!shown || runningForm || open !== opens || result.ok) {
+        return;
+      }
+      const why = result.error ?? 'skydeck could not start the update';
+      if (result.update === undefined) {
+        draw([why]);
+        offered = null;
+        updateNow.hidden = true;
+        close.focus();
+        return;
+      }
+      drawAnswer(result.update, [why]);
+    });
+  });
   scrim.addEventListener('mousedown', (event) => event.preventDefault());
 
   return {
@@ -120,7 +186,7 @@ export function createUpdateDialog(root, deps) {
           return;
         }
         answered = true;
-        draw(dialogLines(result.update.check));
+        drawAnswer(result.update);
         deps.answered(result.update);
       });
     },
@@ -129,10 +195,37 @@ export function createUpdateDialog(root, deps) {
      * @param {UpdatePayload} update
      */
     update(update) {
-      if (shown && answered) {
-        draw(dialogLines(update.check));
+      if (shown && answered && !runningForm) {
+        drawAnswer(update);
       }
     },
+    /**
+     * Milestone 2: the running form while `applying` is set — shown (opened when it was not), one
+     * line, no button, the keyboard on the dialog itself; null lifts it (the dialog closes).
+     * @param {{ to: string } | null} applying
+     */
+    running(applying) {
+      if (applying === null) {
+        if (runningForm) {
+          hide();
+        }
+        return;
+      }
+      if (!shown) {
+        shown = true;
+        opens++;
+        root.hidden = false;
+      }
+      runningForm = true;
+      answered = false;
+      offered = null;
+      draw([runningLine(applying.to)]);
+      updateNow.hidden = true;
+      close.hidden = true;
+      box.focus();
+    },
+    /** @returns {boolean} whether the running form is shown */
+    runningShown: () => shown && runningForm,
     /**
      * A keydown while shown, from app.js's capture phase: true when the dialog took it — Esc
      * closes, Tab and Shift+Tab keep the keyboard on `Close`.
@@ -149,7 +242,7 @@ export function createUpdateDialog(root, deps) {
       if (event.key === 'Escape' && !event.shiftKey) {
         event.preventDefault();
         event.stopPropagation();
-        if (!event.repeat) {
+        if (!event.repeat && !runningForm) {
           hide();
         }
         return true;
@@ -157,7 +250,13 @@ export function createUpdateDialog(root, deps) {
       if (event.key === 'Tab') {
         event.preventDefault();
         event.stopPropagation();
-        close.focus();
+        if (runningForm) {
+          box.focus();
+        } else if (!updateNow.hidden && document.activeElement === close) {
+          updateNow.focus();
+        } else {
+          close.focus();
+        }
         return true;
       }
       return false;

@@ -16,7 +16,8 @@
      follow-up F36's settings screen (`#settings`, web/settings.js), opened by the title bar's
      `Settings` after `Switch…` (`#settings-button`), with its style sheet; follow-up F38's
      `Update available` before `Settings` (`#update-button`, shown while a newer skydeck is known)
-     and the dialog it opens (`#update-dialog`, web/update.js), with their style sheet. -->
+     and the dialog it opens (`#update-dialog`, web/update.js), with their style sheet, and the bar
+     that says how an update from the window ended (`#update-result`). -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -67,6 +68,10 @@
       <div class="bar info" id="info" role="status" hidden>
         <span id="info-text"></span>
         <button class="bar-close" id="info-close" type="button" title="Dismiss">×</button>
+      </div>
+      <div class="bar info" id="update-result" role="status" hidden>
+        <span id="update-result-text"></span>
+        <button class="bar-close" id="update-result-close" type="button" title="Dismiss">×</button>
       </div>
       <main class="main">
         <section class="zone list-zone" id="list-zone">
