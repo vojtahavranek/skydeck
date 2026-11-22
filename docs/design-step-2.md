@@ -867,21 +867,21 @@ record has been applied is it forwarded to the pages (8.2.4), so a snapshot take
 the chain plus the records after it is exactly the stream.
 
 It is the **only responder to terminal queries**: what the headless terminal answers (DA1, DA2,
-DECRQM, CPR, DSR, DECRQSS) is sent to the keeper as input; the page never answers (9.3). It
-answers OSC 10 and OSC 11 (foreground and background colour) itself, from the colours of the theme
-the last focused page reports (the headless terminal has no colours); a reported colour is used
-only when it is exactly `#rrggbb`, else — and until a page has sent its theme — xterm.js's
-default colour is (foreground `#ffffff`, background `#000000`). A page reports its colours in
-`start` (8.2.2) and, from follow-up F13, again in `theme` (8.2.3) whenever they change while it is
-open: a pick of Mode or Colour theme in the settings screen's Appearance (12.1, 12.13), the same
-choice made in another window of the profile, or the system's scheme while the page follows it. The server
-keeps each page's latest for that page's next `focus`, and answers from it at once while that page
-is the one that had focus last, also when its window has lost the focus since (the system's scheme
-is changed in Windows' settings, outside the window). So a program that asks after a change is told
-the colours its terminal has then; before F13 the answer stayed the `start`'s until the page was
-loaded again, also after a change of the system's scheme. It does not answer XTVERSION in the first
-version (9.3). It never answers while it replays (7.3). The answers to a record's queries go to the
-keeper once that record has been applied.
+DECRQM, CPR, DSR, DECRQSS) is sent to the keeper as input; the page never answers (9.3). It answers
+OSC 10 and OSC 11 (foreground and background colour) itself, from the colours of the theme the last
+focused page reports (the headless terminal has no colours); a reported colour is used only when it
+is exactly `#rrggbb`, else — and until a page has sent its theme — xterm.js's default colour is
+(foreground `#ffffff`, background `#000000`). A page reports its colours in `start` (8.2.2) and,
+from follow-up F13, again in `theme` (8.2.3) whenever they change while it is open: a pick of Mode
+or Colour theme in the settings screen's Appearance (12.1, 12.13), the same choice made in another
+window of the profile, or the system's scheme while the page follows it. The server keeps each
+page's latest for that page's next `focus`, and answers from it at once while that page is the one
+that had focus last, also when its window has lost the focus since (the system's scheme is changed
+in Windows' settings, outside the window). So a program that asks after a change is told the colours
+its terminal has then; before F13 the answer stayed the `start`'s until the page was loaded again,
+also after a change of the system's scheme. It does not answer XTVERSION in the first version (9.3).
+It never answers while it replays (7.3). The answers to a record's queries go to the keeper once
+that record has been applied.
 
 The serialise addon does not restore everything (section 21). The server adds what it misses at
 the end of every snapshot, from state it tracks with parser hooks that follow xterm.js 6.0.0's own
@@ -3968,18 +3968,64 @@ skydeck's settings are `config.json`'s keys (16.4, design 9.1); the settings scr
 of them and changes the plain ones, one at a time, through the server. `doctor`, every command and
 editing the file by hand stay as they are, and the file's format does not change.
 
-- **Opening it.** The gear, the title bar's last control (12.1; follow-up F39), or the quick switcher's command
-  `> settings` (a start of it of at least one letter after the `>`, trimmed and in any case: `>s`,
-  `> set`; the server's answer, `list.switcher.settings`, 8.2.3), with Enter or a click on its line
-  `Settings: skydeck’s settings, the plain ones changed here`. Both pass the gate of a window chord
-  (12.9). A dialog over the page as stage D's (12.5): modal, the page inert under it.
-- **What it shows.** At the top the file's path, and where the copy of it is kept (below); `The
-  file does not exist yet: a change creates it.` while there is none; and while the window cannot
-  change it — a file that does not parse (not JSON, a key or a value its rules refuse), a symbolic
+Follow-up F39 (2026-11-22; the owner: the screen was "really messy, its hard to see what is
+important, and there is to much text"; the decisions: the settings easy to understand and worth
+changing on a short screen, the theme moved there from the title bar, every other one in a closed
+"Advanced", a change applied when it is made) makes the screen short; the bullets after the short
+screen's describe Advanced, which keeps F36's screen whole.
+
+- **The short screen.** Three groups, in this order, each setting under a plain label (not its
+  name in the file), its control on the same line, and a hint under it only where the label alone
+  would mislead:
+  - **Appearance**: `Mode` (`Auto`, `Light`, `Dark`) and `Colour theme` (the themes of the scheme
+    the page shows; hint `Light and dark each keep their own.`) — the theme of 12.1, the page's own
+    (its `localStorage`, read before the first paint, followed by another window of the profile and,
+    at Auto, by the system), drawn at once, without the server's answer.
+  - **Links**: `Open links in` (`window.links`: `The default browser`, `Edge`) and `Ticket address`
+    (`ticketUrl`, a one-line field; hint `With {key} where the ticket key goes. Empty: no link.`).
+  - **The window**: `Keep WSL running` (`window.keepAlive`: a switch, on `wsl`, off `off`; marked
+    `after a restart`) and `Typed commands start sessions in` (`terminal`: `That terminal`, `A
+    WezTerm tab`, `The window`; hint `skydeck resume, new and restore, typed in a terminal.`).
+
+  Which keys are there, in which group, under which words, is one table beside the server's, pure
+  text: `web/settings-short.js` (a new setting or group joins by one entry; a group's extra block
+  has one place in `web/settings.js`); a unit test holds it against `src/window/settings.ts` — every
+  key a changeable one, a choice's words exactly the server's values in its order, the switch's
+  two sides its two values —, so the page decides no rule (4.3). The server's keys show once its
+  answer came (`Reading the settings…` until then).
+- **Saved as it is picked** (the short screen). A choice or the switch is sent (`setting-set`) the
+  moment it changes; the text field when Enter is pressed in it or the keyboard leaves it (another
+  control, a click elsewhere, the screen closed), and only when its text differs from the one
+  drawn: an unchanged one sends nothing. There is no `Save` and no `Default`, no line about the
+  default or the file, and none about when a change applies but `after a restart`. The answer's
+  words stand beside the control: `Saved.`, or the refusal's (`"ticketUrl" must be null or an http
+  or https address with {key} once, after its host`) — the field keeping what was typed (left again,
+  the same text is not sent again), a choice or the switch showing the file's value again —, the
+  file unchanged. A value the running server does not use yet (a hand edit, `window.keepAlive`
+  after a change) is marked `after a restart` (its tooltip: `applies after the window restarts: the
+  window uses <value> until then`), and `window.keepAlive` always is. Changed again while the answer
+  waits, a choice is sent again once it came; the text field is read-only meanwhile. Every page's
+  screen follows a change (`settings`, 8.2.3).
+- **Advanced.** The screen ends with a closed section, a button `Advanced (14 more settings)` (the
+  count of the server's table's keys the short screen does not show), closed again at each opening
+  of the screen and opened and closed by a click, Enter or Space. Opened, it holds F36's screen of
+  those settings, as the bullets below say.
+
+- **Opening it.** The gear, the title bar's last control (12.1; follow-up F39), or the quick
+  switcher's command `> settings` (a start of it of at least one letter after the `>`, trimmed and
+  in any case: `>s`, `> set`; the server's answer, `list.switcher.settings`, 8.2.3), with Enter or a
+  click on its line `Settings: skydeck’s settings, the plain ones changed here`. Both pass the gate
+  of a window chord (12.9). A dialog over the page as stage D's (12.5): modal, the page inert under
+  it.
+- **What it shows.** At the screen's top, above the short screen, while the window cannot change
+  the file — a file that does not parse (not JSON, a key or a value its rules refuse), a symbolic
   link to nothing, a path that is not a regular file — that problem in `doctor`'s words (`<file>:
-  unknown key "x"`) and `Mend the file by hand first: the window changes nothing in it until then.`
-  Then every key in the guide's order under its group — Starting sessions, The list, Install, Pull
-  requests, Restore, Claude Code, Tickets, The window —, each with its name as in the file
+  unknown key "x"`) and `Mend the file by hand first: the window changes nothing in it until then.`;
+  every change, on the short screen too, is refused until then. At Advanced's top the file's path,
+  and where the copy of it is kept (below); `The file does not exist yet: a change creates it.`
+  while there is none. Then every key the short screen does not show, in the guide's order under
+  its group — Starting sessions, The list, Install, Pull requests, Restore, Claude Code, Tickets,
+  The window —, each with its name as in the file
   (`prRefreshMinutes`, `window.links`), its meaning in one line (`groupPattern`'s says that it
   runs on every session's title at every list), its value, `default <value> · set in
   the file` (or `· not in the file: the default is used`; while the file cannot be read only the
@@ -3987,17 +4033,18 @@ editing the file by hand stay as they are, and the file's format does not change
   holds — a hand edit, or a key the server reads at its start that was just changed —, `applies
   after the window restarts: the window uses <value> until then`. Values and defaults are shown as
   the file writes them (JSON), as text.
-- **Which can be changed: the server's table.** `src/window/settings.ts` holds one row for every
-  key of `Config` (a key without one does not compile, and a test holds the table against the
-  defaults): its kind, its meaning, its control and when a change applies; the default is the
-  configuration's own. Changed in the window, each in a control that fits it — a number field, a
-  text field (an empty one is null for `ticketUrl` and `wezterm.domain`), a choice of exactly the
-  values the file takes — with `Save` and `Default`: `terminal`, `wezterm.domain`, `groupPattern`,
+- **Which can be changed: the server's table.** `src/window/settings.ts` holds one row for every key
+  of `Config` (a key without one does not compile, and a test holds the table against the defaults):
+  its kind, its meaning, its control and when a change applies; the default is the configuration's
+  own. Changed in the window, each in a control that fits it — a number field, a text field (an
+  empty one is null for `ticketUrl` and `wezterm.domain`), a choice of exactly the values the file
+  takes —, in Advanced with `Save` and `Default`: `terminal`, `wezterm.domain`, `groupPattern`,
   `firstRunDoneAfterDays`, `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`,
   `restoreStartTimeoutSeconds`, `ticketUrl`, `ticketRefreshMinutes`, `window.keepAlive`,
-  `window.links`. Shown only, its value as text and `names a program: it is changed in the file
-  only` (`names a folder`, `is the window's port`): `claudeHome`, `claudeCommand`, `ticketStatus`,
-  `window.port`, `window.edge`, `window.profileDir`.
+  `window.links` (from F39 `terminal`, `ticketUrl`, `window.keepAlive` and `window.links` are on the
+  short screen instead, saved as they are picked). Shown only, its value as text and `names a
+  program: it is changed in the file only` (`names a folder`, `is the window's port`): `claudeHome`,
+  `claudeCommand`, `ticketStatus`, `window.port`, `window.edge`, `window.profileDir`.
 - **When a change applies.** At once — the running server reads it at each use, and the change is
   put into its configuration: `groupPattern` and `ticketUrl` (the rows are loaded again at once: the
   next list, the next link, the next ticket set, the next read of a status), `prRefreshMinutes` and
@@ -4010,23 +4057,22 @@ editing the file by hand stay as they are, and the file's format does not change
   `firstRunDoneAfterDays` (`skydeck install` only). A change restarts, stops and starts nothing,
   and the file is not watched: a hand edit counts at the server's next start, and the screen says
   so beside it.
-- **One setting at a time** (8.2.3 `setting-set`, `setting-default`). `Save`, or Enter in its field,
-  sends that one key and the field's text (a number field's as a number when it reads as one, else
-  as typed, for the server to refuse); `Default` removes the key from the file. The field and its
-  buttons wait for the answer, whose words stand under the field: `Saved: it applies at once.`
-  (`… after the window restarts.`, `the commands use it at their next run.`, `skydeck install uses
-  it.`; `Put back to its default: …`), or the refusal — `config.json`'s own words without the
-  file's path (`"prRefreshMinutes" must be a positive integer`; a ticket link with a user name or a
-  password stays refused) —, the field keeping its text. A text longer than a request carries
-  (4,096 bytes of UTF-8; the file takes a longer `groupPattern` or `wezterm.domain`) is refused by
-  the page before it is sent, `Longer than the window sends (4,096 bytes as UTF-8): change it in
-  the file by hand.` Every page's screen follows a change
-  (`settings`, 8.2.3); a field whose text was changed and not saved keeps it; the screen opened
-  again reads everything again. The line under a field goes when its text or choice changes.
-  `Save` with nothing changed sends nothing (`Nothing changed, nothing saved.`). A text value a
-  one-line field cannot hold faithfully — a line break, a control character — is shown as text for
-  that row, with `holds a line break or a control character, which this field cannot show: change
-  it in the file while it does`, and no `Save`.
+- **One setting at a time** (8.2.3 `setting-set`, `setting-default`). In Advanced, `Save`, or Enter
+  in its field, sends that one key and the field's text (a number field's as a number when it reads
+  as one, else as typed, for the server to refuse); `Default` removes the key from the file. The
+  field and its buttons wait for the answer, whose words stand under the field: `Saved: it applies
+  at once.` (`… after the window restarts.`, `the commands use it at their next run.`, `skydeck
+  install uses it.`; `Put back to its default: …`), or the refusal — `config.json`'s own words
+  without the file's path (`"prRefreshMinutes" must be a positive integer`; a ticket link with a
+  user name or a password stays refused) —, the field keeping its text. A text longer than a request
+  carries (4,096 bytes of UTF-8; the file takes a longer `groupPattern` or `wezterm.domain`) is
+  refused by the page before it is sent, `Longer than the window sends (4,096 bytes as UTF-8):
+  change it in the file by hand.` Every page's screen follows a change (`settings`, 8.2.3); a field
+  whose text was changed and not saved keeps it; the screen opened again reads everything again. The
+  line under a field goes when its text or choice changes. `Save` with nothing changed sends nothing
+  (`Nothing changed, nothing saved.`). A text value a one-line field cannot hold faithfully — a line
+  break, a control character — is shown as text for that row, with `holds a line break or a control
+  character, which this field cannot show: change it in the file while it does`, and no `Save`.
 - **The file.** Read again for every change. Only that key changes: every other key — the
   shown-only ones too — stays, in its order (a key the file did not hold comes last, inside
   `window` or `wezterm` for theirs), with the file's own indentation where it shows one, else two
@@ -4046,19 +4092,20 @@ editing the file by hand stay as they are, and the file's format does not change
   statement, which a rename would overrule) or another user's: `<file> is read-only (mode 444): the
   window does not write over it; make it writable (chmod u+w) or change it by hand: nothing was
   changed`.
-- **Keys** (12.9). The keyboard starts on the first field once the screen came. Tab and Shift+Tab
-  walk its fields and buttons and stay in it; Enter in a field saves it; Esc closes it — the key
-  help first, when it lies over the screen (Ctrl+Shift+H): Esc closes the top layer only; the keyboard
-  goes back where it was (a text field, the list, the terminal), else to the zone's holder. While
-  an answer waits its field is read-only and nothing is disabled, and a draw moves no element: the
-  keyboard and the dialog's scroll stay where they are, also when another window's change draws
-  the screen again. While it
-  is shown every window chord but Ctrl+Shift+H says `close the settings first (Esc)`; a reload passes
-  while no field holds text that was not saved.
+- **Keys** (12.9). The keyboard starts on the first control, `Mode` (from F39; before, the first
+  field once the screen came). Tab and Shift+Tab walk its controls — Advanced's button, and
+  Advanced's fields and buttons while it is open — and stay in it; Enter in a field saves it; Esc
+  closes it — the key help first, when it lies over the screen (Ctrl+Shift+H): Esc closes the top
+  layer only; the keyboard goes back where it was (a text field, the list, the terminal), else to
+  the zone's holder. While an answer waits its field is read-only and nothing is disabled, and a
+  draw moves no element: the keyboard and the dialog's scroll stay where they are, also when another
+  window's change draws the screen again. While it is shown every window chord but Ctrl+Shift+H says
+  `close the settings first (Esc)`; a reload passes while no field holds text that was not saved.
 - **Look.** It is wider and taller than stage D's dialogs and scrolls inside itself in a small
   window; its texts hold 4.5 : 1 in every theme (`Save` is told apart by its border, not by an
-  accent ground); every text is text, a value only an input's value or text: one with markup stays
-  text, a long one wraps, a right-to-left one keeps its order.
+  accent ground; the short screen's labels, hints, marks and words too); every text is text, a value
+  only an input's value or text: one with markup stays text, a long one wraps, a right-to-left one
+  keeps its order.
 
 ## 13. Notifications
 
@@ -4920,8 +4967,9 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W37 | A ticket on a throwaway session (follow-up F18): set by a whole link (`https://example.com/browse/TRY-1`, a host that opens nothing private), the header's third line starts with its chip `TRY-1 ↗`, its tooltip the address, a click opens it where links open (W12); set by a key only while `ticketUrl` is configured (else that step is skipped); removed with an empty text, the chip gone and `+ ticket` back; `skydeck show` prints `ticket:` while one is set. Every step checks the header's short id or the dialog's heading first; at the end the session has no ticket. | F18 | 12.5, 10.2 |
 | W38 | A ticket's status on the throwaway session (follow-up F19), asking no real tracker: a stand-in program the owner writes in a throwaway folder (`~/skydeck-try/status`, its three lines given) answers for a `ticketStatus` rule whose `match` is `https://example.com/try/`; the ticket `https://example.com/try/TRY-1` on the throwaway session shows `TRY-1 · In Progress ↗` in blue in the header and `In Progress` in the row's small chip; the answer changed to each category and ↻ pressed in the ticket dialog: `blocked` red, `review` amber, `doing` blue, `done` green, `todo` and `closed` grey; a failure (the program made not executable) keeps the old status and its tooltip says `status not read: …`; `skydeck show` prints `ticket:` with ` · <status>`. Every step checks the header's short id or the dialog's heading first; at the end the ticket is removed, `config.json` is as it was (restored from a copy), and the stand-in is deleted. | F19 | 12.5, 12.2, 12.3, 10.2 |
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
-| W41 | The settings screen on the owner's own `config.json`, copied aside first: the title bar's gear opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36 | 12.13 |
+| W41 | The settings screen's Advanced on the owner's own `config.json`, copied aside first: the title bar's gear opens it, `Advanced (14 more settings)` opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36, F39 | 12.13 |
 | W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last slotted row and under a filter; `skydeck window --restart` keeps the order. The restore order only where W16's drill runs anyway. | F37 | 7.6, 12.9 |
+| W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links and The window with six plain labels and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

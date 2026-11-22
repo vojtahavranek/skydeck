@@ -183,10 +183,19 @@
   margin-top: 12px;
 }
 
-/* F39: the short screen's groups (web/settings-short.js): a label and its control on one line, a
-   short hint under it where there is one. */
+/* F39: the short screen's groups (web/settings-short.js): a label, its control, `after a restart`
+   and the answer's words on one line — the words beside the control, so that a save when a field
+   is left moves no row under a pointer —, a short hint under it where there is one. */
 .settings-short-group .settings-group {
   margin-top: 10px;
+}
+.settings-short-group[hidden],
+.short-setting[hidden],
+.short-line [hidden],
+.short-note[hidden],
+.settings-advanced-button[hidden],
+.settings-advanced[hidden] {
+  display: none;
 }
 .short-setting {
   padding: 6px 0;
@@ -207,8 +216,92 @@
   min-width: 0;
   margin: 0;
 }
-.short-hint {
+.short-line .short-value {
+  flex: 0 1 260px;
+}
+.short-switch {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.short-switch:focus-visible {
+  outline: 2px solid var(--selline);
+  outline-offset: 2px;
+}
+.short-mark {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--wait-bg);
+  color: var(--text);
+}
+.short-message {
+  flex: 1 1 160px;
+  min-width: 0;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.short-message:empty {
+  display: none;
+}
+.short-message[data-outcome='refused'] {
+  color: var(--crash);
+}
+.short-hint,
+.short-note {
   margin: 3px 0 0 202px;
   color: var(--dim);
   overflow-wrap: anywhere;
+}
+.short-note {
+  color: var(--text);
+}
+/* Advanced: a button that opens and closes its section, a triangle before its words. */
+.settings-advanced-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.settings-advanced-button::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid currentColor;
+}
+.settings-advanced-button[aria-expanded='true']::before {
+  transform: rotate(90deg);
+}
+.settings-advanced-button:hover {
+  border-color: var(--line);
+}
+.settings-advanced-button:focus-visible {
+  outline: 2px solid var(--selline);
+  outline-offset: 1px;
+}
+.settings-advanced {
+  margin-top: 6px;
+  padding-top: 6px;
+}
+/* A narrow window: the label above its control. */
+@media (max-width: 520px) {
+  .short-label {
+    flex-basis: 100%;
+  }
+  .short-hint,
+  .short-note {
+    margin-left: 0;
+  }
 }

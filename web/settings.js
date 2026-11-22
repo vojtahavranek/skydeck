@@ -2,36 +2,44 @@
 // dialogs (web/edit.js, edit.css; modal: app.js makes the page inert under it, D2). It is opened by
 // the title bar's gear (F39) and by the quick switcher's command `> settings`.
 //
-// Follow-up F39: at its top the short screen's groups (web/settings-short.js), drawn at once: the
-// Appearance group's Mode and Colour theme are the page's own (web/theme.js) and need no server;
-// a pick applies and keeps it at once.
+// Follow-up F39: the short screen. The groups of web/settings-short.js, in its order: the
+// Appearance group's Mode and Colour theme are the page's own (web/theme.js), drawn at once
+// without the server; every other entry is a key of config.json under its plain label, shown once
+// the server's screen came. Each is saved as it is picked — a choice or a switch at its change, the
+// one-line text on Enter or when the keyboard leaves it, and only when its text changed; no Save,
+// no Default. The answer's words stand beside the control: `Saved.`, or the refusal's (a choice or
+// a switch then shows the file's value again, a text keeps what was typed). A setting whose change
+// counts after the window restarts, and a value the running server does not use yet, is marked
+// `after a restart`. A file that cannot be used is named at the top; the server refuses every
+// change until it is mended.
 //
-// Then the file's path stands, with where its copy is kept; then every setting in the
-// server's order, under its group's heading: its name as in the file, its meaning, its value in a
-// control that fits its type (a number field, a text field, a choice), the default and whether the
-// file sets it, when a change applies, and — when the running server uses another value —
-// "applies after the window restarts". A changeable one has `Save` and `Default`; a shown-only one
-// shows its value as text and says what it names and that it is changed in the file only.
+// Then the closed section `Advanced (N more settings)`, closed again at each opening: every other
+// setting of the server's table as F36 showed them, the file's path and where its copy is kept on
+// top — its name as in the file, its meaning, its value in a control that fits its type (a number
+// field, a text field, a choice), the default and whether the file sets it, when a change applies,
+// and — when the running server uses another value — "applies after the window restarts". A
+// changeable one has `Save` and `Default`; a shown-only one shows its value as text and says what
+// it names and that it is changed in the file only.
 //
 // It decides no rule (S2 4.3): the table, what may be changed and what a value may be are the
-// server's (src/window/settings.ts). One setting is saved at a time: `Save` (or Enter in its field)
-// sends `act setting-set` for that one, `Default` `act setting-default`; the answer's words stand
-// beside the field — the refusal's, or that it was saved and when it applies —, and the answer's
-// screen is drawn. A text longer than a request carries (4,096 bytes of UTF-8) is refused here,
-// before sending, in words that name the limit and the file. Nothing is disabled while an answer
-// waits (the field is read-only, its buttons say so), and a draw moves no element (each row and
-// each group's heading is made once), so that the keyboard and the scroll stay where they are —
-// also when another window's change draws the screen again. A `settings` message (a change from another window) draws the screen again; a
-// field whose text the user changed and did not save keeps that text. Keys come from app.js's
-// capture phase: Esc closes (`escape()`); Tab and Shift+Tab walk the dialog's controls and stay in
-// it (`key()`); Enter in a field saves it. Every text reaches the DOM as text, a value only as a
-// control's value or as text, each isolated for right-to-left text.
+// server's (src/window/settings.ts); which keys the short screen shows, and their words, are the
+// short table's. One setting is saved at a time: `act setting-set` for that one, Advanced's
+// `Default` `act setting-default`; the answer's screen is drawn. A text longer than a request
+// carries (4,096 bytes of UTF-8) is refused here, before sending, in words that name the limit and
+// the file. Nothing is disabled while an answer waits (a field is read-only, Advanced's buttons
+// say so), and a draw moves no element (each row and each group's heading is made once), so that
+// the keyboard and the scroll stay where they are — also when another window's change draws the
+// screen again (a `settings` message); a field whose text the user changed and did not save keeps
+// that text. Keys come from app.js's capture phase: Esc closes (`escape()`); Tab and Shift+Tab walk
+// the dialog's controls and stay in it (`key()`); Enter in a field saves it. Every text reaches the
+// DOM as text, a value only as a control's value or as text, each isolated for right-to-left text.
 
 /** @import { ResultMessage, SettingPayload, SettingsPayload } from '../src/window/protocol.ts' */
 /** @import { ThemeState } from './theme.js' */
-/** @import { LocalEntry } from './settings-short.js' */
-import { SHORT } from './settings-short.js';
+/** @import { KeyEntry, LocalEntry, ShortGroup } from './settings-short.js' */
+import { SHORT, SHORT_KEYS } from './settings-short.js';
 import {
+  advancedText,
   appliesText,
   controlText,
   factsText,
@@ -90,24 +98,6 @@ function setText(target, text) {
 }
 
 /**
- * One setting's elements, made once per key and kept across screens.
- * @typedef {object} Row
- * @property {HTMLElement} root
- * @property {HTMLElement} value  a shown-only setting's value, or a changeable one's that its
- *   control cannot hold faithfully (`faithful`)
- * @property {HTMLElement} note  then: that it is changed in the file
- * @property {HTMLInputElement | HTMLSelectElement | null} control  a changeable one's
- * @property {HTMLElement} facts
- * @property {HTMLElement} applies
- * @property {HTMLElement} pending
- * @property {HTMLElement} message
- * @property {HTMLButtonElement | null} save
- * @property {HTMLButtonElement | null} reset
- * @property {string} drawn  the control's text as last drawn (another text: the user changed it)
- * @property {boolean} waiting
- */
-
-/**
  * Puts `values` into `select` as its options, each with its word, unless it holds exactly those.
  * @template {string} T
  * @param {HTMLSelectElement} select
@@ -129,6 +119,46 @@ function setOptions(select, values, word) {
   );
 }
 
+/** The words of a refusal: the server's error, else its lines. @param {ResultMessage} result */
+function refusalOf(result) {
+  return result.error ?? (result.lines.join(' ') || 'skydeck could not do that');
+}
+
+/**
+ * One setting of Advanced, its elements made once per key and kept across screens.
+ * @typedef {object} Row
+ * @property {HTMLElement} root
+ * @property {HTMLElement} value  a shown-only setting's value, or a changeable one's that its
+ *   control cannot hold faithfully (`faithful`)
+ * @property {HTMLElement} note  then: that it is changed in the file
+ * @property {HTMLInputElement | HTMLSelectElement | null} control  a changeable one's
+ * @property {HTMLElement} facts
+ * @property {HTMLElement} applies
+ * @property {HTMLElement} pending
+ * @property {HTMLElement} message
+ * @property {HTMLButtonElement | null} save
+ * @property {HTMLButtonElement | null} reset
+ * @property {string} drawn  the control's text as last drawn (another text: the user changed it)
+ * @property {boolean} waiting
+ */
+
+/**
+ * One key of the short screen, its elements made once with the dialog.
+ * @typedef {object} ShortRow
+ * @property {KeyEntry} entry
+ * @property {HTMLElement} root  hidden until the server's screen holds the key
+ * @property {HTMLInputElement | HTMLSelectElement} control  a switch is a checkbox
+ * @property {HTMLElement} value  a text the field cannot hold faithfully, shown as text
+ * @property {HTMLElement} note  then: that it is changed in the file
+ * @property {HTMLElement | null} hint
+ * @property {HTMLElement} mark  `after a restart`
+ * @property {HTMLElement} message  the answer's words
+ * @property {string} drawn  the control's value as last drawn (another: the user changed it)
+ * @property {boolean} waiting
+ * @property {boolean} again  changed again while an answer waited: sent once it came
+ * @property {string | null} refused  the text last refused, not sent again when the field is left
+ */
+
 /**
  * @param {HTMLElement} root  #settings
  * @param {SettingsDeps} deps
@@ -142,6 +172,20 @@ export function createSettingsDialog(root, deps) {
   box.setAttribute('aria-labelledby', 'settings-heading');
   const heading = element('div', 'edit-heading settings-heading', SETTINGS_TEXTS.heading);
   heading.id = 'settings-heading';
+  const problem = element('div', 'settings-problem');
+  problem.setAttribute('role', 'alert');
+  const problemText = element('div', 'settings-problem-text');
+  problem.append(problemText, element('div', 'settings-problem-mend', SETTINGS_TEXTS.mend));
+  const status = element('div', 'settings-status');
+
+  // Advanced: closed, a button that opens and closes it, then today's whole screen of the rest.
+  const advancedButton = button('settings-advanced-button', '');
+  advancedButton.setAttribute('aria-expanded', 'false');
+  advancedButton.setAttribute('aria-controls', 'settings-advanced');
+  advancedButton.hidden = true;
+  const advanced = element('div', 'settings-advanced');
+  advanced.id = 'settings-advanced';
+  advanced.hidden = true;
   const fileLine = element('div', 'settings-file');
   const filePath = element('bdi', 'settings-path');
   fileLine.append(SETTINGS_TEXTS.file, filePath);
@@ -149,45 +193,79 @@ export function createSettingsDialog(root, deps) {
   const copyPath = element('bdi', 'settings-path');
   copyLine.append(SETTINGS_TEXTS.copy, copyPath, '.');
   const noFile = element('div', 'settings-copy settings-no-file', SETTINGS_TEXTS.noFile);
-  const problem = element('div', 'settings-problem');
-  problem.setAttribute('role', 'alert');
-  const problemText = element('div', 'settings-problem-text');
-  problem.append(problemText, element('div', 'settings-problem-mend', SETTINGS_TEXTS.mend));
   const help = element('div', 'settings-help', SETTINGS_TEXTS.help);
-  const status = element('div', 'settings-status');
   const list = element('div', 'settings-list');
+  advanced.append(fileLine, copyLine, noFile, help, list);
+
   const close = button('settings-close', SETTINGS_TEXTS.close);
   const actions = element('div', 'edit-actions settings-actions');
   actions.append(close);
 
-  // F39: the short screen, its groups in the table's order.
-  const short = element('div', 'settings-short');
+  /** Advanced shown or not (aria-expanded and its section). @param {boolean} open */
+  const expand = (open) => {
+    advancedButton.setAttribute('aria-expanded', String(open));
+    advanced.hidden = !open;
+  };
+  advancedButton.addEventListener('click', () => {
+    expand(advancedButton.getAttribute('aria-expanded') !== 'true');
+  });
+
+  let shown = false;
+  /** Opens counted, so that the answer of an earlier open draws nothing after a close. */
+  let opens = 0;
+  /** @type {SettingsPayload | null} */
+  let screen = null;
+  /** @type {Map<string, Row>} */
+  const rows = new Map();
+  /** @type {Map<string, SettingPayload>} */
+  const settings = new Map();
+  /** Each group's heading in Advanced, made once and kept across screens as the rows are. */
+  /** @type {Map<string, HTMLElement>} */
+  const headings = new Map();
   /** The Appearance group's two controls, drawn from the theme (`drawLocal`). */
   /** @type {Map<LocalEntry['local'], HTMLSelectElement>} */
   const locals = new Map();
-  for (const group of SHORT) {
-    const section = element('section', 'settings-short-group');
-    section.dataset['group'] = group.id;
-    const title = element('div', 'settings-group', group.title);
-    title.id = `settings-group-${group.id}`;
-    section.setAttribute('aria-labelledby', title.id);
-    section.append(title);
-    for (const entry of group.entries) {
-      section.append(makeLocal(entry));
-    }
-    short.append(section);
-  }
+  /** The short screen's keys, in the table's order. */
+  /** @type {Map<string, ShortRow>} */
+  const shortRows = new Map();
+  /** Each short group's section, with what it holds; shown while one of its settings is. */
+  /** @type {{ section: HTMLElement, local: boolean, keys: string[] }[]} */
+  const shortGroups = [];
 
-  box.append(heading, short, fileLine, copyLine, noFile, problem, help, status, list, actions);
-  root.replaceChildren(scrim, box);
-  root.hidden = true;
+  /**
+   * A short row's value as its control holds it now: a switch's `on` or `off`, else the control's.
+   * @param {ShortRow} row
+   */
+  const valueOf = (row) =>
+    row.entry.control === 'switch'
+      ? /** @type {HTMLInputElement} */ (row.control).checked
+        ? row.entry.on
+        : row.entry.off
+      : row.control.value;
+
+  /** Puts `text` into a short row's control. @param {ShortRow} row @param {string} text */
+  const setValue = (row, text) => {
+    if (row.entry.control === 'switch') {
+      /** @type {HTMLInputElement} */ (row.control).checked = text === row.entry.on;
+    } else {
+      row.control.value = text;
+    }
+  };
+
+  /** Whether, while the screen is shown, the user changed a field's text and did not save it. */
+  const changed = () =>
+    shown &&
+    ([...rows.values()].some((row) => row.control !== null && row.control.value !== row.drawn) ||
+      [...shortRows.values()].some(
+        (row) => row.entry.control === 'text' && !row.root.hidden && valueOf(row) !== row.drawn,
+      ));
 
   /**
    * One choice of the page's own, made once: its label, its choice, its hint. A pick applies it.
    * @param {LocalEntry} entry
    * @returns {HTMLElement}
    */
-  function makeLocal(entry) {
+  const makeLocal = (entry) => {
     const rowRoot = element('div', 'short-setting');
     rowRoot.dataset['local'] = entry.local;
     const id = `settings-${entry.local}`;
@@ -216,7 +294,121 @@ export function createSettingsDialog(root, deps) {
     });
     locals.set(entry.local, select);
     return rowRoot;
+  };
+
+  /**
+   * One key of the short screen, made once: its label, its control, `after a restart`, the
+   * answer's words, its hint. Hidden until the server's screen holds the key.
+   * @param {KeyEntry} entry
+   * @returns {HTMLElement}
+   */
+  const makeShort = (entry) => {
+    const rowRoot = element('div', 'short-setting');
+    rowRoot.dataset['key'] = entry.key;
+    rowRoot.hidden = true;
+    const id = `settings-key-${entry.key.replace(/[^A-Za-z0-9]/g, '-')}`;
+    const label = /** @type {HTMLLabelElement} */ (element('label', 'short-label', entry.label));
+    label.htmlFor = id;
+    /** @type {HTMLInputElement | HTMLSelectElement} */
+    let control;
+    if (entry.control === 'choice') {
+      control = document.createElement('select');
+      control.className = 'edit-field short-control';
+    } else {
+      const input = document.createElement('input');
+      if (entry.control === 'switch') {
+        input.type = 'checkbox';
+        input.setAttribute('role', 'switch');
+        input.className = 'short-switch';
+      } else {
+        input.type = 'text';
+        input.spellcheck = false;
+        input.autocomplete = 'off';
+        input.dir = 'auto';
+        input.className = 'edit-field short-control';
+      }
+      control = input;
+    }
+    control.id = id;
+    const value = element('bdi', 'setting-value short-value');
+    value.dir = 'auto';
+    value.hidden = true;
+    const mark = element('span', 'short-mark', SETTINGS_TEXTS.afterRestart);
+    mark.id = `${id}-mark`;
+    mark.hidden = true;
+    const message = element('span', 'short-message');
+    message.setAttribute('aria-live', 'polite');
+    const line = element('div', 'short-line');
+    line.append(label, control, value, mark, message);
+    const note = element('div', 'setting-note short-note', SETTINGS_TEXTS.unshowable);
+    note.hidden = true;
+    rowRoot.append(line, note);
+    /** @type {HTMLElement | null} */
+    let hint = null;
+    if (entry.hint !== null) {
+      hint = element('div', 'short-hint', entry.hint);
+      hint.id = `${id}-hint`;
+      rowRoot.append(hint);
+    }
+    /** @type {ShortRow} */
+    const row = {
+      entry,
+      root: rowRoot,
+      control,
+      value,
+      note,
+      hint,
+      mark,
+      message,
+      drawn: '',
+      waiting: false,
+      again: false,
+      refused: null,
+    };
+    if (entry.control === 'text') {
+      // The line beside the field is about what was sent: it goes once the text changes again.
+      control.addEventListener('input', () => {
+        if (!row.waiting) {
+          setText(message, '');
+          delete message.dataset['outcome'];
+        }
+      });
+      // Left — another control, a click elsewhere, the dialog closed — it is saved when changed.
+      control.addEventListener('blur', () => void sendShort(row, true));
+    } else {
+      control.addEventListener('change', () => void sendShort(row, false));
+    }
+    shortRows.set(entry.key, row);
+    return rowRoot;
+  };
+
+  // The short screen: each group of the table, in its order, its heading and its settings.
+  const short = element('div', 'settings-short');
+  /** @param {ShortGroup} group */
+  const makeGroup = (group) => {
+    const section = element('section', 'settings-short-group');
+    section.dataset['group'] = group.id;
+    const title = element('div', 'settings-group', group.title);
+    title.id = `settings-group-${group.id}`;
+    section.setAttribute('aria-labelledby', title.id);
+    section.append(title);
+    for (const entry of group.entries) {
+      section.append('key' in entry ? makeShort(entry) : makeLocal(entry));
+    }
+    // A group's extra block (none yet) is made here, after its settings, and appended to `section`.
+    const keys = group.entries.flatMap((entry) => ('key' in entry ? [entry.key] : []));
+    const local = group.entries.some((entry) => !('key' in entry));
+    section.hidden = !local;
+    shortGroups.push({ section, local, keys });
+    return section;
+  };
+  for (const group of SHORT) {
+    short.append(makeGroup(group));
   }
+
+  box.append(heading, problem, status, short, advancedButton, advanced, actions);
+  root.replaceChildren(scrim, box);
+  root.hidden = true;
 
   /** The Appearance group as the theme is now: the mode, the shown scheme's themes and its one. */
   const drawLocal = () => {
@@ -233,24 +425,6 @@ export function createSettingsDialog(root, deps) {
   };
   drawLocal();
   deps.theme.watch(drawLocal);
-
-  let shown = false;
-  /** Opens counted, so that the answer of an earlier open draws nothing after a close. */
-  let opens = 0;
-  /** @type {SettingsPayload | null} */
-  let screen = null;
-  /** @type {Map<string, Row>} */
-  const rows = new Map();
-  /** @type {Map<string, SettingPayload>} */
-  const settings = new Map();
-  /** Each group's heading, made once and kept across screens as the rows are. */
-  /** @type {Map<string, HTMLElement>} */
-  const headings = new Map();
-
-  /** Whether, while the screen is shown, the user changed a field's text and did not save it. */
-  const changed = () =>
-    shown &&
-    [...rows.values()].some((row) => row.control !== null && row.control.value !== row.drawn);
 
   /** @param {SettingPayload} setting */
   const makeRow = (setting) => {
@@ -337,25 +511,83 @@ export function createSettingsDialog(root, deps) {
   };
 
   /**
-   * Draws `payload`: every row's texts, and each control's value unless the user changed its text
-   * since it was drawn (`redraw`: the keys whose field is drawn whatever it holds). Only what is
-   * out of place moves: an unchanged screen moves no element.
+   * Draws the short screen's keys from `payload`: each control's value unless the user changed it
+   * since it was drawn (`redraw`: the keys drawn whatever they hold), the marks; a group is shown
+   * once one of its settings is.
+   * @param {SettingsPayload} payload
+   * @param {ReadonlySet<string>} redraw
+   * @param {boolean} made  the first screen since the dialog opened: every control is drawn
+   */
+  const drawShort = (payload, redraw, made) => {
+    for (const row of shortRows.values()) {
+      const setting = settings.get(row.entry.key);
+      const there = setting !== undefined && payload.settings.includes(setting);
+      if (row.root.hidden === there) row.root.hidden = !there;
+      if (setting === undefined || !there) continue;
+      const asText = row.entry.control === 'text' && !faithful(setting);
+      if (row.control.hidden !== asText) row.control.hidden = asText;
+      row.value.hidden = !asText;
+      row.note.hidden = !asText;
+      if (asText) setText(row.value, setting.valueText);
+      if (row.entry.control === 'choice') {
+        const words = row.entry.words;
+        setOptions(
+          /** @type {HTMLSelectElement} */ (row.control),
+          setting.choices,
+          (choice) => words[choice] ?? choice,
+        );
+      }
+      const text = controlText(setting);
+      if (made || redraw.has(row.entry.key) || (!row.waiting && valueOf(row) === row.drawn)) {
+        setValue(row, text);
+        row.drawn = valueOf(row);
+      } else {
+        // The user's own text or pick stays; the file's value is what it is compared with.
+        row.drawn = text;
+      }
+      const pendingLine = pendingText(setting);
+      const marked = setting.applies === 'restart' || pendingLine !== null;
+      row.mark.hidden = !marked;
+      row.mark.title = pendingLine ?? '';
+      // The control is described by its hint, and by the mark while it is shown.
+      const described = [row.hint?.id, marked ? row.mark.id : undefined].filter(Boolean).join(' ');
+      if (described === '') row.control.removeAttribute('aria-describedby');
+      else row.control.setAttribute('aria-describedby', described);
+    }
+    for (const group of shortGroups) {
+      const visible = group.local || group.keys.some((key) => !shortRows.get(key)?.root.hidden);
+      if (group.section.hidden === visible) group.section.hidden = !visible;
+    }
+  };
+
+  /**
+   * Draws `payload`: the short screen, then Advanced — every row's texts, and each control's value
+   * unless the user changed its text since it was drawn (`redraw`: the keys whose field is drawn
+   * whatever it holds). Only what is out of place moves: an unchanged screen moves no element.
    * @param {SettingsPayload} payload
    * @param {ReadonlySet<string>} [redraw]
+   * @param {boolean} [made]  the first screen since the dialog opened
    */
-  const draw = (payload, redraw = new Set()) => {
+  const draw = (payload, redraw = new Set(), made = false) => {
     screen = payload;
-    setText(filePath, payload.path);
-    setText(copyPath, payload.backup);
-    noFile.hidden = payload.exists;
+    for (const setting of payload.settings) {
+      settings.set(setting.key, setting);
+    }
     problem.hidden = payload.problem === null;
     setText(problemText, payload.problem ?? '');
     status.hidden = true;
+    drawShort(payload, redraw, made);
+
+    setText(filePath, payload.path);
+    setText(copyPath, payload.backup);
+    noFile.hidden = payload.exists;
+    const rest = payload.settings.filter((setting) => !SHORT_KEYS.has(setting.key));
+    setText(advancedButton, advancedText(rest.length));
+    advancedButton.hidden = false;
     /** @type {HTMLElement[]} */
     const children = [];
     let group = '';
-    for (const setting of payload.settings) {
-      settings.set(setting.key, setting);
+    for (const setting of rest) {
       if (setting.group !== group) {
         group = setting.group;
         let heading = headings.get(group);
@@ -412,8 +644,71 @@ export function createSettingsDialog(root, deps) {
   };
 
   /**
-   * One setting saved (`reset`: put back to its default): its field and buttons wait for the
-   * answer, whose words stand beside it.
+   * One key of the short screen saved, when its value is not the one drawn: a choice or a switch
+   * at its change, a text on Enter (`left` false) or when the keyboard leaves it (`left`; a text
+   * just refused is not sent again then). Changed again while the answer waits, it is sent again
+   * once the answer came.
+   * @param {ShortRow} row
+   * @param {boolean} left
+   */
+  const sendShort = async (row, left) => {
+    const key = row.entry.key;
+    const setting = settings.get(key);
+    if (setting === undefined || row.root.hidden || row.control.hidden) {
+      return;
+    }
+    if (row.waiting) {
+      row.again = true;
+      return;
+    }
+    const text = valueOf(row);
+    if (text === row.drawn || (left && text === row.refused)) {
+      return; // nothing changed since it was drawn: nothing sent, nothing written
+    }
+    const value = valueToSend(setting, text);
+    if (typeof value === 'string' && overLimit(value)) {
+      row.message.dataset['outcome'] = 'refused';
+      setText(row.message, SETTINGS_TEXTS.tooLong);
+      row.refused = text;
+      return;
+    }
+    const open = opens;
+    row.waiting = true;
+    row.root.dataset['waiting'] = 'true';
+    if (row.control instanceof HTMLInputElement && row.entry.control === 'text') {
+      row.control.readOnly = true;
+    }
+    delete row.message.dataset['outcome'];
+    setText(row.message, SETTINGS_TEXTS.saving);
+    const result = await deps.act({ kind: 'setting-set', key, value });
+    row.waiting = false;
+    delete row.root.dataset['waiting'];
+    if (row.control instanceof HTMLInputElement) row.control.readOnly = false;
+    if (!shown || open !== opens) {
+      row.again = false;
+      return;
+    }
+    if (row.again) {
+      // Changed again meanwhile: the new value is sent; the control keeps it.
+      row.again = false;
+      if (result.settings !== undefined) draw(result.settings);
+      void sendShort(row, false);
+      return;
+    }
+    // A choice or a switch shows the file's value again after a refusal; a text keeps what was
+    // typed.
+    const back = result.ok || row.entry.control !== 'text';
+    if (result.settings !== undefined) {
+      draw(result.settings, back ? new Set([key]) : new Set());
+    }
+    row.refused = result.ok ? null : text;
+    row.message.dataset['outcome'] = result.ok ? 'saved' : 'refused';
+    setText(row.message, result.ok ? SETTINGS_TEXTS.saved : refusalOf(result));
+  };
+
+  /**
+   * One setting of Advanced saved (`reset`: put back to its default): its field and buttons wait
+   * for the answer, whose words stand beside it.
    * @param {string} key
    * @param {boolean} reset
    */
@@ -463,12 +758,7 @@ export function createSettingsDialog(root, deps) {
       draw(result.settings, result.ok ? new Set([key]) : new Set());
     }
     row.message.dataset['outcome'] = result.ok ? 'saved' : 'refused';
-    setText(
-      row.message,
-      result.ok
-        ? savedText(setting.applies, reset)
-        : (result.error ?? (result.lines.join(' ') || 'skydeck could not do that')),
-    );
+    setText(row.message, result.ok ? savedText(setting.applies, reset) : refusalOf(result));
   };
 
   /** The controls the keyboard walks, in order. */
@@ -483,7 +773,8 @@ export function createSettingsDialog(root, deps) {
     }
     shown = false;
     opens++;
-    // The keyboard leaves the dialog before it is hidden: app.js gives it back.
+    // The keyboard leaves the dialog before it is hidden: app.js gives it back. A short text left
+    // so is saved when changed (its blur), and its answer is not drawn.
     const holder = document.activeElement;
     if (holder instanceof HTMLElement && root.contains(holder)) {
       holder.blur();
@@ -496,7 +787,7 @@ export function createSettingsDialog(root, deps) {
   scrim.addEventListener('mousedown', (event) => event.preventDefault());
 
   return {
-    /** Shows the dialog and asks the server for the screen; the keyboard on the dialog. */
+    /** Shows the dialog and asks the server for the screen; the keyboard on its first choice. */
     open() {
       if (shown) {
         return;
@@ -509,12 +800,20 @@ export function createSettingsDialog(root, deps) {
         delete row.message.dataset['outcome'];
         row.drawn = row.control?.value ?? '';
       }
+      for (const row of shortRows.values()) {
+        setText(row.message, '');
+        delete row.message.dataset['outcome'];
+        row.refused = null;
+        setValue(row, row.drawn); // nothing typed before stays, also until the answer came
+      }
       // Every field is drawn from the server's answer: nothing typed before stays.
       const fresh = new Set(rows.keys());
+      expand(false);
       status.hidden = false;
       setText(status, SETTINGS_TEXTS.reading);
       drawLocal();
       root.hidden = false;
+      box.scrollTop = 0;
       // The short screen's first choice is the page's own, drawn already: the keyboard starts there.
       (focusable()[0] ?? box).focus();
       void deps.act({ kind: 'settings' }).then((result) => {
@@ -525,7 +824,7 @@ export function createSettingsDialog(root, deps) {
           setText(status, result.error ?? 'skydeck could not read the settings');
           return;
         }
-        draw(result.settings, fresh);
+        draw(result.settings, fresh, true);
         if (document.activeElement === box) {
           focusable()[0]?.focus();
         }
@@ -572,6 +871,16 @@ export function createSettingsDialog(root, deps) {
       }
       if (event.key === 'Enter' && !event.shiftKey) {
         const holder = document.activeElement;
+        const typed = [...shortRows.values()].find(
+          (one) => one.entry.control === 'text' && one.control === holder,
+        );
+        if (typed !== undefined) {
+          event.preventDefault();
+          if (!event.repeat) {
+            void sendShort(typed, false);
+          }
+          return true;
+        }
         const row = [...rows.entries()].find(([, one]) => one.control === holder);
         if (row === undefined) {
           return false; // a button: the browser presses it
