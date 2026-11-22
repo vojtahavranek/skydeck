@@ -35,10 +35,10 @@
 // `close the settings first (Esc)`, Esc closes it, and the keyboard goes back where it was.
 //
 // Follow-up F38 (S2 16.5, 12.1): the server's `update` says what its last look for a newer skydeck
-// found; the title bar's `Update available` (before `Switch…` and the gear) shows exactly while a newer version
-// is known (web/update-text.js), and its click, through `windowChordGate`, opens web/update.js's
-// dialog, modal as "Mark done" is (`close the dialog first (Esc)`). The settings screen's block
-// `Updates` follows every state. Milestone 2: the dialog's `Update now` sends `act update-apply`;
+// found; the title bar's `Update available` (before `Switch…` and the gear) shows exactly while a
+// newer version is known (web/update-text.js), and its click, through `windowChordGate`, opens
+// web/update.js's dialog, modal as "Mark done" is (`close the dialog first (Esc)`). The settings
+// screen's group Updates follows every state. Milestone 2: the dialog's `Update now` sends `act update-apply`;
 // while the server says `applying` and the page is connected, the dialog's running form is shown on
 // every page, the page inert, every window chord answered `skydeck is being updated`. One function,
 // liftUpdateLock(), lifts it when the connection is lost (S2 6.3's bar then names the update's log

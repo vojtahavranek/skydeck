@@ -342,6 +342,15 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
       await openDialog(w, page, state(), 1);
       const open = await dialogOf(page);
       assert.deepEqual(open.buttons, ['Update now', 'Close']);
+      // The title bar's order: the notice before `Switch…` and the gear.
+      assert.deepEqual(
+        await readPage(
+          page,
+          () => [...document.querySelectorAll('.titlebar button')].map((button) => button.id),
+          null,
+        ),
+        ['notify-on', 'update-button', 'switch-button', 'settings-button'],
+      );
       assert.equal(open.focus, 'update-close', 'the keyboard starts on Close');
       await page.keyboard.press('Escape');
       await liftedOn(page);
@@ -476,6 +485,41 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
           'the result bar gone',
         );
       }
+    },
+  );
+
+  await t.test(
+    'the group Updates is shown from the start: its line and `Check now` while the screen still reads the settings',
+    async (t) => {
+      const w = await world(t, chromium);
+      const [page] = w.pages;
+      assert.ok(page !== undefined);
+      w.tell(state());
+      await page.locator('#settings-button').click();
+      // The stand-in never answers `act settings`: the screen stays at its reading line.
+      await w.act('settings');
+      await showsText(page, '#settings .settings-status', /^Reading the settings…$/);
+      const seen = await readPage(
+        page,
+        () => ({
+          group: (
+            document.querySelector('#settings [data-group="updates"]') as HTMLElement | null
+          )?.checkVisibility(),
+          lines: [...document.querySelectorAll('#settings .settings-updates-line')]
+            .filter((line) => (line as HTMLElement).checkVisibility())
+            .map((line) => line.textContent),
+          checkNow: (
+            document.querySelector('#settings .settings-check-now') as HTMLElement | null
+          )?.checkVisibility(),
+        }),
+        null,
+      );
+      assert.deepEqual(
+        { group: seen.group, checkNow: seen.checkNow },
+        { group: true, checkNow: true },
+      );
+      assert.equal(seen.lines.length, 1, JSON.stringify(seen.lines));
+      assert.match(seen.lines[0] ?? '', /^Last check: .* — 1 new commit on origin\/main$/);
     },
   );
 

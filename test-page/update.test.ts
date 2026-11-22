@@ -1,5 +1,5 @@
 // The update notice in the page (follow-up F38, issue #163; S2 16.5, 12.1, 12.13): Check now in
-// the settings screen and its block `Updates`; the title bar's `Update available` on every page
+// the settings screen's group Updates; the title bar's `Update available` on every page
 // exactly while a newer skydeck is known, also through a check whose fetch failed; the dialog it
 // opens, which lists the commits as `skydeck update --check` does and gives the command, or why the
 // checkout cannot be updated as it is, or why skydeck cannot tell. On a real test server whose
@@ -84,7 +84,7 @@ async function noticeIs(page: Page, shown: boolean, what: string): Promise<void>
   await until(async () => (await noticeShown(page)) === shown, what);
 }
 
-/** The lines of the settings screen's block `Updates`. */
+/** The lines of the settings screen's group Updates. */
 function blockLines(page: Page): Promise<string[]> {
   return readPage(
     page,
