@@ -903,6 +903,14 @@ effect.
   field, so that the new session joins that group. Without the click the field stays empty. The
   Group field also offers the groups of your list as you type.
 - **A session that ended** keeps its last screen, dimmed, under a bar with Resume and Close.
+- **The tour**: the first time a browser shows the window, a tour of six steps starts by itself
+  once the list is drawn: each step makes one part of the window stand out (the list, the right
+  side, the key bar, `Switch…`, the gear) and says in two or three lines what is there, above all
+  where the keyboard is. Enter or → goes on, ← goes back, Esc or `Skip the tour` ends it; while it
+  shows, the window under it takes no key and no click. Once ended it does not come back by itself
+  (the browser keeps that, as it keeps the theme; the app window and a browser tab each show it
+  once): `Take the tour` at the top of the key help (Ctrl+Shift+H) starts it again. A browser
+  that keeps no storage (some private modes) never starts it by itself.
 - **Keys**: **Ctrl+Shift+H shows every key of the window**. The window takes only Ctrl+Shift
   chords with a letter or a digit, and Ctrl+Tab, besides the list's own keys while the list has the
   keyboard; every other key goes to Claude Code (Alt chords, Ctrl with a letter, function keys, Esc

@@ -14,7 +14,8 @@
      follow-up F30's dialog "Mark done" for a session the window can end (`#end-dialog`);
      follow-up F36's settings screen (`#settings`, web/settings.js), opened by the title bar's
      gear after `Switch…` (`#settings-button`, F39: an inline drawing, no font's emoji), with its
-     style sheet; from F39 the theme is chosen in it (web/theme.js). -->
+     style sheet; from F39 the theme is chosen in it (web/theme.js); follow-up F41's tour of the
+     window (`#tour`, web/tour.js) over everything, with its style sheet. -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -32,6 +33,7 @@
     <link rel="stylesheet" href="/assets/__VERSION__/web/banner.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/search.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/settings.css" />
+    <link rel="stylesheet" href="/assets/__VERSION__/web/tour.css" />
     <script type="module" src="/assets/__VERSION__/web/app.js"></script>
   </head>
   <body>
@@ -100,6 +102,7 @@
     <div class="help" id="help" hidden></div>
     <div class="toast" id="toast" role="status" hidden></div>
     <div class="switcher" id="switcher" hidden></div>
+    <div class="tour" id="tour" hidden></div>
     <span class="cell-measure" id="cell-measure" aria-hidden="true">WWWWWWWWWWWWWWWWWWWW</span>
   </body>
 </html>

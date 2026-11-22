@@ -1,0 +1,94 @@
+/* Follow-up F41 (S2 12.14): the tour of the window (web/tour.js), over the page and its dialogs'
+   layers (edit.css, search.css: up to z-index 104; xterm.js's own up to 11): a transparent layer
+   over the whole window that takes the clicks, the ring over the step's region — nothing that
+   takes a click, its shadow dims the rest of the page —, and the panel beside it. The ring is
+   drawn inside the region's box, so that it shows at the window's edges too. */
+.tour-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+}
+/* No region to point at (none laid out): the whole page is dimmed. */
+.tour[data-spot='none'] .tour-scrim {
+  background: rgba(10, 14, 20, 0.45);
+}
+.tour-spot {
+  position: fixed;
+  z-index: 111;
+  pointer-events: none;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 0 0 2px var(--accent),
+    0 0 0 200vmax rgba(10, 14, 20, 0.45);
+}
+.tour-panel {
+  position: fixed;
+  z-index: 112;
+  box-sizing: border-box;
+  width: min(340px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 14px 16px 12px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line2);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(20, 30, 50, 0.25);
+  outline: none;
+  font-size: 13px;
+}
+.tour-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.tour-line {
+  margin: 0 0 6px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.tour-ui {
+  font-weight: 600;
+}
+.tour-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.tour-count {
+  color: var(--dim);
+  font-size: 12px;
+}
+.tour-gap {
+  flex: 1;
+}
+.tour-foot button {
+  padding: 4px 12px;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.tour-foot .tour-skip {
+  border-color: transparent;
+  color: var(--dim);
+  padding: 4px 6px;
+}
+.tour-foot .tour-next {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.tour-foot button[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+/* The button that has the keyboard is outlined however it got it: Enter presses it. */
+.tour-foot button:focus {
+  outline: 2px solid var(--selline);
+  outline-offset: 1px;
+}

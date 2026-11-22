@@ -34,6 +34,13 @@
 // as a dialog is (D2): `.app` is inert under its scrim, every window chord but Ctrl+Shift+H says
 // `close the settings first (Esc)`, Esc closes it, and the keyboard goes back where it was.
 //
+// Follow-up F41 (S2 12.14): the tour of the window of web/tour.js. It starts by itself once, at a
+// list while the page is connected and no dialog is shown, when this browser has not seen it
+// (`tour.fresh()`), and again from the key help's `Take the tour`, through `windowChordGate`. It is
+// modal as a dialog is: `.app` is inert under it, every window chord but a reload says `close the
+// tour first (Esc)`, a lost connection or a fatal bar ends it unmarked, and when it closes the
+// keyboard goes back where it was.
+//
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
 
@@ -60,6 +67,8 @@ import { blockInfo, paneFor, sessionRow } from './pane.js';
 import { cutWords } from './search-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
+import { createTour } from './tour.js';
+import { TOUR_TEXTS } from './tour-text.js';
 import { createSettingsDialog } from './settings.js';
 import { createTheme } from './theme.js';
 import { createToast } from './toast.js';
@@ -118,6 +127,7 @@ const dom = {
   switcher: byId('switcher'),
   switchButton: byId('switch-button'),
   measure: byId('cell-measure'),
+  tour: byId('tour'),
 };
 /** The page under a dialog: inert while one is shown (D2), so that nothing in it takes the keyboard. */
 const appRoot = /** @type {HTMLElement} */ (document.querySelector('.app'));
@@ -219,6 +229,10 @@ const state = {
   enderFrom: /** @type {Element | null} */ (null),
   /** F36: what had the keyboard when the settings screen opened: it gets it back. */
   settingsFrom: /** @type {Element | null} */ (null),
+  /** F41: what had the keyboard when the tour opened: it gets it back. */
+  tourFrom: /** @type {Element | null} */ (null),
+  /** F41: whether the tour's start by itself was decided (it is, once per page). */
+  tourTried: false,
 };
 
 /** @type {ReturnType<typeof createConnection> | null} */
@@ -290,7 +304,14 @@ const cards = createCards(dom.cards, {
     listener?.(favouritesOf(state.list));
   },
 });
-const help = createHelp(dom.help);
+// F41: the help's `Take the tour` passes the gate of a window chord, as the gear does.
+const help = createHelp(dom.help, {
+  tour: () => {
+    if (windowChordGate('tour')) {
+      openTour();
+    }
+  },
+});
 const toast = createToast(dom.toast);
 const editor = createEditor(dom.editor, {
   act: (action) => act(action),
@@ -329,6 +350,8 @@ const settingsDialog = createSettingsDialog(dom.settings, {
   say: (text) => say(text),
   theme: pageTheme,
 });
+// F41: the tour of the window (web/tour.js).
+const tour = createTour(dom.tour, { closed: () => tourClosed() });
 // Stage B (B15): a click on a notification passes the gate of a window chord, then selects. A
 // session this page's list does not show (its filter, the folded Earlier) and that has no terminal
 // of the window is not selected (ruled on review 2): the pane would be empty, and a focused page's
@@ -416,9 +439,11 @@ dom.settingsButton.addEventListener('click', () => {
   }
 });
 
-/** Whether a dialog or the switcher is shown (D2, E11, F30, F36: then the page is modal). */
+/** Whether a dialog, the switcher or the tour is shown (D2, E11, F30, F36, F41: then the page is modal). */
 function modal() {
-  return editor.shown() || switcher.shown() || ender.shown() || settingsDialog.shown();
+  return (
+    editor.shown() || switcher.shown() || ender.shown() || settingsDialog.shown() || tour.shown()
+  );
 }
 
 // --- what the page says -------------------------------------------------------------------------
@@ -427,6 +452,9 @@ function modal() {
 function setConnectionState(value) {
   document.documentElement.dataset.connection = value;
   state.connected = value === 'open';
+  if (value === 'lost' || value === 'fatal') {
+    tour.abort(); // F41: ended, not marked seen
+  }
 }
 
 /**
@@ -1059,6 +1087,62 @@ function settingsClosed() {
   giveKeyboard();
 }
 
+// --- F41: the tour of the window ----------------------------------------------------------------
+
+/**
+ * At each list until it is decided, once per page: the tour starts by itself while the page is
+ * connected and no dialog is shown, when this browser has not seen it and can keep the mark.
+ */
+function startTour() {
+  if (state.tourTried || !state.connected || modal()) {
+    return;
+  }
+  state.tourTried = true;
+  if (tour.fresh()) {
+    openTour();
+  }
+}
+
+/** The start by itself or the help's `Take the tour`: the help hidden, the page inert under it. */
+function openTour() {
+  if (modal()) {
+    return;
+  }
+  help.hide();
+  state.tourFrom = document.activeElement;
+  appRoot.inert = true;
+  tour.open(); // the keyboard on its `Next`
+}
+
+/**
+ * The tour closed, whatever closed it: the page is no longer inert, and the keyboard goes back
+ * where it was when that is still there — a text field, the list, the terminal —, else to the
+ * zone's holder (also when only the zone itself had it); a terminal this page's resume brought
+ * meanwhile takes it first.
+ */
+function tourClosed() {
+  appRoot.inert = false;
+  const from = state.tourFrom;
+  state.tourFrom = null;
+  if (broughtTakesKeyboard()) {
+    return;
+  }
+  if (
+    from instanceof HTMLElement &&
+    from !== document.body &&
+    from !== dom.rightZone &&
+    from.isConnected &&
+    from.checkVisibility() &&
+    !dom.tour.contains(from)
+  ) {
+    from.focus();
+    if (document.activeElement === from) {
+      return;
+    }
+  }
+  giveKeyboard();
+}
+
 // --- stage E: the quick switcher (plan E task 98) ---------------------------------------------
 
 /**
@@ -1586,6 +1670,7 @@ function received(message) {
       notifications.update(message);
       // Stage E: the switcher's items, while it is shown (E8).
       switcher.update(message);
+      startTour(); // F41: once, over the page as this list drew it
       if (state.welcomed) {
         state.welcomed = false;
         nextReattach();
@@ -1957,11 +2042,21 @@ function xtermHasKeyboard() {
  * passes — not while F30's dialog "Mark done" is shown, which the help would cover —; a reload
  * passes unless the dialog holds text the user typed and did not save, when the key bar says `save
  * or cancel the edit first`; everything else says `close the edit first (Esc)` (`close the dialog
- * first (Esc)` for "Mark done") and does nothing else.
+ * first (Esc)` for "Mark done") and does nothing else. While F41's tour is shown, the reload keys
+ * pass and everything else, Ctrl+Shift+H too (the help would cover it), says `close the tour first
+ * (Esc)`; the help's `Take the tour` (`tour`) passes only where nothing is shown.
  * @param {WindowChord['kind'] | string} kind
  * @returns {boolean} whether it may act
  */
 function windowChordGate(kind) {
+  if (tour.shown()) {
+    // F41: nothing of the tour is worth keeping, so a reload passes.
+    if (kind === 'reload') {
+      return true;
+    }
+    say(TOUR_TEXTS.closeFirst);
+    return false;
+  }
   if (switcher.shown()) {
     if (kind === 'switcher' || kind === 'reload') {
       return true;
@@ -2195,6 +2290,10 @@ function onKeyDown(event) {
   }
   if (heldFromDialog(event)) {
     return; // swallowed: a held key that closed a dialog (review 2 of task 37)
+  }
+  if (tour.shown() && tour.key(event)) {
+    event.stopPropagation();
+    return; // F41: Enter, the arrows, Esc and Tab are the tour's
   }
   if (switcher.shown() && switcherCapture(event)) {
     return;

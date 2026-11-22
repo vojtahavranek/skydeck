@@ -3523,7 +3523,7 @@ keeps Edge's default: in the list zone Ctrl+W closes the window, which ends no s
 | Ctrl+Shift+N | new session |
 | Ctrl+Shift+F | find in the scrollback |
 | Ctrl+Shift+C / Ctrl+Shift+V | copy the selection / send a raw Ctrl+V (image paste) |
-| Ctrl+Shift+H | the key help |
+| Ctrl+Shift+H | the key help (under its title, `Take the tour`: 12.14) |
 | Ctrl+V, Shift+Enter, Ctrl+click | paste text, newline, open a link (9) |
 
 Letters are matched by the character the key types (Claude Code's own rule). A digit is matched by
@@ -3756,6 +3756,19 @@ terminal sends the program nothing (a key pressed off the program's holder); Esc
 form is open closes the switcher only. Ctrl+Shift+P, and a click on the title bar's `Switch…`
 (which passes the same gate as a window chord), while a dialog is shown say `close the edit first
 (Esc)` and open nothing. The switcher opens while the page is not connected and says so.
+
+**The tour** (follow-up F41, 12.14) is modal by the dialogs' rule too: the page under it takes no
+keyboard and no click (a transparent layer over the window takes every click outside its panel),
+the page moves the keyboard nowhere by itself while it is shown, and no list key acts. Enter or →
+goes on (Enter on one of the panel's buttons presses that button), ← goes back, Esc skips the rest,
+Tab and Shift+Tab walk the panel's buttons and stay in it; each acts once per press. Every window
+chord, Ctrl+Shift+H too (the help would cover it), says `close the tour first (Esc)` and does
+nothing else; the reload keys reload as usual, since nothing of the tour is worth keeping. Opening
+it hides the help. When it closes the keyboard goes back where it was (a text field, the list, the
+terminal), else to the zone's holder, and a terminal this page's resume brought meanwhile takes it
+first. The key help's `Take the tour`, a button under its title, starts it again: it passes the
+gate of a window chord, so while a dialog is shown it says that dialog's `close … first (Esc)`
+and starts nothing; a mousedown on it moves no keyboard.
 
 ### 12.10 Done
 
@@ -4116,6 +4129,63 @@ screen's describe Advanced, which keeps F36's screen whole.
   accent ground; the short screen's labels, hints, marks and words too); every text is text, a value
   only an input's value or text: one with markup stays text, a long one wraps, a right-to-left one
   keeps its order.
+
+### 12.14 The tour
+
+Follow-up F41 (issue #162, its first version; the owner's choice of 2026-11-22, "a tour in the
+window", over a `skydeck tutorial` command and a demo mode). Someone who opens the window for the
+first time learns in a minute where things are and, above all, that the keyboard is either in the
+list or in the terminal. It runs over the real page as it is, with the sessions it has or with
+none: no made-up data.
+
+- **When it starts.** By itself once per browser: at a list from the server while the page is
+  connected and no dialog (12.5, 12.13, the switcher, "Mark done") is shown — the first such list
+  of the page — when this browser has not seen it. It is decided once per page: a dialog open at
+  the first list waits for a later list; a tour ended unmarked (below) does not start again by
+  itself until the page loads again. It never starts while the page is not connected, so neither
+  over the bar of a lost connection, a fatal bar, nor the bar that says the page has no key. The
+  app window and an ordinary browser tab (`--print-url`) keep their storage apart and are two
+  browsers here: each shows it once.
+- **Seen.** Ending it with `Done`, `Skip the tour` or Esc marks it seen for this browser in the
+  page's own `localStorage` (the key `skydeck-tour`, the value `seen`), as the theme's choice is
+  kept (12.1); nothing goes to the server, and no other window is told. It starts by itself only
+  where that storage can be read and written: before it starts, the page writes the key and removes
+  it again; storage that throws or refuses the write (a private mode without storage, a full
+  quota) means the tour never starts by itself (the help's control still starts it). A lost
+  connection or a fatal bar (6.3, 8.2.2) ends a shown tour without marking it, and the page is no
+  longer inert.
+- **Again.** The key help's `Take the tour` (12.9) starts it at its first step, whatever was seen,
+  in the words of the mode the page shows then.
+- **The steps.** Six, each pointing at one region, in this order (the words are
+  `web/tour-text.js`'s, pure text; `test/web/tour-text.test.ts` holds every key a step names
+  against `web/keys.js`, as the help's test does, and `test-page/tour.test.ts` every control a step
+  names against the page in each mode):
+
+  | Region | Title | What it says |
+  |---|---|---|
+  | the list | The list | every session, one row each, of this window and of any terminal; Open, Recent (the last 7 days) and Earlier; the number 1–9 is the slot |
+  | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it |
+  | the key bar | Where the keyboard is | `Focus: list` or `Focus: terminal`; Ctrl+Shift+L moves it; with `Focus: terminal` a letter goes to Claude Code |
+  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done; `/` filter, `a` show done |
+  | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+N a new one |
+  | the gear | Settings and every key | the gear opens Settings; Ctrl+Shift+H shows every key; the tour starts again from there (`Take the tour`) |
+
+  The words name the keys of the mode the page runs in (`<html data-display>`, the rule of the key
+  bar's hints): in a browser tab, which keeps Ctrl+Tab and Ctrl+Shift+N, Ctrl+Shift+O and `+ New in
+  the key bar` stand for them. No key is new (no chord, 12.9).
+- **Look.** The region stands out in a ring drawn inside its box (so that it shows at the window's
+  edges too), whose shadow dims the rest of the page; nothing that takes a click lies on the
+  region once the tour is gone, and the terminal's own layers are not restyled. A small panel
+  beside it (to its right, else its left, else below, else above it, inside the window; the middle
+  of the window when none fits; placed again when the window is resized) holds the title, two or
+  three short lines, `Step n of N`, `Skip the tour`, `Back` (not on the first step) and `Next`
+  (`Done` on the last), with the keyboard on `Next` at each step. It lies over every layer of the
+  page, the dialogs' and the toast's too. Its words are in the page's own colours (`--text`,
+  `--dim` on `--panel`) in every theme. Every text reaches the DOM as text.
+- **Keys**: 12.9's paragraph "The tour".
+- **Tests.** Every browser context of the page suite is made by `newContext`
+  (`test-page/helpers/browser.ts`), which marks the tour seen in each page's storage, so that no
+  case but the tour's own meets it; those ask for a context without the mark.
 
 ## 13. Notifications
 
@@ -4842,7 +4912,14 @@ In the browser suite, besides those:
 - follow-up F37 (`test-page/reorder.test.ts`): Shift+↑, Shift+K, Shift+↓ and Shift+J send `reorder`
   for the selected session, a refusal's line shows in the key bar, one act waits at a time, the
   moved row is scrolled into view, and against a real server the slot chords reach the rows that
-  show their numbers after a move.
+  show their numbers after a move;
+- follow-up F41 (`test-page/tour.test.ts`): the tour starts by itself after the first list, with
+  sessions and on an empty list, and never where it was seen, where the storage throws or refuses a
+  write, or without a key; each step's ring lies on its region and its panel beside it with the
+  step's words, in a tab's and in the app window's; every control a step names is one of the page;
+  its keys, the page under it taking no key and no click, `close the tour first (Esc)`; Done, Skip
+  and Esc mark it seen and give the keyboard back where it was; the key help's `Take the tour`, also
+  refused over a dialog; a lost connection ends it unmarked.
 
 No test shows a desktop notification or asks for a permission (stage B, plan B17), whatever a
 server sends: every browser context of the suite is made by `newContext` of
@@ -4853,7 +4930,9 @@ service worker's `showNotification` that refuses. The cases about notifications 
 `document.hasFocus` (`test-page/helpers/notification.ts`); the double sets a marker, so that either
 order of the two init scripts ends with it (Playwright orders a context's and a page's init scripts
 in no defined way). A case pins that no context is made elsewhere under `test-page/`, and no test
-grants a permission through Playwright.
+grants a permission through Playwright. The same `newContext` marks the tour of the window seen in
+each page's storage (follow-up F41, 12.14) unless a case asks for a context without the mark (only
+`test-page/tour.test.ts` does), so that no other case meets the tour.
 
 ### 17.5 Where the tests are, and what CI runs
 
@@ -4979,6 +5058,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
 | W41 | The settings screen's Advanced on the owner's own `config.json`, copied aside first: the title bar's gear opens it, `Advanced (14 more settings)` opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36, F39 | 12.13 |
 | W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last slotted row and under a filter; `skydeck window --restart` keeps the order. The restore order only where W16's drill runs anyway. | F37 | 7.6, 12.9 |
+| W45 | The tour of the window in the owner's Edge (follow-up F41): it starts by itself at the first opening after the update, over the real list; each step's region stands out and its words read well; Enter, → and ← walk it, a click on the page does nothing, Ctrl+Shift+L says `close the tour first (Esc)`; `Done` gives the keyboard back and a reload shows it no more; the key help's `Take the tour` starts it again and Esc ends it; an InPrivate window with `--print-url`'s address shows it by itself once, in a tab's words. | F41 | 12.9, 12.14 |
 | W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links and The window with six plain labels and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
