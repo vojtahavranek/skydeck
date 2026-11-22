@@ -846,7 +846,7 @@ effect.
 
 ### Using the window
 
-- - **The list**, on the left, has three sections: **Open** (running or starting, in the window or
+- **The list**, on the left, has three sections: **Open** (running or starting, in the window or
   in another terminal; the window's terminals carry the slots 1–9, read top to bottom; Shift+↑ and
   Shift+↓ in the list (`Focus: list`) move the selected one, see Keys), **Recent** (not running,
   last active in the last 7 days) and **Earlier** (folded; a click on its header unfolds it). Done
@@ -855,7 +855,7 @@ effect.
   two ways to get one: start `claude` in any terminal (it shows in the list as soon as it starts),
   or start one in the window with Ctrl+Shift+N (`+ New` in a browser tab); the right side then says
   `The selected session shows here.`
-- - **A session that is not running**: one click selects it and shows its resume card, with the
+- **A session that is not running**: one click selects it and shows its resume card, with the
   exact command it will run. Enter in the list, a double click or `Resume here` resumes it into the
   window.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
@@ -866,7 +866,7 @@ effect.
   see it or end it. The same is expected for the other ways into the background (`/bg`, `claude
   --bg`, `/fork`); one that Claude Code does not mark as a background session reads as `running in
   another terminal`. Once it has ended it can be resumed here too.
-- - **A copy made by Claude Code's background feature.** Agent view and `/bg` can start a copy of a
+- **A copy made by Claude Code's background feature.** Agent view and `/bg` can start a copy of a
   session (`claude --fork-session --resume …`): a new session that holds only the title of the one
   it copies, running in Claude Code's background. While it has no message and sits idle the list
   does not show it as a second row of that session: `a` in the list shows it, as it shows done
@@ -989,7 +989,7 @@ requests — …`): look at it before you save.
   you have changed nothing, and say `save or cancel the edit first` once you have. Closing the
   window, or Edge's own reload, with changed text asks first (Edge's own prompt). Ctrl+V and
   Ctrl+Shift+V paste into the field.
-- - Right after this window saved a label, group, note or ticket of a session, its dialogs wait for
+- Right after this window saved a label, group, note or ticket of a session, its dialogs wait for
   the list that holds the new text (within a second). Until it has come, whichever of the four was
   saved, each of these keys in the list on that session only says so: `l` `the label is not here
   yet; press l again`, F2 `the label is not here yet; press F2 again`, `g` `the group is not here
@@ -1619,7 +1619,7 @@ terminal.
   it: the first characters of the short id in the header (or in `skydeck ls`'s last column), or
   the whole id. A shorter word is looked for in the fields only, so that `fix 2` does not list
   nearly every session through the digits of its id.
-- - **While a word is typed**, done sessions are listed too, with their `done` mark; every section
+- **While a word is typed**, done sessions are listed too, with their `done` mark; every section
   is unfolded and every block flat (below); the footer `17 done hidden · show` is not shown; and
   nothing folds: ← and → in the list do nothing, nor does a click on Earlier's header. The chips
   below do none of that. A filter — a word or a chip — that leaves no session says `No session
@@ -1677,7 +1677,7 @@ bar counts the same whether a block is open or closed. While a word is in the fi
 cards: every session is a flat row with its group. With chips alone the cards stay, each counting
 the sessions the chips leave in it, and a closed one stays closed.
 
-- - A click on the caption line closes or opens the block (the whole line is the control). It
+- A click on the caption line closes or opens the block (the whole line is the control). It
   selects nothing and leaves the keyboard where it was, with one exception: on a closed caption that
   is itself selected (below) it opens the block and selects its first session, as → in the list
   does. While a session of the block is selected, a click does not close it: the selection, the
@@ -1717,7 +1717,7 @@ the sessions the chips leave in it, and a closed one stays closed.
   holds it (the page does not know a closed block's sessions), as it skips a session that the filter
   or the folded Earlier hides and that no terminal of the window holds; one that a terminal of the
   window holds it selects, and its block opens.
-- - `d` in the list on a session of an open block marks that session only: the others stay a card,
+- `d` in the list on a session of an open block marks that session only: the others stay a card,
   or the last one stands alone as a plain row, and the selection goes to the row after it (stage D's
   rule). With done sessions shown the session stays listed and stays selected.
 - While a word is typed, every session stands alone; under chips alone the cards stay.
@@ -1908,7 +1908,7 @@ of the window between light and dark: after one, start or resume the session aga
 - **Two windows.** Label, group and done are last-write-wins between two windows, and between a
   window and a command, as between two commands. Only the note is guarded: a save over a note that
   changed meanwhile is refused, with your text kept in the box.
-- - **The toast's Undo has no key of its own.** It is a button: a click presses it, or Tab until it
+- **The toast's Undo has no key of its own.** It is a button: a click presses it, or Tab until it
   has the keyboard and then Enter. The toast is shown for 5 seconds, and the next toast replaces it.
   Once it is gone: `a` in the list (`Focus: list`) shows done sessions, then `d` on the session.
 - **A long note** (over 64 KiB, 65,536 bytes of UTF-8) is edited with `skydeck note <short id>`
@@ -2007,13 +2007,13 @@ of the window between light and dark: after one, start or resume the session aga
   shows its mark, and Ctrl+Shift+J reaches it, but the title bar's count leaves it out (without
   the filter it is not listed), so the key bar's `… hidden by the filter or the fold` counts one
   too few for each such session.
-- - **`d` in the list (`Focus: list`) while a word is typed.** The toast says `Marked done: hidden
+- **`d` in the list (`Focus: list`) while a word is typed.** The toast says `Marked done: hidden
   from the list. It comes back on new activity.` while the filter still lists the session, with its
   `done` mark.
-- - **`d` in the list under `Done`.** It takes a session's mark away, so the session leaves the list
+- **`d` in the list under `Done`.** It takes a session's mark away, so the session leaves the list
   (`Done` lists done ones only) as any session a filter stops matching ("A selected session the list
   does not show" above): no row is selected, and ↑ and ↓ start again from the first line.
-- - **Blocks the window cannot close.** A block whose group is over 1,024 bytes (of UTF-8) cannot be
+- **Blocks the window cannot close.** A block whose group is over 1,024 bytes (of UTF-8) cannot be
   closed: ← in the list on a session of it and a click on its caption do nothing, and it stays open.
   A window remembers at most 64 closed blocks: closing another opens the one closed first again (and
   when its caption was selected, nothing is selected).
