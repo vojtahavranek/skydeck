@@ -226,6 +226,17 @@ test('the banner says running from the start of a run to its end, and not after'
   assert.deepEqual(seen, [true, false]);
 });
 
+test('running() (F38: an update from the window waits for it) is true from the start of a run to its end', async (t) => {
+  const d = restarted(t, 2);
+  const w = world(d);
+  assert.equal(w.restorer.running(), false);
+  const started = w.restorer.start({ sessionIds: [sid(1)], all: false });
+  assert.ok(started.ok);
+  assert.equal(w.restorer.running(), true);
+  await started.done;
+  assert.equal(w.restorer.running(), false);
+});
+
 test('start returns at once: the run has not opened anything when it returns', async (t) => {
   const d = restarted(t, 2);
   const w = world(d);

@@ -21,27 +21,45 @@
  * - The dialog's look runs without the network and replaces the outcome, keeping the times of the
  *   last fetch and the last failure; while a check runs it starts nothing.
  * - A server sends no stored outcome before its own first check or look has ended.
+ * - Update now (milestone 2, S2 16.5 "Update now"): `apply(to)` is refused while the server
+ *   stops, an update runs, a check runs or a restore runs, and unless a look made now says
+ *   `available`, not blocked, with that `to`. Then `kv window_update_run` says `applying`, every
+ *   page is told, a line goes to `<stateDir>/update.log`, and one detached process is started that
+ *   outlives this server and IS the command: `<checkout>/bin/skydeck update --from-window <to>`,
+ *   with the server's own environment, the directory that environment came from, both outputs
+ *   appended to the log, and the user's soft core limit given back first (through python3). That
+ *   process stops this server, applies, records the outcome and brings the window back; if it ends
+ *   while this server still runs, what it recorded becomes `result`. A server that starts reads the
+ *   entry of its checkout as `result` and removes it; `seen()` dismisses the result.
  * - Nothing it does can end the server: every chain ends in a catch that logs the failure by its
  *   kind (failureKind), never a message; a record that cannot be written or read leaves the state in
  *   memory, still sent; once stop() was called nothing touches the store or the pages again, a
  *   git call that runs gets SIGTERM (SIGKILL two seconds later) and no further one starts.
  */
+import { join } from 'node:path';
+
 import type { Ns } from '../platform/types.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { gitOn } from '../update/git.ts';
 import type { Git } from '../update/git.ts';
-import { counted, lookForUpdate, report } from '../update/look.ts';
+import { counted, lookForUpdate, report, short } from '../update/look.ts';
 import type { Looked } from '../update/look.ts';
 import {
   checkoutRoot,
   checkPayload,
+  clearRun,
   payloadText,
   readCheck,
+  readRun,
+  RUN_LINE_MAX,
   writeCheck,
+  writeRun,
 } from '../update/record.ts';
-import type { CheckOutcome, CheckRecord } from '../update/record.ts';
+import type { CheckOutcome, CheckRecord, RunRecord } from '../update/record.ts';
+import { clipLine } from '../update/git.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
+import { serverLog } from './log.ts';
 import type { UpdatePayload } from './protocol.ts';
 
 /** "Daily": a check this long after the last one this server made (S2 10.1). */
@@ -52,6 +70,53 @@ export const RETRY_AFTER_FAILURE_NS = 60n * 60n * 1_000_000_000n;
 /** What a look without a checkout to look at says (a marked test sandbox without the seam). */
 export const NO_CHECKOUT_LINE = 'no update is looked for in a test sandbox';
 
+/** The python3 the launcher uses for its core limit (bin/skydeck), never one found on PATH. */
+export const PYTHON3 = '/usr/bin/python3';
+
+/**
+ * The program that gives the user's soft core limit back before the update runs (S2 16.5): the
+ * server's own soft limit is 1 byte, and the launcher would record that 1 as the user's for every
+ * later session (bin/skydeck). argv: the soft limit (decimal bytes or `unlimited`), whether
+ * LC_CTYPE was set (`1` or empty) and its value, then the command. The soft limit is set within
+ * the hard one (clamped to it); one that cannot be set ends it with exit 1 and one line, nothing
+ * run. python3 may set LC_CTYPE for itself (PEP 538) and ignores SIGPIPE and SIGXFSZ: the caller's
+ * LC_CTYPE and the default dispositions are given back before the exec, as the launcher does.
+ */
+export const CORE_LIMIT_PROGRAM = `import os, resource, signal, sys
+soft_text, ctype_set, ctype = sys.argv[1:4]
+command = sys.argv[4:]
+try:
+    hard = resource.getrlimit(resource.RLIMIT_CORE)[1]
+    soft = resource.RLIM_INFINITY if soft_text == "unlimited" else int(soft_text)
+    if hard != resource.RLIM_INFINITY and (soft == resource.RLIM_INFINITY or soft > hard):
+        soft = hard
+    resource.setrlimit(resource.RLIMIT_CORE, (soft, hard))
+except Exception as error:
+    sys.stderr.write("skydeck: the soft core limit could not be set to %s (%s); the update was not run\\n" % (soft_text, error))
+    sys.exit(1)
+env = dict(os.environ)
+if ctype_set == "1":
+    env["LC_CTYPE"] = ctype
+else:
+    env.pop("LC_CTYPE", None)
+signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+signal.signal(signal.SIGXFSZ, signal.SIG_DFL)
+try:
+    os.execve(command[0], command, env)
+except Exception as error:
+    sys.stderr.write("skydeck: cannot run %s (%s)\\n" % (command[0], error))
+os._exit(127)
+`;
+
+/** Update now's refusals (S2 16.5), each with nothing started. */
+export const APPLY_REFUSED = {
+  stopping: "the window's server is stopping",
+  running: 'an update is already running',
+  checking: 'a check for updates is running; try again once it has ended',
+  restoring: 'a restore is running; update once it has finished',
+  notListed: "the window's last check does not name that commit; open the dialog again",
+} as const;
+
 export interface Updates {
   /** The state as every page is told it. */
   payload(): UpdatePayload;
@@ -61,6 +126,17 @@ export interface Updates {
   check(): Promise<UpdatePayload>;
   /** The dialog's look, without the network; while a check runs, the state as it is. */
   look(): Promise<UpdatePayload>;
+  /**
+   * Update now (milestone 2): starts the command that applies `to`, or says why not; the state
+   * after it either way.
+   */
+  apply(
+    to: string,
+  ): Promise<
+    { ok: true; update: UpdatePayload } | { ok: false; error: string; update: UpdatePayload }
+  >;
+  /** A page dismissed the result: it goes from every page. */
+  seen(): UpdatePayload;
   /** The server's stop: aborts a running fetch (SIGTERM first), saves nothing of it. */
   stop(): Promise<void>;
 }
@@ -72,6 +148,16 @@ export interface UpdatesDeps {
   log(line: string): void;
   /** The fetch's wait (default FETCH_MS). */
   fetchMs?: number;
+  /** The server's environment as its programs get it (serverEnvironment's `env`): the updater's. */
+  serverEnv: Readonly<Record<string, string>>;
+  /** The user's soft core limit the launcher recorded; null: none (the launcher is started directly). */
+  coreSoft: string | null;
+  /** The directory the server's environment came from (envOrigin.dir): the updater's working directory. */
+  originDir(): string;
+  /** Whether a restore runs. */
+  restoreRunning(): boolean;
+  /** Whether the server's stop has begun. */
+  stopping(): boolean;
 }
 
 /** The checkout the checker looks at, or null in a marked test sandbox without the seam. */
@@ -82,6 +168,19 @@ function checkoutOf(deck: Deck): string | null {
     return seam === undefined || seam === '' ? null : seam;
   }
   return appRoot;
+}
+
+/** The python3 that gives the core limit back: the launcher's, SKYDECK_TEST_PYTHON3 in a marked sandbox. */
+function python3Of(deck: Deck): string {
+  const { env } = deck.platform;
+  return env.SKYDECK_TEST_NO_WINDOWS === '1' && env.SKYDECK_TEST_PYTHON3 !== undefined
+    ? env.SKYDECK_TEST_PYTHON3
+    : PYTHON3;
+}
+
+/** An ns time as the page reads it in a sentence: ISO, to the second, UTC. */
+function isoOf(atNs: string): string {
+  return new Date(Number(BigInt(atNs) / 1_000_000n)).toISOString().replace(/\.[0-9]{3}Z$/, 'Z');
 }
 
 /** The outcome a look gives, as it is stored. */
@@ -130,6 +229,17 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   let checking: Promise<UpdatePayload> | null = null;
   let looking: Promise<UpdatePayload> | null = null;
   let stopped = false;
+  const logPath = join(deck.places.stateDir, 'update.log');
+  /** The log's path as the pages get it. */
+  const shownLog = sanitize(logPath);
+  /** An update started from this server: since when, to which commit; null: none runs. */
+  let applying: { to: string; sinceNs: string } | null = null;
+  /** apply() has passed its refusals and not yet started the process or failed. */
+  let starting = false;
+  /** How many of the dialog's looks ran to their end: Update now's look must be one of them. */
+  let lookEnds = 0;
+  /** How the last update from the window ended, until a page dismisses it. */
+  let result: { ok: boolean; text: string } | null = null;
 
   const payload = (): UpdatePayload => ({
     checking: checking !== null,
@@ -140,7 +250,39 @@ export function createUpdates(deps: UpdatesDeps): Updates {
       record?.failure == null
         ? null
         : { atNs: record.failure.atNs, line: payloadText(record.failure.line) },
+    applying,
+    log: shownLog,
+    result,
   });
+
+  /** What a run entry of this checkout says as the result. */
+  const resultOf = (entry: RunRecord): { ok: boolean; text: string } => {
+    switch (entry.state) {
+      case 'applied':
+        return { ok: true, text: `updated to ${short(entry.to)}` };
+      case 'failed':
+        return { ok: false, text: clipLine(sanitize(entry.line), RUN_LINE_MAX) };
+      case 'applying':
+        return {
+          ok: false,
+          text: `an update started from the window at ${isoOf(entry.atNs)} did not record how it ended; its log says: ${shownLog}`,
+        };
+    }
+  };
+
+  // A server that starts: the entry of its checkout becomes the result, and is removed; another
+  // checkout's entry is left as it is.
+  if (root !== null) {
+    try {
+      const entry = readRun(deck.store, root);
+      if (entry !== null) {
+        result = resultOf(entry);
+        clearRun(deck.store);
+      }
+    } catch (error) {
+      log(`update: the entry of the last update could not be read (${failureKind(error)})`);
+    }
+  }
 
   const tell = (): void => {
     if (stopped) return;
@@ -286,6 +428,7 @@ export function createUpdates(deps: UpdatesDeps): Updates {
         head: looked.kind === 'cannot' ? looked.head : looked.update.oldId,
         outcome: outcomeOf(looked),
       });
+      lookEnds += 1;
       return payload();
     })()
       .catch((error: unknown) => {
@@ -297,6 +440,136 @@ export function createUpdates(deps: UpdatesDeps): Updates {
       });
     looking = running;
     return running;
+  };
+
+  /** The updater ended while this server still runs: what it recorded is the result. */
+  const updaterEnded = (code: number | null, signal: string | null): void => {
+    if (stopped || deps.stopping()) return;
+    const how = code !== null ? `exit ${code}` : `signal ${signal ?? 'unknown'}`;
+    const untold = `the update ended without saying how (${how}); see ${shownLog}`;
+    let entry: RunRecord | null = null;
+    try {
+      entry = root === null ? null : readRun(deck.store, root);
+    } catch (error) {
+      log(`update: the entry of the update could not be read (${failureKind(error)})`);
+    }
+    if (entry === null || entry.state === 'applying') {
+      result = { ok: false, text: untold };
+    } else {
+      result = resultOf(entry);
+    }
+    if (entry !== null) {
+      try {
+        clearRun(deck.store);
+      } catch (error) {
+        log(`update: the entry of the update could not be removed (${failureKind(error)})`);
+      }
+    }
+    applying = null;
+    log(`update: the updater ended (${how})`);
+    tell();
+    void look();
+  };
+
+  /** The command line that applies `to`: the launcher, through python3 when a core limit is to be given back. */
+  const commandLine = (launcher: string, to: string): { command: string; args: string[] } => {
+    const args = [launcher, 'update', '--from-window', to];
+    if (deps.coreSoft === null) return { command: launcher, args: args.slice(1) };
+    const ctype = deps.serverEnv.LC_CTYPE;
+    return {
+      command: python3Of(deck),
+      args: [
+        '-I',
+        '-S',
+        '-c',
+        CORE_LIMIT_PROGRAM,
+        deps.coreSoft,
+        ctype === undefined ? '' : '1',
+        ctype ?? '',
+        ...args,
+      ],
+    };
+  };
+
+  /** The updater's working directory: where the environment came from, else `/`. */
+  const workingDir = (): string => {
+    try {
+      const dir = deps.originDir();
+      return platform.files.stat(dir)?.kind === 'dir' ? dir : '/';
+    } catch {
+      return '/';
+    }
+  };
+
+  const apply = async (
+    to: string,
+  ): Promise<
+    { ok: true; update: UpdatePayload } | { ok: false; error: string; update: UpdatePayload }
+  > => {
+    const refused = (error: string): { ok: false; error: string; update: UpdatePayload } => ({
+      ok: false,
+      error,
+      update: payload(),
+    });
+    if (stopped || deps.stopping()) return refused(APPLY_REFUSED.stopping);
+    if (applying !== null || starting) return refused(APPLY_REFUSED.running);
+    if (checking !== null) return refused(APPLY_REFUSED.checking);
+    if (deps.restoreRunning()) return refused(APPLY_REFUSED.restoring);
+    starting = true;
+    try {
+      // A look made now, run to its end, must name `to`, not blocked (it replaces the outcome,
+      // every page told); a check that began meanwhile (Check now) refuses as one that ran.
+      if (looking !== null) await looking;
+      const ends = lookEnds;
+      await look();
+      if (stopped || deps.stopping()) return refused(APPLY_REFUSED.stopping);
+      if (checking !== null) return refused(APPLY_REFUSED.checking);
+      const check = record === null || lookEnds === ends ? null : checkPayload(record);
+      if (check?.state === 'available' && check.to === to && check.blocked !== null) {
+        return refused(`${check.blocked}; open the dialog again once that is set right`);
+      }
+      if (check?.state !== 'available' || check.to !== to || checkout === null || root === null) {
+        return refused(APPLY_REFUSED.notListed);
+      }
+      const sinceNs = String(platform.clock.nowNs());
+      try {
+        writeRun(deck.store, { v: 1, root, state: 'applying', to, atNs: sinceNs });
+        applying = { to, sinceNs };
+        tell();
+        serverLog(platform, logPath, false)(`update to ${short(to)} started from the window`);
+        const { command, args } = commandLine(join(checkout, 'bin', 'skydeck'), to);
+        const started = await platform.processes.startDetached(command, args, {
+          cwd: workingDir(),
+          env: deps.serverEnv,
+          stdoutTo: logPath,
+          stderrTo: logPath,
+        });
+        log(`update: the updater was started (pid ${started.pid})`);
+        void started.exited
+          .then(({ code, signal }) => {
+            updaterEnded(code, signal);
+          })
+          .catch((error: unknown) => {
+            log(`update: the updater's end could not be handled (${failureKind(error)})`);
+          });
+        return { ok: true, update: payload() };
+      } catch (error) {
+        const kind = failureKind(error);
+        log(`update: the updater could not be started (${kind})`);
+        try {
+          clearRun(deck.store);
+        } catch (again) {
+          log(`update: the entry of the update could not be removed (${failureKind(again)})`);
+        }
+        applying = null;
+        tell();
+        return refused(
+          `the update could not be started (${kind}); run skydeck update in a terminal of your own`,
+        );
+      }
+    } finally {
+      starting = false;
+    }
   };
 
   /** Whether a check is due at `nowNs` (the switch is on). */
@@ -315,7 +588,8 @@ export function createUpdates(deps: UpdatesDeps): Updates {
         const first = !started;
         started = true;
         if (deck.config.window.updateCheck === 'daily') {
-          if (checking === null && due(platform.clock.nowNs())) void check();
+          if (checking === null && applying === null && !starting && due(platform.clock.nowNs()))
+            void check();
         } else if (first && known() !== null) {
           void look();
         }
@@ -325,6 +599,12 @@ export function createUpdates(deps: UpdatesDeps): Updates {
     },
     check,
     look,
+    apply,
+    seen() {
+      result = null;
+      tell();
+      return payload();
+    },
     async stop() {
       if (stopped) return;
       stopped = true;

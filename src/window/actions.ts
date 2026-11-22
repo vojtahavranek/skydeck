@@ -83,7 +83,7 @@ export interface ActionDeps {
   settingsChanged?(payload: SettingsPayload): void;
   /** F38: the check for a newer skydeck (updates.ts, one per server). Absent: its kinds answer
    *  "skydeck cannot do that action". */
-  updates?: Pick<Updates, 'check' | 'look'>;
+  updates?: Pick<Updates, 'check' | 'look' | 'apply' | 'seen'>;
   /** F37 (S2 12.9): `act reorder` for the page that sent it (reorder.ts); a busy store is thrown.
    *  Absent: the kind answers "skydeck cannot do that action". */
   reorder?(
@@ -458,6 +458,19 @@ export function createActions(deps: ActionDeps): ActionHandler {
         const update = await (action.kind === 'update-check' ? updates.check() : updates.look());
         return { ...DONE, update };
       }
+      case 'update-apply': {
+        // Milestone 2: the checker refuses or starts the updater; either way its state goes back.
+        const updates = deps.updates;
+        if (updates === undefined) return refusal(NOT_AN_ACTION);
+        const applied = await updates.apply(action.to);
+        return applied.ok
+          ? { ...DONE, update: applied.update }
+          : { ...refusal(applied.error), update: applied.update };
+      }
+      case 'update-seen':
+        return deps.updates === undefined
+          ? refusal(NOT_AN_ACTION)
+          : { ...DONE, update: deps.updates.seen() };
       case 'reorder':
         // Its slots' change pushes every page's list (the registry's change): no `changed()`.
         return deps.reorder === undefined

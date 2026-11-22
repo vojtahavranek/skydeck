@@ -2,28 +2,43 @@
 // scripted git, the seam variable naming a checkout inside the sandbox (updateSeam). No test here
 // starts a real fetch or a real git.
 import assert from 'node:assert/strict';
-import { mkdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
-import type { RunResult } from '../../src/platform/types.ts';
+import type { Detached, RunResult } from '../../src/platform/types.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
 import { report } from '../../src/update/look.ts';
-import { CHECK_KEY, readCheck, readCheckEntry, writeCheck } from '../../src/update/record.ts';
-import type { CheckRecord } from '../../src/update/record.ts';
+import {
+  CHECK_KEY,
+  checkoutRoot,
+  clearRun,
+  readCheck,
+  readCheckEntry,
+  readRunEntry,
+  RUN_KEY,
+  writeCheck,
+  writeRun,
+} from '../../src/update/record.ts';
+import type { CheckRecord, RunRecord } from '../../src/update/record.ts';
 import type { UpdatePayload } from '../../src/window/protocol.ts';
 import {
+  APPLY_REFUSED,
   CHECK_EVERY_NS,
+  CORE_LIMIT_PROGRAM,
   createUpdates,
   NO_CHECKOUT_LINE,
+  PYTHON3,
   RETRY_AFTER_FAILURE_NS,
 } from '../../src/window/updates.ts';
 import type { Updates } from '../../src/window/updates.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
-import { T0 } from '../helpers/platform.ts';
-import type { FakeRunner } from '../helpers/platform.ts';
+import { fakeProcesses, T0 } from '../helpers/platform.ts';
+import type { FakeProcesses, FakeRunner } from '../helpers/platform.ts';
+import { sandbox } from '../helpers/sandbox.ts';
 import { gitArgs, NEW, OLD, scriptedGit, scriptedRepo, updateSeam } from '../helpers/update.ts';
 import type { ScriptedRepo } from '../helpers/update.ts';
 
@@ -44,7 +59,13 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
 interface World {
   d: TestDeck;
   deck: Deck;
+  /** The checkout's real path; `seam` is the path the seam variable names (a link to it, or it). */
   root: string;
+  seam: string;
+  processes: FakeProcesses;
+  /** What the restore and the server's stop answer to the checker (the test changes them). */
+  restoring: { now: boolean };
+  serverStopping: { now: boolean };
   repo: ScriptedRepo;
   runner: FakeRunner;
   updates: Updates;
@@ -66,41 +87,66 @@ interface WorldOptions {
   deck?: (deck: Deck) => Deck;
   /** Before the checker is made (an entry already stored). */
   before?: (deck: Deck, root: string) => void;
+  /** Milestone 2: what startDetached answers (default: a pid and an exit that never comes). */
+  processes?: FakeProcesses;
+  coreSoft?: string | null;
+  serverEnv?: Record<string, string>;
+  originDir?: string;
+  /** true: the seam names a symbolic link to the checkout, not the checkout itself. */
+  link?: boolean;
 }
 
+/** The server's environment the tests hand the checker (the updater's). */
+const SERVER_ENV = { PATH: '/usr/bin:/bin', HOME: '/home/you', SKYDECK_TEST_NO_WINDOWS: '1' };
+
 function world(t: TestContext, options: WorldOptions = {}): World {
+  const seamName = options.link === true ? 'link' : 'checkout';
   const d = testDeck(t, {
-    env: (s) => (options.seam === false ? {} : updateSeam(s, join(s.root, 'checkout'))),
+    env: (s) => (options.seam === false ? {} : updateSeam(s, join(s.root, seamName))),
   });
   const root = join(d.sandbox.root, 'checkout');
   mkdirSync(root);
-  const repo = scriptedRepo(root, options.repo);
+  const seam = join(d.sandbox.root, seamName);
+  if (options.link === true) symlinkSync(root, seam);
+  const repo = scriptedRepo(seam, options.repo);
   const runner = scriptedGit(repo);
+  const processes = options.processes ?? fakeProcesses();
   const config = {
     ...d.deck.config,
     window: { ...d.deck.config.window, updateCheck: options.updateCheck ?? 'daily' },
   };
-  const base: Deck = { ...d.deck, config, platform: { ...d.deck.platform, runner } };
+  const base: Deck = { ...d.deck, config, platform: { ...d.deck.platform, runner, processes } };
   const deck = options.deck === undefined ? base : options.deck(base);
   options.before?.(deck, root);
   const told: UpdatePayload[] = [];
   const logs: string[] = [];
+  const restoring = { now: false };
+  const serverStopping = { now: false };
   const updates = createUpdates({
     deck,
     changed: (payload) => told.push(payload),
     log: (line) => logs.push(line),
+    serverEnv: options.serverEnv ?? SERVER_ENV,
+    coreSoft: options.coreSoft ?? null,
+    originDir: () => options.originDir ?? d.sandbox.home,
+    restoreRunning: () => restoring.now,
+    stopping: () => serverStopping.now,
   });
   t.after(() => updates.stop());
   return {
     d,
     deck,
     root,
+    seam,
+    processes,
+    restoring,
+    serverStopping,
     repo,
     runner,
     updates,
     told,
     logs,
-    fetches: () => runner.calls.filter((call) => gitArgs(call, root).includes('fetch')).length,
+    fetches: () => runner.calls.filter((call) => gitArgs(call, seam).includes('fetch')).length,
     stored: () => readCheck(d.deck.store, root),
     setSwitch: (value) => {
       config.window.updateCheck = value;
@@ -780,6 +826,8 @@ describe('a check that fails (review of milestone 1)', () => {
 
     assert.equal(answer.check?.state, 'available');
     assert.deepEqual(w.logs, [
+      // Milestone 2: the start's read of an update's entry meets the same store.
+      'update: the entry of the last update could not be read (Error (ERR_SQLITE_ERROR))',
       'update check: the stored outcome could not be read (Error (ERR_SQLITE_ERROR))',
     ]);
   });
@@ -876,4 +924,562 @@ describe("a stop at the look's last git call (review of milestone 1)", () => {
       assert.equal(w.updates.payload().check, null);
     });
   }
+});
+
+// ---------------------------------------------------------------------------------------------
+// Milestone 2: Update now (S2 16.5 "Update now")
+
+/** An `exited` the test settles itself: the updater ending while the server still runs. */
+function updater(pid = 7001): {
+  detached: Detached;
+  end(code: number | null, signal?: string | null): void;
+} {
+  const exit = deferred<{ code: number | null; signal: string | null }>();
+  return {
+    detached: { pid, exited: exit.promise },
+    end: (code, signal = null) => {
+      exit.resolve({ code, signal });
+    },
+  };
+}
+
+const LOG_LINE = /^[0-9T:.-]+Z update to fedcba9 started from the window\n$/;
+
+describe('Update now: the start of the updater', () => {
+  test("without a core limit: the seam checkout's launcher, `update --from-window <to>`, the server's environment key for key, the origin as working directory, both outputs to update.log", async (t) => {
+    const w = world(t);
+    await w.updates.check();
+
+    const answer = await w.updates.apply(NEW);
+
+    assert.equal(answer.ok, true);
+    const log = join(w.d.places.stateDir, 'update.log');
+    assert.deepEqual(w.processes.calls, [
+      {
+        command: join(w.seam, 'bin', 'skydeck'),
+        args: ['update', '--from-window', NEW],
+        options: { cwd: w.d.sandbox.home, env: SERVER_ENV, stdoutTo: log, stderrTo: log },
+      },
+    ]);
+    assert.notEqual(join(w.seam, 'bin', 'skydeck'), join(process.cwd(), 'bin', 'skydeck'));
+    assert.match(readFileSync(log, 'utf8'), LOG_LINE);
+    assert.deepEqual(answer.update.applying, { to: NEW, sinceNs: String(T0) });
+    assert.equal(answer.update.log, log);
+  });
+
+  test('with a core limit: through python3 (-I -S -c, the program, the limit, LC_CTYPE set or not), then the launcher', async (t) => {
+    const envs: Record<string, string>[] = [SERVER_ENV, { ...SERVER_ENV, LC_CTYPE: 'cs_CZ.UTF-8' }];
+    for (const env of envs) {
+      const w = world(t, { coreSoft: 'unlimited', serverEnv: env });
+      await w.updates.check();
+      assert.equal((await w.updates.apply(NEW)).ok, true);
+      const [call] = w.processes.calls;
+      assert.equal(call?.command, PYTHON3, "no SKYDECK_TEST_PYTHON3 here: the launcher's python3");
+      assert.deepEqual(call?.args, [
+        '-I',
+        '-S',
+        '-c',
+        CORE_LIMIT_PROGRAM,
+        'unlimited',
+        env.LC_CTYPE === undefined ? '' : '1',
+        env.LC_CTYPE ?? '',
+        join(w.seam, 'bin', 'skydeck'),
+        'update',
+        '--from-window',
+        NEW,
+      ]);
+      assert.deepEqual(call?.options.env, env);
+    }
+  });
+
+  test('in a marked sandbox SKYDECK_TEST_PYTHON3 replaces /usr/bin/python3', async (t) => {
+    const w = world(t, {
+      coreSoft: '0',
+      deck: (deck) => ({
+        ...deck,
+        platform: {
+          ...deck.platform,
+          env: { ...deck.platform.env, SKYDECK_TEST_PYTHON3: '/sandbox/python3' },
+        },
+      }),
+    });
+    await w.updates.check();
+    await w.updates.apply(NEW);
+    assert.equal(w.processes.calls[0]?.command, '/sandbox/python3');
+  });
+
+  test('the working directory is `/` when the origin is no directory any more', async (t) => {
+    const w = world(t, { originDir: '/no/such/dir' });
+    await w.updates.check();
+    await w.updates.apply(NEW);
+    assert.equal(w.processes.calls[0]?.options.cwd, '/');
+  });
+
+  test('in a marked sandbox without the seam variable nothing is started, and no git runs', async (t) => {
+    const w = world(t, { seam: false });
+    const answer = await w.updates.apply(NEW);
+    assert.deepEqual(answer, {
+      ok: false,
+      error: APPLY_REFUSED.notListed,
+      update: w.updates.payload(),
+    });
+    assert.deepEqual(w.processes.calls, []);
+    assert.deepEqual(w.runner.calls, []);
+  });
+
+  test('`applying` is written (with the root) and sent to the pages before the start', async (t) => {
+    let atStart: { entry: RunRecord | null; told: UpdatePayload | undefined } | null = null;
+    let w: World | null = null;
+    const processes = fakeProcesses(() => {
+      if (w !== null) {
+        atStart = { entry: readRunEntry(w.d.deck.store), told: w.told.at(-1) };
+      }
+      return updater().detached;
+    });
+    w = world(t, { processes });
+    await w.updates.check();
+
+    await w.updates.apply(NEW);
+
+    assert.deepEqual(atStart, {
+      entry: { v: 1, root: w.root, state: 'applying', to: NEW, atNs: String(T0) },
+      told: { ...w.updates.payload(), applying: { to: NEW, sinceNs: String(T0) } },
+    });
+  });
+});
+
+describe('Update now: refused, nothing started', () => {
+  test('each refusal of S2 16.5 with its words', async (t) => {
+    // The server is stopping.
+    const stopping = world(t);
+    await stopping.updates.check();
+    stopping.serverStopping.now = true;
+    const stopAnswer = await stopping.updates.apply(NEW);
+    assert.equal(stopAnswer.ok ? '' : stopAnswer.error, APPLY_REFUSED.stopping);
+    // A restore runs.
+    const restoring = world(t);
+    await restoring.updates.check();
+    restoring.restoring.now = true;
+    const restoreAnswer = await restoring.updates.apply(NEW);
+    assert.equal(restoreAnswer.ok ? '' : restoreAnswer.error, APPLY_REFUSED.restoring);
+    // A check runs.
+    const fetch = deferred<Partial<RunResult>>();
+    const checking = world(t, { repo: { quietFetch: () => fetch.promise } });
+    const running = checking.updates.check();
+    await flush();
+    const checkAnswer = await checking.updates.apply(NEW);
+    assert.equal(checkAnswer.ok ? '' : checkAnswer.error, APPLY_REFUSED.checking);
+    fetch.resolve({});
+    await running;
+    // Another commit than the look names.
+    const other = world(t);
+    await other.updates.check();
+    const otherAnswer = await other.updates.apply('e'.repeat(40));
+    assert.equal(otherAnswer.ok ? '' : otherAnswer.error, APPLY_REFUSED.notListed);
+    // Up to date now (a look made now says so).
+    const current = world(t, { repo: { fetched: OLD } });
+    const currentAnswer = await current.updates.apply(NEW);
+    assert.equal(currentAnswer.ok ? '' : currentAnswer.error, APPLY_REFUSED.notListed);
+    for (const w of [stopping, restoring, checking, other, current]) {
+      assert.deepEqual(w.processes.calls, []);
+      assert.equal(w.d.deck.store.getKv(RUN_KEY), null);
+    }
+  });
+
+  test("blocked: the look's line and what to do; the new state goes to every page", async (t) => {
+    const w = world(t, { repo: { status: ' M a.txt\0' } });
+    const told = w.told.length;
+
+    const answer = await w.updates.apply(NEW);
+
+    assert.deepEqual(answer, {
+      ok: false,
+      error:
+        'this checkout has changes that are not committed (1 file, the first: a.txt); commit or undo them first; open the dialog again once that is set right',
+      update: w.updates.payload(),
+    });
+    assert.ok(w.told.length > told, 'the look told every page');
+    assert.equal(w.told.at(-1)?.check?.state, 'available');
+    assert.equal(w.fetches(), 0, 'the look made now uses no network');
+    assert.deepEqual(w.processes.calls, []);
+  });
+
+  test("a second apply while one runs: 'an update is already running', also while the first is still starting", async (t) => {
+    const w = world(t);
+    await w.updates.check();
+    const first = w.updates.apply(NEW); // its look still runs
+    const second = await w.updates.apply(NEW);
+    assert.deepEqual(second.ok ? '' : second.error, APPLY_REFUSED.running);
+    assert.equal((await first).ok, true);
+    const third = await w.updates.apply(NEW);
+    assert.deepEqual(third.ok ? '' : third.error, APPLY_REFUSED.running);
+    assert.equal(w.processes.calls.length, 1);
+  });
+
+  test('a start that rejects: the entry removed, `applying` taken back, the words with the kind', async (t) => {
+    const w = world(t, {
+      processes: fakeProcesses(() => {
+        throw Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' });
+      }),
+    });
+    await w.updates.check();
+
+    const answer = await w.updates.apply(NEW);
+
+    assert.deepEqual(answer, {
+      ok: false,
+      error:
+        'the update could not be started (Error (EAGAIN)); run skydeck update in a terminal of your own',
+      update: w.updates.payload(),
+    });
+    assert.equal(answer.update.applying, null);
+    assert.equal(w.d.deck.store.getKv(RUN_KEY), null);
+    assert.equal(w.told.at(-1)?.applying, null);
+  });
+
+  test('no tick starts a check while an update runs', async (t) => {
+    const w = world(t);
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 1);
+    assert.equal((await w.updates.apply(NEW)).ok, true);
+    w.d.clock.setNs(T0 + CHECK_EVERY_NS * 2n);
+    for (let i = 0; i < 3; i++) w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 1);
+  });
+});
+
+describe('Update now: how it ended', () => {
+  test('the updater ends while the server runs, the entry `failed`: its line is the result, the entry removed, `applying` taken back, a look made', async (t) => {
+    const run = updater();
+    const w = world(t, { processes: fakeProcesses(() => run.detached) });
+    await w.updates.check();
+    await w.updates.apply(NEW);
+    writeRun(w.d.deck.store, {
+      v: 1,
+      root: w.root,
+      state: 'failed',
+      to: NEW,
+      line: "this checkout's git index is locked (/x/.git/index.lock): …; nothing was changed",
+      atNs: String(T0),
+    });
+    const calls = w.runner.calls.length;
+
+    run.end(1);
+    await flush();
+
+    const state = w.updates.payload();
+    assert.deepEqual(state.result, {
+      ok: false,
+      text: "this checkout's git index is locked (/x/.git/index.lock): …; nothing was changed",
+    });
+    assert.equal(state.applying, null);
+    assert.equal(w.d.deck.store.getKv(RUN_KEY), null);
+    assert.ok(w.runner.calls.length > calls, 'a look was made');
+    assert.equal(w.fetches(), 1, 'without the network');
+    assert.deepEqual(w.told.at(-1), state);
+  });
+
+  test("the updater ends with the entry still `applying`: 'ended without saying how', with its exit and the log; the entry removed", async (t) => {
+    const run = updater();
+    const w = world(t, { processes: fakeProcesses(() => run.detached) });
+    await w.updates.check();
+    await w.updates.apply(NEW);
+
+    run.end(3);
+    await flush();
+
+    const log = join(w.d.places.stateDir, 'update.log');
+    assert.deepEqual(w.updates.payload().result, {
+      ok: false,
+      text: `the update ended without saying how (exit 3); see ${log}`,
+    });
+    assert.equal(w.updates.payload().applying, null);
+    assert.equal(w.d.deck.store.getKv(RUN_KEY), null);
+  });
+
+  test("the updater ends while the entry names another root, or is gone: 'ended without saying how', and that entry is left as it is", async (t) => {
+    for (const other of [true, false]) {
+      const run = updater();
+      const w = world(t, { processes: fakeProcesses(() => run.detached) });
+      await w.updates.check();
+      await w.updates.apply(NEW);
+      const theirs: RunRecord = { v: 1, root: '/elsewhere', state: 'applied', to: NEW, atNs: '1' };
+      if (other) writeRun(w.d.deck.store, theirs);
+      else clearRun(w.d.deck.store);
+
+      run.end(null, 'SIGKILL');
+      await flush();
+
+      const log = join(w.d.places.stateDir, 'update.log');
+      assert.deepEqual(w.updates.payload().result, {
+        ok: false,
+        text: `the update ended without saying how (signal SIGKILL); see ${log}`,
+      });
+      assert.deepEqual(readRunEntry(w.d.deck.store), other ? theirs : null);
+    }
+  });
+
+  test('a server that starts with the entry `applied` or `failed`: the result, the entry removed', async (t) => {
+    for (const [entry, result] of [
+      [
+        { v: 1, state: 'applied', to: NEW, atNs: '1' },
+        { ok: true, text: 'updated to fedcba9' },
+      ],
+      [
+        {
+          v: 1,
+          state: 'failed',
+          to: NEW,
+          line: 'the update could not be applied: x; the checkout is as it was',
+          atNs: '1',
+        },
+        { ok: false, text: 'the update could not be applied: x; the checkout is as it was' },
+      ],
+    ] as const) {
+      const w = world(t, {
+        before: (deck, root) => {
+          writeRun(deck.store, { ...entry, root } as RunRecord);
+        },
+      });
+      assert.deepEqual(w.updates.payload().result, result);
+      assert.equal(w.d.deck.store.getKv(RUN_KEY), null);
+    }
+  });
+
+  test("a server that starts with the entry still `applying` (an updater that could not record, also after an update that worked): 'did not record how it ended', not ok, the entry removed", async (t) => {
+    const w = world(t, {
+      before: (deck, root) => {
+        writeRun(deck.store, {
+          v: 1,
+          root,
+          state: 'applying',
+          to: NEW,
+          atNs: '1794474000000000000',
+        });
+      },
+    });
+    const log = join(w.d.places.stateDir, 'update.log');
+    assert.deepEqual(w.updates.payload().result, {
+      ok: false,
+      text: `an update started from the window at 2026-11-12T09:00:00Z did not record how it ended; its log says: ${log}`,
+    });
+    assert.equal(w.d.deck.store.getKv(RUN_KEY), null);
+  });
+
+  test('a run entry of another root at the start: no result, the entry left as it is', async (t) => {
+    const theirs: RunRecord = { v: 1, root: '/elsewhere', state: 'applied', to: NEW, atNs: '1' };
+    const w = world(t, {
+      before: (deck) => {
+        writeRun(deck.store, theirs);
+      },
+    });
+    assert.equal(w.updates.payload().result, null);
+    assert.deepEqual(readRunEntry(w.d.deck.store), theirs);
+  });
+
+  test("the seam through a symbolic link: the `applying` entry's root is the real path, and the updater's entry for that checkout is this server's own", async (t) => {
+    const run = updater();
+    const w = world(t, { link: true, processes: fakeProcesses(() => run.detached) });
+    await w.updates.check();
+    await w.updates.apply(NEW);
+    assert.notEqual(w.seam, w.root);
+    assert.equal(readRunEntry(w.d.deck.store)?.root, w.root);
+    assert.equal(w.processes.calls[0]?.command, join(w.seam, 'bin', 'skydeck'));
+    // What the updater writes: checkoutRoot of the app root it resolved.
+    writeRun(w.d.deck.store, {
+      v: 1,
+      root: checkoutRoot(w.deck.platform.files, w.seam),
+      state: 'failed',
+      to: NEW,
+      line: 'a line of the updater',
+      atNs: '2',
+    });
+
+    run.end(1);
+    await flush();
+
+    assert.deepEqual(w.updates.payload().result, { ok: false, text: 'a line of the updater' });
+  });
+
+  test('seen() clears the result and tells every page', async (t) => {
+    const w = world(t, {
+      before: (deck, root) => {
+        writeRun(deck.store, { v: 1, root, state: 'applied', to: NEW, atNs: '1' });
+      },
+    });
+    assert.notEqual(w.updates.payload().result, null);
+    const told = w.told.length;
+    const answer = w.updates.seen();
+    assert.equal(answer.result, null);
+    assert.equal(w.told.length, told + 1);
+    assert.equal(w.told.at(-1)?.result, null);
+  });
+});
+
+describe("Update now: the handler of the updater's end cannot end the server", () => {
+  test("its `exited` settling while the store's getKv throws the busy error: one log line, `applying` taken back, a result naming the log, the pages told, no rejection", async (t) => {
+    const seen = rejections(t);
+    const busy = Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR' });
+    let failing = false;
+    const run = updater();
+    const w = world(t, {
+      processes: fakeProcesses(() => run.detached),
+      deck: (deck) =>
+        deckWith(deck, {
+          store: {
+            getKv: (key) => {
+              if (failing) throw busy;
+              return deck.store.getKv(key);
+            },
+          },
+        }),
+    });
+    await w.updates.check();
+    await w.updates.apply(NEW);
+    failing = true;
+    const logs = w.logs.length;
+
+    run.end(1);
+    await flush();
+
+    const log = join(w.d.places.stateDir, 'update.log');
+    assert.deepEqual(w.logs.slice(logs, logs + 1), [
+      'update: the entry of the update could not be read (Error (ERR_SQLITE_ERROR))',
+    ]);
+    assert.equal(w.updates.payload().applying, null);
+    assert.deepEqual(w.updates.payload().result, {
+      ok: false,
+      text: `the update ended without saying how (exit 1); see ${log}`,
+    });
+    assert.equal(w.told.at(-1)?.applying, null);
+    assert.deepEqual(seen, []);
+  });
+
+  test('settling after stop() with the store closed: nothing read, written, sent or thrown', async (t) => {
+    const seen = rejections(t);
+    const run = updater();
+    const w = world(t, { processes: fakeProcesses(() => run.detached) });
+    await w.updates.check();
+    await w.updates.apply(NEW);
+    await w.updates.stop();
+    w.d.deck.store.close();
+    const told = w.told.length;
+    const logs = [...w.logs];
+
+    run.end(0);
+    await flush();
+
+    assert.equal(w.told.length, told);
+    assert.deepEqual(w.logs, logs);
+    assert.deepEqual(seen, []);
+  });
+});
+
+describe('the core-limit program with the real python3', () => {
+  /** A script that prints its core limits and its environment, then writes a marker. */
+  function probe(dir: string): { script: string; marker: string } {
+    const script = join(dir, 'probe.sh');
+    const marker = join(dir, 'ran');
+    writeFileSync(
+      script,
+      `#!/bin/sh\n/usr/bin/grep '^Max core file size' /proc/self/limits\n/usr/bin/env\n: > '${marker}'\n`,
+      { mode: 0o755 },
+    );
+    return { script, marker };
+  }
+
+  /**
+   * The program run as the updater's start runs it, from a python3 whose core limits are
+   * (soft, hard) first, as the server's are: its output, status and whether the probe ran.
+   */
+  function runProgram(
+    t: TestContext,
+    limits: { soft: number; hard: number | null },
+    args: { coreSoft: string; ctype: string | null },
+    env: Record<string, string | undefined>,
+  ): { status: number | null; out: string; err: string; ran: boolean } {
+    const s = sandbox(t);
+    const { script, marker } = probe(s.root);
+    const setFirst = `import os, resource, sys
+hard = ${limits.hard === null ? 'resource.getrlimit(resource.RLIMIT_CORE)[1]' : String(limits.hard)}
+resource.setrlimit(resource.RLIMIT_CORE, (${limits.soft}, hard))
+os.execv(sys.argv[1], sys.argv[1:])`;
+    const result = spawnSync(
+      PYTHON3,
+      [
+        '-c',
+        setFirst,
+        PYTHON3,
+        '-I',
+        '-S',
+        '-c',
+        CORE_LIMIT_PROGRAM,
+        args.coreSoft,
+        args.ctype === null ? '' : '1',
+        args.ctype ?? '',
+        script,
+        'update',
+        '--from-window',
+        NEW,
+      ],
+      { env: s.env(env), encoding: 'utf8' },
+    );
+    return {
+      status: result.status,
+      out: result.stdout,
+      err: result.stderr,
+      ran: existsSync(marker),
+    };
+  }
+
+  /** The soft and hard core limits the probe printed. */
+  function limitsOf(out: string): string[] {
+    return (/^Max core file size\s+(\S+)\s+(\S+)/m.exec(out) ?? []).slice(1, 3);
+  }
+
+  test("a soft limit of 1 is set back to the given one, the hard one kept; the command is exec'd", (t) => {
+    const r = runProgram(t, { soft: 1, hard: 1_000_000 }, { coreSoft: '4096', ctype: null }, {});
+    assert.equal(r.status, 0, r.err);
+    assert.ok(r.ran);
+    assert.deepEqual(limitsOf(r.out), ['4096', '1000000']);
+  });
+
+  test('a limit above the hard one is clamped to it; `unlimited` too', (t) => {
+    for (const coreSoft of ['5000000', 'unlimited']) {
+      const r = runProgram(t, { soft: 1, hard: 1_000_000 }, { coreSoft, ctype: null }, {});
+      assert.equal(r.status, 0, r.err);
+      assert.deepEqual(limitsOf(r.out), ['1000000', '1000000'], coreSoft);
+    }
+  });
+
+  test("LC_CTYPE as given: unset stays unset, a value stays that value (python3's own coercion undone)", (t) => {
+    const unset = runProgram(
+      t,
+      { soft: 1, hard: null },
+      { coreSoft: '0', ctype: null },
+      { LC_ALL: undefined, LANG: undefined, LC_CTYPE: undefined },
+    );
+    assert.equal(unset.status, 0, unset.err);
+    assert.ok(!/^LC_CTYPE=/m.test(unset.out), unset.out);
+    const posix = runProgram(
+      t,
+      { soft: 1, hard: null },
+      { coreSoft: '0', ctype: 'POSIX' },
+      { LC_ALL: undefined, LANG: undefined, LC_CTYPE: 'POSIX' },
+    );
+    assert.equal(posix.status, 0, posix.err);
+    assert.match(posix.out, /^LC_CTYPE=POSIX$/m);
+  });
+
+  test('a value it cannot set: exit 1, one line, nothing run', (t) => {
+    const r = runProgram(t, { soft: 1, hard: null }, { coreSoft: 'not-a-limit', ctype: null }, {});
+    assert.equal(r.status, 1);
+    assert.equal(r.ran, false);
+    assert.match(
+      r.err,
+      /^skydeck: the soft core limit could not be set to not-a-limit \(.+\); the update was not run\n$/,
+    );
+  });
 });

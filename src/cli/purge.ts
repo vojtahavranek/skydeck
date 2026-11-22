@@ -85,9 +85,10 @@ export const DATA_DIR: Spec = [
 
 /**
  * `<stateDir>`: the spool (the hook's files and temporaries, bad/), locks/ (created, unused),
- * hook.log, the notes being edited and their temporaries, the window's logs, their rotations and
- * the rotations' temporaries (S2 4.2), and the runtime directory of this store when the rule put it
- * there (`run-<store id>`, S2 4.2).
+ * hook.log, the notes being edited and their temporaries, the window's logs — server.log,
+ * keepers.log and update.log, the log of an update started from the window (F38) —, their
+ * rotations and the rotations' temporaries (S2 4.2), and the runtime directory of this store when
+ * the rule put it there (`run-<store id>`, S2 4.2).
  */
 export function stateDirSpec(storeId: string): Spec {
   return [
@@ -108,8 +109,8 @@ export function stateDirSpec(storeId: string): Spec {
     { name: 'hook.log', kinds: ['file'] },
     { name: new RegExp(`^note-${SESSION_ID}\\.md$`), kinds: ['file'] },
     { name: new RegExp(`^\\.note-${SESSION_ID}\\.md\\.${HEX12}\\.tmp$`), kinds: ['file'] },
-    { name: /^(?:server|keepers)\.log(?:\.1)?$/, kinds: ['file'] },
-    { name: /^\.(?:server|keepers)\.log\.1\.tmp$/, kinds: ['file'] },
+    { name: /^(?:server|keepers|update)\.log(?:\.1)?$/, kinds: ['file'] },
+    { name: /^\.(?:server|keepers|update)\.log\.1\.tmp$/, kinds: ['file'] },
     { name: `run-${storeId}`, kinds: ['dir'], inside: RUNTIME_DIR },
   ];
 }

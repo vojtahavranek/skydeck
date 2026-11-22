@@ -2,8 +2,8 @@
 // a small throwaway checkout inside the sandbox (test/helpers/git-checkout.ts), named to the server
 // by the seam variable (updateSeam), its only remote a bare repository beside it (or an ssh
 // address whose ssh is a sandbox stub that connects nowhere). The check at the start, Check now,
-// the dialog's look, a known update kept through a fetch that failed, and the server's stop during
-// a check. In the test process (A19) on realTestPlatform; never a real home or the network.
+// the dialog's look, a known update kept through a fetch that failed, the server's stop during a
+// check, and (milestone 2) Update now with a startDetached that records and never runs anything. In the test process (A19) on realTestPlatform; never a real home or the network.
 import assert from 'node:assert/strict';
 import {
   chmodSync,
@@ -18,11 +18,14 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
+import { NS_PER_MINUTE } from '../../src/platform/time.ts';
+import type { Platform } from '../../src/platform/types.ts';
 import type { UpdatePayload } from '../../src/window/protocol.ts';
 import { gitCheckout, gitTestEnv } from '../helpers/git-checkout.ts';
 import type { GitCheckout } from '../helpers/git-checkout.ts';
 import { sleep, until } from '../helpers/keeper.ts';
 import { updateSeam } from '../helpers/update.ts';
+import { earlierId, restoreSandbox } from '../helpers/window-restore.ts';
 import { connectTestPage, serverSandbox, WAIT_MS } from '../helpers/window.ts';
 import type { ServerSandbox, TestPage, TestServer } from '../helpers/window.ts';
 
@@ -280,5 +283,141 @@ describe("the server's stop during a check", () => {
     assert.ok(took < 10_000, `the stop took ${took} ms`);
     assert.deepEqual(locks(join(k.c.root, '.git')), []);
     assert.equal(k.d.deck.store.getKv('window_update_check'), null);
+  });
+});
+
+describe('Update now on a running server (milestone 2)', () => {
+  /**
+   * A startDetached that records each start of the updater (`update --from-window`) and never
+   * ends it: no updater is ever run. Every other start (a keeper) is the platform's own.
+   */
+  function recording(): {
+    calls: { command: string; args: readonly string[] }[];
+    platform: (p: Platform) => Platform;
+  } {
+    const calls: { command: string; args: readonly string[] }[] = [];
+    let pid = 7000;
+    return {
+      calls,
+      platform: (p) => ({
+        ...p,
+        processes: {
+          ...p.processes,
+          startDetached(command, args, options) {
+            if (!args.includes('--from-window')) {
+              return p.processes.startDetached(command, args, options);
+            }
+            calls.push({ command, args });
+            pid += 1;
+            return Promise.resolve({ pid, exited: new Promise(() => {}) });
+          },
+        },
+      }),
+    };
+  }
+
+  test('two pages: the first update-apply answers ok and both pages get `applying`; the second page is refused; nothing real is started', async (t) => {
+    const k = checked(t, 'off');
+    const started = recording();
+    const server = await k.d.start({
+      platform: (p) =>
+        started.platform({
+          ...p,
+          env: { ...p.env, ...gitTestEnv(k.d.s), ...updateSeam(k.d.s, k.c) },
+        }),
+    });
+    const a = await connectTestPage(t, k.d, server.server);
+    const b = await connectTestPage(t, k.d, server.server);
+    const pushed = k.c.push('a commit to apply', { 'README.md': 'two\n' });
+    const found = await a.act({ kind: 'update-check' }, WAIT_MS);
+    assert.equal(found.update?.check?.state, 'available', JSON.stringify(found));
+
+    const first = await a.act({ kind: 'update-apply', to: pushed }, WAIT_MS);
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.equal(first.update?.applying?.to, pushed);
+    for (const page of [a, b]) {
+      await updateWhere(page, (u) => u.applying?.to === pushed, 'told applying');
+    }
+    const second = await b.act({ kind: 'update-apply', to: pushed }, WAIT_MS);
+    assert.deepEqual(
+      { ok: second.ok, error: second.error },
+      { ok: false, error: 'an update is already running' },
+    );
+    assert.deepEqual(started.calls, [
+      { command: join(k.c.root, 'bin', 'skydeck'), args: ['update', '--from-window', pushed] },
+    ]);
+    const entry = k.d.deck.store.getKv('window_update_run');
+    assert.match(entry ?? '', /"state":"applying"/);
+    assert.match(
+      readFileSync(join(k.d.deck.places.stateDir, 'update.log'), 'utf8'),
+      / update to [0-9a-f]{7} started from the window\n$/,
+    );
+  });
+
+  test('another commit id, a blocked checkout: refused, nothing started, the server keeps running', async (t) => {
+    const k = checked(t, 'off');
+    const started = recording();
+    const server = await k.d.start({
+      platform: (p) =>
+        started.platform({
+          ...p,
+          env: { ...p.env, ...gitTestEnv(k.d.s), ...updateSeam(k.d.s, k.c) },
+        }),
+    });
+    const page = await connectTestPage(t, k.d, server.server);
+    const pushed = k.c.push('a commit to apply', { 'README.md': 'two\n' });
+    await page.act({ kind: 'update-check' }, WAIT_MS);
+
+    const other = await page.act({ kind: 'update-apply', to: 'e'.repeat(40) }, WAIT_MS);
+    assert.deepEqual(
+      { ok: other.ok, error: other.error },
+      {
+        ok: false,
+        error: "the window's last check does not name that commit; open the dialog again",
+      },
+    );
+    writeFileSync(join(k.c.root, 'README.md'), 'changed by hand\n');
+    const blocked = await page.act({ kind: 'update-apply', to: pushed }, WAIT_MS);
+    assert.deepEqual(
+      { ok: blocked.ok, error: blocked.error },
+      {
+        ok: false,
+        error:
+          'this checkout has changes that are not committed (1 file, the first: README.md); commit or undo them first; open the dialog again once that is set right',
+      },
+    );
+    assert.deepEqual(started.calls, []);
+    assert.equal(k.d.deck.store.getKv('window_update_run'), null);
+  });
+
+  test('while a restore runs: refused with its words, nothing started', async (t) => {
+    const r = restoreSandbox(t, { config: { restoreStartTimeoutSeconds: 120 } });
+    const c = gitCheckout(r.d.s);
+    const baseNs = r.d.platform.clock.nowNs() - 90n * NS_PER_MINUTE;
+    r.earlierBoot([{ sessionId: earlierId(1), startNs: baseNs }]);
+    const started = recording();
+    const server = await r.d.start({
+      platform: (p) =>
+        started.platform({
+          ...p,
+          env: { ...p.env, ...gitTestEnv(r.d.s), ...updateSeam(r.d.s, c) },
+        }),
+    });
+    const page = await connectTestPage(t, r.d, server.server);
+    const pushed = c.push('a commit to apply', { 'README.md': 'two\n' });
+    await page.act({ kind: 'update-check' }, WAIT_MS);
+    await page.list((l) => l.banner !== null, 'the banner');
+    const restore = await page.act({ kind: 'restore', sessionIds: [earlierId(1)] });
+    assert.equal(restore.ok, true, JSON.stringify(restore));
+    await until(() => r.waiting(earlierId(1)), 'the restore at its gate', WAIT_MS);
+
+    const refused = await page.act({ kind: 'update-apply', to: pushed }, WAIT_MS);
+
+    assert.deepEqual(
+      { ok: refused.ok, error: refused.error },
+      { ok: false, error: 'a restore is running; update once it has finished' },
+    );
+    assert.deepEqual(started.calls, []);
+    r.open(earlierId(1));
   });
 });

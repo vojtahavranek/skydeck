@@ -35,6 +35,9 @@ function payload(over: Partial<UpdatePayload> = {}): UpdatePayload {
     checkedAtNs: ago(90n),
     fetchedAtNs: ago(90n),
     failure: null,
+    applying: null,
+    log: '/state/update.log',
+    result: null,
     ...over,
   };
 }

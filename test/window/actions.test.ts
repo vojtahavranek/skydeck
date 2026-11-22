@@ -1847,14 +1847,18 @@ test("resume is refused while a lost terminal's program may still run (task 82):
   assert.deepEqual(h.hub.closed, ['aaaaaaaaaaa1']);
 });
 
-describe("F38's update-check and update-look (S2 16.5)", () => {
+describe("F38's update acts (S2 16.5)", () => {
   const STATE: UpdatePayload = {
     checkedAtNs: '1',
     checking: false,
     check: { state: 'current', summary: 'skydeck is up to date (main at 0123456, as origin/main)' },
     fetchedAtNs: '1',
     failure: null,
+    applying: null,
+    log: '/state/update.log',
+    result: null,
   };
+  const TO = 'f'.repeat(40);
 
   test("each act answers ok with the checker's state as `update`", async (t) => {
     const d = testDeck(t);
@@ -1879,15 +1883,45 @@ describe("F38's update-check and update-look (S2 16.5)", () => {
           calls.push('look');
           return Promise.resolve(STATE);
         },
+        apply: (to) => {
+          calls.push(`apply ${to}`);
+          return Promise.resolve(
+            to === TO
+              ? { ok: true, update: { ...STATE, applying: { to, sinceNs: '3' } } }
+              : { ok: false, error: 'an update is already running', update: STATE },
+          );
+        },
+        seen: () => {
+          calls.push('seen');
+          return STATE;
+        },
       },
     });
 
     const checked = await actions.act(PAGE, { t: 'act', id: 41, kind: 'update-check' });
     const looked = await actions.act(PAGE, { t: 'act', id: 42, kind: 'update-look' });
+    const applied = await actions.act(PAGE, { t: 'act', id: 43, kind: 'update-apply', to: TO });
+    const other = 'e'.repeat(40);
+    const refusedApply = await actions.act(PAGE, {
+      t: 'act',
+      id: 44,
+      kind: 'update-apply',
+      to: other,
+    });
+    const seen = await actions.act(PAGE, { t: 'act', id: 45, kind: 'update-seen' });
 
     assert.deepEqual(checked, { ...ok(41), update: { ...STATE, fetchedAtNs: '2' } });
     assert.deepEqual(looked, { ...ok(42), update: STATE });
-    assert.deepEqual(calls, ['check', 'look']);
+    assert.deepEqual(applied, {
+      ...ok(43),
+      update: { ...STATE, applying: { to: TO, sinceNs: '3' } },
+    });
+    assert.deepEqual(refusedApply, {
+      ...refused(44, 'an update is already running'),
+      update: STATE,
+    });
+    assert.deepEqual(seen, { ...ok(45), update: STATE });
+    assert.deepEqual(calls, ['check', 'look', `apply ${TO}`, `apply ${other}`, 'seen']);
     assert.deepEqual(h.told, []);
     assert.deepEqual(h.logs, []);
   });
@@ -1895,12 +1929,14 @@ describe("F38's update-check and update-look (S2 16.5)", () => {
   test("without the dep each answers 'skydeck cannot do that action'", async (t) => {
     const d = testDeck(t);
     const h = harness(d);
-    for (const kind of ['update-check', 'update-look'] as const) {
-      assert.deepEqual(
-        await h.act({ t: 'act', id: 43, kind }),
-        refused(43, 'skydeck cannot do that action'),
-        kind,
-      );
+    const acts: ActMessage[] = [
+      { t: 'act', id: 43, kind: 'update-check' },
+      { t: 'act', id: 43, kind: 'update-look' },
+      { t: 'act', id: 43, kind: 'update-apply', to: TO },
+      { t: 'act', id: 43, kind: 'update-seen' },
+    ];
+    for (const act of acts) {
+      assert.deepEqual(await h.act(act), refused(43, 'skydeck cannot do that action'), act.kind);
     }
   });
 });

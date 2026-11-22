@@ -573,6 +573,12 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         pages.update(payload);
       },
       log,
+      // Milestone 2: what the updater is started with, and what refuses an apply.
+      serverEnv: environment.env,
+      coreSoft: environment.coreSoft,
+      originDir: () => envOrigin.dir,
+      restoreRunning: () => restorer.running(),
+      stopping: () => stopBegun,
     });
     // F37 (design 7.8): the slots each session last had in this boot, a restore's order.
     const slotMemory = createSlotMemory({ store: deck.store, bootId: own.bootId, log: quietLog });

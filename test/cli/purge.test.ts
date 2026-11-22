@@ -96,6 +96,10 @@ const EVERYTHING: Record<string, { spec: Spec; entries: Record<string, Maker> }>
       'keepers.log': file('keepers.log'),
       'keepers.log.1': file('keepers.log.1'),
       '.keepers.log.1.tmp': file('.keepers.log.1.tmp'),
+      // F38: the log of an update started from the window, its rotation and its temporary.
+      'update.log': file('update.log'),
+      'update.log.1': file('update.log.1'),
+      '.update.log.1.tmp': file('.update.log.1.tmp'),
       'run-<store id>/server.json': file(`run-${STORE_ID}/server.json`),
       'run-<store id>/terms/<id>.sock': socket(`run-${STORE_ID}/terms/aaaaaaaaaaaa.sock`),
     },
@@ -167,6 +171,32 @@ describe('purgeDir: every entry of each list is removed, with the directory', ()
       }
     });
   }
+});
+
+describe("purgeDir: the update's log (F38)", () => {
+  test("update.log, update.log.1 and .update.log.1.tmp go as the server's logs do; update.log.2 is not skydeck's: left alone", (t) => {
+    const { platform, root } = platformOf(t);
+    const dir = join(root, 'state');
+    mkdirSync(dir);
+    for (const name of ['update.log', 'update.log.1', '.update.log.1.tmp']) {
+      writeFileSync(join(dir, name), '');
+    }
+    writeFileSync(join(dir, 'update.log.2'), '');
+
+    assert.deepEqual(purgeDir(platform, dir, stateDirSpec(STORE_ID)), {
+      kind: 'left',
+      why: 'holds update.log.2, which skydeck did not write',
+    });
+    assert.ok(existsSync(join(dir, 'update.log.2')));
+
+    const { platform: again, root: other } = platformOf(t);
+    const clean = join(other, 'state');
+    mkdirSync(clean);
+    for (const name of ['update.log', 'update.log.1', '.update.log.1.tmp']) {
+      writeFileSync(join(clean, name), '');
+    }
+    assert.deepEqual(purgeDir(again, clean, stateDirSpec(STORE_ID)), { kind: 'removed' });
+  });
 });
 
 describe('purgeDir: a link to a directory is never followed', () => {

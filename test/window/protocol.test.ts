@@ -1477,7 +1477,7 @@ describe("parsePageMessage: F36's acts (S2 12.13)", () => {
 });
 
 describe("parsePageMessage: F38's acts (S2 16.5)", () => {
-  for (const kind of ['update-check', 'update-look'] as const) {
+  for (const kind of ['update-check', 'update-look', 'update-seen'] as const) {
     const message: PageMessage = { t: 'act', id: 7, kind };
     test(`act ${kind} → ok and equal`, () => {
       assert.deepEqual(parsePageMessage(JSON.stringify(message)), { ok: true, value: message });
@@ -1492,6 +1492,24 @@ describe("parsePageMessage: F38's acts (S2 16.5)", () => {
     });
   }
 
+  test('act update-apply with a full commit id (40 or 64 lower-case hex digits) → ok and equal', () => {
+    for (const to of ['f'.repeat(40), '0123456789abcdef'.repeat(4)]) {
+      const message: PageMessage = { t: 'act', id: 7, kind: 'update-apply', to };
+      assert.deepEqual(parsePageMessage(JSON.stringify(message)), { ok: true, value: message });
+    }
+  });
+
+  test('act update-apply: no `to`, one that is not a full id, or an extra field → refused (no remote, path or program travels)', () => {
+    const message = { t: 'act', id: 7, kind: 'update-apply', to: 'f'.repeat(40) };
+    for (const to of ['fffffff', 'F'.repeat(40), 'f'.repeat(41), 'f'.repeat(63), '', 1, null]) {
+      refused(page({ ...message, to }));
+    }
+    refused(page({ t: 'act', id: 7, kind: 'update-apply' }));
+    refused(page({ ...message, [MARKER]: 1 }));
+    refused(page({ ...message, remote: 'origin' }));
+    refused(page({ ...message, path: '/srv/skydeck' }));
+  });
+
   test('the update message and the result carrying it compile, and travel as JSON', () => {
     const update: UpdatePayload = {
       checkedAtNs: '1794474000000000000',
@@ -1505,6 +1523,9 @@ describe("parsePageMessage: F38's acts (S2 16.5)", () => {
       },
       fetchedAtNs: '1794474000000000000',
       failure: { atNs: '1794474000000000001', line: 'git fetch from origin failed: x' },
+      applying: { to: 'f'.repeat(40), sinceNs: '1794474000000000002' },
+      log: '/home/you/.local/state/skydeck/update.log',
+      result: { ok: true, text: 'updated to fffffff' },
     };
     const messages: ServerMessage[] = [
       { t: 'update', update } satisfies UpdateMessage,

@@ -164,7 +164,10 @@ export interface ResizeMessage {
  *  F38 (S2 16.5): `update-check` is Check now (a check for a newer skydeck, with the network,
  *  whatever the switch says; answered when it has ended), `update-look` the dialog's look without
  *  the network. Neither carries a field: the checkout, its remote and the program are the
- *  server's. The result's `update` is the state.
+ *  server's. The result's `update` is the state. Milestone 2: `update-apply` is Update now for
+ *  the commit `to` (a full id) the dialog listed — compared with what the server's own look
+ *  names, never passed to git by the server —, and `update-seen` dismisses the result of the last
+ *  update on every page.
  *
  *  F37 (S2 12.9): `reorder` moves the session's row of Open one place up or down; the server
  *  computes the move over Open as it draws it and gives the slots out again
@@ -202,7 +205,8 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'settings' }
   | { t: 'act'; id: number; kind: 'setting-set'; key: string; value: string | number | null }
   | { t: 'act'; id: number; kind: 'setting-default'; key: string }
-  | { t: 'act'; id: number; kind: 'update-check' | 'update-look' }
+  | { t: 'act'; id: number; kind: 'update-check' | 'update-look' | 'update-seen' }
+  | { t: 'act'; id: number; kind: 'update-apply'; to: string }
   | { t: 'act'; id: number; kind: 'reorder'; sessionId: string; direction: 'up' | 'down' };
 /** Follow-up F13: the page's colours changed while it is open — the title bar's theme switch was
  *  clicked here or in another window of the profile, or the system's scheme changed while the page
@@ -625,7 +629,8 @@ export interface ResultMessage {
   /** F36, `settings`, `setting-set` and `setting-default` only, also with a refusal: the settings
    *  screen as the file and the running server are now. Absent for every other kind. */
   settings?: SettingsPayload;
-  /** F38, `update-check` and `update-look` only: the check's state. Absent for every other kind. */
+  /** F38, the four update kinds only (`update-check`, `update-look`, `update-apply`,
+   *  `update-seen`), also with a refusal of `update-apply`: the state. Absent for every other kind. */
   update?: UpdatePayload;
 }
 /** F36 (S2 12.13): a JSON value, as config.json holds one. */
@@ -705,6 +710,14 @@ export interface UpdatePayload {
   /** The last check failed (its fetch, a git call, the check itself): when, and why (sanitised,
    *  clipped); null once a check ended without a failure. */
   failure: { atNs: NsText; line: string } | null;
+  /** Milestone 2: an update started from a window runs — to which commit (its full id), since
+   *  when; null: none. */
+  applying: { to: string; sinceNs: NsText } | null;
+  /** The update's log, `<stateDir>/update.log`: where a page that loses its server sends the user. */
+  log: string;
+  /** How the last update from the window ended (`updated to <id>`, or why not), until a page
+   *  dismisses it (`update-seen`); null: nothing to say. */
+  result: { ok: boolean; text: string } | null;
 }
 /** F38: the check's state, to a page right after its `start` and to every page on each change. */
 export interface UpdateMessage {
@@ -846,6 +859,8 @@ function matching(pattern: RegExp): Check {
     return pattern.test(value) ? null : `${where}: wrong value`;
   };
 }
+/** F38: a full commit id, as git names a commit: 40 lower-case hex digits, or 64 (SHA-256). */
+const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const SESSION: Check = (value, where) => {
   if (typeof value !== 'string') return `${where}: wrong type`;
   return isSessionId(value) ? null : `${where}: wrong value`;
@@ -1041,6 +1056,9 @@ const ACTS: Readonly<Record<string, Check>> = {
   // F38 (S2 16.5): Check now and the dialog's look; no field: what is looked at is the server's.
   'update-check': object({ t: ANY, id: COUNT, kind: ANY }),
   'update-look': object({ t: ANY, id: COUNT, kind: ANY }),
+  // Milestone 2: Update now names the commit the dialog listed (a full id, only compared).
+  'update-apply': object({ t: ANY, id: COUNT, kind: ANY, to: matching(COMMIT_ID) }),
+  'update-seen': object({ t: ANY, id: COUNT, kind: ANY }),
   // F37 (S2 12.9): a session of Open one place up or down.
   reorder: object({
     t: ANY,

@@ -879,6 +879,9 @@ describe("pages: F38's update message", () => {
     check: { state: 'current', summary: 'skydeck is up to date (main at 0123456, as origin/main)' },
     fetchedAtNs: '1',
     failure: null,
+    applying: null,
+    log: '/state/update.log',
+    result: null,
   };
 
   test('a page gets `update` right after its start; Pages.update reaches every open page and no page in the handshake', async (t) => {
