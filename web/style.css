@@ -50,7 +50,7 @@
   --term-font-size: 14px;
   color-scheme: light;
 }
-/* The colour themes of the title bar's second switch (web/theme-text.js PALETTES; S2 12.1): each
+/* The colour themes of Settings' Colour theme (web/theme-text.js PALETTES; S2 12.1): each
    lays its own values over the scheme it belongs to, so it declares only what it changes. A light
    one is a plain rule ahead of the dark scheme, which overrides every property it declares
    (test/web/theme.test.ts holds them a part of the dark block's); a dark one is a dark block of
@@ -76,7 +76,7 @@
   --term-fg: #241523;
 }
 /* The dark scheme: the system's while the page follows it, and forced dark (`<html
-   data-theme="dark">`, the title bar's switch, follow-up F13) whatever the system says; forced
+   data-theme="dark">`, Settings' Mode, follow-up F13 and F39) whatever the system says; forced
    light (`data-theme="light"`) keeps :root's. The two rules hold the same declarations in the same
    order, in each style sheet that has a dark scheme (test/web/theme.test.ts). */
 @media (prefers-color-scheme: dark) {

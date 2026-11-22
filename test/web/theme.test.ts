@@ -299,7 +299,7 @@ describe('one set of dark values (H4): the media block and its twin', () => {
         return;
       }
       assert.equal(system.length, 1, 'one default dark block');
-      // No other rule reads the switch: what forced dark draws is the twins' variables only.
+      // No other rule reads the mode: what forced dark draws is the twins' variables only.
       assert.equal(
         css.match(/data-theme/g)?.length,
         2 + 2 * darkThemes,

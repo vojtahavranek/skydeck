@@ -6,13 +6,13 @@
 // Appearance group's Mode and Colour theme are the page's own (web/theme.js), drawn at once
 // without the server; every other entry is a key of config.json under its plain label, shown once
 // the server's screen came. Each is saved as it is picked — a choice or a switch at its change, the
-// one-line text on Enter or when the keyboard leaves it (Esc drops it unsaved), and only when its
-// text changed; no Save,
-// no Default. The answer's words stand beside the control: `Saved.`, or the refusal's (a choice or
-// a switch then shows the file's value again, a text keeps what was typed). A setting whose change
-// counts after the window restarts, and a value the running server does not use yet, is marked
-// `after a restart`. A file that cannot be used is named at the top; the server refuses every
-// change until it is mended.
+// one-line text on Enter or when the keyboard leaves it (Esc drops it unsaved; the window losing
+// the focus is not leaving it), and only when its text changed; no Save, no Default. The answer's
+// words stand beside the control: `Saved.`, or the refusal's (a choice or a switch then shows the
+// file's value again, a text keeps what was typed). A setting whose change counts after the window
+// restarts, and a value the running server does not use yet, is marked `after a restart` — while
+// the server uses another value, which, in the control's words (`… still on until then`).
+// A file that cannot be used is named at the top; the server refuses every change until mended.
 //
 // Then the closed section `Advanced (N more settings)`, closed again at each opening: every other
 // setting of the server's table as F36 showed them, the file's path and where its copy is kept on
@@ -43,6 +43,7 @@ import {
   advancedText,
   appliesText,
   notSavedText,
+  restartText,
   controlText,
   factsText,
   faithful,
@@ -158,6 +159,7 @@ function refusalOf(result) {
  * @property {HTMLElement} mark  `after a restart`
  * @property {HTMLElement} message  the answer's words
  * @property {string} drawn  the control's value as last drawn (another: the user changed it)
+ * @property {boolean} ever  drawn from a screen once (until then hidden, nothing to keep)
  * @property {boolean} waiting
  * @property {boolean} again  changed again while an answer waited: sent once it came
  * @property {string | null} refused  the text last refused, not sent again when the field is left
@@ -365,6 +367,7 @@ export function createSettingsDialog(root, deps) {
       mark,
       message,
       drawn: '',
+      ever: false,
       waiting: false,
       again: false,
       refused: null,
@@ -378,7 +381,12 @@ export function createSettingsDialog(root, deps) {
         }
       });
       // Left — another control, a click elsewhere, the dialog closed — it is saved when changed.
-      control.addEventListener('blur', () => void sendShort(row, true));
+      // The window losing the focus (Alt+Tab) leaves the field the active element: that is not
+      // leaving it, and nothing is saved.
+      control.addEventListener('blur', () => {
+        if (document.activeElement === control) return;
+        void sendShort(row, true);
+      });
     } else {
       control.addEventListener('change', () => void sendShort(row, false));
     }
@@ -518,11 +526,12 @@ export function createSettingsDialog(root, deps) {
    * Draws the short screen's keys from `payload`: each control's value unless the user changed it
    * since it was drawn (`redraw`: the keys drawn whatever they hold), the marks; a group is shown
    * once one of its settings is.
+   * The first answer of an opening follows the same rule: `open` put each control back to its
+   * drawn value, so a control that differs then was changed since this opening, and keeps it.
    * @param {SettingsPayload} payload
    * @param {ReadonlySet<string>} redraw
-   * @param {boolean} made  the first screen since the dialog opened: every control is drawn
    */
-  const drawShort = (payload, redraw, made) => {
+  const drawShort = (payload, redraw) => {
     for (const row of shortRows.values()) {
       const setting = settings.get(row.entry.key);
       const there = setting !== undefined && payload.settings.includes(setting);
@@ -542,9 +551,10 @@ export function createSettingsDialog(root, deps) {
         );
       }
       const text = controlText(setting);
-      if (made || redraw.has(row.entry.key) || (!row.waiting && valueOf(row) === row.drawn)) {
+      if (!row.ever || redraw.has(row.entry.key) || (!row.waiting && valueOf(row) === row.drawn)) {
         setValue(row, text);
         row.drawn = valueOf(row);
+        row.ever = true;
       } else {
         // The user's own text or pick stays; the file's value is what it is compared with.
         row.drawn = text;
@@ -552,6 +562,8 @@ export function createSettingsDialog(root, deps) {
       const pendingLine = pendingText(setting);
       const marked = setting.applies === 'restart' || pendingLine !== null;
       row.mark.hidden = !marked;
+      // While the running server uses another value, the mark says which, in the control's words.
+      setText(row.mark, restartText(row.entry, setting));
       row.mark.title = pendingLine ?? '';
       // The control is described by its hint, and by the mark while it is shown.
       const described = [row.hint?.id, marked ? row.mark.id : undefined].filter(Boolean).join(' ');
@@ -570,9 +582,8 @@ export function createSettingsDialog(root, deps) {
    * whatever it holds). Only what is out of place moves: an unchanged screen moves no element.
    * @param {SettingsPayload} payload
    * @param {ReadonlySet<string>} [redraw]
-   * @param {boolean} [made]  the first screen since the dialog opened
    */
-  const draw = (payload, redraw = new Set(), made = false) => {
+  const draw = (payload, redraw = new Set()) => {
     screen = payload;
     for (const setting of payload.settings) {
       settings.set(setting.key, setting);
@@ -580,7 +591,7 @@ export function createSettingsDialog(root, deps) {
     problem.hidden = payload.problem === null;
     setText(problemText, payload.problem ?? '');
     status.hidden = true;
-    drawShort(payload, redraw, made);
+    drawShort(payload, redraw);
 
     setText(filePath, payload.path);
     setText(copyPath, payload.backup);
@@ -696,11 +707,14 @@ export function createSettingsDialog(root, deps) {
       return;
     }
     if (row.again) {
-      // Changed again meanwhile: the new value is sent; the control keeps it.
       row.again = false;
-      if (result.settings !== undefined) draw(result.settings);
-      void sendShort(row, false);
-      return;
+      if (valueOf(row) !== text) {
+        // Changed again meanwhile: the new value is sent; the control keeps it.
+        if (result.settings !== undefined) draw(result.settings);
+        void sendShort(row, false);
+        return;
+      }
+      // Asked again for the value just answered (Enter, then leaving it): its answer is the outcome.
     }
     // A choice or a switch shows the file's value again after a refusal; a text keeps what was
     // typed.
@@ -846,7 +860,7 @@ export function createSettingsDialog(root, deps) {
           setText(status, result.error ?? 'skydeck could not read the settings');
           return;
         }
-        draw(result.settings, fresh, true);
+        draw(result.settings, fresh);
         if (document.activeElement === box) {
           focusable()[0]?.focus();
         }

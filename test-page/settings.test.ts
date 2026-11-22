@@ -25,6 +25,7 @@ import {
   pageUrl,
   readPage,
   showsText,
+  shownText,
   toZone,
 } from './helpers/shell.ts';
 import type { Launched } from './helpers/shell.ts';
@@ -99,6 +100,23 @@ async function countSets(page: Page): Promise<() => Promise<number>> {
     };
   });
   return () => page.evaluate(() => Number(Reflect.get(globalThis, 'testSets')));
+}
+
+/** From now on holds each act of `kind` back by `ms` before it is sent (a slow answer). */
+async function holdBack(page: Page, kind: string, ms: number): Promise<void> {
+  await page.evaluate(
+    ({ kind, ms }) => {
+      const send = WebSocket.prototype.send;
+      WebSocket.prototype.send = function (data) {
+        if (typeof data === 'string' && data.includes(`"kind":"${kind}"`)) {
+          setTimeout(() => send.call(this, data), ms);
+          return;
+        }
+        send.call(this, data);
+      };
+    },
+    { kind, ms },
+  );
 }
 
 async function closed(page: Page): Promise<void> {
@@ -1091,7 +1109,11 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
               .map((one) => one.textContent ?? ''),
           short('window.links'),
         );
-      assert.deepEqual(await mark(l.page), ['after a restart'], 'the hand edit');
+      assert.deepEqual(
+        await mark(l.page),
+        ['after a restart: still “Edge” until then'],
+        'the hand edit: the value in use, in the choice’s words',
+      );
       assert.equal(await l.page.locator(shortControl('window.links')).inputValue(), 'default');
       // Picked back to the value the server uses, saved at once: no mark; the other window follows.
       await l.page.locator(shortControl('window.links')).selectOption('edge');
@@ -1134,6 +1156,12 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
         async () => configOf(l)['ticketUrl'] === 'https://tickets.example.com/{key}',
         'saved at Close',
       );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(
+        await shownText(l.page, '#key-message'),
+        '',
+        'a save at Close that worked says nothing',
+      );
       // A refused one: the key bar says so, the file unchanged.
       await l.page.locator('#settings-button').click();
       await opened(l.page);
@@ -1152,6 +1180,206 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
       );
       assert.equal(readFileSync(l.d.deck.places.configPath, 'utf8'), saved, 'nothing changed');
       assert.deepEqual(l.problems, []);
+    },
+  );
+  await t.test(
+    'a change made while an answer waits: Enter then Tab, or Enter twice, in Ticket address, and a choice picked B, A or B, A, B, end in the file and in `Saved.`',
+    async (t) => {
+      const l = await launched(t, chromium, {
+        config: { ticketUrl: 'https://t.example.com/{key}' },
+      });
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      await holdBack(l.page, 'setting-set', 200);
+      const sets = await countSets(l.page);
+      const ticket = l.page.locator(shortControl('ticketUrl'));
+      for (const [address, second] of [
+        ['https://one.example.com/{key}', 'Tab'],
+        ['https://two.example.com/{key}', 'Enter'],
+      ] as const) {
+        await ticket.focus();
+        await ticket.fill(address);
+        await l.page.keyboard.press('Enter');
+        await l.page.keyboard.press(second);
+        await shortSays(l.page, 'ticketUrl', 'Saved.');
+        assert.equal(configOf(l)['ticketUrl'], address, `Enter then ${second}`);
+      }
+      const terminal = l.page.locator(shortControl('terminal'));
+      for (const [picks, end] of [
+        [['wezterm', 'window'], 'window'],
+        [['here', 'wezterm', 'here'], 'here'],
+      ] as const) {
+        for (const pick of picks) await terminal.selectOption(pick);
+        await shortSays(l.page, 'terminal', 'Saved.');
+        await until(async () => configOf(l)['terminal'] === end, `${picks.join(', ')} ends ${end}`);
+        assert.equal(await terminal.inputValue(), end);
+      }
+      assert.ok((await sets()) >= 5, `each change sent: ${await sets()}`);
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'the window losing the focus (a blur while the field stays the active element) saves nothing; leaving the field then saves it',
+    async (t) => {
+      const l = await launched(t, chromium, {
+        config: { ticketUrl: 'https://t.example.com/{key}' },
+      });
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      const sets = await countSets(l.page);
+      const before = readFileSync(l.d.deck.places.configPath, 'utf8');
+      const ticket = l.page.locator(shortControl('ticketUrl'));
+      await ticket.fill('https://half.example.com/{key}');
+      await ticket.evaluate((field) => field.dispatchEvent(new FocusEvent('blur')));
+      assert.equal(await active(l.page), '#settings-key-ticketUrl', 'still the active element');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(await sets(), 0, 'nothing is sent');
+      assert.equal(readFileSync(l.d.deck.places.configPath, 'utf8'), before);
+      assert.equal(await ticket.inputValue(), 'https://half.example.com/{key}', 'the text stays');
+      await l.page.keyboard.press('Tab');
+      await shortSays(l.page, 'ticketUrl', 'Saved.');
+      assert.equal(configOf(l)['ticketUrl'], 'https://half.example.com/{key}');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'another window’s change keeps a ticket address being typed; an address longer than a request carries is refused before it is sent; Tab and Shift+Tab wrap with Advanced closed',
+    async (t) => {
+      const l = await launched(t, chromium, {
+        config: { ticketUrl: 'https://t.example.com/{key}' },
+      });
+      const other = await l.page.context().newPage();
+      await other.goto(pageUrl(l.server.port));
+      await connection(other, 'open');
+      for (const page of [l.page, other]) {
+        await page.locator('#settings-button').click();
+        await opened(page);
+      }
+      const typing = other.locator(shortControl('ticketUrl'));
+      await typing.fill('https://typing.example.com/{key}');
+      await l.page.locator(shortControl('window.links')).selectOption('default');
+      await shortSays(l.page, 'window.links', 'Saved.');
+      await until(
+        async () => (await other.locator(shortControl('window.links')).inputValue()) === 'default',
+        'the other window follows',
+      );
+      assert.equal(
+        await typing.inputValue(),
+        'https://typing.example.com/{key}',
+        'its typing stays',
+      );
+
+      const sets = await countSets(l.page);
+      const before = readFileSync(l.d.deck.places.configPath, 'utf8');
+      const ticket = l.page.locator(shortControl('ticketUrl'));
+      await ticket.fill(`https://long.example.com/${'a'.repeat(5000)}/{key}`);
+      await ticket.press('Enter');
+      await shortSays(
+        l.page,
+        'ticketUrl',
+        'Longer than the window sends (4,096 bytes as UTF-8): change it in the file by hand.',
+      );
+      await l.page.locator(shortControl('terminal')).focus();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(await sets(), 0, 'not sent, at Enter nor when left');
+      assert.equal(readFileSync(l.d.deck.places.configPath, 'utf8'), before);
+
+      await l.page.locator('#settings .settings-close').focus();
+      await l.page.keyboard.press('Tab');
+      assert.equal(await active(l.page), '#settings-mode', 'Tab on Close: back to Mode');
+      await l.page.keyboard.press('Shift+Tab');
+      assert.equal(
+        await readPage(
+          l.page,
+          () => document.activeElement?.classList.contains('settings-close') === true,
+          null,
+        ),
+        true,
+        'Shift+Tab on Mode: Close',
+      );
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'the first answer of a later opening keeps a text typed before it came; a field not typed in takes the file’s value and sends nothing when left',
+    async (t) => {
+      const l = await launched(t, chromium, {
+        config: { ticketUrl: 'https://t.example.com/{key}' },
+      });
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      await l.page.keyboard.press('Escape');
+      await closed(l.page);
+      // Changed behind the screen's back, so the answer brings a new value.
+      writeFileSync(
+        l.d.deck.places.configPath,
+        JSON.stringify({ ...configOf(l), ticketUrl: 'https://file.example.com/{key}' }),
+      );
+      await holdBack(l.page, 'settings', 800);
+      const sets = await countSets(l.page);
+      const ticket = l.page.locator(shortControl('ticketUrl'));
+      await l.page.locator('#settings-button').click();
+      await ticket.fill('https://early.example.com/{key}');
+      await opened(l.page);
+      assert.equal(await ticket.inputValue(), 'https://early.example.com/{key}', 'kept');
+      await l.page.keyboard.press('Tab');
+      await shortSays(l.page, 'ticketUrl', 'Saved.');
+      assert.equal(configOf(l)['ticketUrl'], 'https://early.example.com/{key}');
+      assert.equal(await sets(), 1);
+
+      // Not typed in: the answer draws the file's value, and leaving the field sends nothing.
+      await l.page.keyboard.press('Escape');
+      await closed(l.page);
+      writeFileSync(
+        l.d.deck.places.configPath,
+        JSON.stringify({ ...configOf(l), ticketUrl: 'https://again.example.com/{key}' }),
+      );
+      await l.page.locator('#settings-button').click();
+      await ticket.focus();
+      await opened(l.page);
+      assert.equal(await ticket.inputValue(), 'https://again.example.com/{key}', "the file's");
+      await l.page.keyboard.press('Tab');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(await sets(), 1, 'nothing more sent');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'Keep WSL running while its change waits for a restart: the mark says the value in use in the switch’s words, both ways; back to the value in use, `after a restart` alone',
+    async (t) => {
+      const mark = (page: Page): Promise<string> =>
+        readPage(
+          page,
+          (at) => document.querySelector(`${at} .short-mark`)?.textContent ?? '',
+          short('window.keepAlive'),
+        );
+      // The sandbox's server runs with `off`.
+      const off = await launched(t, chromium);
+      await off.page.locator('#settings-button').click();
+      await opened(off.page);
+      const offSwitch = off.page.locator(shortControl('window.keepAlive'));
+      assert.equal(await mark(off.page), 'after a restart');
+      await offSwitch.click();
+      await shortSays(off.page, 'window.keepAlive', 'Saved.');
+      assert.equal(await mark(off.page), 'after a restart: still off until then');
+      await offSwitch.click();
+      await shortSays(off.page, 'window.keepAlive', 'Saved.');
+      assert.equal(await mark(off.page), 'after a restart');
+      assert.deepEqual(off.problems, []);
+
+      // A server started with `wsl` (its keep-alive fails in the sandbox, as in shell.test.ts).
+      const on = await launched(t, chromium, { window: { keepAlive: 'wsl' } });
+      await on.page.locator('#settings-button').click();
+      await opened(on.page);
+      const onSwitch = on.page.locator(shortControl('window.keepAlive'));
+      assert.equal(await onSwitch.isChecked(), true);
+      await onSwitch.click();
+      await shortSays(on.page, 'window.keepAlive', 'Saved.');
+      assert.equal(await mark(on.page), 'after a restart: still on until then');
     },
   );
 });

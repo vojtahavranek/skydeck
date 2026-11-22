@@ -197,9 +197,9 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'setting-set'; key: string; value: string | number | null }
   | { t: 'act'; id: number; kind: 'setting-default'; key: string }
   | { t: 'act'; id: number; kind: 'reorder'; sessionId: string; direction: 'up' | 'down' };
-/** Follow-up F13: the page's colours changed while it is open — the title bar's theme switch was
- *  clicked here or in another window of the profile, or the system's scheme changed while the page
- *  follows it. The same colours as `start.theme`, checked the same way; the server answers OSC 10
+/** Follow-up F13: the page's colours changed while it is open — Mode or Colour theme was picked in
+ *  the settings screen (F39; before it, the title bar's switches) here or in another window of the
+ *  profile, or the system's scheme changed while the page follows it. The same colours as `start.theme`, checked the same way; the server answers OSC 10
  *  and 11 from the latest the page that had focus last reported (S2 7.2). */
 export interface ThemeMessage {
   t: 'theme';

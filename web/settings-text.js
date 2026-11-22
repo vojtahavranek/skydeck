@@ -6,6 +6,7 @@
 // the refusal's words, which the screen shows beside the field.
 
 /** @import { SettingApplies, SettingPayload, SettingValue } from '../src/window/protocol.ts' */
+/** @import { KeyEntry } from './settings-short.js' */
 
 export const SETTINGS_TEXTS = {
   heading: 'Settings',
@@ -33,6 +34,36 @@ export const SETTINGS_TEXTS = {
   /** F39, the short screen: a change the server saved. */
   saved: 'Saved.',
 };
+
+/**
+ * F39: the short screen's mark beside a setting whose change counts after a restart, or whose
+ * value the running server does not use yet: `after a restart`, and while the server uses another
+ * value, which one, in the words the control shows (`after a restart: still on until then`).
+ * @param {KeyEntry} entry
+ * @param {SettingPayload} setting
+ * @returns {string}
+ */
+export function restartText(entry, setting) {
+  if (setting.pending !== true || setting.runningText === null) {
+    return SETTINGS_TEXTS.afterRestart;
+  }
+  /** @type {unknown} */
+  let running;
+  try {
+    running = JSON.parse(setting.runningText);
+  } catch {
+    running = setting.runningText;
+  }
+  let word;
+  if (entry.control === 'switch') {
+    word = running === entry.on ? 'on' : 'off';
+  } else if (entry.control === 'choice') {
+    word = `“${typeof running === 'string' ? (entry.words[running] ?? running) : String(running)}”`;
+  } else {
+    word = typeof running === 'string' && running !== '' ? `“${running}”` : 'empty';
+  }
+  return `${SETTINGS_TEXTS.afterRestart}: still ${word} until then`;
+}
 
 /**
  * F39: the key bar's words for a short text saved as the dialog closed, which the server refused.

@@ -3995,21 +3995,26 @@ screen's describe Advanced, which keeps F36's screen whole.
   answer came (`Reading the settings…` until then).
 - **Saved as it is picked** (the short screen). A choice or the switch is sent (`setting-set`) the
   moment it changes; the text field when Enter is pressed in it or the keyboard leaves it (another
-  control, a click elsewhere, `Close`), and only when its text differs from the one drawn: an
-  unchanged one sends nothing. Esc is the way out without saving: it closes the screen at once, a
-  text typed and not saved is dropped, nothing is sent, and the next opening shows the file's value.
-  A text saved as the screen closes (the field left by a click on `Close`) whose answer is a refusal
-  is not lost: the key bar says it (`Ticket address was not saved: <the refusal>`), as it says an
-  action's refusal while no dialog is open. There is no `Save` and no `Default`, no line about the
-  default or the file, and none about when a change applies but `after a restart`. The answer's
-  words stand beside the control: `Saved.`, or the refusal's (`"ticketUrl" must be null or an http
-  or https address with {key} once, after its host`) — the field keeping what was typed (left again,
-  the same text is not sent again), a choice or the switch showing the file's value again —, the
-  file unchanged. A value the running server does not use yet (a hand edit, `window.keepAlive` after
-  a change) is marked `after a restart` (its tooltip: `applies after the window restarts: the window
-  uses <value> until then`), and `window.keepAlive` always is. Changed again while the answer waits,
-  a choice is sent again once it came; the text field is read-only meanwhile. Every page's screen
-  follows a change (`settings`, 8.2.3).
+  control, a click elsewhere, `Close`; the window losing the focus, Alt+Tab, is not leaving it), and
+  only when its text differs from the one drawn: an unchanged one sends nothing. Esc is the way out
+  without saving: it closes the screen at once, a text typed and not saved is dropped, nothing is
+  sent, and the next opening shows the file's value. A text saved as the screen closes (the field
+  left by a click on `Close`) whose answer is a refusal is not lost: the key bar says it (`Ticket
+  address was not saved: <the refusal>`), as it says an action's refusal while no dialog is open.
+  There is no `Save` and no `Default`, no line about the default or the file, and none about when a
+  change applies but `after a restart`. The answer's words stand beside the control: `Saved.`, or
+  the refusal's (`"ticketUrl" must be null or an http or https address with {key} once, after its
+  host`) — the field keeping what was typed (left again, the same text is not sent again), a choice
+  or the switch showing the file's value again —, the file unchanged. `window.keepAlive` is always
+  marked `after a restart`; while the running server uses another value than the file holds (a hand
+  edit, `window.keepAlive` after a change), the mark says which in the control's own words — `after
+  a restart: still on until then` (`still off`; a choice's words, `still “Edge” until then`; a text
+  in quotes, or `still empty`) — and its tooltip in the file's (`applies after the window restarts:
+  the window uses <value> until then`). Changed again while the answer waits, a choice is sent again
+  once it came; the text field is read-only meanwhile. Every page's screen follows a change
+  (`settings`, 8.2.3), a text being typed keeping its text. Until an opening's answer comes, the
+  rows show the values the last opening drew, and can be used; a text typed meanwhile is kept when
+  the answer is drawn.
 - **Advanced.** The screen ends with a closed section, a button `Advanced (14 more settings)` (the
   count of the server's table's keys the short screen does not show), closed again at each opening
   of the screen and opened and closed by a click, Enter or Space. Opened, it holds F36's screen of
