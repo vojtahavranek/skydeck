@@ -42,6 +42,11 @@ export interface ScriptedRepo {
   fetched: string;
   /** The fetch's exit code; null: ended by a signal. */
   fetch: number | null;
+  /**
+   * What the window's quiet fetch (F38: a run() call whose arguments hold `fetch`) answers, or a
+   * function that gives the answer (a promise: a fetch that is still to answer).
+   */
+  quietFetch: Partial<RunResult> | (() => Promise<Partial<RunResult>>);
   /** Whether HEAD is an ancestor of the fetched commit. */
   ancestor: boolean;
   /** `rev-list --count <head>..<fetched>` and `<fetched>..<head>`. */
@@ -83,6 +88,7 @@ export function scriptedRepo(root: string, over: Partial<ScriptedRepo> = {}): Sc
     head: OLD,
     fetched: NEW,
     fetch: 0,
+    quietFetch: {},
     ancestor: true,
     behind: 1,
     ahead: 0,
@@ -127,11 +133,23 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
   let fetched = false;
   const branch = (): string | null =>
     fetched && repo.afterFetch.branch !== undefined ? repo.afterFetch.branch : repo.branch;
-  const answer = (call: RunCall): RunResult => {
+  const answer = (call: RunCall): RunResult | Promise<RunResult> => {
     repo.onCall(call, false);
     const args = gitArgs(call, repo.root);
     const given = repo.answers[args.join(' ')];
     if (given !== undefined) return runResult(given);
+    if (args.includes('fetch')) {
+      // The window's fetch (F38): it changes what the look sees afterwards as the terminal's does.
+      const { quietFetch } = repo;
+      if (typeof quietFetch === 'function') {
+        return quietFetch().then((result) => {
+          fetched = true;
+          return runResult(result);
+        });
+      }
+      fetched = true;
+      return runResult(quietFetch);
+    }
     const [first, ...rest] = args;
     const line = (text: string): RunResult => runResult({ stdout: `${text}\n` });
     switch (`${first} ${rest[0] ?? ''}`) {
@@ -223,6 +241,19 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
     return repo.launcher;
   };
   return fakeRunner(answer, interactive);
+}
+
+/**
+ * F38: the environment entry that names the checkout a test server's update checker looks at
+ * (`SKYDECK_TEST_UPDATE_CHECKOUT`, src/window/updates.ts) — only once the path is checked to lie
+ * inside the sandbox. Every test sets that variable through here, never by hand.
+ */
+export function updateSeam(
+  s: Sandbox,
+  checkout: string | { root: string },
+): { SKYDECK_TEST_UPDATE_CHECKOUT: string } {
+  const path = typeof checkout === 'string' ? checkout : checkout.root;
+  return { SKYDECK_TEST_UPDATE_CHECKOUT: insideSandbox(s, path) };
 }
 
 /**

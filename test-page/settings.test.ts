@@ -1,6 +1,6 @@
 // The settings screen in the page (follow-up F36, issue #164; S2 12.13): opened by the title bar's
-// gear (F39) and by the switcher's `> settings`. F39's short screen: three groups, six controls
-// under plain labels, each saved as it is picked, a refusal beside it, `after a restart`; then the
+// gear (F39) and by the switcher's `> settings`. F39's short screen: four groups (the fourth,
+// Updates, F38's), seven controls under plain labels, each saved as it is picked, a refusal beside it, `after a restart`; then the
 // closed Advanced, which holds F36's screen of every other setting: the file's path on top, each
 // setting in the server's order under its group, a changeable one in a control that fits it with
 // Save and Default, a shown-only one as text with what it names; a save, a refusal beside the
@@ -220,7 +220,8 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
         expanded: 'false',
         hidden: true,
         file: false,
-        buttons: ['Advanced (14 more settings)', 'Close'],
+        // F38: the group Updates' `Check now`, the short screen's one button.
+        buttons: ['Check now', 'Advanced (14 more settings)', 'Close'],
       });
       await advanced(l.page);
       await showsText(
@@ -246,7 +247,13 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
         'firstRunDoneAfterDays',
       ]);
       assert.equal(drawn.keys.length, 14);
-      for (const key of ['terminal', 'ticketUrl', 'window.keepAlive', 'window.links']) {
+      for (const key of [
+        'terminal',
+        'ticketUrl',
+        'window.keepAlive',
+        'window.links',
+        'window.updateCheck',
+      ]) {
         assert.ok(!drawn.keys.includes(key), `${key} is on the short screen, not in Advanced`);
       }
       assert.deepEqual(drawn.groups, [
@@ -885,7 +892,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
     },
   );
   await t.test(
-    'the short screen (F39): three groups, six controls under plain labels, each showing the file’s value; a hint only under three; `after a restart` beside Keep WSL running; no Save, no Default, no line about the default, the file or when a change applies',
+    'the short screen (F39): four groups, seven controls (F38: Updates) under plain labels, each showing the file’s value; a hint only under three; `after a restart` beside Keep WSL running; no Save, no Default, no line about the default, the file or when a change applies',
     async (t) => {
       const l = await launched(t, chromium, {
         config: {
@@ -986,6 +993,20 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
               control: ['That terminal', 'A WezTerm tab', 'The window'],
               value: 'wezterm',
               hint: ['skydeck resume, new and restore, typed in a terminal.'],
+              mark: [],
+            },
+          ],
+        },
+        {
+          // F38: the check for a newer skydeck (off in the sandbox), its extra block after it.
+          group: 'Updates',
+          rows: [
+            {
+              label: 'Check for updates every day',
+              labelled: true,
+              control: 'checkbox switch',
+              value: false,
+              hint: [],
               mark: [],
             },
           ],

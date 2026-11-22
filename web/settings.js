@@ -34,8 +34,15 @@
 // that text. Keys come from app.js's capture phase: Esc closes (`escape()`); Tab and Shift+Tab walk
 // the dialog's controls and stay in it (`key()`); Enter in a field saves it. Every text reaches the
 // DOM as text, a value only as a control's value or as text, each isolated for right-to-left text.
+//
+// Follow-up F38 (S2 12.13, 16.5): the group Updates holds, after its switch, the extra block of the
+// check for a newer skydeck — when the window's server last looked and what it found, a failed
+// last check and why, `Checking…` while one runs (web/update-text.js) —, and `Check now`
+// (`deps.checkNow`, `act update-check`), which works whatever the switch `window.updateCheck`
+// says. It follows every state the page is given (`updateState`), also while the screen is closed,
+// and draws it while it is shown.
 
-/** @import { ResultMessage, SettingPayload, SettingsPayload } from '../src/window/protocol.ts' */
+/** @import { ResultMessage, SettingPayload, SettingsPayload, UpdatePayload } from '../src/window/protocol.ts' */
 /** @import { ThemeState } from './theme.js' */
 /** @import { KeyEntry, LocalEntry, ShortGroup } from './settings-short.js' */
 import { SHORT, SHORT_KEYS } from './settings-short.js';
@@ -55,6 +62,7 @@ import {
   valueToSend,
 } from './settings-text.js';
 import { MODES, paletteWord, themeWord } from './theme-text.js';
+import { settingsLines, UPDATE_TEXTS } from './update-text.js';
 
 /**
  * @typedef {object} SettingsDeps
@@ -63,6 +71,8 @@ import { MODES, paletteWord, themeWord } from './theme-text.js';
  * @property {(text: string) => void} say  the key bar's message: the refusal of a short text saved
  *   as the dialog closed (`Close`), whose words the dialog no longer shows
  * @property {ThemeState} theme  the Appearance group's mode and colour theme
+ * @property {() => Promise<ResultMessage>} checkNow F38: `act update-check`
+ * @property {() => string} now F38: the server's time now (ns, decimal; '' when not known)
  */
 
 /**
@@ -185,6 +195,16 @@ export function createSettingsDialog(root, deps) {
   problem.append(problemText, element('div', 'settings-problem-mend', SETTINGS_TEXTS.mend));
   const status = element('div', 'settings-status');
 
+  // F38: the extra block of the group Updates: the last check's lines and `Check now`.
+  const updates = element('div', 'settings-updates');
+  updates.setAttribute('aria-live', 'polite');
+  const updatesLines = element('div', 'settings-updates-lines');
+  const checkNow = button('settings-check-now', UPDATE_TEXTS.checkNow);
+  updates.append(updatesLines, checkNow);
+  /** Each group's extra block, by its id: shown with the group from the start. */
+  /** @type {Readonly<Record<string, HTMLElement>>} */
+  const extras = { updates };
+
   // Advanced: closed, a button that opens and closes it, then today's whole screen of the rest.
   const advancedButton = button('settings-advanced-button', '');
   advancedButton.setAttribute('aria-expanded', 'false');
@@ -222,6 +242,30 @@ export function createSettingsDialog(root, deps) {
   let opens = 0;
   /** @type {SettingsPayload | null} */
   let screen = null;
+  /** F38: the last state of the check the page was given. @type {UpdatePayload | null} */
+  let updateState = null;
+
+  /** F38: the block's lines, one element each, made again only when a text changed. */
+  const drawUpdates = () => {
+    const texts = settingsLines(updateState, deps.now());
+    const now = [...updatesLines.children].map((one) => one.textContent);
+    if (now.length === texts.length && now.every((text, i) => text === texts[i])) {
+      return;
+    }
+    updatesLines.replaceChildren(
+      ...texts.map((text) => element('div', 'settings-updates-line', text)),
+    );
+  };
+  checkNow.addEventListener('click', () => {
+    void deps.checkNow().then((result) => {
+      if (result.update !== undefined) {
+        updateState = result.update;
+      }
+      if (shown) {
+        drawUpdates();
+      }
+    });
+  });
   /** @type {Map<string, Row>} */
   const rows = new Map();
   /** @type {Map<string, SettingPayload>} */
@@ -236,7 +280,7 @@ export function createSettingsDialog(root, deps) {
   /** @type {Map<string, ShortRow>} */
   const shortRows = new Map();
   /** Each short group's section, with what it holds; shown while one of its settings is. */
-  /** @type {{ section: HTMLElement, local: boolean, keys: string[] }[]} */
+  /** @type {{ section: HTMLElement, always: boolean, keys: string[] }[]} */
   const shortGroups = [];
 
   /**
@@ -413,11 +457,15 @@ export function createSettingsDialog(root, deps) {
     for (const entry of group.entries) {
       section.append('key' in entry ? makeShort(entry) : makeLocal(entry));
     }
-    // A group's extra block (none yet) is made here, after its settings, and appended to `section`.
+    // A group's extra block is made here, after its settings, and appended to `section` (F38:
+    // Updates' check for a newer skydeck); a group that has one is shown from the start.
+    const extra = extras[group.id];
+    if (extra !== undefined) section.append(extra);
     const keys = group.entries.flatMap((entry) => ('key' in entry ? [entry.key] : []));
-    const local = group.entries.some((entry) => !('key' in entry));
-    section.hidden = !local;
-    shortGroups.push({ section, local, keys });
+    // Shown from the start: a group of the page's own choices, or one with an extra block.
+    const always = group.entries.some((entry) => !('key' in entry)) || extra !== undefined;
+    section.hidden = !always;
+    shortGroups.push({ section, always, keys });
     return section;
   };
   for (const group of SHORT) {
@@ -577,7 +625,7 @@ export function createSettingsDialog(root, deps) {
       else row.control.setAttribute('aria-describedby', described);
     }
     for (const group of shortGroups) {
-      const visible = group.local || group.keys.some((key) => !shortRows.get(key)?.root.hidden);
+      const visible = group.always || group.keys.some((key) => !shortRows.get(key)?.root.hidden);
       if (group.section.hidden === visible) group.section.hidden = !visible;
     }
   };
@@ -857,6 +905,7 @@ export function createSettingsDialog(root, deps) {
       status.hidden = false;
       setText(status, SETTINGS_TEXTS.reading);
       drawLocal();
+      drawUpdates();
       root.hidden = false;
       box.scrollTop = 0;
       // The short screen's first choice is the page's own, drawn already: the keyboard starts there.
@@ -880,6 +929,17 @@ export function createSettingsDialog(root, deps) {
     update(payload) {
       if (shown && screen !== null) {
         draw(payload);
+      }
+    },
+    /**
+     * F38: the check's state (every `update` message, and the answers of the page's acts); drawn
+     * while the screen is shown.
+     * @param {UpdatePayload} payload
+     */
+    updateState(payload) {
+      updateState = payload;
+      if (shown) {
+        drawUpdates();
       }
     },
     /** Esc, from app.js's capture phase: closes, a typed short text dropped (`escape`). */

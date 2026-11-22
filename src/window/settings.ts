@@ -257,6 +257,18 @@ export const SETTINGS: Readonly<Record<SettingKey, SettingRow>> = {
     nullable: false,
     applies: 'now',
   },
+  // F38: the update checker reads deck.config.window.updateCheck at each tick (S2 16.5).
+  'window.updateCheck': {
+    group: 'The window',
+    meaning:
+      '"daily": the window\'s server looks for a newer skydeck when it starts and once a day (git fetch of skydeck\'s own checkout; nothing is applied without a click); "off": only Check now looks.',
+    kind: 'change',
+    names: null,
+    control: 'choice',
+    choices: ['daily', 'off'],
+    nullable: false,
+    applies: 'now',
+  },
 };
 
 /** Beside config.json: the copy kept before a server's first change. */

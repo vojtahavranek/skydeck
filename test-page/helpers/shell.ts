@@ -25,6 +25,7 @@ import { controlClient } from '../../src/window/client.ts';
 import { S1, S2, S3, testPlatform } from '../../test/helpers/platform.ts';
 import { startTestServer } from '../../test/helpers/window.ts';
 import type {
+  ServerSandbox,
   ServerSandboxOptions,
   StartedServer,
   StartOptions,
@@ -981,7 +982,8 @@ export async function launched(
   t: TestContext,
   chromium: Browser,
   options: ServerSandboxOptions & {
-    server?: StartOptions;
+    /** A function of the sandbox for options that name something made in it first (F38). */
+    server?: StartOptions | ((d: ServerSandbox) => StartOptions);
     /** Modules served to the page in place of web/'s (pinModules); none by default. */
     modules?: Readonly<Record<string, string>>;
   } = {},

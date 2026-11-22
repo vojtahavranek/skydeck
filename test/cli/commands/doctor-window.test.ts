@@ -24,6 +24,8 @@ import type { TestContext } from 'node:test';
 import { isoFromNs } from '../../../src/platform/time.ts';
 import type { Files, Platform, RunResult } from '../../../src/platform/types.ts';
 import { computeBuild } from '../../../src/window/build.ts';
+import { writeCheck } from '../../../src/update/record.ts';
+import type { CheckRecord } from '../../../src/update/record.ts';
 import { formatPidLine } from '../../../src/window/pidline.ts';
 import { writeServerJson } from '../../../src/window/runtime.ts';
 import { reportLines } from '../../helpers/doctor.ts';
@@ -425,6 +427,245 @@ describe('doctor: the launch alarm', () => {
     const m = machine(t);
 
     lineOf(await doctor(m), 'ok', /^ok {7}no launch alarm$/);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The update line (F38): the window's last check, from kv alone
+
+describe("doctor: the window's last check for a newer skydeck (F38)", () => {
+  const HEAD = '0123456789abcdef0123456789abcdef01234567';
+  const OTHER_HEAD = '89abcdef0123456789abcdef0123456789abcdef';
+  const TO = 'fedcba9876543210fedcba9876543210fedcba98';
+  const HOUR = 3_600_000_000_000n;
+
+  /**
+   * doctor with its app root a folder of the sandbox and a runner that answers its git calls (HEAD
+   * at `commit`, null: the commit is not known) and hands every other program to the machine's.
+   */
+  async function doctorAt(
+    m: WindowMachine,
+    commit: string | null = HEAD,
+  ): Promise<{ r: Lines; root: string; gitCalls: string[][] }> {
+    const root = join(m.s.root, 'checkout');
+    mkdirSync(root, { recursive: true });
+    const gitCalls: string[][] = [];
+    const runner = fakeRunner((call) => {
+      if (call.command !== 'git')
+        return m.platform.runner.run(call.command, call.args, call.options);
+      gitCalls.push([...call.args]);
+      if (call.args.includes('log')) {
+        return runResult(commit === null ? { code: 128 } : { stdout: `${commit} 2026-11-20\n` });
+      }
+      return runResult({});
+    });
+    const r = await doctor(m, { runner, appRoot: root });
+    return { r, root, gitCalls };
+  }
+
+  /** The entry the server would store for `root`, its times `hours` hours before now. */
+  function entry(m: WindowMachine, root: string, over: Partial<CheckRecord> = {}): CheckRecord {
+    const now = m.platform.clock.nowNs();
+    return {
+      v: 1,
+      root,
+      lookedAtNs: String(now - 2n * HOUR),
+      checkedAtNs: String(now - 2n * HOUR),
+      fetchedAtNs: String(now - 2n * HOUR),
+      failure: null,
+      head: HEAD,
+      outcome: {
+        kind: 'available',
+        upstream: 'origin/main',
+        count: 3,
+        to: TO,
+        lines: ['3 new commits on origin/main (0123456..fedcba9):'],
+        blocked: null,
+      },
+      ...over,
+    };
+  }
+
+  const root = (m: WindowMachine): string => join(m.s.root, 'checkout');
+
+  test("no record: never checked; no fetch and no git call beyond the version line's two", async (t) => {
+    const m = machine(t);
+
+    const { r, gitCalls } = await doctorAt(m);
+
+    lineOf(
+      r,
+      'info',
+      /^info {5}update: never checked \(the window's server checks when it starts\)$/,
+    );
+    assert.equal(gitCalls.length, 2, JSON.stringify(gitCalls));
+    assert.ok(gitCalls.every((args) => !args.includes('fetch')));
+  });
+
+  test('an update known: how many, on which branch, when fetched, and the command', async (t) => {
+    const m = machine(t);
+    mkdirSync(root(m), { recursive: true });
+    writeCheck(m.deck.store, entry(m, root(m)));
+
+    const { r, gitCalls } = await doctorAt(m);
+
+    lineOf(
+      r,
+      'info',
+      /^info {5}update: 3 new commits on origin\/main \(fetched 2h ago\); skydeck update applies them$/,
+    );
+    assert.ok(gitCalls.every((args) => !args.includes('fetch')));
+  });
+
+  test('up to date, and a look that cannot tell', async (t) => {
+    const m = machine(t);
+    mkdirSync(root(m), { recursive: true });
+    writeCheck(
+      m.deck.store,
+      entry(m, root(m), {
+        outcome: {
+          kind: 'current',
+          line: 'skydeck is up to date (main at 0123456, as origin/main)',
+        },
+      }),
+    );
+    lineOf(
+      (await doctorAt(m)).r,
+      'info',
+      /^info {5}update: skydeck is up to date \(main at 0123456, as origin\/main\) \(fetched 2h ago\)$/,
+    );
+    writeCheck(
+      m.deck.store,
+      entry(m, root(m), {
+        head: null,
+        fetchedAtNs: null,
+        outcome: {
+          kind: 'cannot',
+          line: 'the branch main follows no branch of a remote; update it with git yourself',
+        },
+      }),
+    );
+    lineOf(
+      (await doctorAt(m)).r,
+      'info',
+      /^info {5}update: the branch main follows no branch of a remote; update it with git yourself$/,
+    );
+    // A look that could not tell, beside a failed last check: the failure goes on its line too.
+    writeCheck(
+      m.deck.store,
+      entry(m, root(m), {
+        head: null,
+        fetchedAtNs: null,
+        failure: {
+          atNs: String(m.platform.clock.nowNs() - HOUR),
+          line: 'git fetch from origin failed: x',
+        },
+        outcome: {
+          kind: 'cannot',
+          line: 'this checkout changed while git fetch ran (main at 0123456); run skydeck update again',
+        },
+      }),
+    );
+    lineOf(
+      (await doctorAt(m)).r,
+      'info',
+      /^info {5}update: this checkout changed while git fetch ran \(main at 0123456\); run skydeck update again; the last check failed 1h ago: git fetch from origin failed: x$/,
+    );
+  });
+
+  test('a failure beside a known update: both said; a fetch there never was is (never fetched)', async (t) => {
+    const m = machine(t);
+    mkdirSync(root(m), { recursive: true });
+    const now = m.platform.clock.nowNs();
+    writeCheck(
+      m.deck.store,
+      entry(m, root(m), {
+        failure: { atNs: String(now - HOUR), line: 'git fetch from origin failed: fatal: gone' },
+      }),
+    );
+    lineOf(
+      (await doctorAt(m)).r,
+      'info',
+      /^info {5}update: 3 new commits on origin\/main \(fetched 2h ago\); skydeck update applies them; the last check failed 1h ago: git fetch from origin failed: fatal: gone$/,
+    );
+    writeCheck(
+      m.deck.store,
+      entry(m, root(m), {
+        fetchedAtNs: null,
+        failure: { atNs: String(now - HOUR), line: 'git fetch from origin failed: fatal: gone' },
+        outcome: {
+          kind: 'current',
+          line: 'skydeck is up to date (main at 0123456, as origin/main)',
+        },
+      }),
+    );
+    lineOf(
+      (await doctorAt(m)).r,
+      'info',
+      /^info {5}update: skydeck is up to date \(main at 0123456, as origin\/main\) \(never fetched\); the last check failed 1h ago: /,
+    );
+  });
+
+  test('a check that failed is its own cannot: its line once, with the age of the failure', async (t) => {
+    const m = machine(t);
+    mkdirSync(root(m), { recursive: true });
+    const now = String(m.platform.clock.nowNs());
+    for (const line of [
+      'skydeck could not check for an update (Error (EAGAIN))',
+      'git symbolic-ref failed: no answer within 10 s; nothing was changed',
+    ]) {
+      writeCheck(
+        m.deck.store,
+        entry(m, root(m), {
+          head: null,
+          lookedAtNs: now,
+          checkedAtNs: now,
+          failure: { atNs: now, line },
+          outcome: { kind: 'cannot', line },
+        }),
+      );
+      const found = lineOf((await doctorAt(m)).r, 'info', /^info {5}update: /);
+      assert.equal(found, `info     update: ${line} (the last check failed 0s ago)`);
+    }
+  });
+
+  test("a failure line at the clip's length is shown whole", async (t) => {
+    const m = machine(t);
+    mkdirSync(root(m), { recursive: true });
+    const line = `git fetch from origin failed: ${'x'.repeat(5000)}`;
+    writeCheck(
+      m.deck.store,
+      entry(m, root(m), { failure: { atNs: String(m.platform.clock.nowNs()), line } }),
+    );
+
+    const found = lineOf((await doctorAt(m)).r, 'info', /^info {5}update: /);
+
+    const shown = found.slice(found.indexOf('git fetch from origin failed'));
+    assert.equal(shown.length, 300);
+    assert.ok(shown.endsWith('…'));
+  });
+
+  test('a record of another commit than the checkout is at now', async (t) => {
+    const m = machine(t);
+    mkdirSync(root(m), { recursive: true });
+    writeCheck(m.deck.store, entry(m, root(m), { head: OTHER_HEAD }));
+
+    lineOf(
+      (await doctorAt(m)).r,
+      'info',
+      /^info {5}update: last looked 2h ago at 89abcde, which is not the commit this checkout is at now; the window's server checks again when it starts$/,
+    );
+  });
+
+  test('a record of another checkout: its root named', async (t) => {
+    const m = machine(t);
+    writeCheck(m.deck.store, entry(m, '/another/checkout'));
+
+    lineOf(
+      (await doctorAt(m)).r,
+      'info',
+      /^info {5}update: the last check was of another checkout \(\/another\/checkout\); none of this one yet$/,
+    );
   });
 });
 

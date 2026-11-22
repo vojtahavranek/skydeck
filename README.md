@@ -41,7 +41,9 @@ minutes in the window.
   given as `claude`'s argument is not: it waits in the spool (`~/.local/state/skydeck/spool/`) only
   until skydeck reads it in, or up to seven days if that file cannot be read.
 - Its logs (`~/.local/state/skydeck/*.log`) hold no prompt.
-- Network: only `gh`, `skydeck update`'s `git fetch` and your ticket-status programs. No telemetry.
+- Network: only `gh`, `skydeck update`'s `git fetch`, your ticket-status programs, and the window's
+  `git fetch` of skydeck's own checkout when its server starts and once a day, to say whether a
+  newer skydeck is there (a setting turns it off; nothing is applied without a click). No telemetry.
 - The window is a local page (127.0.0.1) served from WSL; it types into your sessions as a terminal,
   and ends a session of the window only when you ask it to (Done's dialog).
 

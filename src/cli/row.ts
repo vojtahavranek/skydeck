@@ -7,7 +7,7 @@ import type { Ns } from '../platform/types.ts';
 import type { ListRow, PrView } from '../sessions/list.ts';
 import { formatAge } from '../text/age.ts';
 import { sanitize } from '../text/sanitize.ts';
-import { clip } from './clip.ts';
+import { clip } from '../text/clip.ts';
 
 const STATE_WIDTH = 11; // 'not-running', the longest state
 const AGE_WIDTH = 4;

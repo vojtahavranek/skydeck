@@ -11,6 +11,8 @@ export interface WindowConfig {
   keepAlive: 'wsl' | 'off';
   /** S2 9.6: where a link the window opens goes — the Windows default browser, or `edge`. */
   links: 'default' | 'edge';
+  /** F38 (S2 16.5): whether the window's server looks for a newer skydeck at its start and daily. */
+  updateCheck: 'daily' | 'off';
 }
 
 /**
@@ -65,6 +67,7 @@ export const DEFAULT_CONFIG: Config = {
     profileDir: null,
     keepAlive: 'wsl',
     links: 'default',
+    updateCheck: 'daily',
   },
 };
 
@@ -209,7 +212,8 @@ function readStatusRules(value: unknown, fail: (problem: string) => never): Tick
  * `claudeCommand` empty; `ticketUrl` that isTicketUrl refuses (S2 16.4); `ticketStatus` that
  * readStatusRules refuses and `ticketRefreshMinutes` not a whole number from 1 to 1440 (F19); in `window` (S2 16.4): an
  * unknown key, `port` outside 1–65535, `edge` not absolute, `profileDir` neither null nor an absolute Windows path,
- * `keepAlive` neither "wsl" nor "off", `links` neither "default" nor "edge".
+ * `keepAlive` neither "wsl" nor "off", `links` neither "default" nor "edge", `updateCheck` neither
+ * "daily" nor "off" (F38).
  *
  * `claudeHome`, `ticketUrl` and `wezterm.domain` may also be `null`, which is their default; an
  * empty `wezterm.domain` is an error like an empty `claudeCommand`.
@@ -352,6 +356,12 @@ export function parseConfig(text: string, source: string): Config {
                 fail('"window.links" must be "default" or "edge"');
               }
               config.window.links = item;
+              break;
+            case 'updateCheck':
+              if (item !== 'daily' && item !== 'off') {
+                fail('"window.updateCheck" must be "daily" or "off"');
+              }
+              config.window.updateCheck = item;
               break;
             default:
               fail(`unknown key "window.${name}"`);

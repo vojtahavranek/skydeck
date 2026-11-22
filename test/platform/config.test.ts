@@ -45,6 +45,7 @@ describe('loadConfig', () => {
       profileDir: null,
       keepAlive: 'wsl',
       links: 'default',
+      updateCheck: 'daily',
     });
   });
 
@@ -63,6 +64,7 @@ describe('loadConfig', () => {
         profileDir: 'D:\\skydeck\\edge',
         keepAlive: 'off',
         links: 'edge',
+        updateCheck: 'off',
       },
     });
 
@@ -72,6 +74,7 @@ describe('loadConfig', () => {
       profileDir: 'D:\\skydeck\\edge',
       keepAlive: 'off',
       links: 'edge',
+      updateCheck: 'off',
     });
     assert.equal(parseConfig('{"window":{"port":65535}}', 'x').window.port, 65535);
     assert.equal(parseConfig('{"window":{"profileDir":"c:\\\\"}}', 'x').window.profileDir, 'c:\\');
@@ -83,6 +86,30 @@ describe('loadConfig', () => {
     assert.equal(parseConfig('{"window":{"port":47000}}', 'x').window.links, 'default');
     assert.equal(parseConfig('{"window":{"links":"default"}}', 'x').window.links, 'default');
     assert.equal(parseConfig('{"window":{"links":"edge"}}', 'x').window.links, 'edge');
+  });
+
+  test('window.updateCheck is "daily" unless set, and takes "daily" or "off" (F38, S2 16.4)', () => {
+    assert.equal(parseConfig('{}', 'x').window.updateCheck, 'daily');
+    assert.equal(parseConfig('{"window":{"links":"edge"}}', 'x').window.updateCheck, 'daily');
+    assert.equal(
+      parseConfig('{"window":{"updateCheck":"daily"}}', 'x').window.updateCheck,
+      'daily',
+    );
+    assert.equal(parseConfig('{"window":{"updateCheck":"off"}}', 'x').window.updateCheck, 'off');
+    for (const value of ['"weekly"', '"Off"', 'false', 'true', 'null', '0']) {
+      assert.throws(
+        () => parseConfig(`{"window":{"updateCheck":${value}}}`, '/c/config.json'),
+        (error: unknown) => {
+          assert.ok(error instanceof ConfigError, String(error));
+          assert.equal(
+            error.message,
+            '/c/config.json: "window.updateCheck" must be "daily" or "off"',
+            value,
+          );
+          return true;
+        },
+      );
+    }
   });
 
   test('a wrong window.links is refused as a wrong window.keepAlive is, in the same words', () => {
@@ -225,6 +252,7 @@ describe('parseConfig', () => {
         profileDir: null,
         keepAlive: 'wsl',
         links: 'default',
+        updateCheck: 'daily',
       },
     });
   });

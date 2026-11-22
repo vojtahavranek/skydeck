@@ -905,6 +905,189 @@ describe('real runner', () => {
     assert.equal(result.code, 0);
   });
 
+  describe('killGraceMs (F38): SIGTERM first, SIGKILL after the grace', () => {
+    /** Whether process `pid` still runs (a signal 0 reaches it). */
+    const runs = (pid: number): boolean => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    /** Waits up to `ms` for `pid` to be gone; whether it is. */
+    const gone = async (pid: number, ms = 2000): Promise<boolean> => {
+      const until = Date.now() + ms;
+      while (runs(pid) && Date.now() < until) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      return !runs(pid);
+    };
+    const pidIn = (path: string): number => Number(readFileSync(path, 'utf8').trim());
+    /** Waits until `path` exists (the child has started and written it). */
+    const written = async (path: string): Promise<void> => {
+      const until = Date.now() + 5000;
+      while (!existsSync(path) && Date.now() < until) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.ok(existsSync(path), `${path} was not written`);
+    };
+    /** A shell that writes its pid, then loops in short sleeps, so that a trap runs at once. */
+    const looping = (s: Sandbox, trap: string): string[] => {
+      const pid = join(s.root, 'pid');
+      return ['-c', `${trap}; echo $$ > '${pid}'; while :; do sleep 0.05; done`];
+    };
+
+    test('a child that traps TERM: a timeout sends it SIGTERM and answers timedOut at its exit', async (t) => {
+      const s = sandbox(t);
+      s.link('sh', 'sleep', 'touch');
+      const marker = join(s.root, 'termed');
+
+      const result = await realPlatform().runner.run(
+        'sh',
+        looping(s, `trap "touch '${marker}'; exit 143" TERM`),
+        { env: s.env(), timeoutMs: 300, killGraceMs: 5000 },
+      );
+
+      assert.equal(result.timedOut, true);
+      assert.equal(result.code, null);
+      assert.equal(existsSync(marker), true);
+    });
+
+    test('a child that traps TERM: an abort sends it SIGTERM and rejects with an AbortError at its exit', async (t) => {
+      const s = sandbox(t);
+      s.link('sh', 'sleep', 'touch');
+      const marker = join(s.root, 'termed');
+      const controller = new AbortController();
+
+      const running = realPlatform().runner.run(
+        'sh',
+        looping(s, `trap "touch '${marker}'; exit 143" TERM`),
+        { env: s.env(), timeoutMs: 20_000, killGraceMs: 5000, signal: controller.signal },
+      );
+      await written(join(s.root, 'pid'));
+      const started = Date.now();
+      controller.abort();
+
+      await assert.rejects(running, { name: 'AbortError' });
+      assert.equal(existsSync(marker), true);
+      assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+    });
+
+    test('a child that ignores TERM is killed once the grace is over, at a timeout and at an abort', async (t) => {
+      const s = sandbox(t);
+      s.link('sh', 'sleep');
+      const pidFile = join(s.root, 'pid');
+
+      const started = Date.now();
+      const timedOut = await realPlatform().runner.run('sh', looping(s, "trap '' TERM"), {
+        env: s.env(),
+        timeoutMs: 200,
+        killGraceMs: 400,
+      });
+      assert.equal(timedOut.timedOut, true);
+      assert.ok(Date.now() - started >= 550, `answered after ${Date.now() - started} ms`);
+      assert.equal(await gone(pidIn(pidFile)), true);
+
+      rmSync(pidFile);
+      const controller = new AbortController();
+      const running = realPlatform().runner.run('sh', looping(s, "trap '' TERM"), {
+        env: s.env(),
+        killGraceMs: 400,
+        signal: controller.signal,
+      });
+      await written(pidFile);
+      const aborted = Date.now();
+      controller.abort();
+      await assert.rejects(running, { name: 'AbortError' });
+      assert.ok(Date.now() - aborted >= 350, `rejected after ${Date.now() - aborted} ms`);
+      assert.equal(await gone(pidIn(pidFile)), true);
+    });
+
+    test('a child that exits at TERM while a helper of its holds its stderr: answered at its exit, the helper not signalled', async (t) => {
+      const s = sandbox(t);
+      s.link('sh', 'sleep');
+      const helperFile = join(s.root, 'helper');
+      const helpers: number[] = [];
+      t.after(() => {
+        for (const pid of helpers) {
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch {
+            // already gone
+          }
+        }
+      });
+      // The helper keeps the child's stderr open for 30 s (its stdout goes nowhere).
+      const script = [
+        '-c',
+        `trap 'exit 143' TERM; sleep 30 >/dev/null & echo $! > '${helperFile}'; while :; do sleep 0.05; done`,
+      ];
+
+      const started = Date.now();
+      const result = await realPlatform().runner.run('sh', script, {
+        env: s.env(),
+        timeoutMs: 300,
+        killGraceMs: 2000,
+      });
+      assert.equal(result.timedOut, true);
+      assert.ok(Date.now() - started < 1500, `answered after ${Date.now() - started} ms`);
+      const first = pidIn(helperFile);
+      helpers.push(first);
+      assert.equal(runs(first), true, 'the helper was not signalled');
+
+      rmSync(helperFile);
+      const controller = new AbortController();
+      const running = realPlatform().runner.run('sh', script, {
+        env: s.env(),
+        killGraceMs: 2000,
+        signal: controller.signal,
+      });
+      await written(helperFile);
+      const second = pidIn(helperFile);
+      helpers.push(second);
+      const aborted = Date.now();
+      controller.abort();
+      await assert.rejects(running, { name: 'AbortError' });
+      assert.ok(Date.now() - aborted < 1500, `rejected after ${Date.now() - aborted} ms`);
+      assert.equal(runs(second), true, 'the helper was not signalled');
+    });
+
+    test('once answered, no timer of the run is left (the grace timer is cleared)', async (t) => {
+      const s = sandbox(t);
+      s.link('sh', 'sleep', 'touch');
+      const marker = join(s.root, 'termed');
+      const timers = (): number =>
+        process.getActiveResourcesInfo().filter((kind) => kind === 'Timeout').length;
+      const before = timers();
+
+      const result = await realPlatform().runner.run(
+        'sh',
+        looping(s, `trap "touch '${marker}'; exit 143" TERM`),
+        { env: s.env(), timeoutMs: 300, killGraceMs: 5000 },
+      );
+
+      assert.equal(result.timedOut, true);
+      assert.equal(timers(), before);
+    });
+
+    test('without killGraceMs a timeout sends SIGKILL at once: a TERM trap never runs', async (t) => {
+      const s = sandbox(t);
+      s.link('sh', 'sleep', 'touch');
+      const marker = join(s.root, 'termed');
+
+      const result = await realPlatform().runner.run(
+        'sh',
+        looping(s, `trap "touch '${marker}'; exit 143" TERM`),
+        { env: s.env(), timeoutMs: 300 },
+      );
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      assert.equal(result.timedOut, true);
+      assert.equal(existsSync(marker), false);
+    });
+  });
+
   test('a child that finishes before timeoutMs is not timed out', async (t) => {
     const s = sandbox(t);
     s.link('sh');

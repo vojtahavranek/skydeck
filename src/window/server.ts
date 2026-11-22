@@ -83,6 +83,7 @@ import { createSlotMemory } from './slot-memory.ts';
 import { createRegistry } from './terminals.ts';
 import type { Registry } from './terminals.ts';
 import { createTick } from './tick.ts';
+import { createUpdates } from './updates.ts';
 import type { Tick } from './tick.ts';
 import { buildListMessage } from './view/build.ts';
 import { restoreOffer } from './view/search/switcher.ts';
@@ -565,6 +566,20 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     });
     // F36 (S2 12.13): the settings screen; one per server, whose first change keeps the copy.
     const settings = createSettings({ deck, log });
+    // F38 (S2 16.5): the check for a newer skydeck; its state to every page on each change.
+    const updates = createUpdates({
+      deck,
+      changed: (payload) => {
+        pages.update(payload);
+      },
+      log,
+      // Milestone 2: what the updater is started with, and what refuses an apply.
+      serverEnv: environment.env,
+      coreSoft: environment.coreSoft,
+      originDir: () => envOrigin.dir,
+      restoreRunning: () => restorer.running(),
+      stopping: () => stopBegun,
+    });
     // F37 (design 7.8): the slots each session last had in this boot, a restore's order.
     const slotMemory = createSlotMemory({ store: deck.store, bootId: own.bootId, log: quietLog });
     const reorder = createReorder({
@@ -595,6 +610,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       settingsChanged: (payload) => {
         pages.settings(payload);
       },
+      updates,
       // F37 (S2 12.9): a session of Open moved by hand, for the page's last view.
       reorder: (page, sessionId, direction) => reorder.reorder(page.view, sessionId, direction),
     });
@@ -743,6 +759,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       log,
       starting: () => !ready,
       seen: attending.seen,
+      update: () => updates.payload(),
     });
     created.onChange(() => {
       pages.pushList();
@@ -789,6 +806,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       storeNewer,
       attention: attending.tick,
       tickets: ticketFetches,
+      updates,
     });
     tick = startedTick;
 
@@ -955,6 +973,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       await startedTick.stop();
       await prFetches.idle(); // aborted: it saves nothing more and starts no other (plan D8)
       await ticketFetches.idle(); // F19: likewise
+      await updates.stop(); // F38: a running fetch gets SIGTERM, and up to 2 s; nothing is saved
       attending.seen.stop(); // no hold ends from now on (plan B 2.7)
       await control.close(); // no command reaches it any more; its file goes with it
       await pages.bye(reason); // then an upgrade is answered 503 until the port closes (task 17)

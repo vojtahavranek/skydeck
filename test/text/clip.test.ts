@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { clip } from '../../src/cli/clip.ts';
+import { clip } from '../../src/text/clip.ts';
 
 test('clip: text that fits is returned as it is', () => {
   assert.equal(clip('abc', 3), 'abc');

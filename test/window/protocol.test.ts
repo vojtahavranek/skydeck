@@ -39,6 +39,8 @@ import type {
   SettingsPayload,
   SizeMessage,
   SnapMessage,
+  UpdateMessage,
+  UpdatePayload,
   StartMessage,
   StatusAnswer,
   ThemeMessage,
@@ -1468,6 +1470,73 @@ describe("parsePageMessage: F36's acts (S2 12.13)", () => {
         error: null,
         sessionId: null,
         settings: payload,
+      } satisfies ResultMessage,
+    ];
+    assert.deepEqual(JSON.parse(JSON.stringify(messages)), messages);
+  });
+});
+
+describe("parsePageMessage: F38's acts (S2 16.5)", () => {
+  for (const kind of ['update-check', 'update-look', 'update-seen'] as const) {
+    const message: PageMessage = { t: 'act', id: 7, kind };
+    test(`act ${kind} → ok and equal`, () => {
+      assert.deepEqual(parsePageMessage(JSON.stringify(message)), { ok: true, value: message });
+    });
+    test(`act ${kind} with an extra field → refused (no remote, path or program travels)`, () => {
+      refused(page({ ...message, [MARKER]: 1 }));
+      refused(page({ ...message, remote: 'origin' }));
+      refused(page({ ...message, to: 'f'.repeat(40) }));
+    });
+    test(`act ${kind} without its id → refused`, () => {
+      refused(page({ t: 'act', kind }));
+    });
+  }
+
+  test('act update-apply with a full commit id (40 or 64 lower-case hex digits) → ok and equal', () => {
+    for (const to of ['f'.repeat(40), '0123456789abcdef'.repeat(4)]) {
+      const message: PageMessage = { t: 'act', id: 7, kind: 'update-apply', to };
+      assert.deepEqual(parsePageMessage(JSON.stringify(message)), { ok: true, value: message });
+    }
+  });
+
+  test('act update-apply: no `to`, one that is not a full id, or an extra field → refused (no remote, path or program travels)', () => {
+    const message = { t: 'act', id: 7, kind: 'update-apply', to: 'f'.repeat(40) };
+    for (const to of ['fffffff', 'F'.repeat(40), 'f'.repeat(41), 'f'.repeat(63), '', 1, null]) {
+      refused(page({ ...message, to }));
+    }
+    refused(page({ t: 'act', id: 7, kind: 'update-apply' }));
+    refused(page({ ...message, [MARKER]: 1 }));
+    refused(page({ ...message, remote: 'origin' }));
+    refused(page({ ...message, path: '/srv/skydeck' }));
+  });
+
+  test('the update message and the result carrying it compile, and travel as JSON', () => {
+    const update: UpdatePayload = {
+      checkedAtNs: '1794474000000000000',
+      checking: false,
+      check: {
+        state: 'available',
+        summary: '1 new commit on origin/main',
+        to: 'f'.repeat(40),
+        lines: ['1 new commit on origin/main (0123456..fffffff):', '  fffffff  a subject'],
+        blocked: null,
+      },
+      fetchedAtNs: '1794474000000000000',
+      failure: { atNs: '1794474000000000001', line: 'git fetch from origin failed: x' },
+      applying: { to: 'f'.repeat(40), sinceNs: '1794474000000000002' },
+      log: '/home/you/.local/state/skydeck/update.log',
+      result: { ok: true, text: 'updated to fffffff' },
+    };
+    const messages: ServerMessage[] = [
+      { t: 'update', update } satisfies UpdateMessage,
+      {
+        t: 'result',
+        id: 1,
+        ok: true,
+        lines: [],
+        error: null,
+        sessionId: null,
+        update,
       } satisfies ResultMessage,
     ];
     assert.deepEqual(JSON.parse(JSON.stringify(messages)), messages);

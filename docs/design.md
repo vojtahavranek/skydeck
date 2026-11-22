@@ -54,8 +54,12 @@ section first.
    transient files (5.3). The one exception is the label and group skydeck itself has just stored
    for a `new` session that never started (7.7).
 7. **Never resume one session twice.** Two processes on one session interleave one transcript.
-8. **Local only.** No network service, no account, no telemetry. The only network use is the
-   `gh` command line for pull-request status.
+8. **Local only.** No network service, no account, no telemetry, and nothing is applied without
+   a click. The network is used only by: the `gh` command line (the status of pull requests and
+   GitHub issues); the user's own ticket-status programs; `skydeck update`'s `git fetch`; and the
+   window's server, which runs `git fetch` of skydeck's own checkout when it starts and once a day
+   to say whether a newer skydeck is there (design-step-2.md 16.5), a check that a setting turns
+   off. That last use is the owner's decision of 2026-11-21 (issue #163).
 9. **Everything that knows a Claude Code format lives in `src/claude/`**, so a Claude Code update
    that changes a format changes one place. Other modules see normalised values only.
 
@@ -1070,6 +1074,12 @@ could not be resumed; see above`).
   cannot be read. The time limits end the program skydeck started, not what that program started
   (the inner program of a wrapper script runs on).
 
+  Among the window's lines (design-step-2.md 16.3; follow-up F38), one `info` line `update: …`
+  says what the window's server's last check for a newer skydeck found — how many new commits on
+  which branch, up to date, or why it could not tell, and a failed last fetch beside it — from the
+  stored entry alone: `doctor` itself uses no network for it and runs no git but line (1)'s, whose
+  commit it compares with the entry's.
+
 `docs/install.md` is the guide for setting skydeck up on another machine.
 
 ## 9. Data
@@ -1079,7 +1089,7 @@ could not be resumed; see above`).
 | Name | Default | Holds |
 |---|---|---|
 | `dataDir` | `${XDG_DATA_HOME:-~/.local/share}/skydeck` | `skydeck.db` and the copies kept before its migrations (9.2), the `node` and `skydeck-hook` links. |
-| `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`; `locks/` is created but unused (resume locks are in the database, 7.6). |
+| `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`; `locks/` is created but unused (resume locks are in the database, 7.6). Since step 2 also the window's logs (design-step-2.md 4.2), among them `update.log`, the log of an update started from the window (follow-up F38). |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
 | `claudeHome` | the configuration key `claudeHome`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files. |
 | `claudeGlobalConfig` | `<claudeHome>/.claude.json` when the configuration key or `$CLAUDE_CONFIG_DIR` names `claudeHome`, else `~/.claude.json`; also `~/.claude.json` when the configuration key is the default `~/.claude` written out (those sessions run without `CLAUDE_CONFIG_DIR`), unless `$CLAUDE_CONFIG_DIR` names that same directory, when it is `~/.claude/.claude.json` | Claude Code's global config file (follow-up F11). Claude Code keeps it in the home directory, and inside `CLAUDE_CONFIG_DIR` when that is set; a configured `claudeHome` stands for the `CLAUDE_CONFIG_DIR` Claude Code runs with, since only that variable moves Claude Code's home. |
@@ -1259,7 +1269,7 @@ a copy back. No migration, setting or command comes with it.
 |---|---|---|
 | `bin/skydeck-hook` | The hook (5.1, 5.2). | — |
 | `src/platform/` | Interfaces and real implementations for clock, files, `/proc`, running programs; resolving the places in 9.1; reading the configuration. | — |
-| `src/text/` | The sanitiser; shell quoting. | — |
+| `src/text/` | The sanitiser; shell quoting; from follow-up F38 `clip.ts` (a text cut to a width without splitting a surrogate pair; moved from `src/cli/`, the window's server uses it too). | — |
 | `src/store/` | The database: connection settings, migrations and the copy kept before them (9.2), typed functions. The only SQL. | platform |
 | `src/claude/hookinput.ts` | Parses a spool file into a normalised event (5.3). | text |
 | `src/claude/live.ts` | Reads live-session files; the liveness rule (5.5). | platform |
@@ -1271,6 +1281,7 @@ a copy back. No migration, setting or command comes with it.
 | `src/github.ts` | Pull-request keys, batched status, cache rules (7.3); from F19 also GitHub issues' keys and batched status, and which provider takes a ticket's address (`statusProvider`: a configured rule, else a GitHub issue). | platform, store |
 | `src/ticket-status.ts` | A ticket's status (F19, 7.3): the configured program and its answer, when a status is due, the fetch that saves it. | github, platform, sessions (the ticket's name), store, text |
 | `src/terminals/` | The terminal interface and its implementations: `here` (handoff file), `wezterm`. | platform, text |
+| `src/update/` | Follow-up F38 (design-step-2.md 16.5): the look for a newer skydeck, one copy for `skydeck update`, the window's server and `doctor` — how skydeck runs git on its own checkout and the window's fetch that never asks (`git.ts`, moved from `src/cli/update-git.ts`), the look in the command's and the window's order and `--check`'s lines (`look.ts`), the stored outcome (`record.ts`). | platform, text, store (types), the window's protocol types |
 | `src/cli/` | Arguments, commands, output formats, the interactive list. | everything above |
 
 Nothing outside `src/claude/` reads a Claude Code file or names a Claude Code field. Nothing

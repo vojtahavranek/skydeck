@@ -84,6 +84,22 @@ export const SHORT = [
       },
     ],
   },
+  {
+    // F38: the check for a newer skydeck; web/settings.js puts its extra block (the last check,
+    // `Check now`) after the switch.
+    id: 'updates',
+    title: 'Updates',
+    entries: [
+      {
+        key: 'window.updateCheck',
+        label: 'Check for updates every day',
+        hint: null,
+        control: 'switch',
+        on: 'daily',
+        off: 'off',
+      },
+    ],
+  },
 ];
 
 /** The keys of config.json the short screen shows; the screen's Advanced holds every other one. */

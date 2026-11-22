@@ -45,6 +45,34 @@ const WITH_SESSIONS = scriptedList(
 );
 const EMPTY = scriptedList([], []);
 
+/** F38's `update`: none known, or one being applied (its running form locks the page). */
+function update(applying: boolean): Record<string, unknown> {
+  return {
+    checking: false,
+    check: null,
+    checkedAtNs: null,
+    fetchedAtNs: null,
+    failure: null,
+    applying: applying
+      ? { to: '5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f80', sinceNs: '1794474000000000000' }
+      : null,
+    log: '/home/you/.local/state/skydeck/update.log',
+    result: null,
+  };
+}
+
+/** Whether F38's update dialog (its running form) shows, and whether the page is inert. */
+async function updateLock(page: Page): Promise<{ shown: boolean; inert: boolean }> {
+  return readPage(
+    page,
+    () => ({
+      shown: document.getElementById('update-dialog')?.hidden === false,
+      inert: (document.querySelector('.app') as HTMLElement | null)?.inert === true,
+    }),
+    null,
+  );
+}
+
 let seed = 140;
 
 /**
@@ -55,15 +83,21 @@ async function world(
   t: TestContext,
   chromium: Browser,
   list: Record<string, unknown>,
-  options: { tour?: boolean; init?: string } = {},
+  options: { tour?: boolean; init?: string; update?: Record<string, unknown> } = {},
 ): Promise<{ page: Page; standin: Standin }> {
   const page = await newPage(t, chromium, { tour: options.tour ?? true });
   if (options.init !== undefined) await page.addInitScript(options.init);
   const secret = new Uint8Array(32).fill(seed++);
+  const told = new Set<unknown>();
   const standin = await standinServer(t, {
     socket: honest(secret, {
       open: (conn, message) => {
         if (message['t'] === 'view') {
+          // F38: the server's `update` comes right after `start`, before the first list.
+          if (options.update !== undefined && !told.has(conn)) {
+            told.add(conn);
+            conn.send({ t: 'update', update: options.update });
+          }
           conn.send(list);
         } else if (message['t'] === 'attach') {
           const { term, cols, rows } = message as { term: string; cols: number; rows: number };
@@ -504,6 +538,37 @@ test('the tour of the window', async (t) => {
       assert.equal(await l.page.locator('#switcher .switcher-list [data-offer="tour"]').count(), 0);
       await l.page.keyboard.press('Escape');
       assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'F38: an update that runs closes the tour as it closes the dialogs, without marking it seen; the tour does not start while the running form shows',
+    async (t) => {
+      const { page, standin } = await world(t, chromium, WITH_SESSIONS);
+      await listed(page, false);
+      await tourStep(page, 1);
+      await page.keyboard.press('Enter');
+      await tourStep(page, 2);
+      for (const conn of standin.connections) conn.send({ t: 'update', update: update(true) });
+      await tourHidden(page);
+      await until(async () => (await updateLock(page)).shown, 'the running form');
+      assert.deepEqual(await updateLock(page), { shown: true, inert: true });
+      assert.equal(await mark(page), null, 'not marked seen');
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('Enter');
+      assert.equal(await shownTour(page), null);
+      // Lifted: the page is usable again, and the tour does not come back by itself.
+      for (const conn of standin.connections) conn.send({ t: 'update', update: update(false) });
+      await until(async () => !(await updateLock(page)).shown, 'the running form lifted');
+      assert.equal((await updateLock(page)).inert, false);
+      assert.equal(await shownTour(page), null);
+      assert.equal(await mark(page), null);
+
+      // A page whose first list comes while an update runs: no tour over the running form.
+      const locked = await world(t, chromium, WITH_SESSIONS, { update: update(true) });
+      await listed(locked.page, false);
+      await until(async () => (await updateLock(locked.page)).shown, 'the running form');
+      assert.equal(await shownTour(locked.page), null);
     },
   );
 

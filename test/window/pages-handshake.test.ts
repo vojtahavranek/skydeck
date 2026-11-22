@@ -6,6 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import type { Store } from '../../src/store/store.ts';
 import { isNonce, pageProof, serverProof } from '../../src/window/auth.ts';
+import type { UpdatePayload } from '../../src/window/protocol.ts';
 import {
   SERVER_ID,
   challengeOf,
@@ -868,5 +869,57 @@ describe('pages: welcome', () => {
     assert.deepEqual(welcome.keepAlive, { mode: 'wsl', state: 'running', since: '1', error: null });
     assert.equal(welcome.assetVersion, 'build123');
     assert.equal(welcome.protocol, 1);
+  });
+});
+
+describe("pages: F38's update message", () => {
+  const STATE: UpdatePayload = {
+    checkedAtNs: '1',
+    checking: false,
+    check: { state: 'current', summary: 'skydeck is up to date (main at 0123456, as origin/main)' },
+    fetchedAtNs: '1',
+    failure: null,
+    applying: null,
+    log: '/state/update.log',
+    result: null,
+  };
+
+  test('a page gets `update` right after its start; Pages.update reaches every open page and no page in the handshake', async (t) => {
+    let state = STATE;
+    const f = await startPages(t, { update: () => state });
+    const opened: PageClient[] = [];
+    for (let i = 0; i < 2; i++) {
+      const client = await connectPage(t, f);
+      await hello(client, f, 'key', f.secret);
+      assert.equal((await client.nextText('the welcome')).t, 'welcome');
+      start(client);
+      const before = await roundTrip(client);
+      assert.deepEqual(
+        before.map((item) => ('text' in item ? item.text : 'binary')),
+        [{ t: 'update', update: STATE }],
+      );
+      opened.push(client);
+    }
+    // One past its welcome but not started, one that has not said hello.
+    const welcomed = await connectPage(t, f);
+    await hello(welcomed, f, 'key', f.secret);
+    assert.equal((await welcomed.nextText('the welcome')).t, 'welcome');
+    const challenged = await connectPage(t, f);
+    assert.equal((await challenged.nextText('the challenge')).t, 'challenge');
+
+    state = { ...STATE, checking: true };
+    f.pages.update(state);
+    for (const client of opened) {
+      assert.deepEqual(await client.nextText('the update'), { t: 'update', update: state });
+    }
+    await delay(100);
+    assert.deepEqual(welcomed.pending(), []);
+    assert.deepEqual(challenged.pending(), []);
+  });
+
+  test('without the dep no `update` is sent after start', async (t) => {
+    const f = await startPages(t);
+    const opened = await openPage(t, f); // it asserts that nothing but the pong came after start
+    assert.ok(opened.client.all.every((item) => !('text' in item) || item.text.t !== 'update'));
   });
 });
