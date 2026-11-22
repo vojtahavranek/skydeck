@@ -11,7 +11,9 @@ import type { TestContext } from 'node:test';
 
 import type { Browser, Page } from 'playwright';
 
+import { createSettings } from '../src/window/settings.ts';
 import type { UpdatePayload } from '../src/window/protocol.ts';
+import { testDeck } from '../test/helpers/deck.ts';
 import { browser, newPage } from './helpers/browser.ts';
 import {
   connection,
@@ -222,6 +224,110 @@ async function appliedAndGone(w: World): Promise<void> {
 const AWAY = new RegExp(
   `^skydeck is being updated \\(since \\d\\d:\\d\\d:\\d\\d\\): the server restarts by itself and this window comes back; sessions keep running\\. If it is not back within two minutes, the update's log says why: ${escape(LOG)} — read it first; then, in a WSL terminal: skydeck window$`,
 );
+
+const SID = '11111111-2222-4333-8444-555555555555';
+const TERM = 'aaaaaaaaaaaaaaaa';
+const TICKET = 'https://tickets.example.com/browse/{key}';
+
+/**
+ * Two pages of a stand-in whose list has one running, endable session, and whose settings screen
+ * is the server's own for a sandbox config.json holding a ticket address (createSettings); every
+ * act is recorded, and only `settings` is answered.
+ */
+async function rowWorld(t: TestContext, chromium: Browser): Promise<World> {
+  const secret = new Uint8Array(32).fill(95);
+  const seen: Seen[] = [];
+  const d = testDeck(t, { config: { ticketUrl: TICKET } });
+  const settings = createSettings({ deck: d.deck, log: () => {} });
+  const list = (): Record<string, unknown> => {
+    const made = scriptedList(
+      [{ id: SID, terminal: TERM, slot: 1, title: 'alpha' }],
+      [{ id: TERM, slot: 1, sessionId: SID }],
+    ) as { sections: { rows: Record<string, unknown>[] }[] };
+    const row = made.sections[0]?.rows[0];
+    if (row !== undefined) row['endable'] = true;
+    return made as unknown as Record<string, unknown>;
+  };
+  const standin = await standinServer(t, {
+    socket: honest(secret, {
+      open: (conn, message) => {
+        let entry = seen.find((s) => s.conn === conn);
+        if (entry === undefined) {
+          entry = { conn, acts: [] };
+          seen.push(entry);
+        }
+        if (message['t'] === 'view') {
+          conn.send(list());
+        } else if (message['t'] === 'act') {
+          entry.acts.push(message);
+          if (message['kind'] === 'settings') {
+            conn.send({
+              t: 'result',
+              id: message['id'],
+              ok: true,
+              lines: [],
+              error: null,
+              sessionId: null,
+              settings: settings.payload(),
+            });
+          }
+        }
+      },
+    }),
+  });
+  const first = await newPage(t, chromium);
+  await first.goto(standin.url);
+  await storeKey(first, secret);
+  await first.goto(standin.url);
+  await connection(first, 'open');
+  const second = await first.context().newPage();
+  await second.goto(standin.url);
+  await connection(second, 'open');
+  return {
+    standin,
+    secret,
+    pages: [first, second],
+    seen,
+    tell(update) {
+      for (const { conn } of seen) {
+        if (conn.ws.readyState === conn.ws.OPEN) conn.send({ t: 'update', update });
+      }
+    },
+    act: () => Promise.reject(new Error('not used here')),
+    answer: () => {},
+  };
+}
+
+/** Which of the page's dialogs are hidden, whether it is inert, and where the keyboard is. */
+function pageFacts(page: Page): Promise<{
+  hidden: Record<string, boolean | undefined>;
+  inert: boolean;
+  inUpdate: boolean;
+  focus: string;
+}> {
+  return readPage(
+    page,
+    () => {
+      const hid = (id: string): boolean | undefined => {
+        const hidden = document.getElementById(id)?.hidden;
+        return hidden === undefined ? undefined : hidden === true;
+      };
+      const holder = document.activeElement;
+      return {
+        hidden: {
+          editor: hid('editor'),
+          end: hid('end-dialog'),
+          settings: hid('settings'),
+          switcher: hid('switcher'),
+        },
+        inert: (document.querySelector('.app') as HTMLElement | null)?.inert === true,
+        inUpdate: document.getElementById('update-dialog')?.contains(holder) === true,
+        focus: `${holder?.tagName ?? ''}#${holder?.id ?? ''}.${holder?.className ?? ''}`,
+      };
+    },
+    null,
+  );
+}
 
 test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
   const chromium = await browser(t);
@@ -437,6 +543,123 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
       await new Promise((resolve) => setTimeout(resolve, 300));
       await runningOn(second);
       assert.deepEqual(sent(), before, 'nothing was sent');
+    },
+  );
+
+  for (const which of [
+    'the editor',
+    'the editor with a save in flight',
+    '"Mark done"',
+    'the switcher',
+  ] as const) {
+    await t.test(
+      `${which} open on the second page when \`applying\` comes: it closes; no key or click reaches anything under the running form, nothing is sent; lifted, the page is usable`,
+      async (t) => {
+        const w = await rowWorld(t, chromium);
+        const [, second] = w.pages;
+        assert.ok(second !== undefined);
+        const kinds = (): unknown[] => w.seen.flatMap((s) => s.acts).map((a) => a['kind']);
+        // The first row is selected by itself; the list takes the keyboard.
+        await until(
+          async () =>
+            (await readPage(
+              second,
+              (id) =>
+                document.querySelector('#list [data-selected="true"]')?.getAttribute('data-id') ===
+                id,
+              SID,
+            )) === true,
+          'the session selected',
+        );
+        await second.keyboard.press('Control+Shift+L');
+        await until(
+          async () => (await pageFacts(second)).focus.includes('#list'),
+          'the list has the keyboard',
+        );
+        const start = await pageFacts(second);
+        const id =
+          which === '"Mark done"' ? 'end' : which === 'the switcher' ? 'switcher' : 'editor';
+        if (id === 'editor') {
+          await second.keyboard.press('l');
+        } else if (id === 'end') {
+          await second.keyboard.press('d');
+        } else {
+          await second.keyboard.press('Control+Shift+P');
+        }
+        await until(async () => (await pageFacts(second)).hidden[id] === false, `${which} shown`);
+        if (id === 'editor') await second.keyboard.type('half typed');
+        if (id === 'switcher') await second.keyboard.type('al');
+        if (which === 'the editor with a save in flight') {
+          await second.keyboard.press('Enter');
+          await until(() => kinds().includes('label'), 'the label sent');
+        }
+        const before = kinds();
+        w.tell(APPLYING);
+        await runningOn(second);
+        const during = await pageFacts(second);
+        assert.deepEqual(
+          during.hidden,
+          { editor: true, end: true, settings: true, switcher: true },
+          'every other dialog closed under the running form',
+        );
+        for (const key of ['Tab', 'Tab', 'Enter', 'Escape', 'x', 'd', 'Space']) {
+          await second.keyboard.press(key);
+        }
+        await second.mouse.click(300, 300);
+        await second.mouse.click(60, 120);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        const after = await pageFacts(second);
+        assert.equal(after.inUpdate, true, 'the keyboard stays in the running form');
+        assert.equal(after.inert, true);
+        assert.deepEqual(kinds().slice(before.length), [], 'nothing sent while the form is shown');
+        w.tell(state({ result: { ok: false, text: 'refused' } }));
+        await liftedOn(second);
+        await until(
+          async () => (await pageFacts(second)).focus === start.focus,
+          'the keyboard back where it was',
+        );
+      },
+    );
+  }
+
+  await t.test(
+    'a ticket address half typed in Settings when `applying` comes: closing it for the running form sends no setting-set; the next opening shows the file’s value',
+    async (t) => {
+      const w = await rowWorld(t, chromium);
+      const [, second] = w.pages;
+      assert.ok(second !== undefined);
+      const kinds = (): unknown[] => w.seen.flatMap((s) => s.acts).map((a) => a['kind']);
+      const field = '#settings .short-setting[data-key="ticketUrl"] input';
+      const shownValue = (): Promise<string | null> =>
+        readPage(
+          second,
+          (selector) => {
+            const input = document.querySelector<HTMLInputElement>(selector);
+            return input !== null && input.checkVisibility() ? input.value : null;
+          },
+          field,
+        );
+      await second.locator('#settings-button').click();
+      await until(async () => (await shownValue()) === TICKET, 'the ticket address shown');
+      await second.locator(field).click();
+      await second.keyboard.press('Control+A');
+      await second.keyboard.type('https://half.example.com/{key}');
+      const before = kinds();
+
+      w.tell(APPLYING);
+      await runningOn(second);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      assert.equal(
+        await readPage(second, () => document.getElementById('settings')?.hidden, null),
+        true,
+      );
+      assert.deepEqual(kinds().slice(before.length), [], 'no setting-set, nothing sent');
+      w.tell(state({ result: { ok: false, text: 'refused' } }));
+      await liftedOn(second);
+      await second.locator('#settings-button').click();
+      await until(async () => (await shownValue()) === TICKET, 'the file’s value again');
+      assert.ok(!kinds().includes('setting-set'));
     },
   );
 

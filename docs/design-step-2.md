@@ -4906,6 +4906,10 @@ command's, because the command is what runs:
   that comes back later still reconnects, reloads and shows the right result (the entry was
   written before the bring-back). Running `skydeck window` as the log says is harmless: it finds
   the server and, with the page connected, says that a window is already open.
+- **A restart typed meanwhile.** A `skydeck window --restart` typed while the updater starts
+  leaves the checkout untouched (the updater finds no server of this checkout to stop and refuses
+  before the merge), but the restarted server reads the entry still `applying` and says that the
+  update "did not record how it ended"; the updater's `failed` entry shows only at the next start.
 - **One database, several checkouts.** The entry names its checkout, but there is one: an update
   from a second checkout's window writes over the first one's entry (an unread result of the
   first is then lost; its log stays).

@@ -2239,8 +2239,9 @@ the one skydeck's server serves, and its key could not be stored, so it cannot r
 skydeck window again`. The `skydeck window` the update runs is that run: after its 7 seconds it
 opens a new window; close the old one (its ×). The new server gets the environment of the shell you typed
 `skydeck update` in, as with `skydeck window` ("Starting it" above): run it from a plain shell.
-A window that was not open is never opened; one that does not come back within the 7 seconds is
-replaced by a new one, as `skydeck window` does.
+With `skydeck update` typed in a terminal, a window that was not open is never opened (an update
+started from the window, "Update now in the window" below, always brings it back); one that does
+not come back within the 7 seconds is replaced by a new one, as `skydeck window` does.
 
 A server of another checkout is left as it is (`skydeck: the window's server runs from another
 checkout (<path>); it is left as it is`), and so is the server when the database was written by a
@@ -2265,6 +2266,7 @@ When it refuses, it says why in one line and changes nothing (exit 1):
 | `git <command> failed: <git's line>; nothing was changed` | git's line says why; `git status`. |
 | a line of the window's server or of the database, then `; nothing was changed` | As that line says, then again. |
 | `<upstream> is at <id>, not at <id>, the commit the window listed; check again in the window; nothing was changed` | Only after `Update now` (the window's bar shows it): the remote moved on since the dialog looked. Open the dialog again. |
+| `<why>, so the update started from the window was not applied; nothing was changed` | Only after `Update now` (the window's bar shows it): the window's server of this checkout was not running when the update began (`no window server of this checkout runs`), or the one that runs is another checkout's, or the database was written by a newer skydeck, so nothing was stopped and nothing merged. `skydeck window`, then `Update now` again; or `skydeck update` in a terminal of your own. |
 | `nothing was applied: this checkout is already at <id>; run skydeck window in a terminal of your own to restart the window for it` | Only after `Update now` (the window's bar shows it): the checkout was updated by hand meanwhile, and the window still runs the old code: in a WSL terminal of your own, `skydeck window` (it restarts a server of another build). |
 
 More ends, each with exit 1:
@@ -2367,7 +2369,9 @@ not fetch again, so nothing can ask for a passphrase), and starts the new server
 environment the old one had. Every window shows `skydeck is being updated to <id>. The window comes
 back by itself.`, closes any other dialog it showed (a text half typed in it is dropped) and takes
 no keys or clicks meanwhile; the sessions keep running. Two clicks are always
-needed: `Update available`, then `Update now`.
+needed: `Update available`, then `Update now`. Once the update has stopped the window's server, the
+window is always brought back, also when the window that clicked was closed meanwhile (unlike
+`skydeck update` typed in a terminal, which opens no window that was not open).
 
 - **It worked.** The window reloads itself and a bar says `updated to <id>`; its × dismisses it in
   every window.
