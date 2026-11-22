@@ -514,10 +514,11 @@ optional. Unknown keys are an error, so a typo is not silently ignored.
 switcher, Ctrl+Shift+P) opens Settings. It shows first what is easy to change, each saved the moment
 you pick it: **Appearance** (the window's colours, "Colours" below), **Links** — `Open links in`
 (`window.links`) and `Ticket address` (`ticketUrl`; saved on Enter, or when you leave the field, if
-you changed it) — and **The window** — `Keep WSL running` (`window.keepAlive`; it counts `after a
-restart`, `skydeck window --restart`) and `Typed commands start sessions in` (`terminal`). A value
-the file's rules refuse is refused beside it in their words (`"ticketUrl" must be null or an http or
-https address with {key} once, after its host`), and the file stays as it was.
+you changed it; Esc closes Settings without saving it) — and **The window** — `Keep WSL running`
+(`window.keepAlive`; it counts `after a restart`, `skydeck window --restart`) and `Typed commands
+start sessions in` (`terminal`). A value the file's rules refuse is refused beside it in their words
+(`"ticketUrl" must be null or an http or https address with {key} once, after its host`), and the
+file stays as it was.
 
 Every other key is under **Advanced (14 more settings)**, closed until you open it: there each key
 shows its value, its default and whether the file sets it. The keys marked `change` below are

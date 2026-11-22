@@ -36,13 +36,15 @@ function configOf(l: Launched): Record<string, unknown> {
 
 const row = (key: string): string => `#settings .setting[data-key="${key}"]`;
 
-/** Whether the screen is shown and drawn (its rows came). */
+/** Whether the screen is shown and drawn from this opening's answer. */
 async function shown(page: Page): Promise<boolean> {
   return readPage(
     page,
     () =>
       document.getElementById('settings')?.hidden === false &&
-      document.querySelectorAll('#settings .setting').length > 0,
+      document.querySelectorAll('#settings .setting').length > 0 &&
+      // The server's answer of this opening came (`Reading the settings…` gone).
+      (document.querySelector('#settings .settings-status') as HTMLElement | null)?.hidden === true,
     null,
   );
 }
@@ -1100,6 +1102,55 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
         'the second window follows',
       );
       assert.deepEqual(await mark(other), []);
+      assert.deepEqual(l.problems, []);
+    },
+  );
+  await t.test(
+    'Esc is the way out without saving: a ticket address typed and not saved is dropped, nothing is sent, the next opening shows the file’s; left by a click on Close it is saved, and a refusal then goes to the key bar',
+    async (t) => {
+      const l = await launched(t, chromium, {
+        config: { ticketUrl: 'https://t.example.com/{key}' },
+      });
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      const sets = await countSets(l.page);
+      const before = readFileSync(l.d.deck.places.configPath, 'utf8');
+      const ticket = l.page.locator(shortControl('ticketUrl'));
+      await ticket.fill('https://other.example.com/{key}');
+      await l.page.keyboard.press('Escape');
+      await closed(l.page);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(await sets(), 0, 'nothing is sent');
+      assert.equal(readFileSync(l.d.deck.places.configPath, 'utf8'), before, 'the file as it was');
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      assert.equal(await ticket.inputValue(), 'https://t.example.com/{key}', "the file's value");
+
+      // A click on Close leaves the field: a good text is saved.
+      await ticket.fill('https://tickets.example.com/{key}');
+      await l.page.locator('#settings .settings-close').click();
+      await closed(l.page);
+      await until(
+        async () => configOf(l)['ticketUrl'] === 'https://tickets.example.com/{key}',
+        'saved at Close',
+      );
+      // A refused one: the key bar says so, the file unchanged.
+      await l.page.locator('#settings-button').click();
+      await opened(l.page);
+      await until(
+        async () => (await ticket.inputValue()) === 'https://tickets.example.com/{key}',
+        'the screen drawn from the file',
+      );
+      const saved = readFileSync(l.d.deck.places.configPath, 'utf8');
+      await ticket.fill('nope');
+      await l.page.locator('#settings .settings-close').click();
+      await closed(l.page);
+      await showsText(
+        l.page,
+        '#key-message',
+        /^Ticket address was not saved: "ticketUrl" must be null or an http or https address/,
+      );
+      assert.equal(readFileSync(l.d.deck.places.configPath, 'utf8'), saved, 'nothing changed');
       assert.deepEqual(l.problems, []);
     },
   );

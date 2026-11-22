@@ -326,6 +326,7 @@ const pageTheme = createTheme({
 const settingsDialog = createSettingsDialog(dom.settings, {
   act: (action) => act(action),
   closed: () => settingsClosed(),
+  say: (text) => say(text),
   theme: pageTheme,
 });
 // Stage B (B15): a click on a notification passes the gate of a window chord, then selects. A

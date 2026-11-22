@@ -6,7 +6,8 @@
 // Appearance group's Mode and Colour theme are the page's own (web/theme.js), drawn at once
 // without the server; every other entry is a key of config.json under its plain label, shown once
 // the server's screen came. Each is saved as it is picked — a choice or a switch at its change, the
-// one-line text on Enter or when the keyboard leaves it, and only when its text changed; no Save,
+// one-line text on Enter or when the keyboard leaves it (Esc drops it unsaved), and only when its
+// text changed; no Save,
 // no Default. The answer's words stand beside the control: `Saved.`, or the refusal's (a choice or
 // a switch then shows the file's value again, a text keeps what was typed). A setting whose change
 // counts after the window restarts, and a value the running server does not use yet, is marked
@@ -41,6 +42,7 @@ import { SHORT, SHORT_KEYS } from './settings-short.js';
 import {
   advancedText,
   appliesText,
+  notSavedText,
   controlText,
   factsText,
   faithful,
@@ -57,6 +59,8 @@ import { MODES, paletteWord, themeWord } from './theme-text.js';
  * @typedef {object} SettingsDeps
  * @property {(action: Record<string, unknown> & { kind: string }) => Promise<ResultMessage>} act
  * @property {() => void} closed called once whenever the dialog closes, whatever closed it
+ * @property {(text: string) => void} say  the key bar's message: the refusal of a short text saved
+ *   as the dialog closed (`Close`), whose words the dialog no longer shows
  * @property {ThemeState} theme  the Appearance group's mode and colour theme
  */
 
@@ -685,7 +689,10 @@ export function createSettingsDialog(root, deps) {
     delete row.root.dataset['waiting'];
     if (row.control instanceof HTMLInputElement) row.control.readOnly = false;
     if (!shown || open !== opens) {
+      // Saved as the dialog closed (the field left by a click on `Close`): a refusal is not lost,
+      // the key bar says it.
       row.again = false;
+      if (!result.ok) deps.say(notSavedText(row.entry.label, refusalOf(result)));
       return;
     }
     if (row.again) {
@@ -783,6 +790,21 @@ export function createSettingsDialog(root, deps) {
     deps.closed();
   };
 
+  /**
+   * Esc: the way out without saving. A short text typed and not saved is dropped — the field shows
+   * what was drawn again, so that leaving it sends nothing —, then the dialog closes.
+   */
+  const escape = () => {
+    for (const row of shortRows.values()) {
+      if (row.entry.control === 'text' && !row.waiting && valueOf(row) !== row.drawn) {
+        setValue(row, row.drawn);
+        setText(row.message, '');
+        delete row.message.dataset['outcome'];
+      }
+    }
+    hide();
+  };
+
   close.addEventListener('click', hide);
   scrim.addEventListener('mousedown', (event) => event.preventDefault());
 
@@ -837,8 +859,8 @@ export function createSettingsDialog(root, deps) {
         draw(payload);
       }
     },
-    /** Esc, from app.js's capture phase. */
-    escape: hide,
+    /** Esc, from app.js's capture phase: closes, a typed short text dropped (`escape`). */
+    escape,
     /**
      * A keydown while shown, from app.js's capture phase: true when the dialog took it — Tab and
      * Shift+Tab walk its controls and stay inside, Enter in a field saves that field.

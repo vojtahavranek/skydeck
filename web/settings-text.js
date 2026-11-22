@@ -35,6 +35,16 @@ export const SETTINGS_TEXTS = {
 };
 
 /**
+ * F39: the key bar's words for a short text saved as the dialog closed, which the server refused.
+ * @param {string} label  the setting's label on the short screen
+ * @param {string} refusal  the server's words
+ * @returns {string}
+ */
+export function notSavedText(label, refusal) {
+  return `${label} was not saved: ${refusal}`;
+}
+
+/**
  * F39: the closed section's button, with the count of the settings it holds.
  * @param {number} count
  * @returns {string}

@@ -3995,17 +3995,21 @@ screen's describe Advanced, which keeps F36's screen whole.
   answer came (`Reading the settings…` until then).
 - **Saved as it is picked** (the short screen). A choice or the switch is sent (`setting-set`) the
   moment it changes; the text field when Enter is pressed in it or the keyboard leaves it (another
-  control, a click elsewhere, the screen closed), and only when its text differs from the one
-  drawn: an unchanged one sends nothing. There is no `Save` and no `Default`, no line about the
+  control, a click elsewhere, `Close`), and only when its text differs from the one drawn: an
+  unchanged one sends nothing. Esc is the way out without saving: it closes the screen at once, a
+  text typed and not saved is dropped, nothing is sent, and the next opening shows the file's value.
+  A text saved as the screen closes (the field left by a click on `Close`) whose answer is a refusal
+  is not lost: the key bar says it (`Ticket address was not saved: <the refusal>`), as it says an
+  action's refusal while no dialog is open. There is no `Save` and no `Default`, no line about the
   default or the file, and none about when a change applies but `after a restart`. The answer's
   words stand beside the control: `Saved.`, or the refusal's (`"ticketUrl" must be null or an http
   or https address with {key} once, after its host`) — the field keeping what was typed (left again,
   the same text is not sent again), a choice or the switch showing the file's value again —, the
-  file unchanged. A value the running server does not use yet (a hand edit, `window.keepAlive`
-  after a change) is marked `after a restart` (its tooltip: `applies after the window restarts: the
-  window uses <value> until then`), and `window.keepAlive` always is. Changed again while the answer
-  waits, a choice is sent again once it came; the text field is read-only meanwhile. Every page's
-  screen follows a change (`settings`, 8.2.3).
+  file unchanged. A value the running server does not use yet (a hand edit, `window.keepAlive` after
+  a change) is marked `after a restart` (its tooltip: `applies after the window restarts: the window
+  uses <value> until then`), and `window.keepAlive` always is. Changed again while the answer waits,
+  a choice is sent again once it came; the text field is read-only meanwhile. Every page's screen
+  follows a change (`settings`, 8.2.3).
 - **Advanced.** The screen ends with a closed section, a button `Advanced (14 more settings)` (the
   count of the server's table's keys the short screen does not show), closed again at each opening
   of the screen and opened and closed by a click, Enter or Space. Opened, it holds F36's screen of
@@ -4095,12 +4099,13 @@ screen's describe Advanced, which keeps F36's screen whole.
 - **Keys** (12.9). The keyboard starts on the first control, `Mode` (from F39; before, the first
   field once the screen came). Tab and Shift+Tab walk its controls — Advanced's button, and
   Advanced's fields and buttons while it is open — and stay in it; Enter in a field saves it; Esc
-  closes it — the key help first, when it lies over the screen (Ctrl+Shift+H): Esc closes the top
-  layer only; the keyboard goes back where it was (a text field, the list, the terminal), else to
-  the zone's holder. While an answer waits its field is read-only and nothing is disabled, and a
-  draw moves no element: the keyboard and the dialog's scroll stay where they are, also when another
-  window's change draws the screen again. While it is shown every window chord but Ctrl+Shift+H says
-  `close the settings first (Esc)`; a reload passes while no field holds text that was not saved.
+  closes it, dropping a short text not saved — the key help first, when it lies over the screen
+  (Ctrl+Shift+H): Esc closes the top layer only; the keyboard goes back where it was (a text field,
+  the list, the terminal), else to the zone's holder. While an answer waits its field is read-only
+  and nothing is disabled, and a draw moves no element: the keyboard and the dialog's scroll stay
+  where they are, also when another window's change draws the screen again. While it is shown every
+  window chord but Ctrl+Shift+H says `close the settings first (Esc)`; a reload passes while no
+  field holds text that was not saved.
 - **Look.** It is wider and taller than stage D's dialogs and scrolls inside itself in a small
   window; its texts hold 4.5 : 1 in every theme (`Save` is told apart by its border, not by an
   accent ground; the short screen's labels, hints, marks and words too); every text is text, a value
