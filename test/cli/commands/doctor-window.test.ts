@@ -26,6 +26,7 @@ import type { Files, Platform, RunResult } from '../../../src/platform/types.ts'
 import { computeBuild } from '../../../src/window/build.ts';
 import { formatPidLine } from '../../../src/window/pidline.ts';
 import { writeServerJson } from '../../../src/window/runtime.ts';
+import { reportLines } from '../../helpers/doctor.ts';
 import { claudeFolders, run, withStore } from '../../helpers/install.ts';
 import { BOOT_A, fakeRunner, runResult, testPlatform } from '../../helpers/platform.ts';
 import {
@@ -916,14 +917,14 @@ describe('doctor: before and after the window was first used', () => {
     const { d, platform } = await brokenForTheWindow(t);
 
     const before = await run(platform, ['doctor']);
-    const beforeLines = before.stdout.split('\n').filter((line) => line !== '');
+    const beforeLines = reportLines(before.stdout);
 
     assert.equal(before.code, 0, before.stdout);
     assert.ok(!beforeLines.some((line) => line.startsWith('problem')), before.stdout);
 
     withStore(d.places, (store) => store.setKv('window_secret', 'A'.repeat(43)));
     const after = await run(platform, ['doctor']);
-    const afterLines = after.stdout.split('\n').filter((line) => line !== '');
+    const afterLines = reportLines(after.stdout);
     const problems = afterLines.filter((line) => line.startsWith('problem'));
 
     assert.equal(after.code, 1);

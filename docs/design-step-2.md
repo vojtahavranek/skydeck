@@ -4234,8 +4234,8 @@ check let through; a page's `new` flags become `claude` arguments only after des
 ### 16.1 Install
 
 Unchanged in what it writes: the same two hook entries (10.3), the same links, nothing on the
-Windows side. It adds one `info` line when `python3` 3.9 or newer is not found: `the window
-(skydeck window) needs python3 3.9 or newer; the commands do not`. (3.9 is the oldest the keeper's
+Windows side. It adds one line, in a section `Window` of its own (design 8), when `python3` 3.9 or
+newer is not found: `the window (skydeck window) needs python3 3.9 or newer; the commands do not`. (3.9 is the oldest the keeper's
 code allows; it is tested on 3.12, which Ubuntu 24.04 and the CI runners have.)
 
 ### 16.2 Uninstall
@@ -4280,7 +4280,8 @@ holds is `RUNTIME_DIR` in `src/cli/purge.ts`.
 
 ### 16.3 Doctor
 
-New lines, with `ok`, `info` or `problem` as in design 8. It still starts no program but those it
+New lines, with `ok`, `info` or `problem` as in design 8, under its Window heading after the
+terminal's line. It still starts no program but those it
 already runs (`gh`, `wezterm`, and for its first three lines git and `<claudeCommand> --version`,
 design 8, follow-up F20) and `python3 --version`; it starts nothing on Windows, signals
 nothing and creates nothing. While the window has never been used — no `window_secret`, or no
@@ -4826,7 +4827,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W30 | On the user's own sessions, without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a block's card closed with ← and opened again with → (blocks are open by default from follow-up F3, drawn as cards with a selectable caption from follow-up F9), a click on a caption, the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |
 | W31 | Czech and US layouts in the filter's and the switcher's fields: AltGr characters and dead keys type; Ctrl+Shift+P opens and closes the switcher on both. | E | 12.8, 12.9 |
 | W32 | `skydeck update` on the user's own installation, typed in a WSL terminal of the user's own with the window open: `--check` first (the list of new commits, or "up to date"; the window and the sessions stay as they are); then, only when it listed commits, the update itself: the window says for a few seconds that the server is not answering, then reloads itself; every session is there; no second window; `skydeck doctor` has no `problem` line that was not there before. It types into no session and presses no key in the window. | F8 | 16.5, 5.1 |
-| W33 | **Real claude**: `skydeck install` asks whether to turn Claude Code's ← shortcut off (three lines and `Turn the shortcut off? [y/N]`); `y` sets only `leftArrowOpensAgents` to `false` in `~/.claude.json`, after a backup, and `skydeck doctor` then says the shortcut is off; in a throwaway session of the window started after it, ← on its empty prompt leaves the terminal as it is (no agent view). It changes that one key of the user's on purpose and prints neither file. | F11 | 7.9 |
+| W33 | **Real claude**: `skydeck install` asks whether to turn Claude Code's ← shortcut off (its section `Claude Code's ← shortcut`, the explanation, and `> Turn the shortcut off? [y/N]`); `y` sets only `leftArrowOpensAgents` to `false` in `~/.claude.json`, after a backup, and `skydeck doctor` then says the shortcut is off; in a throwaway session of the window started after it, ← on its empty prompt leaves the terminal as it is (no agent view). It changes that one key of the user's on purpose and prints neither file. | F11 | 7.9 |
 | W34 | **Real claude**: the title bar's theme switch in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme "Auto (match terminal)" (looked at in `/theme`, never in its files), a new throwaway session started in each forced state picks the matching one, and whether one already running changes its theme at a switch is written down (not documented). At the end the switch, Windows' mode and Claude Code's theme are as they were. | F13 | 12.1, 7.2, 9.3 |
 | W35 | **Real claude**, a throwaway session started from the New form with `--model` and one more flag: the header's second line ends in those flags, in the short id's grey, after the short id, nothing else of the line moved; its tooltip says `Started with: …`; in a narrower window they are cut first; once it ended and was closed, the resume card's "Will run" has them and the header not; resumed, the header shows them again. | F16 | 12.5 |
 | W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (the header's flags, F16, and `skydeck show`); removed with ×, `Undo` puts it back at its place; with a session of the user's in a group selected, the form shows that group's chip, and a click puts the name into the Group field (nothing started). It types no prompt and changes no real session. | F15, F28 | 12.6, 10.2 |

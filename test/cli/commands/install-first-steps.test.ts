@@ -17,8 +17,8 @@ import { installedTail, nextSteps, run, transcript } from '../../helpers/install
 import { S1, S2, T0, testPlatform } from '../../helpers/platform.ts';
 
 const DONE_SAYS =
-  '"Done" only hides a session from skydeck\'s list: nothing is deleted, it can still be ' +
-  'resumed, and skydeck ls --all shows it.';
+  '  "Done" only hides a session from skydeck\'s list: nothing is deleted,\n' +
+  '  it can still be resumed, and skydeck ls --all shows it.\n';
 
 const OLD = T0 - 10n * NS_PER_DAY;
 
@@ -72,6 +72,9 @@ describe('install: the next steps after "skydeck is installed" (F22)', () => {
     assert.ok(r.stdout.endsWith(tail), r.stdout);
     assert.ok(afterLastStderr(r.writes).endsWith(tail), JSON.stringify(r.writes.slice(-8)));
     assert.equal(r.stdout.split('skydeck is installed\n').length, 2, 'the line once');
+    // Next: the steps numbered, the guide's line last, all under the heading.
+    assert.ok(r.stdout.includes('\nNext\n  1. Open a new terminal: '), r.stdout);
+    assert.ok(r.stdout.includes('\n  4. skydeck window opens the window'), r.stdout);
     for (const line of nextSteps(d.platform)) {
       assert.ok(!r.stderr.includes(line), `not on stderr: ${line}`);
     }
@@ -84,7 +87,7 @@ describe('install: the next steps after "skydeck is installed" (F22)', () => {
     const r = await inOrder(d.platform, ['install'], { lines: [] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, /hook entries already present/);
+    assert.match(r.stdout, /^ {2}hook entries already present in /m);
     const tail = installedTail(d.platform);
     assert.ok(r.stdout.endsWith(tail), r.stdout);
     assert.ok(afterLastStderr(r.writes).endsWith(tail), JSON.stringify(r.writes.slice(-8)));
@@ -99,7 +102,7 @@ describe('install: the next steps after "skydeck is installed" (F22)', () => {
     const r = await inOrder(d.platform, ['install'], { lines: ['y', 'n', 'n'] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.ok(r.stderr.endsWith('Turn the shortcut off? [y/N] '), r.stderr);
+    assert.ok(r.stderr.endsWith('> Turn the shortcut off? [y/N] \n'), r.stderr);
     const tail = installedTail(d.platform);
     assert.ok(afterLastStderr(r.writes).endsWith(tail), JSON.stringify(r.writes.slice(-8)));
   });
@@ -120,7 +123,7 @@ describe('install: the next steps after "skydeck is installed" (F22)', () => {
     const r = await run(d.platform, ['install'], { lines: ['y'] });
 
     const guide = r.stdout.trimEnd().split('\n').at(-1) ?? '';
-    assert.equal(guide, `The guide: ${join(d.platform.appRoot, 'README.md')}`);
+    assert.equal(guide, `  The guide: ${join(d.platform.appRoot, 'README.md')}`);
     assert.ok(existsSync(join(d.platform.appRoot, 'README.md')));
   });
 
@@ -146,15 +149,17 @@ describe('install: what "done" does, before the question about old sessions (F22
 
     assert.equal(r.code, 0, r.stderr);
     assert.ok(
-      r.stderr.includes(`${DONE_SAYS}\nMark 2 sessions older than 7 days as done? [y/N] `),
+      r.stderr.includes(
+        `\nOld sessions\n${DONE_SAYS}\n> Mark 2 sessions older than 7 days as done? [y/N] \n`,
+      ),
       r.stderr,
     );
     assert.equal(r.stderr.split(DONE_SAYS).length, 2, 'once');
     assert.ok(!r.stdout.includes(DONE_SAYS));
     // The question, its default and its once-only rule are as before.
     assert.deepEqual(r.prompts, [
-      'Add them? [y/N] ',
-      'Mark 2 sessions older than 7 days as done? [y/N] ',
+      '> Add them? [y/N] ',
+      '> Mark 2 sessions older than 7 days as done? [y/N] ',
     ]);
   });
 
@@ -176,7 +181,7 @@ describe('install: what "done" does, before the question about old sessions (F22
     const r = await run(d.platform, ['install']);
 
     assert.equal(r.code, 0, r.stderr);
-    assert.ok(!r.prompts.some((prompt) => prompt.startsWith('Mark ')));
+    assert.ok(!r.prompts.some((prompt) => prompt.startsWith('> Mark ')));
     assert.ok(!(r.stdout + r.stderr).includes(DONE_SAYS), r.stderr);
   });
 });

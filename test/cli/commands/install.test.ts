@@ -17,13 +17,14 @@ import { describe, test } from 'node:test';
 
 import { command } from '../../../src/cli/commands/install.ts';
 import { main } from '../../../src/cli/main.ts';
-import { hookEntry } from '../../../src/claude/settings.ts';
+import { hookCommand, hookEntry } from '../../../src/claude/settings.ts';
 import { NS_PER_DAY } from '../../../src/platform/time.ts';
 import type { Files, RunResult } from '../../../src/platform/types.ts';
 import { capture } from '../../helpers/capture.ts';
 import {
   backupAtT0,
   backups,
+  installStdout,
   installedTail,
   run,
   settingsFile,
@@ -52,6 +53,30 @@ function ourHooks(d: TestPlatform): Record<string, unknown> {
     SessionStart: [hookEntry(d.places.hookPath, 'SessionStart')],
     SessionEnd: [hookEntry(d.places.hookPath, 'SessionEnd')],
   };
+}
+
+/** The lines install shows for the two entries: event, command and timeout, lined up. */
+function entryLines(d: TestPlatform): string {
+  const start = hookCommand(d.places.hookPath, 'SessionStart');
+  const end = hookCommand(d.places.hookPath, 'SessionEnd');
+  const width = Math.max(start.length, end.length);
+  return (
+    `    SessionStart  ${start.padEnd(width)}  timeout 5 s\n` +
+    `    SessionEnd    ${end.padEnd(width)}  timeout 5 s\n`
+  );
+}
+
+/** The entries an install's stderr shows on their lines, read back as the file would hold them. */
+function entriesOf(stderr: string): Record<string, unknown> {
+  const entries: Record<string, unknown> = {};
+  for (const [, event, command, timeout] of stderr.matchAll(
+    /^ {4}(\w+) +(.+?) +timeout (\d+) s$/gm,
+  )) {
+    entries[event ?? ''] = [
+      { hooks: [{ type: 'command', command: command ?? '', timeout: Number(timeout) }] },
+    ];
+  }
+  return entries;
 }
 
 const kv = (d: TestPlatform, key: 'settings_hash' | 'settings_backup' | 'first_run_offered') =>
@@ -90,14 +115,73 @@ describe('install: links and hook entries', () => {
     assert.equal(kv(d, 'settings_backup'), 'none');
     assert.equal(kv(d, 'settings_hash'), sha256(text));
     assert.deepEqual(backups(d.places), []);
-    assert.ok(r.prompts.includes('Add them? [y/N] '));
-    const header = `skydeck will add these hook entries to ${settingsFile(d.places)}:\n`;
-    const announced = r.stderr.indexOf(header);
-    const prompt = r.stderr.indexOf('Add them? [y/N] ');
-    assert.ok(announced >= 0 && announced < prompt, r.stderr);
-    // Between the two: exactly the added groups, by event, as JSON.
-    const shown = r.stderr.slice(announced + header.length, prompt);
-    assert.deepEqual(JSON.parse(shown), ourHooks(d));
+    assert.deepEqual(r.prompts, ['> Add them? [y/N] ']);
+    // The section: its heading, the explanation indented, a blank line, one line per entry, a
+    // blank line and the question; the line closed after it, since no answer was echoed.
+    assert.ok(
+      r.stderr.startsWith(
+        'Hooks\n' +
+          `  skydeck adds these hook entries to ${settingsFile(d.places)}\n` +
+          '  (a new file):\n' +
+          '\n' +
+          entryLines(d) +
+          '\n' +
+          '> Add them? [y/N] \n',
+      ),
+      r.stderr,
+    );
+    assert.deepEqual(entriesOf(r.stderr), ourHooks(d));
+    assert.ok(!r.stderr.includes('{'), 'no JSON');
+  });
+
+  test('over a file: the explanation says it is backed up first; added and backup under the question', async (t) => {
+    const d = testPlatform(t);
+    writeFileSync(settingsFile(d.places), `${JSON.stringify({ model: 'opus' }, null, 2)}\n`);
+
+    const r = await run(d.platform, ['install'], { lines: ['y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(
+      r.stderr.startsWith(
+        'Hooks\n' +
+          `  skydeck adds these hook entries to ${settingsFile(d.places)}\n` +
+          '  (the file is backed up first):\n\n' +
+          entryLines(d) +
+          '\n> Add them? [y/N] \n',
+      ),
+      r.stderr,
+    );
+    assert.ok(!r.stderr.includes('{'), 'no JSON');
+    const root = join(d.platform.appRoot, 'bin');
+    assert.ok(
+      r.stdout.startsWith(
+        `  linked  ${d.places.hookPath} -> ${join(root, 'skydeck-hook')}\n` +
+          `  linked  ${d.places.binLink} -> ${join(root, 'skydeck')}\n` +
+          `  linked  ${d.places.nodeLink} -> ${process.execPath}\n` +
+          `  added   the hook entries to ${settingsFile(d.places)}\n` +
+          `  backup  ${backupOf(d)}\n`,
+      ),
+      r.stdout,
+    );
+  });
+
+  test('an entry the line cannot show whole (a control character in its command) is shown as JSON', async (t) => {
+    const d = testPlatform(t, { env: (s) => ({ SKYDECK_HOME: join(s.root, 'deck\u0085') }) });
+
+    const r = await run(d.platform, ['install'], { lines: ['n'] });
+
+    assert.equal(r.code, 1);
+    const json = r.stderr.slice(r.stderr.indexOf('    SessionStart\n'), r.stderr.indexOf('\n> '));
+    const entries: Record<string, unknown> = {};
+    for (const [, event, body] of json.matchAll(/^ {4}(\w+)\n((?: {6}.*\n?)+)/gm)) {
+      entries[event ?? ''] = (JSON.parse(body ?? '') as unknown[])[0];
+    }
+    assert.deepEqual(entries, {
+      SessionStart: hookEntry(d.places.hookPath, 'SessionStart'),
+      SessionEnd: hookEntry(d.places.hookPath, 'SessionEnd'),
+    });
+    assert.ok(r.stderr.includes('deck\\u0085'), r.stderr);
+    assert.ok(!r.stderr.includes('\u0085'), 'no raw C1 control reaches the terminal');
   });
 
   test('a hook path with a character a terminal acts on is shown escaped, not changed', async (t) => {
@@ -150,13 +234,26 @@ describe('install: links and hook entries', () => {
       const r = await run(d.platform, ['install'], { lines });
 
       assert.equal(r.code, 1);
-      assert.ok(r.stderr.endsWith('Add them? [y/N] settings not changed\n'), r.stderr);
+      assert.ok(r.stderr.endsWith('\n\n> Add them? [y/N] \nsettings not changed\n'), r.stderr);
+      assert.equal(r.stdout, '');
       assert.equal(readFileSync(settingsFile(d.places), 'utf8'), '{"model":"opus"}');
       assert.deepEqual(backups(d.places), []);
       nothingCreated(d);
       assert.equal(exists(d.places.binLink), false);
     });
   }
+
+  test('on a terminal: the answer typed ends the line itself; end of input closes it', async (t) => {
+    for (const [lines, end] of [
+      [['n'], '> Add them? [y/N] settings not changed\n'],
+      [[], '> Add them? [y/N] \nsettings not changed\n'],
+    ] as const) {
+      const d = testPlatform(t);
+      const r = await run(d.platform, ['install'], { lines, stdinTTY: true });
+      assert.equal(r.code, 1);
+      assert.ok(r.stderr.endsWith(end), r.stderr);
+    }
+  });
 
   test('"yes" and " Y " count as yes', async (t) => {
     for (const answer of ['yes', ' Y ']) {
@@ -180,8 +277,12 @@ describe('install: links and hook entries', () => {
     const r = await run(d.platform, ['install']);
 
     assert.equal(r.code, 0, r.stderr);
-    assert.ok(!r.prompts.some((prompt) => prompt.startsWith('Add them?')));
-    assert.match(r.stdout + r.stderr, /hook entries already present/);
+    assert.ok(!r.prompts.some((prompt) => prompt.startsWith('> Add them?')));
+    assert.ok(
+      r.stdout.startsWith(`Hooks\n  hook entries already present in ${settingsFile(d.places)}\n`),
+      r.stdout,
+    );
+    assert.deepEqual(installStdout(r.stdout).summary, ['nothing was changed']);
     assert.equal(readFileSync(settingsFile(d.places), 'utf8'), textBefore);
     assert.equal(statSync(settingsFile(d.places)).ino, settingsBefore.ino);
     assert.equal(statSync(settingsFile(d.places)).mtimeMs, settingsBefore.mtimeMs);
@@ -497,16 +598,11 @@ describe('install: the rewrite of the whole file is announced', () => {
     const r = await run(d.platform, ['install'], { lines: ['y'] });
 
     assert.equal(r.code, 0, r.stderr);
-    const header = `skydeck will add these hook entries to ${settingsFile(d.places)}:\n`;
-    const shown = r.stderr.slice(r.stderr.indexOf(header) + header.length);
-    const [entries, note, prompt] = [
-      shown.slice(0, shown.indexOf('\n}\n') + 3),
-      shown.slice(shown.indexOf('\n}\n') + 3, shown.indexOf('Add them?')),
-      shown.slice(shown.indexOf('Add them?')),
-    ];
-    assert.deepEqual(JSON.parse(entries), ourHooks(d));
-    assert.equal(note, `${announced(backupOf(d))}\n`);
-    assert.ok(prompt.startsWith('Add them? [y/N] '));
+    // Inside the section, after the entries: a blank line, the line, a blank line, the question.
+    assert.ok(
+      r.stderr.includes(`${entryLines(d)}\n  ${announced(backupOf(d))}\n\n> Add them? [y/N] \n`),
+      r.stderr,
+    );
     // What the line promised is what happened.
     assert.equal(readFileSync(backupOf(d), 'utf8'), text);
     assert.deepEqual(JSON.parse(readFileSync(settingsFile(d.places), 'utf8')), {
@@ -613,8 +709,8 @@ describe('install: the first-run offer', () => {
 
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.prompts, [
-      'Add them? [y/N] ',
-      'Mark 2 sessions older than 7 days as done? [y/N] ',
+      '> Add them? [y/N] ',
+      '> Mark 2 sessions older than 7 days as done? [y/N] ',
     ]);
     assert.deepEqual(doneOf(d), { [S1]: T0, [S2]: T0 });
     assert.equal(kv(d, 'first_run_offered'), '1');
@@ -632,8 +728,8 @@ describe('install: the first-run offer', () => {
 
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(r.prompts, [
-      'Add them? [y/N] ',
-      'Mark 1 session older than 7 days as done? [y/N] ',
+      '> Add them? [y/N] ',
+      '> Mark 1 session older than 7 days as done? [y/N] ',
     ]);
     assert.deepEqual(doneOf(d), {});
     assert.equal(kv(d, 'first_run_offered'), '1');
@@ -647,7 +743,7 @@ describe('install: the first-run offer', () => {
     const r = await run(d.platform, ['install'], { lines: ['y'] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.deepEqual(r.prompts, ['Add them? [y/N] ']);
+    assert.deepEqual(r.prompts, ['> Add them? [y/N] ']);
     assert.equal(kv(d, 'first_run_offered'), '1');
   });
 
@@ -672,7 +768,7 @@ describe('install: the first-run offer', () => {
     const r = await run(d.platform, ['install'], { lines: ['y', 'y'] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.ok(r.prompts.includes('Mark 1 session older than 7 days as done? [y/N] '));
+    assert.ok(r.prompts.includes('> Mark 1 session older than 7 days as done? [y/N] '));
     assert.deepEqual(doneOf(d), { [S3]: T0 });
   });
 
@@ -685,7 +781,7 @@ describe('install: the first-run offer', () => {
     const r = await run(d.platform, ['install'], { lines: ['y', 'y'] });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.ok(r.prompts.includes('Mark 1 session older than 1 day as done? [y/N] '));
+    assert.ok(r.prompts.includes('> Mark 1 session older than 1 day as done? [y/N] '));
   });
 });
 
@@ -709,7 +805,7 @@ describe('install: python3 for the window (S2 16.1)', () => {
     const { r } = await installWith(t, { code: null, notFound: true });
 
     assert.equal(r.code, 0, r.stderr);
-    assert.ok(linesOf(r.stdout).includes(LINE), r.stdout);
+    assert.ok(linesOf(r.stdout).includes(`  ${LINE}`), r.stdout);
   });
 
   test('python3 3.12: no line', async (t) => {
@@ -730,7 +826,7 @@ describe('install: python3 for the window (S2 16.1)', () => {
       const { r } = await installWith(t, answer);
 
       assert.equal(r.code, 0, r.stderr);
-      assert.ok(linesOf(r.stdout).includes(LINE), JSON.stringify(answer) + r.stdout);
+      assert.ok(linesOf(r.stdout).includes(`  ${LINE}`), JSON.stringify(answer) + r.stdout);
     }
   });
 
@@ -743,7 +839,7 @@ describe('install: python3 for the window (S2 16.1)', () => {
       const { r } = await installWith(t, answer);
 
       assert.equal(r.code, 0, r.stderr);
-      assert.ok(linesOf(r.stdout).includes(LINE), JSON.stringify(answer) + r.stdout);
+      assert.ok(linesOf(r.stdout).includes(`  ${LINE}`), JSON.stringify(answer) + r.stdout);
     }
   });
 
@@ -770,7 +866,7 @@ describe('install: python3 for the window (S2 16.1)', () => {
       linesOf((r.stdout + r.stderr).replaceAll(d.sandbox.root, '<root>'));
 
     assert.deepEqual(
-      normalise(without.r, without.d).filter((line) => line !== LINE),
+      normalise(without.r, without.d).filter((line) => line !== `  ${LINE}` && line !== 'Window'),
       normalise(withPython.r, withPython.d),
     );
     for (const { d } of [withPython, without]) {
@@ -829,7 +925,7 @@ describe('install: python3 that cannot be started (review 2)', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.match(
       r.stdout,
-      /^the window \(skydeck window\) needs python3 3\.9 or newer; the commands do not$/m,
+      /^Window\n {2}the window \(skydeck window\) needs python3 3\.9 or newer; the commands do not$/m,
     );
     assert.ok(r.stdout.endsWith(installedTail(d.platform)), r.stdout);
   });

@@ -929,6 +929,34 @@ could not be resumed; see above`).
   session saved it while the question was open), install stops and writes nothing. A write that
   fails is an error naming the file, and leaves no backup of its own behind.
 
+  What install prints comes in sections, in the order of its steps: Hooks (3), Old sessions (5,
+  only when its question is asked), Window (only for the python3 line, design-step-2.md 16.1),
+  Claude Code's ← shortcut (6). A section is a heading line, with a blank line before every heading
+  but the first, and its explanation indented by two spaces. In Hooks each entry is one line: its
+  event, the whole command as it is written to the file and the timeout (`timeout 5 s`), lined up;
+  an entry the line cannot show whole — anything but one hook of type `command` with a timeout, or
+  a command that sanitising (7.4) would change — is shown as JSON instead (written as by `jsonText`,
+  a character a terminal acts on escaped), so that the question never shows less than what is
+  written. Each question stands on its own line after a blank line and starts `> `; its wording,
+  `[y/N]` and the answers it takes do not change, and when no answer was echoed (end of input, or
+  standard input that is not a terminal) install ends the line, so that what follows starts on a
+  line of its own. Under a question, results are short lines, a word lined up with the other
+  results of that question and the rest: `linked <path> -> <target>` for each link made or
+  pointed anew, `added`, `backup`, `marked`, `turned off`, `note`. Before `skydeck is installed`,
+  `Changed` lists every file this run changed — the database when this run created it (every run
+  writes to it, which does not count), each link made or pointed anew, the settings file, the
+  global config file — each followed by its backup when it had one; a run that changed none of
+  them prints the one line `nothing was changed`. Last, `Next`: the four things to do next,
+  numbered, and the guide's path. The sections that ask (Hooks with its entries, Old sessions, the
+  ← shortcut while it is on) write their heading, explanation and question to stderr; the sections
+  that do not ask (Hooks with `hook entries already present in <file>`, Window, the ← shortcut
+  with `It is off.` or `left <file> alone (…)`), the results, the summary and Next go to stdout,
+  and so does every line that went there before the sections; a failure of the ← step is a result
+  on stderr. On a terminal (that stream a terminal, `NO_COLOR`
+  unset or empty, `TERM` not `dumb`) headings, questions and `skydeck is installed` are bold and
+  the backup and link lines dim; otherwise there is no colour. The first scan's progress line
+  (5.6) is cleared as for every command.
+
   Step (6) reads `leftArrowOpensAgents` from Claude Code's global config file (9.1,
   `claudeGlobalConfig`): `off` when it is exactly `false`; `on` when it is absent or `true`;
   `unknown` when there is no file, it cannot be read, it is not UTF-8 (the file is read as bytes
@@ -936,11 +964,11 @@ could not be resumed; see above`).
   backup), it is not a JSON object, the key holds anything else, or the path is a symbolic link,
   not a regular file, or another user's (such a file is never written, so its state is not asked
   for); and a file without its owner's write bit whose shortcut is on (one that is off reads `off`:
-  nothing would be written to it). The reader never creates the file and never follows a link. On `on` install prints three lines (what the shortcut does, that ← also
-  closes a group in the window's list, that agent view itself stays) and asks `Turn the shortcut
-  off? [y/N]`; a no, or no answer, is one line on how to do it later (`/config` in Claude Code,
-  "← opens agents", or install again). On `off` it prints one line, on `unknown` one line naming
-  the file, left alone; neither asks. After the yes it sets the key, and only it: the text is
+  nothing would be written to it). The reader never creates the file and never follows a link. On `on` install explains in its section what the shortcut does, that ← also
+  closes a group in the window's list, that only this key changes, after a backup, and that agent
+  view itself stays, and asks `Turn the shortcut off? [y/N]`; a no, or no answer, is one line on
+  how to do it later (`/config` in Claude Code, "← opens agents", or install again). On `off` its
+  section has one line, on `unknown` one line naming the file, left alone; neither asks. After the yes it sets the key, and only it: the text is
   edited, not parsed and written back (that would reorder numeric keys, lose digits and change
   escapes), the key's `true` replaced where it is or the key added after the last member with
   that member's own white space and colon, so indentation, line ends and the final newline stay;
@@ -1001,6 +1029,20 @@ could not be resumed; see above`).
   copy of an older database its open migrates, 9.2, whose line it says on stderr). A check that fails unexpectedly is one problem line, not the end
   of the report; so is a configuration file that cannot be read or a database that is missing or
   cannot be opened, and the checks that do not need it still run.
+
+  Each line is `ok`, `info` or `problem` padded to 9 characters, then the text, at the start of
+  its line, on stdout. The lines stand in groups, in this order, each under a heading line with a
+  blank line before every heading but the first: Versions (the three lines below), Recording (the
+  configuration's and the database's problem lines, the hook entries and link, Node.js, the
+  database, the spool, the last event, `spool/bad/`, `hook.log`, scripted runs, the last refresh),
+  Claude Code (its folders, the ← shortcut), GitHub (`gh`), Window (the terminal adapter, then the
+  window's checks, design-step-2.md 16.3). A group with no line, because its checks were skipped,
+  has no heading. After the groups, a blank line and the verdict: `no problems`, or `1 problem` /
+  `<n> problems` followed by each problem line again, as it stood. The exit code is 1 exactly when
+  there is a problem line. On a terminal (stdout a terminal, `NO_COLOR` unset or empty, `TERM` not
+  `dumb`) headings and the verdict are bold, the word `ok` green and `problem` red; otherwise the
+  output holds no escape sequence. Colour goes around what skydeck writes, never into foreign text,
+  which is sanitised as everywhere (7.4).
 
   Before every other line, three `info` lines say what runs (follow-up F20); none is ever a
   problem, none changes the exit code, and none names a path. (1) `skydeck <version line>`, the

@@ -3,6 +3,7 @@
  * another on one sandboxed platform, each run with its own captured output and answers, and look
  * at the database and Claude Code's folders between runs.
  */
+import assert from 'node:assert/strict';
 import { mkdirSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
@@ -110,7 +111,43 @@ export function nextSteps(platform: Platform): string[] {
   ];
 }
 
-/** The end of the stdout of an install that succeeded: `skydeck is installed`, then the next steps. */
+/**
+ * The end of the stdout of an install that succeeded: a blank line, `skydeck is installed`, a blank
+ * line and Next, the next steps numbered but the guide's.
+ */
 export function installedTail(platform: Platform): string {
-  return `skydeck is installed\n${nextSteps(platform).join('\n')}\n`;
+  const steps = nextSteps(platform);
+  const guide = steps.pop() ?? '';
+  const numbered = steps.map((step, index) => `  ${index + 1}. ${step}\n`).join('');
+  return `\nskydeck is installed\n\nNext\n${numbered}  ${guide}\n`;
+}
+
+/** The prompt of one of install's questions, `> <question> ` (without colour). */
+export function prompt(question: string): string {
+  return `> ${question} `;
+}
+
+/** The stdout of an install that succeeded, in three: what came before the summary, its lines, the tail. */
+export interface InstallStdout {
+  /** Everything before the summary, ending in a newline (the blank line before it left out). */
+  before: string;
+  /** The summary: `Changed` and its lines, or the one line `nothing was changed`. */
+  summary: string[];
+  /** From the blank line before `skydeck is installed` to the end (installedTail). */
+  tail: string;
+}
+
+export function installStdout(stdout: string): InstallStdout {
+  const end = stdout.lastIndexOf('\n\nskydeck is installed\n');
+  assert.ok(end >= 0, `no "skydeck is installed" in:\n${stdout}`);
+  const head = stdout.slice(0, end + 1);
+  const start = head.lastIndexOf('\n\n');
+  return {
+    before: start < 0 ? '' : head.slice(0, start + 1),
+    summary: head
+      .slice(start < 0 ? 0 : start + 2)
+      .split('\n')
+      .filter((line) => line !== ''),
+    tail: stdout.slice(end + 1),
+  };
 }

@@ -11,6 +11,7 @@ import type { TestContext } from 'node:test';
 
 import pkg from '../../../package.json' with { type: 'json' };
 import type { Platform, RunResult, Runner } from '../../../src/platform/types.ts';
+import { reportLines } from '../../helpers/doctor.ts';
 import { claudeFolders, run } from '../../helpers/install.ts';
 import type { Run } from '../../helpers/install.ts';
 import { fakeRunner, realTestPlatform, runResult, testPlatform } from '../../helpers/platform.ts';
@@ -98,7 +99,7 @@ async function doctor(
     { ...d.platform, runner, ...systemParts(d, options.system), ...options.platform },
     ['doctor'],
   );
-  const lines = r.stdout.split('\n').filter((line) => line !== '');
+  const lines = reportLines(r.stdout);
   return { ...r, lines, problems: lines.filter((line) => line.startsWith('problem  ')), runner };
 }
 
@@ -409,7 +410,7 @@ describe('doctor: the system line (follow-up F20)', () => {
   test("on this machine: its own /etc/os-release is read (the kernel is the test platform's)", async (t) => {
     const d = await installedMachine(t);
     const r = await run({ ...d.platform }, ['doctor']);
-    const line = r.stdout.split('\n')[2] ?? '';
+    const line = reportLines(r.stdout)[2] ?? '';
     assert.match(line, /^info {5}system: \S.*, Linux 6\.6\.0-test$/);
   });
 });

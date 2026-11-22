@@ -27,8 +27,10 @@ Node.js, put the path of a newer `node` in front: `SKYDECK_NODE=/path/to/node bi
 
 The install adds two hooks to Claude Code's settings file, `~/.claude/settings.json`, which tell
 skydeck when a session starts and when it ends. It shows you the exact entries first, and keeps a
-copy of the file as it was. It asks up to three questions; Enter alone answers no, and a no to the
-first one ends the install with nothing changed.
+copy of the file as it was. It asks up to three questions, each in a section of its own and on a
+line that starts with `> `; Enter alone answers no, and a no to the first one ends the install with
+nothing changed. At the end it lists every file it changed, with its backup, under `Changed`, and
+what to do next under `Next`.
 
 1. **Add them?** Yes adds the two hooks, so that skydeck records every session that starts.
 2. **Mark … sessions older than 7 days as done?** (asked once, when there are such sessions) Yes
@@ -51,8 +53,9 @@ one more), and run:
 skydeck doctor
 ```
 
-It prints one line per check, each starting with `ok`, `info` or `problem`, and most `problem`
-lines say what to do. Two things are normal on a new machine: `doctor` has seen no events yet (that
+It prints its checks in groups (Versions, Recording, Claude Code, GitHub, Window), one line per
+check, each starting with `ok`, `info` or `problem`, and ends with a verdict: `no problems`, or how
+many there are with each `problem` line again. Most `problem` lines say what to do. Two things are normal on a new machine: `doctor` has seen no events yet (that
 changes once a session starts), and without `gh` logged in, its `gh` line is a `problem`.
 `skydeck ls` prints your sessions, also those Claude Code had before the install; one that never
 had a prompt shows only while it runs.
