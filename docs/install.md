@@ -257,7 +257,7 @@ Last, install looks at **Claude Code's ← shortcut**. In a Claude Code session,
 sends the session to the background and opens Claude Code's agent view. In skydeck's window ← also
 closes a group in the list, so a ← meant for the list but typed into a terminal sends that
 terminal's session away: the conversation goes on in a background session that the window lists as
-"running in Claude Code's background" once it has a message (before that `a` shows it, marked
+"running in Claude Code's background" once it has a message (before that `a` in the list shows it, marked
 `empty copy`: "Using the window"), the session the terminal had stays in the list, and what you
 type in the terminal then goes to a background session. Claude Code keeps the switch,
 `leftArrowOpensAgents`, in its global config file (not in `settings.json`): `~/.claude.json`, or
@@ -848,15 +848,15 @@ effect.
 
 - **The list**, on the left, has three sections: **Open** (running or starting, in the window or in
   another terminal; the window's terminals carry the slots 1–9, read top to bottom; Shift+↑ and
-  Shift+↓ move the selected one, see Keys), **Recent** (not running, last
+  Shift+↓ in the list (`Focus: list`) move the selected one, see Keys), **Recent** (not running, last
   active in the last 7 days) and **Earlier** (folded; a click on its header unfolds it). Done
-  sessions are hidden: the footer's `show`, or `a`, shows them. While there is no session at all
+  sessions are hidden: the footer's `show`, or `a` in the list, shows them. While there is no session at all
   (none yet, or the last one done or gone), the list says so under Open and names the two ways to
   get one: start `claude` in any terminal (it shows in the list as soon as it starts), or start one
   in the window with Ctrl+Shift+N (`+ New` in a browser tab); the right side then says `The
   selected session shows here.`
 - **A session that is not running**: one click selects it and shows its resume card, with the
-  exact command it will run. Enter, a double click or `Resume here` resumes it into the window.
+  exact command it will run. Enter in the list, a double click or `Resume here` resumes it into the window.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
   terminal shows a card instead: it cannot be shown in the window. Once you `/exit` it there, it
   can be resumed here. A session in Claude Code's background has no terminal at all. For one sent
@@ -868,7 +868,7 @@ effect.
 - **A copy made by Claude Code's background feature.** Agent view and `/bg` can start a copy of a
   session (`claude --fork-session --resume …`): a new session that holds only the title of the one
   it copies, running in Claude Code's background. While it has no message and sits idle the list
-  does not show it as a second row of that session: `a` shows it, as it shows done sessions, marked
+  does not show it as a second row of that session: `a` in the list shows it, as it shows done sessions, marked
   `empty copy` (its tooltip names the session it copies), and so does `skydeck ls --all`; restore
   never offers it. Once you give it a prompt (in agent view) it is listed by itself, without a
   reload, marked `continued`, its tooltip naming the session it began as a copy of. One that is
@@ -877,7 +877,7 @@ effect.
   message; a pull request skydeck attached by itself, from a link Claude Code may have copied with
   the title, does not count). A copy that a terminal of the window shows is always listed. A copy
   you start yourself with `--fork-session` in a terminal of your own is the same to skydeck: it
-  shows once it has a first message, and `a` shows it before. skydeck does not stop a copy: it runs
+  shows once it has a first message, and `a` in the list shows it before. skydeck does not stop a copy: it runs
   in Claude Code's background as before.
 - **A new session**: Ctrl+Shift+N (in a browser tab the browser keeps Ctrl+Shift+N for itself:
   use the `+ New` button there), with its directory,
@@ -990,14 +990,14 @@ requests — …`): look at it before you save.
   Ctrl+Shift+V paste into the field.
 - Right after this window saved a label, group, note or ticket of a session, its dialogs wait for
   the list that holds the new text (within a second). Until it has come, whichever of the four was
-  saved, each of these on that session only says so: `l` `the label is not here yet; press l
+  saved, each of these keys in the list on that session only says so: `l` `the label is not here yet; press l
   again`, F2 `the label is not here yet; press F2 again`, `g` `the group is not here yet; press g
   again`, `n` `the note is not here yet; press n again`, `t` `the ticket is not here yet; press t
   again`; the header's controls say the same with the list's key (`press l again`, …). `p` never
   waits. Right after you select a session, `n` and `t` can also say so. A refusal that comes after you closed
   its dialog shows in the toast as `not saved: <why>`.
 
-**Done.** `d` or `Done` marks the session done and shows a toast with `Undo` for 5 seconds:
+**Done.** `d` in the list or `Done` marks the session done and shows a toast with `Undo` for 5 seconds:
 `Marked done: hidden from the list. It comes back on new activity.`, or for a session that runs
 in another terminal, or in a terminal of the window that skydeck cannot end (one started before
 skydeck was updated to a version that can end sessions, or one whose terminal is not connected),
@@ -1007,7 +1007,7 @@ in claude agents. Hidden once it stops.` — such a row stays under Open with a 
 the session stops. `Undo` marks it undone again: a click presses it, or Tab until it has the
 keyboard and then Enter.
 
-For a session that runs in a terminal of the window, `d` or `Done` first asks, in a dialog over the
+For a session that runs in a terminal of the window, `d` in the list or `Done` first asks, in a dialog over the
 window: `Mark done: <its title>` and `This session is still running.`, with `End session and mark
 done`, `Mark done, keep it running` and `Cancel`; while it is working the dialog also says `It is
 working: ending it now stops the current turn.` The keyboard is always on `Mark done, keep it
@@ -1035,7 +1035,7 @@ unless you moved the selection meanwhile. `Done` in the header selects nothing i
 `d` on a session marked done (shown with `a`), and `Undone`, mark it undone, without a toast. A
 held `d` acts once, and so does a double click on a button of the header.
 
-**The pull-request dialog** (`p`, `Pull requests` or `+ PR`) lists every attached pull request on a
+**The pull-request dialog** (`p` in the list, `Pull requests` or `+ PR`) lists every attached pull request on a
 line of its own: `acme/web #7 · approved, green · checked 4m ago` (or `checks failing`, `changes
 requested`, `checks pending`, `review required`, `unresolved comments`, `draft`, `blocked`, `checks
 passing`, `open`; `not fetched` until it is first read). They say what GitHub waits for before it
@@ -1111,7 +1111,7 @@ letters, digits, `-`, `_` and `.` and starting with a letter or a digit; with th
 a key such as `ABC-123` at its start — the chip shows the group with `↗` after it (`ABC-123 ↗`,
 `ABC-123 cleanup ↗`), underlined, with the ticket's address as its tooltip, and a click on it that
 selected no text opens the ticket in your default browser (`window.links`). Without such a key,
-or without `ticketUrl`, the chip is plain text. The chip never edits: ✎ and `g` edit the group.
+or without `ticketUrl`, the chip is plain text. The chip never edits: ✎ and `g` in the list edit the group.
 skydeck itself reads nothing from the ticket system (a status comes through `gh` or a program you
 name: "A ticket's status" below).
 
@@ -1384,7 +1384,7 @@ colour, before the counts per state: `3 need you · 2 working · 1 waiting · 14
 before `not running` when there are such sessions. A session that needs you is counted there and
 in no other count. The count takes in every session
 the list lists, also those the filter or the folded Earlier hides; a done session that has stopped
-is counted only while done sessions are shown (`show`, `a`). The window's title, which the taskbar
+is counted only while done sessions are shown (`show`, or `a` in the list). The window's title, which the taskbar
 button shows, is `(3) skydeck`, and `skydeck` while none needs you.
 
 **Ctrl+Shift+J** selects the next session that needs you: first those that ask, the one that has
@@ -1662,7 +1662,7 @@ Recent only recent ones (not running, last active in the last 7 days), so a grou
 two sections is two blocks. Every session of the group is in its block, one that has a terminal of
 the window and one that needs you too. A block sits where its first session sits in the section's
 order (under Open: by slot), and the others follow it in that order, so the slot numbers under Open
-can run `1 3 2` — until you move a session (Shift+↑ or Shift+↓, "Using the window"), which gives the
+can run `1 3 2` — until you move a session (Shift+↑ or Shift+↓ in the list, "Using the window"), which gives the
 numbers out again top to bottom. A group is its exact text: `ORB-1` and `orb-1` are two. A session whose group no
 other session of its section has, or that has no group, is listed as before. A section's count
 counts every session in it, those of a closed block too.
@@ -1719,7 +1719,7 @@ the sessions the chips leave in it, and a closed one stays closed.
   holds it (the page does not know a closed block's sessions), as it skips a session that the filter
   or the folded Earlier hides and that no terminal of the window holds; one that a terminal of the
   window holds it selects, and its block opens.
-- `d` on a session of an open block marks that session only: the others stay a card, or the last one
+- `d` in the list on a session of an open block marks that session only: the others stay a card, or the last one
   stands alone as a plain row, and the selection goes to the row after it (stage D's rule). With
   done sessions shown the session stays listed and stays selected.
 - While a word is typed, every session stands alone; under chips alone the cards stay.
@@ -1912,7 +1912,7 @@ of the window between light and dark: after one, start or resume the session aga
   changed meanwhile is refused, with your text kept in the box.
 - **The toast's Undo has no key of its own.** It is a button: a click presses it, or Tab until
   it has the keyboard and then Enter. The toast is shown for 5 seconds, and the next toast
-  replaces it. Once it is gone: `a` shows done sessions, then `d` on the session.
+  replaces it. Once it is gone: `a` in the list shows done sessions, then `d` on the session.
 - **A long note** (over 64 KiB, 65,536 bytes of UTF-8) is edited with `skydeck note <short id>`
   only: its dialog says `this note is longer than the window edits; use skydeck note <short id>`.
   A label or group over 1,024 bytes is refused before it is sent (`the label is longer than skydeck
@@ -2009,9 +2009,9 @@ of the window between light and dark: after one, start or resume the session aga
   shows its mark, and Ctrl+Shift+J reaches it, but the title bar's count leaves it out (without
   the filter it is not listed), so the key bar's `… hidden by the filter or the fold` counts one
   too few for each such session.
-- **`d` while a word is typed.** The toast says `Marked done: hidden from the list. It comes back
+- **`d` in the list while a word is typed.** The toast says `Marked done: hidden from the list. It comes back
   on new activity.` while the filter still lists the session, with its `done` mark.
-- **`d` under `Done`.** It takes a session's mark away, so the session leaves the list (`Done`
+- **`d` in the list under `Done`.** It takes a session's mark away, so the session leaves the list (`Done`
   lists done ones only) as any session a filter stops matching ("A selected session the list does
   not show" above): no row is selected, and ↑ and ↓ start again from the first line.
 - **Blocks the window cannot close.** A block whose group is over 1,024 bytes (of UTF-8) cannot
@@ -2565,7 +2565,7 @@ file.
 | `doctor`: `no SessionStart hook entry ...` | Run `skydeck install`. Claude Code may have rewritten its settings file. |
 | A session you expect is not in `skydeck ls` | A session that is not running and never received a prompt has no transcript and is not listed. One marked done needs `--all`, and so does a copy Claude Code's background feature made that has no message yet ("Using the window", "A copy made by Claude Code's background feature"). A scripted run (print mode, an SDK host, an editor extension) is not a session of its own and is not listed (`doctor` counts what it drops), and neither is a session whose transcript says it was not started by the interactive `claude` (its entry point is not `cli`). Run `skydeck doctor`. |
 | `skydeck: <id> is running (pid <n>)` when you resume | The session runs in another terminal, or in Claude Code's background (`skydeck show <ref>` then says `(in Claude Code's background)` next to the holder; `claude agents` shows it). skydeck never resumes a session twice (exit 4). |
-| What you type into a window terminal shows up on another row, "running in Claude Code's background" | ← on the terminal's empty prompt sent its session to the background (Claude Code's agent view). That row shows once the background session has a message (`a` shows it before, marked `empty copy`); the session the terminal had stays in the list. `skydeck doctor` says whether that shortcut is on; `skydeck install` offers to turn it off (Install, step 3). |
+| What you type into a window terminal shows up on another row, "running in Claude Code's background" | ← on the terminal's empty prompt sent its session to the background (Claude Code's agent view). That row shows once the background session has a message (`a` in the list shows it before, marked `empty copy`); the session the terminal had stays in the list. `skydeck doctor` says whether that shortcut is on; `skydeck install` offers to turn it off (Install, step 3). |
 | The same, but you see no such terminal | A scripted run (print mode such as `claude -p --resume <id>`, an SDK host, an editor extension) holds that session. skydeck shows it as `running`, `skydeck show <ref>` says `(scripted run)` next to the holder, and `resume` is refused until that process ends. |
 | `skydeck: <id> is being resumed (<n> s ago); try again in <m> s` | A resume of that session started less than a minute ago. When skydeck printed a command for you to run, the same hold applies for that minute. |
 | `skydeck: the window's server is not started from inside a Claude Code session: …` | `skydeck window` was run as a `!` command of a Claude Code session, or from a shell that inherited `CLAUDECODE`. Run it in a WSL terminal of your own. |
