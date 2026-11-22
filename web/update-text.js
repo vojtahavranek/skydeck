@@ -1,6 +1,6 @@
 // Follow-up F38's words for the update notice (S2 16.5, 12.1, 12.13), pure (no DOM): whether the
 // title bar's `Update available` shows, what the dialog it opens says for each answer of the
-// server's look, the settings screen's block `Updates`, and (milestone 2) whether the dialog offers
+// server's look, the lines of the settings screen's group Updates, and (milestone 2) whether the dialog offers
 // `Update now`, its running form, and the bar while the server is away for an update. The page decides no rule: what is
 // known, and whether it can be applied, is the server's (src/window/updates.ts); these functions
 // only put its texts into sentences. Every text they return reaches the DOM as text.
@@ -13,8 +13,6 @@ export const UPDATE_TEXTS = {
   heading: 'Update available',
   close: 'Close',
   looking: 'Looking at the checkout…',
-  /** The settings screen's block. */
-  block: 'Updates',
   checkNow: 'Check now',
   checking: 'Checking…',
   never: 'No check was made yet.',

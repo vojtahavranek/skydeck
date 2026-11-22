@@ -157,7 +157,7 @@ const VALID: Record<string, PageMessage> = {
   },
   'act ticket, a key': { t: 'act', id: 16, kind: 'ticket', sessionId: S1, text: 'ABC-123' },
   'act ticket, empty (removes it)': { t: 'act', id: 17, kind: 'ticket', sessionId: S1, text: '' },
-  // Follow-up F13: the page's colours again, after the title bar's switch or the system's scheme.
+  // Follow-up F13: the page's colours again, after a pick in Settings' Appearance or the system's scheme.
   theme: { t: 'theme', theme: { fg: '#24292f', bg: '#fbfbf9' } },
 };
 

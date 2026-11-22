@@ -840,9 +840,9 @@ export function createTerminalView(root, deps) {
   };
 
   // The colours follow the page's light or dark scheme (style.css, terminal-view.css): the
-  // system's, and the title bar's switch, which sets <html data-theme> (web/theme.js; follow-up
-  // F13) —, and the scheme's colour theme, <html data-palette-light> and <html data-palette-dark>
-  // (the title bar's second switch). Every terminal is repainted, a hidden one too.
+  // system's, and Settings' Mode, which sets <html data-theme> (web/theme.js; follow-ups F13,
+  // F39) —, and the scheme's colour theme, <html data-palette-light> and <html data-palette-dark>
+  // (Settings' Colour theme). Every terminal is repainted, a hidden one too.
   const retheme = () => {
     for (const t of terms.values()) {
       t.xterm.options.theme = theme();

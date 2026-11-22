@@ -510,30 +510,43 @@ The file is `<configDir>/config.json` (default `~/.config/skydeck/config.json`).
 until you write it (by hand, or with a change in the window's Settings, below), and every key is
 optional. Unknown keys are an error, so a typo is not silently ignored.
 
-**In the window: Settings.** `Settings` in the window's title bar (or `> settings` in the quick
-switcher, Ctrl+Shift+P) shows every key, its value, its default and whether the file sets it. The
-keys marked `change` below are changed there, one at a time: `Save` (or Enter in its field), or
-`Default` to remove the key from the file. A key marked `shown` names a program, a folder or the
-port: the window shows it, and you change it in the file. A value the file's rules refuse is
-refused there in the same words (`"prRefreshMinutes" must be a positive integer`), and the file
-stays as it was; a text longer than 4,096 bytes (the file takes a longer `groupPattern`) is changed
-in the file by hand; a file that cannot be read is never written (the screen says what `doctor` says:
-mend it by hand), and neither is one you may not write (mode 444) or another user's. Only that key
-changes; every other key of the file stays, in its order, with its indentation and line ends. The
-first time the window writes over the file after its server started, it keeps a copy of it first,
-beside it, as `config.json.skydeck-backup` (one copy, replaced at the next start's first such
-write; a change that creates the file makes none). `Save` with nothing changed saves nothing; a
-value with a line break or a control character, which a one-line field cannot hold, is shown as
-text, to be changed in the file. **Applies**
-says when a change takes effect in the window: `at once` (from its next use: the next list, link,
-refresh or restore), `after the window restarts` (`skydeck window --restart`; the screen says
-`applies after the window restarts` beside such a value, and beside a hand edit it does not use
-yet), or that only the commands read it, at each run (or only `skydeck install`). A change in the
-window restarts, starts and stops nothing; the commands always read the file as it is.
+**In the window: Settings.** The gear in the window's title bar (or `> settings` in the quick
+switcher, Ctrl+Shift+P) opens Settings. It shows first what is easy to change, each saved the moment
+you pick it: **Appearance** (the window's colours, "Colours" below), **Links** — `Open links in`
+(`window.links`) and `Ticket address` (`ticketUrl`; saved on Enter, or when you leave the field, if
+you changed it; Esc closes Settings without saving it) — and **The window** — `Keep WSL running`
+(`window.keepAlive`; it counts `after a restart`, `skydeck window --restart`) and `Typed commands
+start sessions in` (`terminal`) — and **Updates** — `Check for updates every day`
+(`window.updateCheck`), with the last check and `Check now` under it ("The window says when there
+is one", in "Updating"). A value the file's rules refuse is refused beside it in their words
+(`"ticketUrl" must be null or an http or https address with {key} once, after its host`), and the
+file stays as it was.
+
+Every other key is under **Advanced (14 more settings)**, closed until you open it: there each key
+shows its value, its default and whether the file sets it. The keys marked `change` below are
+changed there (those marked `change, first` in the first part instead, as above), one at a time:
+`Save` (or Enter in its field), or `Default` to remove the key from the file. A key marked `shown`
+names a program, a folder or the port: the window shows it, and you change it in the file. A value
+the file's rules refuse is refused there in the same words (`"prRefreshMinutes" must be a positive
+integer`), and the file stays as it was; a text longer than 4,096 bytes (the file takes a longer
+`groupPattern`) is changed in the file by hand; a file that cannot be read is never written
+(Settings says at its top what `doctor` says: mend it by hand), and neither is one you may not write
+(mode 444) or another user's. Only that key changes; every other key of the file stays, in its
+order, with its indentation and line ends. The first time the window writes over the file after its
+server started, it keeps a copy of it first, beside it, as `config.json.skydeck-backup` (one copy,
+replaced at the next start's first such write; a change that creates the file makes none). `Save`
+with nothing changed saves nothing; a value with a line break or a control character, which a
+one-line field cannot hold, is shown as text, to be changed in the file. **Applies** says when a
+change takes effect in the window: `at once` (from its next use: the next list, link, refresh or
+restore), `after the window restarts` (`skydeck window --restart`; Advanced says `applies after the
+window restarts` beside such a value, and beside a hand edit it does not use yet, which the short
+part marks `after a restart`), or that only the commands read it, at each run (or only `skydeck
+install`). A change in the window restarts, starts and stops nothing; the commands always read the
+file as it is.
 
 | Key | Default | In the window | Applies | What it does |
 |---|---|---|---|---|
-| `terminal` | `"here"` | change | the commands, at their next run | Where `resume`, `new`, `restore` and `R` start `claude` when you give none of `--here`, `--tab` and `--window`: `"here"` (this terminal), `"wezterm"` (a new WezTerm tab) or `"window"` (the skydeck window, through its server; `--tab` then means the window too, and `--here` this terminal: "Starting sessions in the window from a terminal (stage C)"). |
+| `terminal` | `"here"` | change, first | the commands, at their next run | Where `resume`, `new`, `restore` and `R` start `claude` when you give none of `--here`, `--tab` and `--window`: `"here"` (this terminal), `"wezterm"` (a new WezTerm tab) or `"window"` (the skydeck window, through its server; `--tab` then means the window too, and `--here` this terminal: "Starting sessions in the window from a terminal (stage C)"). |
 | `wezterm.domain` | `null` | change | the commands, at their next run | The WezTerm domain a tab opens in (`--domain-name`). `null` passes no domain. |
 | `groupPattern` | `"^[A-Z][A-Z0-9]+-[0-9]+"` | change | at once | A JavaScript regular expression (the source, no flags). When a session has no group, the text it matches in the session's title is the group. The default takes a ticket key such as `ABC-123` at the start of the title. It runs on every session's title at every list: a pattern that takes very long makes the window hang ("If something goes wrong" says how to get back). |
 | `firstRunDoneAfterDays` | `7` | change | `skydeck install` only | install's one-time offer to mark sessions as done: those not running whose last activity is older than this many days. |
@@ -543,7 +556,7 @@ window restarts, starts and stops nothing; the commands always read the file as 
 | `restoreStartTimeoutSeconds` | `120` | change | at once | How long `restore` waits for the sessions of a batch to report their start. |
 | `claudeHome` | `null` | shown | after the window restarts | Claude Code's folder. `null` means `$CLAUDE_CONFIG_DIR`, else `~/.claude`. Must be an absolute path (no `~`). |
 | `claudeCommand` | `"claude"` | shown | after the window restarts | The program `resume`, `new` and `restore` (and `R` in the list) run. One word: a name on `PATH` or an absolute path. It is not split into arguments. The window runs it too. |
-| `ticketUrl` | `null` | change | at once | A ticket's address with `{key}` where the ticket key goes, for Jira `"https://example.atlassian.net/browse/{key}"`. The group chip of the window's header then opens the session's ticket, and `skydeck show` prints its address as a `ticket:` line (while the session has no ticket of its own); a bare key then also sets a session's ticket ("The ticket link", "The ticket of a session"). `null`: no link. What it accepts, and its line when it is refused: "The ticket link", in "The window (step 2)". |
+| `ticketUrl` | `null` | change, first | at once | A ticket's address with `{key}` where the ticket key goes, for Jira `"https://example.atlassian.net/browse/{key}"`. The group chip of the window's header then opens the session's ticket, and `skydeck show` prints its address as a `ticket:` line (while the session has no ticket of its own); a bare key then also sets a session's ticket ("The ticket link", "The ticket of a session"). `null`: no link. What it accepts, and its line when it is refused: "The ticket link", in "The window (step 2)". |
 | `ticketStatus` | `[]` | shown | after the window restarts | The programs that read a ticket's status, for the trackers `gh` does not know (a GitHub issue's status needs only `gh`): a list of at most 8 rules `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` starts a ticket's address takes it. The program is run without a shell, with `{url}` and `{key}` filled into its arguments, and prints the status on one line and its category on the next. The rule, the answer and a complete example: "A ticket's status", in "The window (step 2)". `[]`: only GitHub issues have a status. A program never gets a secret from here: it reads its own from a file you keep. |
 | `ticketRefreshMinutes` | `10` | change | at once | The least time between two automatic reads of a ticket's status, in whole minutes from 1 to 1440, counted from the last attempt; a status that is `done` or `closed` is read again after 12 hours instead. The window's server reads both ticket keys when it starts: `skydeck window --restart` after a change by hand (a change of this one in Settings applies at once). |
 | `window` | see the window's section | — | — | The window's keys `window.port`, `window.edge`, `window.profileDir` and `window.keepAlive`: "The window (step 2)", "The `window` keys". |
@@ -784,9 +797,9 @@ In `config.json` ("Configuration" above), all optional; "In the window" and "App
 | `window.port` | `47613` | shown | after the window restarts | The server's port on `127.0.0.1`: a whole number from 1 to 65535. Keep it unchanged once windows were opened: a window keeps its key per port, so after a change the old windows cannot connect (close them) and `skydeck window` opens a new one. |
 | `window.edge` | `"/mnt/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"` | shown | after the window restarts | The Edge program: an absolute path in WSL. With `window.links` `"edge"` the links the window opens open with it too, in your own Edge profile. |
 | `window.profileDir` | `null` | shown | `skydeck window`, at its next run | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
-| `window.keepAlive` | `"wsl"` | change | after the window restarts | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`: without it, WSL stops 15 seconds after its last Windows terminal closes, ending every session in the window. |
-| `window.links` | `"default"` | change | at once | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
-| `window.updateCheck` | `"daily"` | change | at once | `"daily"`: the window's server looks for a newer skydeck when it starts and once a day, with a `git fetch` of skydeck's own checkout, and the title bar says `Update available` while one is known ("Updating" below); nothing is applied without a click. `"off"`: it does not look by itself; Check now in Settings still does. Anything else: `<file>: "window.updateCheck" must be "daily" or "off"`. |
+| `window.keepAlive` | `"wsl"` | change, first | after the window restarts | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`: without it, WSL stops 15 seconds after its last Windows terminal closes, ending every session in the window. |
+| `window.links` | `"default"` | change, first | at once | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
+| `window.updateCheck` | `"daily"` | change, first | at once | `"daily"`: the window's server looks for a newer skydeck when it starts and once a day, with a `git fetch` of skydeck's own checkout, and the title bar says `Update available` while one is known ("Updating" below); nothing is applied without a click. `"off"`: it does not look by itself; Check now in Settings still does. Anything else: `<file>: "window.updateCheck" must be "daily" or "off"`. |
 
 With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
 "Starting sessions in the window from a terminal (stage C)" below. An example, for a PC with two
@@ -1836,18 +1849,19 @@ manifest names no start address).
 
 #### Colours
 
-Two buttons at the right of the title bar, before `Switch…`, choose the window's colours. Every
-window of the same Edge profile follows a change at once, and the choice holds across restarts.
+The gear at the right end of the title bar opens Settings; its first group, **Appearance**, chooses
+the window's colours, and a choice applies at once. Every window of the same Edge profile follows a
+change at once, and the choice holds across restarts (it is kept in the window's Edge profile, not
+in `config.json`).
 
-- `◐ Auto`, `◐ Light`, `◐ Dark`: light or dark as Windows is (Auto), or always light or dark.
-- `✦ Default`, `✦ Iris`, `✦ Pleiades`: the colour theme of the light or dark the window shows now,
-  for the list and the terminals alike. Light and dark each keep their own: light has Default and
-  Iris, dark has Default, Iris and Pleiades (after VS Code's Andromeda theme). A click goes to the
-  next theme.
+- **Mode**: `Auto`, `Light`, `Dark`: light or dark as Windows is (Auto), or always light or dark.
+- **Colour theme**: the colour theme of the light or dark the window shows now, for the list and
+  the terminals alike. Light and dark each keep their own: light has Default and Iris, dark has
+  Default, Iris and Pleiades (after VS Code's Andromeda theme).
 
 **Claude Code's own theme.** Claude Code draws parts of its screen in the colours of its own theme
 (`/theme`), whatever the window shows. Set it to **Auto (match terminal)**, so that it picks its
-light or dark theme to match the window's. A Claude Code that runs does not follow a later switch
+light or dark theme to match the window's. A Claude Code that runs does not follow a later change
 of the window between light and dark: after one, start or resume the session again.
 
 ### Known limits of stage A
@@ -2319,7 +2333,7 @@ never your files, the index or HEAD. The check applies nothing; `Update now` in 
 after your second click (below).
 
 - **The title bar.** While a newer version is known, every window shows `Update available` right
-  before `Settings`. A click opens a dialog that looks at the checkout again (without the network)
+  before `Switch…` and the gear. A click opens a dialog that looks at the checkout again (without the network)
   and lists the new commits as `skydeck update --check` does, the line about the database's
   upgrade steps included, and gives the command: `To apply it, in a WSL terminal of your own:
   skydeck update`. When the checkout cannot be updated as it is — a change to a tracked file that
@@ -2328,11 +2342,13 @@ after your second click (below).
   no branch of a remote any more, `skydeck cannot tell here whether there is an update: …` and the
   same. Esc or `Close` closes it; `Update now` stands beside `Close` when the update can be
   applied as the checkout is.
-- **Settings.** Above the list, the block `Updates` says when the last check ended and what it
-  found (`Last check: 2h ago — 3 new commits on origin/main`), or, when it failed, when and why
-  (`The last check failed 5m ago: git fetch from origin failed: …`) and what is known from the
-  last fetch that worked (`Known from 2h ago: …`). `Check now` checks at once. The switch is `window.updateCheck`: `"daily"` (the
-  default) or `"off"`, which stops the checks at the start and every day; `Check now` still works.
+- **Settings** (the gear). The group **Updates**, after The window: the switch `Check for updates
+  every day` (`window.updateCheck`: on is `"daily"`, the default; off is `"off"`, which stops the
+  checks at the start and every day), saved as you pick it; then a line that says when the last
+  check ended and what it found (`Last check: 2h ago — 3 new commits on origin/main`), or, when it
+  failed, when and why (`The last check failed 5m ago: git fetch from origin failed: …`) and what
+  is known from the last fetch that worked (`Known from 2h ago: …`); and `Check now`, which checks
+  at once, also with the switch off.
 - **`skydeck doctor`** prints the same in one `info` line: `update: 3 new commits on origin/main
   (fetched 2h ago); skydeck update applies them`, or `update: skydeck is up to date (…)`, and a
   failed last check beside it. doctor itself uses no network.
@@ -2644,7 +2660,7 @@ file.
 | You see | Do |
 |---|---|
 | `skydeck: the database … was not upgraded: its copy … could not be written (<reason>)` | Before an upgrade skydeck keeps a copy of the database, and this one could not be written: make room on the disk, or move away what is in the way (the reason says which), then run the command again. The database is as it was ("Going back"). |
-| Settings' block `Updates` or `doctor` says `the last check failed …: git fetch from origin failed: <git's line>` | The window's check for a newer skydeck could not fetch: git's line says why (no network, a remote that needs a login or a passphrase, which the check never asks for). Nothing else is affected, and it tries again an hour later; `skydeck update --check` in a terminal of your own fetches with your login. `window.updateCheck` `"off"` stops the daily check. |
+| Settings' group `Updates` or `doctor` says `the last check failed …: git fetch from origin failed: <git's line>` | The window's check for a newer skydeck could not fetch: git's line says why (no network, a remote that needs a login or a passphrase, which the check never asks for). Nothing else is affected, and it tries again an hour later; `skydeck update --check` in a terminal of your own fetches with your login. `window.updateCheck` `"off"` stops the daily check. |
 | The window's bar says `an update started from the window at <time> did not record how it ended; its log says: <stateDir>/update.log` | The update ran but could not write its outcome where the window reads it (its database was busy, say). Read the log's last lines: `updated to <id>` means it worked; otherwise they say why not. `skydeck doctor`'s first line names the commit the checkout is at. |
 | After `Update now` the window does not come back (the bar says `skydeck is being updated (since …)` for more than two minutes) | Read `<stateDir>/update.log` first: its last line says what happened. When it says that the checkout may not be as it was, set it right as "Updating" says; then, in a WSL terminal of your own, `skydeck window`. |
 | `git fetch` (yours, the window's, `skydeck update`'s) says `cannot lock ref 'refs/remotes/origin/main': Unable to create '…/.git/refs/remotes/origin/main.lock': File exists` | A git that was cut off left that file: the window's check is ended with SIGTERM first (git then removes its locks) and killed only 2 seconds later, but a machine that went down in the middle of a fetch can leave one. When no git runs in the checkout, remove the file git names (`rm <path>`), then again. A `git pull` of yours at the very moment of a check can meet the check's lock once: run it again. |

@@ -1,6 +1,7 @@
-/* Follow-up F38 (S2 16.5, 12.1, 12.13): the title bar's `Update available`, before `Settings`; the
-   dialog it opens (web/update.js), a dialog of stage D's kind (edit.css: .edit-scrim, .edit-dialog);
-   and the settings screen's block `Updates` (web/settings.js). The control is told apart by its
+/* Follow-up F38 (S2 16.5, 12.1, 12.13): the title bar's `Update available`, before `Switch…` and
+   the gear; the dialog it opens (web/update.js), a dialog of stage D's kind (edit.css: .edit-scrim,
+   .edit-dialog); and the extra block of the settings screen's group Updates (web/settings.js), under
+   its switch. The control is told apart by its
    border and weight in --accent on the title bar's own ground, not by an accent ground (white on the
    dark schemes' --accent is under 4.5 : 1). The dialog's lines are `skydeck update --check`'s, in
    the terminal's font, each wrapping anywhere. */
@@ -47,17 +48,8 @@
 }
 
 .settings-updates {
-  margin: 0 0 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  margin: 6px 0 4px;
   font-size: 12.5px;
-}
-.settings-updates-heading {
-  margin-bottom: 4px;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
 }
 .settings-updates-line {
   margin: 0 0 4px;

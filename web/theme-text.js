@@ -1,8 +1,8 @@
-// The title bar's theme switch (follow-up F13; S2 12.1): its three states, the stored value each
-// stands for, the order a click walks them in, and what the button says. Pure: no DOM, so that
-// node:test and the root type check load it (test/web/theme.test.ts). web/theme.js applies the
-// states; web/theme-early.js, a classic script, reads the stored value before the first paint by
-// the same rule (the unit test holds the two readings equal).
+// The window's theme (follow-up F13; S2 12.1), chosen in the settings screen's Appearance (F39,
+// S2 12.13): its three modes, the stored value each stands for, and their words. Pure: no DOM, so
+// that node:test and the root type check load it (test/web/theme.test.ts). web/theme.js applies
+// them; web/theme-early.js, a classic script, reads the stored value before the first paint by the
+// same rule (the unit test holds the two readings equal).
 
 /** `system` follows the system's light or dark (today's behaviour); `light` and `dark` force one.
  *  @typedef {'system' | 'light' | 'dark'} Theme */
@@ -21,27 +21,14 @@ export function themeOf(value) {
   return value === 'light' || value === 'dark' ? value : 'system';
 }
 
-/**
- * The state a click goes to: Auto → Light → Dark → Auto.
- * @param {Theme} theme
- * @returns {Theme}
- */
-export function nextTheme(theme) {
-  return theme === 'system' ? 'light' : theme === 'light' ? 'dark' : 'system';
-}
+/** The modes in the order the screen offers them. @type {readonly Theme[]} */
+export const MODES = ['system', 'light', 'dark'];
 
 /** @type {Readonly<Record<Theme, string>>} */
 const WORDS = { system: 'Auto', light: 'Light', dark: 'Dark' };
 
-/** @type {Readonly<Record<Theme, string>>} */
-const TITLES = {
-  system: 'Theme: follows the system. Click for light.',
-  light: 'Theme: light. Click for dark.',
-  dark: 'Theme: dark. Click to follow the system.',
-};
-
 /**
- * The button's word.
+ * The mode's word.
  * @param {Theme} theme
  * @returns {string}
  */
@@ -49,26 +36,17 @@ export function themeWord(theme) {
   return WORDS[theme];
 }
 
-/**
- * The button's hover title: the state, and what a click does.
- * @param {Theme} theme
- * @returns {string}
- */
-export function themeTitle(theme) {
-  return TITLES[theme];
-}
-
-// The title bar's second switch, the colour themes (S2 12.1): each scheme keeps its own choice, as
-// Windows Terminal's light and dark colour schemes do, and the button shows and changes the one of
-// the scheme the page shows now. `default` is skydeck's own colours; every other theme is a rule
+// The colour themes (S2 12.1): each scheme keeps its own choice, as Windows Terminal's light and
+// dark colour schemes do, and the screen shows and changes the one of the scheme the page shows
+// now. `default` is skydeck's own colours; every other theme is a rule
 // of style.css and terminal-view.css on <html data-palette-light> or <html data-palette-dark>.
 
-/** The page's scheme: forced by the theme switch, else the system's.
+/** The page's scheme: forced by the mode, else the system's.
  *  @typedef {'light' | 'dark'} Scheme */
 
 /** @typedef {'default' | 'iris' | 'pleiades'} Palette */
 
-/** Each scheme's themes, in the order a click walks them, the default first.
+/** Each scheme's themes, in the order the screen offers them, the default first.
  *  @type {Readonly<Record<Scheme, readonly Palette[]>>} */
 export const PALETTES = { light: ['default', 'iris'], dark: ['default', 'iris', 'pleiades'] };
 
@@ -90,36 +68,14 @@ export function paletteOf(scheme, value) {
   );
 }
 
-/**
- * The theme a click goes to in `scheme`: the next of PALETTES, after the last the default again.
- * @param {Scheme} scheme
- * @param {Palette} palette
- * @returns {Palette}
- */
-export function nextPalette(scheme, palette) {
-  const palettes = PALETTES[scheme];
-  return palettes[(palettes.indexOf(palette) + 1) % palettes.length] ?? 'default';
-}
-
 /** @type {Readonly<Record<Palette, string>>} */
 const PALETTE_WORDS = { default: 'Default', iris: 'Iris', pleiades: 'Pleiades' };
 
 /**
- * The button's word: the theme's name.
+ * The theme's name.
  * @param {Palette} palette
  * @returns {string}
  */
 export function paletteWord(palette) {
   return PALETTE_WORDS[palette];
-}
-
-/**
- * The button's hover title: the scheme, its theme, and what a click does.
- * @param {Scheme} scheme
- * @param {Palette} palette
- * @returns {string}
- */
-export function paletteTitle(scheme, palette) {
-  const next = paletteWord(nextPalette(scheme, palette));
-  return `${scheme === 'light' ? 'Light' : 'Dark'} colours: ${paletteWord(palette)}. Click for ${next}.`;
 }

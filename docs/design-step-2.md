@@ -209,9 +209,9 @@ Added to design 11:
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12); from follow-up F37 the move of a session of Open by hand and the slots it gives out (`slot-moves.ts`, 12.9, 7.6). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
 | `src/window/view/search/` | The rules of search as pure functions (stage E, plan E1): the filter's words and chips (12.8), the blocks (12.2; the code calls them stacks), the switcher's ranking (12.8); `build.ts` calls them. No pattern is ever built from a search text. | values: its own files and `text`'s `sanitize` only; types: sessions, `protocol.ts`, `hub.ts`, `view/sections.ts` |
-| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the stored choices of the theme switch and the colour themes' switch on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
+| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the stored choices of the theme's Mode and colour themes on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
-| `web/update.js`, `web/update-text.js` | Follow-up F38 (12.1, 12.13, 16.5): the dialog of `Update available`, and its words and the settings screen's block `Updates` as pure functions. They put the server's texts into sentences and decide nothing. | `web/format.js` |
+| `web/update.js`, `web/update-text.js` | Follow-up F38 (12.1, 12.13, 16.5): the dialog of `Update available`, and its words and the lines of the settings screen's group Updates as pure functions. They put the server's texts into sentences and decide nothing. | `web/format.js` |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
 
 Nothing in `web/` decides a rule that the server also needs: the page renders what the server
@@ -893,21 +893,21 @@ record has been applied is it forwarded to the pages (8.2.4), so a snapshot take
 the chain plus the records after it is exactly the stream.
 
 It is the **only responder to terminal queries**: what the headless terminal answers (DA1, DA2,
-DECRQM, CPR, DSR, DECRQSS) is sent to the keeper as input; the page never answers (9.3). It
-answers OSC 10 and OSC 11 (foreground and background colour) itself, from the colours of the theme
-the last focused page reports (the headless terminal has no colours); a reported colour is used
-only when it is exactly `#rrggbb`, else — and until a page has sent its theme — xterm.js's
-default colour is (foreground `#ffffff`, background `#000000`). A page reports its colours in
-`start` (8.2.2) and, from follow-up F13, again in `theme` (8.2.3) whenever they change while it is
-open: a click on the title bar's theme switch or its colour themes' switch (12.1), the same choice
-made in another window of the profile, or the system's scheme while the page follows it. The server
-keeps each page's latest for that page's next `focus`, and answers from it at once while that page
-is the one that had focus last, also when its window has lost the focus since (the system's scheme
-is changed in Windows' settings, outside the window). So a program that asks after a change is told
-the colours its terminal has then; before F13 the answer stayed the `start`'s until the page was
-loaded again, also after a change of the system's scheme. It does not answer XTVERSION in the first
-version (9.3). It never answers while it replays (7.3). The answers to a record's queries go to the
-keeper once that record has been applied.
+DECRQM, CPR, DSR, DECRQSS) is sent to the keeper as input; the page never answers (9.3). It answers
+OSC 10 and OSC 11 (foreground and background colour) itself, from the colours of the theme the last
+focused page reports (the headless terminal has no colours); a reported colour is used only when it
+is exactly `#rrggbb`, else — and until a page has sent its theme — xterm.js's default colour is
+(foreground `#ffffff`, background `#000000`). A page reports its colours in `start` (8.2.2) and,
+from follow-up F13, again in `theme` (8.2.3) whenever they change while it is open: a pick of Mode
+or Colour theme in the settings screen's Appearance (12.1, 12.13), the same choice made in another
+window of the profile, or the system's scheme while the page follows it. The server keeps each
+page's latest for that page's next `focus`, and answers from it at once while that page is the one
+that had focus last, also when its window has lost the focus since (the system's scheme is changed
+in Windows' settings, outside the window). So a program that asks after a change is told the colours
+its terminal has then; before F13 the answer stayed the `start`'s until the page was loaded again,
+also after a change of the system's scheme. It does not answer XTVERSION in the first version (9.3).
+It never answers while it replays (7.3). The answers to a record's queries go to the keeper once
+that record has been applied.
 
 The serialise addon does not restore everything (section 21). The server adds what it misses at
 the end of every snapshot, from state it tracks with parser hooks that follow xterm.js 6.0.0's own
@@ -1462,8 +1462,8 @@ the server's proof.
 6. Only then the page sends `{ "t": "start", "assetVersion": "<the version it was loaded with>",
    "windowId": "<random per page>", "focused": true, "theme": { "fg": "…", "bg": "…" } }`, and the
    connection is open for 8.2.3's messages. `theme` is the terminal's foreground and background
-   as the page draws them at that moment (the system's scheme, or the title bar's switch, 12.1);
-   a later change is sent as 8.2.3's `theme` (follow-up F13). A page whose `assetVersion` is not the server's
+   as the page draws them at that moment (the system's scheme, or the one Settings' Mode forces,
+   12.1); a later change is sent as 8.2.3's `theme` (follow-up F13). A page whose `assetVersion` is not the server's
    reloads itself (it was loaded from an older server), without sending `start`. It does so once
    per version of the server's (it remembers that version for the tab): a page that still differs
    after that reload is not served by that server at all — most likely something else answers the
@@ -1576,7 +1576,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `detach` | `term` | Stop it. |
 | `input` | `term`, `data` | Typed text (UTF-8) for the terminal; `binary: true` when `data` is a byte string from xterm.js's binary channel (mouse reports). Makes this page the size owner. |
 | `resize` | `term`, `cols`, `rows` | The page's fitted size (8.2.6). |
-| `theme` | `theme` (`fg`, `bg`: each a text, checked exactly as `start.theme`, 8.2.2) | From follow-up F13: the page's colours changed while it is open — a click on the title bar's theme switch or its colour themes' switch, the same choice made in another window of the profile, or the system's scheme while the page follows it (12.1). The server keeps them for the page's next `focus`, and answers OSC 10 and 11 from them at once while the page is the one that had focus last (7.2). |
+| `theme` | `theme` (`fg`, `bg`: each a text, checked exactly as `start.theme`, 8.2.2) | From follow-up F13: the page's colours changed while it is open — a pick of Mode or Colour theme in the settings screen's Appearance (from follow-up F39; before it the title bar's two switches), the same choice made in another window of the profile, or the system's scheme while the page follows it (12.1). The server keeps them for the page's next `focus`, and answers OSC 10 and 11 from them at once while the page is the one that had focus last (7.2). |
 | `act` | `id`, `kind`, and the fields of the next table | An action (11, 12). The server answers `result` with the same `id`. |
 
 | `act` kind | Fields | Effect |
@@ -1852,7 +1852,7 @@ starts with `xterm.js` and then changes wheel scrolling, glyph-atlas resets and 
 W5; the answer is a one-line change in the screen side.
 
 The colours OSC 10 and 11 are answered with are the page's (7.2). From follow-up F13 a program that
-asks after a click on the title bar's theme switch or its colour themes' switch (12.1), or after a
+asks after a pick of Mode or Colour theme in the settings screen (12.1), or after a
 change of the system's scheme, is told the colours its terminal has then. A program that asked
 before keeps what it was told until it asks again: nothing tells a running program that the colours
 changed — no notification of a theme change is sent to programs, which is not part of F13. Claude
@@ -2489,11 +2489,14 @@ fold; a session that needs you is counted there and in no other count, so that t
 order Ctrl+Shift+J goes, the server sends with each `list` (8.2.3 `needYou`): the page decides no
 rule (4.3; stage B, plan B7).
 
-**Settings** (follow-up F36): the title bar's last control, after `Switch…`, opens the settings
-screen (12.13).
+**Settings** (follow-up F36; from follow-up F39 a gear): the title bar's last control, after
+`Switch…`, opens the settings screen (12.13). It is a gear drawn inline (an SVG in the text's
+colour, so that it looks the same on every system; no font's emoji, no picture fetched), with the
+accessible name and the tooltip `Settings`; a click on it takes no keyboard (12.9) before the
+screen opens. The title bar holds no switch of the theme any more: the theme is chosen in the
+screen's Appearance (below, 12.13).
 
-**Update available** (follow-up F38, 16.5): right before `Settings`, which stays the last control,
-on every page, shown exactly while the server's last look says that a newer skydeck is known
+**Update available** (follow-up F38, 16.5): right before `Switch…` and the gear, on every page, shown exactly while the server's last look says that a newer skydeck is known
 (`update`, 8.2.3: `check.state` is `available`, also after a check whose fetch failed) and hidden
 otherwise. A click, through the gate of a window chord (12.9), opens a dialog of stage D's kind
 (12.5: modal, the page inert under it, Esc closes, Tab stays inside, the keyboard goes back where it
@@ -2518,24 +2521,23 @@ every page (`act update-seen`). The look's
 answer goes to every page, so a control the look found stale goes on every page. The page decides
 no rule (4.3): what is known, and whether it can be applied, is the server's.
 
-**The theme switch** (follow-up F13, 2026-11-18: so that the theme can also be chosen by
-hand). The page is light or dark as the
+**The theme's mode** (follow-up F13, 2026-11-18: so that the theme can also be chosen by
+hand; from follow-up F39, 2026-11-22, chosen in the settings screen, no longer by the title bar's
+switch). The page is light or dark as the
 system is (Windows' Settings, Personalization, Colors: the `prefers-color-scheme` media query), and
-changes with it while it is open. A small button in the title bar, right before `Switch…` and drawn
-as it is, shows a half circle and the state's word: `Auto` (the system's, the default), `Light` or
-`Dark`. A click goes to the next (Auto → Light → Dark → Auto); its tooltip says the state and what
-a click does (`Theme: follows the system. Click for light.`, `Theme: light. Click for dark.`,
-`Theme: dark. Click to follow the system.`); its word keeps the room of the widest, so that a click
-moves nothing. Forced dark is exactly the system's dark and forced light exactly the system's
-light: every colour of the page and `color-scheme` (scroll bars, form controls); at a click every
+changes with it while it is open. The settings screen's first group, Appearance (12.13), has
+`Mode`, a choice of `Auto` (the system's, the default), `Light` and `Dark`; a pick applies at once.
+Forced dark is exactly the system's dark and forced light exactly the system's
+light: every colour of the page and `color-scheme` (scroll bars, form controls); at a pick every
 terminal of the page is repainted in the new colours — background, text, the cursor, the sixteen
-colours, the selection —, a hidden one too, as after a change of the system's scheme. A click moves
-no keyboard (the title bar takes none, 12.9) and changes no selection; there is no key chord, no
-`config.json` key and no command-line flag for it. The choice is the page's: one key of its
+colours, the selection —, a hidden one too, as after a change of the system's scheme. A pick
+changes no selection, and Esc gives the keyboard back where it was before the screen opened;
+there is no key chord, no `config.json` key and no command-line flag for it. The choice is the
+page's: one key of its
 `localStorage` (`skydeck-theme`, `light` or `dark`; none for Auto), so it holds across reloads and
 restarts of the window and in every window of the profile, and another window of the profile follows
 a change at once (the `storage` event). A stored value that is neither, or storage that throws or is
-missing, is Auto; the button then still works for the life of the page. A classic script of its own
+missing, is Auto; a pick then still works for the life of the page. A classic script of its own
 (`web/theme-early.js`, loaded in `<head>` ahead of the style sheets, which the policy allows as it
 is, 8.2.1) puts the stored choice on `<html data-theme>` before the first paint, so that no frame
 shows the other theme. Nothing of it is sent to or kept by the server but the colours, which the
@@ -2548,12 +2550,10 @@ equal declaration by declaration. Check W34.
 scheme has themes of its own, as Windows Terminal's light and dark colour schemes do: the default —
 skydeck's colours, as above — and Iris in both, after Windows Terminal's T3 Iris Light and Dark (the
 light one's lavender stronger); Pleiades in dark only, after VS Code's Andromeda theme (Eliver Lara,
-MIT). A second small button in the title bar, right before the theme switch and drawn as it is,
-shows a four-pointed star and the theme of the scheme the page shows now (`Default`, `Iris`,
-`Pleiades`). A click goes to that scheme's next theme, after the last back to the default, and
-leaves the other scheme's as it is; its tooltip says the scheme, its theme and what a click does
-(`Dark colours: Iris. Click for Pleiades.`); its word keeps the room of the widest, and follows the
-scheme shown when the theme switch or the system changes it. A theme changes the page's neutral
+MIT). Appearance's `Colour theme`, under `Mode`, shows the theme of the scheme the page shows now
+and offers that scheme's themes (`Default`, `Iris`, and in dark `Pleiades`); a pick applies it and
+leaves the other scheme's as it is (its hint: `Light and dark each keep their own.`); it follows
+the scheme shown when `Mode` or the system changes it. A theme changes the page's neutral
 colours — the backgrounds, lines, text, the selection, the accent and the text on it (`--on-accent`)
 — and the terminal's: background, text, cursor, the sixteen colours, the selection. The attention
 marks, the waiting and crash colours and the chips' tints stay the scheme's, and every contrast the
@@ -2568,7 +2568,7 @@ keeps the choice for the life of the page. In the style sheets that have themes 
 `terminal-view.css`) a light theme is a plain rule ahead of the dark scheme that sets only
 properties the dark scheme sets, so that dark overrides it whole; a dark theme is a dark block of
 its own, scoped as the default's, with its twin for forced dark; `test/web/theme.test.ts` holds that
-structure and the page suite the computed values. As for the theme switch, there is no key chord, no
+structure and the page suite the computed values. As for the mode, there is no key chord, no
 `config.json` key and no command-line flag, and nothing of it goes to the server but the colours
 (8.2.3 `theme`).
 
@@ -4044,18 +4044,76 @@ skydeck's settings are `config.json`'s keys (16.4, design 9.1); the settings scr
 of them and changes the plain ones, one at a time, through the server. `doctor`, every command and
 editing the file by hand stay as they are, and the file's format does not change.
 
-- **Opening it.** `Settings`, the title bar's last control, or the quick switcher's command
-  `> settings` (a start of it of at least one letter after the `>`, trimmed and in any case: `>s`,
-  `> set`; the server's answer, `list.switcher.settings`, 8.2.3), with Enter or a click on its line
-  `Settings: skydeck’s settings, the plain ones changed here`. Both pass the gate of a window chord
-  (12.9). A dialog over the page as stage D's (12.5): modal, the page inert under it.
-- **What it shows.** At the top the file's path, and where the copy of it is kept (below); `The
-  file does not exist yet: a change creates it.` while there is none; and while the window cannot
-  change it — a file that does not parse (not JSON, a key or a value its rules refuse), a symbolic
+Follow-up F39 (2026-11-22; the owner: the screen was "really messy, its hard to see what is
+important, and there is to much text"; the decisions: the settings easy to understand and worth
+changing on a short screen, the theme moved there from the title bar, every other one in a closed
+"Advanced", a change applied when it is made) makes the screen short; the bullets after the short
+screen's describe Advanced, which keeps F36's screen whole.
+
+- **The short screen.** Four groups (the fourth, Updates, follow-up F38's), in this order, each
+  setting under a plain label (not its name in the file), its control on the same line, and a hint
+  under it only where the label alone would mislead:
+  - **Appearance**: `Mode` (`Auto`, `Light`, `Dark`) and `Colour theme` (the themes of the scheme
+    the page shows; hint `Light and dark each keep their own.`) — the theme of 12.1, the page's own
+    (its `localStorage`, read before the first paint, followed by another window of the profile and,
+    at Auto, by the system), drawn at once, without the server's answer.
+  - **Links**: `Open links in` (`window.links`: `The default browser`, `Edge`) and `Ticket address`
+    (`ticketUrl`, a one-line field; hint `With {key} where the ticket key goes. Empty: no link.`).
+  - **The window**: `Keep WSL running` (`window.keepAlive`: a switch, on `wsl`, off `off`; marked
+    `after a restart`) and `Typed commands start sessions in` (`terminal`: `That terminal`, `A
+    WezTerm tab`, `The window`; hint `skydeck resume, new and restore, typed in a terminal.`).
+  - **Updates** (follow-up F38): `Check for updates every day` (`window.updateCheck`: a switch, on
+    `daily`, off `off`), then the group's extra block, the last check and `Check now` (the bullet
+    Updates below).
+
+  Which keys are there, in which group, under which words, is one table beside the server's, pure
+  text: `web/settings-short.js` (a new setting or group joins by one entry; a group's extra block
+  has one place in `web/settings.js`); a unit test holds it against `src/window/settings.ts` — every
+  key a changeable one, a choice's words exactly the server's values in its order, the switch's
+  two sides its two values —, so the page decides no rule (4.3). The server's keys show once its
+  answer came (`Reading the settings…` until then).
+- **Saved as it is picked** (the short screen). A choice or the switch is sent (`setting-set`) the
+  moment it changes; the text field when Enter is pressed in it or the keyboard leaves it (another
+  control, a click elsewhere, `Close`; the window losing the focus, Alt+Tab, is not leaving it), and
+  only when its text differs from the one drawn: an unchanged one sends nothing. Esc is the way out
+  without saving: it closes the screen at once, a text typed and not saved is dropped, nothing is
+  sent, and the next opening shows the file's value. A text saved as the screen closes (the field
+  left by a click on `Close`) whose answer is a refusal is not lost: the key bar says it (`Ticket
+  address was not saved: <the refusal>`), as it says an action's refusal while no dialog is open.
+  There is no `Save` and no `Default`, no line about the default or the file, and none about when a
+  change applies but `after a restart`. The answer's words stand beside the control: `Saved.`, or
+  the refusal's (`"ticketUrl" must be null or an http or https address with {key} once, after its
+  host`) — the field keeping what was typed (left again, the same text is not sent again), a choice
+  or the switch showing the file's value again —, the file unchanged. `window.keepAlive` is always
+  marked `after a restart`; while the running server uses another value than the file holds (a hand
+  edit, `window.keepAlive` after a change), the mark says which in the control's own words — `after
+  a restart: still on until then` (`still off`; a choice's words, `still “Edge” until then`; a text
+  in quotes, or `still empty`) — and its tooltip in the file's (`applies after the window restarts:
+  the window uses <value> until then`). Changed again while the answer waits, a choice is sent again
+  once it came; the text field is read-only meanwhile. Every page's screen follows a change
+  (`settings`, 8.2.3), a text being typed keeping its text. Until an opening's answer comes, the
+  rows show the values the last opening drew, and can be used; a text typed meanwhile is kept when
+  the answer is drawn.
+- **Advanced.** The screen ends with a closed section, a button `Advanced (14 more settings)` (the
+  count of the server's table's keys the short screen does not show), closed again at each opening
+  of the screen and opened and closed by a click, Enter or Space. Opened, it holds F36's screen of
+  those settings, as the bullets below say.
+
+- **Opening it.** The gear, the title bar's last control (12.1; follow-up F39), or the quick
+  switcher's command `> settings` (a start of it of at least one letter after the `>`, trimmed and
+  in any case: `>s`, `> set`; the server's answer, `list.switcher.settings`, 8.2.3), with Enter or a
+  click on its line `Settings: skydeck’s settings, the plain ones changed here`. Both pass the gate
+  of a window chord (12.9). A dialog over the page as stage D's (12.5): modal, the page inert under
+  it.
+- **What it shows.** At the screen's top, above the short screen, while the window cannot change
+  the file — a file that does not parse (not JSON, a key or a value its rules refuse), a symbolic
   link to nothing, a path that is not a regular file — that problem in `doctor`'s words (`<file>:
-  unknown key "x"`) and `Mend the file by hand first: the window changes nothing in it until then.`
-  Then every key in the guide's order under its group — Starting sessions, The list, Install, Pull
-  requests, Restore, Claude Code, Tickets, The window —, each with its name as in the file
+  unknown key "x"`) and `Mend the file by hand first: the window changes nothing in it until then.`;
+  every change, on the short screen too, is refused until then. At Advanced's top the file's path,
+  and where the copy of it is kept (below); `The file does not exist yet: a change creates it.`
+  while there is none. Then every key the short screen does not show, in the guide's order under
+  its group — Starting sessions, The list, Install, Pull requests, Restore, Claude Code, Tickets,
+  The window —, each with its name as in the file
   (`prRefreshMinutes`, `window.links`), its meaning in one line (`groupPattern`'s says that it
   runs on every session's title at every list), its value, `default <value> · set in
   the file` (or `· not in the file: the default is used`; while the file cannot be read only the
@@ -4063,17 +4121,19 @@ editing the file by hand stay as they are, and the file's format does not change
   holds — a hand edit, or a key the server reads at its start that was just changed —, `applies
   after the window restarts: the window uses <value> until then`. Values and defaults are shown as
   the file writes them (JSON), as text.
-- **Which can be changed: the server's table.** `src/window/settings.ts` holds one row for every
-  key of `Config` (a key without one does not compile, and a test holds the table against the
-  defaults): its kind, its meaning, its control and when a change applies; the default is the
-  configuration's own. Changed in the window, each in a control that fits it — a number field, a
-  text field (an empty one is null for `ticketUrl` and `wezterm.domain`), a choice of exactly the
-  values the file takes — with `Save` and `Default`: `terminal`, `wezterm.domain`, `groupPattern`,
+- **Which can be changed: the server's table.** `src/window/settings.ts` holds one row for every key
+  of `Config` (a key without one does not compile, and a test holds the table against the defaults):
+  its kind, its meaning, its control and when a change applies; the default is the configuration's
+  own. Changed in the window, each in a control that fits it — a number field, a text field (an
+  empty one is null for `ticketUrl` and `wezterm.domain`), a choice of exactly the values the file
+  takes —, in Advanced with `Save` and `Default`: `terminal`, `wezterm.domain`, `groupPattern`,
   `firstRunDoneAfterDays`, `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`,
   `restoreStartTimeoutSeconds`, `ticketUrl`, `ticketRefreshMinutes`, `window.keepAlive`,
-  `window.links`, `window.updateCheck` (follow-up F38). Shown only, its value as text and `names a program: it is changed in the file
-  only` (`names a folder`, `is the window's port`): `claudeHome`, `claudeCommand`, `ticketStatus`,
-  `window.port`, `window.edge`, `window.profileDir`.
+  `window.links`, `window.updateCheck` (from F39 `terminal`, `ticketUrl`, `window.keepAlive` and
+  `window.links` are on the short screen instead, saved as they are picked, and from F38
+  `window.updateCheck`, in its group Updates). Shown only, its value as text and `names a
+  program: it is changed in the file only` (`names a folder`, `is the window's port`): `claudeHome`,
+  `claudeCommand`, `ticketStatus`, `window.port`, `window.edge`, `window.profileDir`.
 - **When a change applies.** At once — the running server reads it at each use, and the change is
   put into its configuration: `groupPattern` and `ticketUrl` (the rows are loaded again at once: the
   next list, the next link, the next ticket set, the next read of a status), `prRefreshMinutes` and
@@ -4087,23 +4147,22 @@ editing the file by hand stay as they are, and the file's format does not change
   `firstRunDoneAfterDays` (`skydeck install` only). A change restarts, stops and starts nothing,
   and the file is not watched: a hand edit counts at the server's next start, and the screen says
   so beside it.
-- **One setting at a time** (8.2.3 `setting-set`, `setting-default`). `Save`, or Enter in its field,
-  sends that one key and the field's text (a number field's as a number when it reads as one, else
-  as typed, for the server to refuse); `Default` removes the key from the file. The field and its
-  buttons wait for the answer, whose words stand under the field: `Saved: it applies at once.`
-  (`… after the window restarts.`, `the commands use it at their next run.`, `skydeck install uses
-  it.`; `Put back to its default: …`), or the refusal — `config.json`'s own words without the
-  file's path (`"prRefreshMinutes" must be a positive integer`; a ticket link with a user name or a
-  password stays refused) —, the field keeping its text. A text longer than a request carries
-  (4,096 bytes of UTF-8; the file takes a longer `groupPattern` or `wezterm.domain`) is refused by
-  the page before it is sent, `Longer than the window sends (4,096 bytes as UTF-8): change it in
-  the file by hand.` Every page's screen follows a change
-  (`settings`, 8.2.3); a field whose text was changed and not saved keeps it; the screen opened
-  again reads everything again. The line under a field goes when its text or choice changes.
-  `Save` with nothing changed sends nothing (`Nothing changed, nothing saved.`). A text value a
-  one-line field cannot hold faithfully — a line break, a control character — is shown as text for
-  that row, with `holds a line break or a control character, which this field cannot show: change
-  it in the file while it does`, and no `Save`.
+- **One setting at a time** (8.2.3 `setting-set`, `setting-default`). In Advanced, `Save`, or Enter
+  in its field, sends that one key and the field's text (a number field's as a number when it reads
+  as one, else as typed, for the server to refuse); `Default` removes the key from the file. The
+  field and its buttons wait for the answer, whose words stand under the field: `Saved: it applies
+  at once.` (`… after the window restarts.`, `the commands use it at their next run.`, `skydeck
+  install uses it.`; `Put back to its default: …`), or the refusal — `config.json`'s own words
+  without the file's path (`"prRefreshMinutes" must be a positive integer`; a ticket link with a
+  user name or a password stays refused) —, the field keeping its text. A text longer than a request
+  carries (4,096 bytes of UTF-8; the file takes a longer `groupPattern` or `wezterm.domain`) is
+  refused by the page before it is sent, `Longer than the window sends (4,096 bytes as UTF-8):
+  change it in the file by hand.` Every page's screen follows a change (`settings`, 8.2.3); a field
+  whose text was changed and not saved keeps it; the screen opened again reads everything again. The
+  line under a field goes when its text or choice changes. `Save` with nothing changed sends nothing
+  (`Nothing changed, nothing saved.`). A text value a one-line field cannot hold faithfully — a line
+  break, a control character — is shown as text for that row, with `holds a line break or a control
+  character, which this field cannot show: change it in the file while it does`, and no `Save`.
 - **The file.** Read again for every change. Only that key changes: every other key — the
   shown-only ones too — stays, in its order (a key the file did not hold comes last, inside
   `window` or `wezterm` for theirs), with the file's own indentation where it shows one, else two
@@ -4123,31 +4182,35 @@ editing the file by hand stay as they are, and the file's format does not change
   statement, which a rename would overrule) or another user's: `<file> is read-only (mode 444): the
   window does not write over it; make it writable (chmod u+w) or change it by hand: nothing was
   changed`.
-- **Keys** (12.9). The keyboard starts on the first field once the screen came. Tab and Shift+Tab
-  walk its fields and buttons and stay in it; Enter in a field saves it; Esc closes it — the key
-  help first, when it lies over the screen (Ctrl+Shift+H): Esc closes the top layer only; the keyboard
-  goes back where it was (a text field, the list, the terminal), else to the zone's holder. While
-  an answer waits its field is read-only and nothing is disabled, and a draw moves no element: the
-  keyboard and the dialog's scroll stay where they are, also when another window's change draws
-  the screen again. While it
-  is shown every window chord but Ctrl+Shift+H says `close the settings first (Esc)`; a reload passes
-  while no field holds text that was not saved.
+- **Keys** (12.9). The keyboard starts on the first control, `Mode` (from F39; before, the first
+  field once the screen came). Tab and Shift+Tab walk its controls — Advanced's button, and
+  Advanced's fields and buttons while it is open — and stay in it; Enter in a field saves it; Esc
+  closes it, dropping a short text not saved — the key help first, when it lies over the screen
+  (Ctrl+Shift+H): Esc closes the top layer only; the keyboard goes back where it was (a text field,
+  the list, the terminal), else to the zone's holder. While an answer waits its field is read-only
+  and nothing is disabled, and a draw moves no element: the keyboard and the dialog's scroll stay
+  where they are, also when another window's change draws the screen again. While it is shown every
+  window chord but Ctrl+Shift+H says `close the settings first (Esc)`; a reload passes while no
+  field holds text that was not saved.
 - **Look.** It is wider and taller than stage D's dialogs and scrolls inside itself in a small
   window; its texts hold 4.5 : 1 in every theme (`Save` is told apart by its border, not by an
-  accent ground); every text is text, a value only an input's value or text: one with markup stays
-  text, a long one wraps, a right-to-left one keeps its order.
-- **Updates** (follow-up F38, 16.5). Above the list, a block `Updates` says what the window's server
-  last found when it looked for a newer skydeck: `Last check: <age> ago — <summary>`, the age that
-  of the last check's end, whatever it found (`No check was made yet.`); when the last check
-  failed, first `The last check failed <age> ago: <its line>` (git's, or `skydeck could not check
-  for an update (<kind>)`), then `Known from <age> ago: <summary>`, the age that of the last fetch
-  that worked (`Nothing was fetched before.`) — that first line alone when the check's own
-  outcome is that line (a git call failed, the check threw); a check that ends without a failure takes that line
-  away; `Checking…` while a check runs. `Check now`
-  runs a check at once (`act update-check`), whether `window.updateCheck` is `"daily"` or `"off"`,
-  and the block follows every `update` message while the screen is shown. A checkout whose branch
-  follows no branch of a remote never shows the title bar's `Update available` (12.1); this block
-  is where it says why. The switch itself is the row `window.updateCheck` of the table.
+  accent ground; the short screen's labels, hints, marks and words too); every text is text, a value
+  only an input's value or text: one with markup stays text, a long one wraps, a right-to-left one
+  keeps its order.
+- **Updates** (follow-up F38, 16.5). The short screen's fourth group, after The window: the switch
+  `Check for updates every day` (`window.updateCheck`, on `"daily"`, off `"off"`, saved as it is
+  picked like every short setting), then the group's extra block (`makeGroup`'s one place for it),
+  shown from the start like the Appearance group: it says what the window's server last found when
+  it looked for a newer skydeck: `Last check: <age> ago — <summary>`, the age that of the last
+  check's end, whatever it found (`No check was made yet.`); when the last check failed, first
+  `The last check failed <age> ago: <its line>` (git's, or `skydeck could not check for an update
+  (<kind>)`), then `Known from <age> ago: <summary>`, the age that of the last fetch that worked
+  (`Nothing was fetched before.`) — that first line alone when the check's own outcome is that
+  line (a git call failed, the check threw); a check that ends without a failure takes that line
+  away; `Checking…` while a check runs. `Check now` runs a check at once (`act update-check`),
+  whether `window.updateCheck` is `"daily"` or `"off"`, and the block follows every `update`
+  message while the screen is shown. A checkout whose branch follows no branch of a remote never
+  shows the title bar's `Update available` (12.1); this block is where it says why.
 
 ## 13. Notifications
 
@@ -4664,7 +4727,7 @@ one (`update` writes none) and exits with node's status.
 
 **The window's check** (follow-up F38, issue #163; the owner's decision of 2026-11-21, design 2
 principle 8). The window's server says when a newer skydeck is there: the title bar's `Update
-available` (12.1), its dialog, the settings screen's block `Updates` and `Check now` (12.13), and
+available` (12.1), its dialog, the settings screen's group Updates and `Check now` (12.13), and
 `doctor`'s `update:` line (16.3). The check applies nothing; Update now (below) does, after the
 user's second click.
 
@@ -5234,15 +5297,16 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W31 | Czech and US layouts in the filter's and the switcher's fields: AltGr characters and dead keys type; Ctrl+Shift+P opens and closes the switcher on both. | E | 12.8, 12.9 |
 | W32 | `skydeck update` on the user's own installation, typed in a WSL terminal of the user's own with the window open: `--check` first (the list of new commits, or "up to date"; the window and the sessions stay as they are); then, only when it listed commits, the update itself: the window says for a few seconds that the server is not answering, then reloads itself; every session is there; no second window; `skydeck doctor` has no `problem` line that was not there before. It types into no session and presses no key in the window. | F8 | 16.5, 5.1 |
 | W33 | **Real claude**: `skydeck install` asks whether to turn Claude Code's ← shortcut off (its section `Claude Code's ← shortcut`, the explanation, and `> Turn the shortcut off? [y/N]`); `y` sets only `leftArrowOpensAgents` to `false` in `~/.claude.json`, after a backup, and `skydeck doctor` then says the shortcut is off; in a throwaway session of the window started after it, ← on its empty prompt leaves the terminal as it is (no agent view). It changes that one key of the user's on purpose and prints neither file. | F11 | 7.9 |
-| W34 | **Real claude**: the title bar's theme switch in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme "Auto (match terminal)" (looked at in `/theme`, never in its files), a new throwaway session started in each forced state picks the matching one, and whether one already running changes its theme at a switch is written down (not documented). At the end the switch, Windows' mode and Claude Code's theme are as they were. | F13 | 12.1, 7.2, 9.3 |
+| W34 | **Real claude**: the theme's Mode (Settings, Appearance; the title bar's switch before F39) in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme "Auto (match terminal)" (looked at in `/theme`, never in its files), a new throwaway session started in each forced state picks the matching one, and whether one already running changes its theme at a switch is written down (not documented). At the end Mode, Windows' mode and Claude Code's theme are as they were. | F13, F39 | 12.1, 7.2, 9.3 |
 | W35 | **Real claude**, a throwaway session started from the New form with `--model` and one more flag: the header's second line ends in those flags, in the short id's grey, after the short id, nothing else of the line moved; its tooltip says `Started with: …`; in a narrower window they are cut first; once it ended and was closed, the resume card's "Will run" has them and the header not; resumed, the header shows them again. | F16 | 12.5 |
 | W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (the header's flags, F16, and `skydeck show`); removed with ×, `Undo` puts it back at its place; with a session of the user's in a group selected, the form shows that group's chip, and a click puts the name into the Group field (nothing started). It types no prompt and changes no real session. | F15, F28 | 12.6, 10.2 |
 | W37 | A ticket on a throwaway session (follow-up F18): set by a whole link (`https://example.com/browse/TRY-1`, a host that opens nothing private), the header's third line starts with its chip `TRY-1 ↗`, its tooltip the address, a click opens it where links open (W12); set by a key only while `ticketUrl` is configured (else that step is skipped); removed with an empty text, the chip gone and `+ ticket` back; `skydeck show` prints `ticket:` while one is set. Every step checks the header's short id or the dialog's heading first; at the end the session has no ticket. | F18 | 12.5, 10.2 |
 | W38 | A ticket's status on the throwaway session (follow-up F19), asking no real tracker: a stand-in program the owner writes in a throwaway folder (`~/skydeck-try/status`, its three lines given) answers for a `ticketStatus` rule whose `match` is `https://example.com/try/`; the ticket `https://example.com/try/TRY-1` on the throwaway session shows `TRY-1 · In Progress ↗` in blue in the header and `In Progress` in the row's small chip; the answer changed to each category and ↻ pressed in the ticket dialog: `blocked` red, `review` amber, `doing` blue, `done` green, `todo` and `closed` grey; a failure (the program made not executable) keeps the old status and its tooltip says `status not read: …`; `skydeck show` prints `ticket:` with ` · <status>`. Every step checks the header's short id or the dialog's heading first; at the end the ticket is removed, `config.json` is as it was (restored from a copy), and the stand-in is deleted. | F19 | 12.5, 12.2, 12.3, 10.2 |
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
-| W41 | The settings screen on the owner's own `config.json`, copied aside first: `Settings` in the title bar shows the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36 | 12.13 |
+| W41 | The settings screen's Advanced on the owner's own `config.json`, copied aside first: the title bar's gear opens it, `Advanced (14 more settings)` opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36, F39 | 12.13 |
 | W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last slotted row and under a filter; `skydeck window --restart` keeps the order. The restore order only where W16's drill runs anyway. | F37 | 7.6, 12.9 |
-| W43 | The update notice. First half (nothing is applied): `Check now` in Settings gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Update now` and `Close`; `doctor`'s `update:` line; `window.updateCheck` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
+| W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Update now` and `Close`; `doctor`'s `update:` line; the group's switch `Check for updates every day` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
+| W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links, The window and (F38) Updates with seven plain labels and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

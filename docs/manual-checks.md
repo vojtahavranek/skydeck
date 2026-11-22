@@ -7,23 +7,24 @@
 The short checklist to run by hand after installing skydeck on a machine, and before trusting a new
 Claude Code version. It covers what the tests cannot: they never start `claude`, never open a
 terminal tab, never restart WSL and never start a Windows program. Each item gives the command and
-the expected result. Items 1–9 check the commands of step 1; the checks W1–W26 but W11, W16,
-W19 and W21 check the window of step 2 (stage A) and start at "The window (step 2, stage A)"
-below; W27–W29 check editing in the window (stage D), at "The window (step 2, stage D)"; W11, W19
-and W21 check which sessions need you and the desktop notifications (stage B), at "The window
-(step 2, stage B)"; W16 checks restore in the window after WSL stopped (stage C), at
-"The window (step 2, stage C)"; W30, W31 and W3's icon check search, the quick switcher and the
-page's icon (stage E), at "The window (step 2, stage E)"; W32 checks `skydeck update` (follow-up
-F8), at "Updating skydeck"; W33 checks install's offer to turn off Claude Code's ← shortcut
-(follow-up F11), at "Claude Code's ← shortcut"; W34 checks the title bar's theme switch (follow-up
-F13), at "The window's theme"; W35 checks the flags a session was started with in the header
-(follow-up F16), at "The flags a session was started with"; W36 checks the new form's favourite
-flags (follow-up F15) and its group chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
+the expected result. Items 1–9 check the commands of step 1; the checks W1–W26 but W11, W16, W19 and
+W21 check the window of step 2 (stage A) and start at "The window (step 2, stage A)" below; W27–W29
+check editing in the window (stage D), at "The window (step 2, stage D)"; W11, W19 and W21 check
+which sessions need you and the desktop notifications (stage B), at "The window (step 2, stage B)";
+W16 checks restore in the window after WSL stopped (stage C), at "The window (step 2, stage C)";
+W30, W31 and W3's icon check search, the quick switcher and the page's icon (stage E), at "The
+window (step 2, stage E)"; W32 checks `skydeck update` (follow-up F8), at "Updating skydeck"; W33
+checks install's offer to turn off Claude Code's ← shortcut (follow-up F11), at "Claude Code's ←
+shortcut"; W34 checks the window's theme (follow-up F13; from F39 in Settings), at "The window's
+theme"; W35 checks the flags a session was started with in the header (follow-up F16), at "The flags
+a session was started with"; W36 checks the new form's favourite flags (follow-up F15) and its group
+chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follow-up F18), at "A
 session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status"; W40 checks
 a copy that Claude Code's background feature makes (follow-up F33), at "A copy made in agent view";
-W41 checks the window's settings screen (follow-up F36), at "The settings screen"; W42 checks
-moving a session of Open by hand (follow-up F37), at "Moving a session in Open"; W43 checks the
-window's notice of a newer skydeck (follow-up F38), at "The update notice".
+W41 checks the window's settings screen (follow-up F36), at "The settings screen"; W42 checks moving
+a session of Open by hand (follow-up F37), at "Moving a session in Open"; W43 checks the window's
+notice of a newer skydeck (follow-up F38), at "The update notice"; W44 checks the short settings
+screen and its gear (follow-up F39), at "The short settings screen".
 
 Setup:
 
@@ -478,9 +479,10 @@ Three questions about how Claude Code talks to the terminal skydeck gives it.
   supports it). If Claude Code asks before it uses it, a 0 in a terminal that does not support it
   says nothing about the window. Write down which terminal W is, with its version.
 - **Does the colour answer make its automatic theme right?** When your Claude Code has a theme
-  that follows the terminal (look in `/config` or `/theme`), choose it. While the title bar's theme
-  switch shows `◐ Auto` (follow-up F13; click it until it does, and click it back to what it showed
-  at the end), the window is dark while Windows is in dark mode and light in light mode (Settings >
+  that follows the terminal (look in `/config` or `/theme`), choose it. While the theme's Mode shows
+  `Auto` (follow-up F13: the gear at the right end of the title bar opens Settings, whose first
+  group, Appearance, has Mode; pick `Auto` when it shows another, and pick that one again at the
+  end), the window is dark while Windows is in dark mode and light in light mode (Settings >
   Personalization > Colors); W34 tries `Light` and `Dark`. Start a new throwaway session in the
   window in each mode, after a click into the window: Claude Code should pick the matching theme.
 - **An XTVERSION answer** (`xterm.js(6.0.0)`) would make Claude Code treat the terminal as xterm.js
@@ -2078,74 +2080,72 @@ documentation only (design.md 14), or not at all.
 
 ## The window's theme
 
-The check of the title bar's theme switch (follow-up F13; design-step-2.md 12.1, 7.2, 9.3): W34,
-in your own window. The switch is a small button right before `Switch…`: a half circle and `Auto`
-(the window follows Windows' light or dark mode, as before), `Light` or `Dark`; each click goes to
-the next, in this order: Auto → Light → Dark → Auto. **It changes one setting of the window on
-purpose**: the switch's choice, which the window keeps in its own Edge profile (not in any file of
-yours); the setup writes down what it shows, and the end puts it back. Steps 5 and 6 are optional:
-step 5 changes Windows' mode for the whole desktop, and step 6 may change Claude Code's theme
-through its own `/theme`; each says how to put it back. No step reads or writes a file of Claude
-Code's (`~/.claude.json` holds your account details): its theme is looked at in `/theme`. Nothing
-here sends a prompt: the only text typed into a terminal is `/theme` and `/exit`, and only into a
-new throwaway session.
+The check of the window's theme (follow-up F13, chosen in Settings from F39; design-step-2.md 12.1,
+12.13, 7.2, 9.3): W34, in your own window. **Mode** is the first choice of Settings: click the gear
+at the right end of the title bar, and its first group, Appearance, shows `Mode` with `Auto` (the
+window follows Windows' light or dark mode, as before), `Light` or `Dark`. "Pick `Light`" below
+means: open Settings with the gear, choose `Light` in Mode (it applies at once), press Esc (Settings
+closes). **It changes one setting of the window on purpose**: Mode's choice, which the window keeps
+in its own Edge profile (not in any file of yours); the setup writes down what it shows, and the end
+puts it back. Steps 5 and 6 are optional: step 5 changes Windows' mode for the whole desktop, and
+step 6 may change Claude Code's theme through its own `/theme`; each says how to put it back. No
+step reads or writes a file of Claude Code's (`~/.claude.json` holds your account details): its
+theme is looked at in `/theme`. Nothing here sends a prompt: the only text typed into a terminal is
+`/theme` and `/exit`, and only into a new throwaway session.
 
 ## W34. Light, dark or the system's (real claude)
 
-Setup: skydeck updated to a commit that has follow-up F13 (`skydeck update`, W32); the window open,
-as you work with it. Write down two things:
+Setup: skydeck updated to a commit that has follow-up F39 (`skydeck update`, W32; before it, the
+title bar's switch `◐` stood for Mode); the window open, as you work with it. Write down two things:
 
-- what the switch shows: `◐ Auto`, `◐ Light` or `◐ Dark` (hold the mouse over it: the tooltip says
-  `Theme: follows the system. Click for light.`, `Theme: light. Click for dark.` or `Theme: dark.
-  Click to follow the system.`);
+- what Mode shows: `Auto`, `Light` or `Dark` (open Settings with the gear, read it, press Esc);
 - Windows' mode: Settings > Personalization > Colors, "Choose your mode" (Light, Dark or Custom;
   for Custom, "Choose your default app mode").
 
-Then click the switch until it shows `◐ Auto` (from `Light` two clicks, from `Dark` one).
+Then pick `Auto` (when it shows `Auto` already, nothing).
 
 1. **Auto.** Expected: the window is light while Windows' app mode is Light and dark while it is
    Dark, as before F13: the list, the header, the key bar and the terminal of the selected session.
-   Before each click of this check, look at the key bar (`Focus: list` or `Focus: terminal`), and
-   after it look that it says the same: a click on the switch moves no keyboard.
-2. **Auto → Light.** Click the switch once. Expected: it shows `◐ Light`, and at once the whole
-   window is light — the list, the header, the key bar, the scroll bars, and every terminal: a
-   light background with dark text, the sixteen colours a program uses (`ls`'s, say) in their light
-   variants. A program's own 24-bit colours stay as they are: a running Claude Code whose theme is
-   not one of its ANSI themes keeps its own theme's colours on the light background, so some of
-   its text may be hard to read until it is drawn in another theme (expected from what its themes
-   are documented to be, not tried; write down what you see). Nothing else moves: the title bar's
-   `Switch…` stays where it was, the selection is the same row. Select another row that has a
-   terminal (one click on its row, no key), and look that its terminal is light too; click back on
-   the row you had.
-3. **Light → Dark.** Click it once more. Expected: `◐ Dark`, and the whole window dark, every
-   terminal too, whatever Windows' mode is.
-4. **It is kept.** With `◐ Dark` shown, press Ctrl+Shift+R (the page's reload, in either zone).
+   Before each pick of this check, look at the key bar (`Focus: list` or `Focus: terminal`), and
+   after its Esc look that it says the same: Settings gives the keyboard back where it was.
+2. **Auto → Light.** Pick `Light`. Expected: at once, behind Settings, the whole window is light —
+   the list, the header, the key bar, the scroll bars, and every terminal: a light background with
+   dark text, the sixteen colours a program uses (`ls`'s, say) in their light variants. A program's
+   own 24-bit colours stay as they are: a running Claude Code whose theme is not one of its ANSI
+   themes keeps its own theme's colours on the light background, so some of its text may be hard to
+   read until it is drawn in another theme (expected from what its themes are documented to be, not
+   tried; write down what you see). Nothing else moves: the selection is the same row. Select
+   another row that has a terminal (one click on its row, no key), and look that its terminal is
+   light too; click back on the row you had.
+3. **Light → Dark.** Pick `Dark`. Expected: the whole window dark, every terminal too, whatever
+   Windows' mode is.
+4. **It is kept.** With `Dark` picked, press Ctrl+Shift+R (the page's reload, in either zone).
    Expected: the page loads again dark from its first frame — no frame of the page in light while it
-   loads — and the switch shows `◐ Dark`. Then close the window with its × (closing the window ends
+   loads — and Mode shows `Dark`. Then close the window with its × (closing the window ends
    no session) and, in W, `skydeck window`. Before the page's first frame Edge shows its own empty
    window, in Windows' mode: with Windows in Light mode it may be light for a moment, which is
    Edge's and not the page's (the page cannot change it). Expected: the page itself is dark from its
-   first frame, `◐ Dark`. Write down, for each load, whether anything flashed light, and which it
+   first frame, Mode `Dark`. Write down, for each load, whether anything flashed light, and which it
    was: Edge's empty window (nothing of the page in it), or a frame of the page (its title bar or
    its list in light).
 5. **Optional: Windows' mode.** Only when you may change it for a minute: in Settings >
-   Personalization > Colors set the app mode to the other one (Light ↔ Dark). Expected while the
-   switch shows `◐ Dark`: the window stays dark. Click the switch once (**Dark → Auto**): it shows
-   `◐ Auto`, and the window follows Windows' mode of the moment. Set Windows' mode back to what you
-   wrote down: at `Auto` the window follows at once. Then click once more (**Auto → Light**): the
-   window is light whatever Windows says.
+   Personalization > Colors set the app mode to the other one (Light ↔ Dark). Expected while
+   Mode is `Dark`: the window stays dark. Pick `Auto` (**Dark → Auto**): the window follows
+   Windows' mode of the moment. Set Windows' mode back to what you wrote down: at `Auto` the window
+   follows at once. Then pick `Light` (**Auto → Light**): the window is light whatever Windows
+   says.
 6. **Optional: Claude Code's theme.** This step needs Claude Code's theme to be "Auto (match
    terminal)"; the setting is looked at in a throwaway session.
-   - **A new throwaway session.** Click the switch until it shows `◐ Light` (from `Dark` two
-     clicks, from `Auto` one). In the window press Ctrl+Shift+N. The right side shows the form for
-     a new session, its first field the directory, with the cursor in it; when the form does not
-     show, or the cursor is not in that field, type nothing: press Ctrl+Shift+N again, or click
-     into the field. Press Ctrl+A in the field, type the throwaway folder's full path over its text
-     (`/home/<you>/skydeck-try`), leave the other fields empty, and press Enter only when the field
-     holds exactly that path. **Type no prompt into the new session.** Look that it is the new one:
-     the header shows its short id and "opened" a moment ago, `skydeck-try` as its folder, and its
-     terminal shows Claude Code's empty prompt. Look that its terminal has the keyboard: the key bar
-     says `Focus: terminal` (else Ctrl+Shift+L until it does).
+   - **A new throwaway session.** Pick `Light` (when Mode shows another). In the window press
+     Ctrl+Shift+N. The right side shows the form for a new session, its first field the directory,
+     with the cursor in it; when the form does not show, or the cursor is not in that field, type
+     nothing: press Ctrl+Shift+N again, or click into the field. Press Ctrl+A in the field, type the
+     throwaway folder's full path over its text (`/home/<you>/skydeck-try`), leave the other fields
+     empty, and press Enter only when the field holds exactly that path. **Type no prompt into the
+     new session.** Look that it is the new one: the header shows its short id and "opened" a moment
+     ago, `skydeck-try` as its folder, and its terminal shows Claude Code's empty prompt. Look that
+     its terminal has the keyboard: the key bar says `Focus: terminal` (else Ctrl+Shift+L until it
+     does).
    - **Its theme.** Only then type `/theme` and Enter. Claude Code shows its themes, the current
      one marked; write down its name. When the list has no "Auto (match terminal)" (an older
      Claude Code), press Esc and leave out the rest of this step but its end. When the current one
@@ -2153,32 +2153,32 @@ Then click the switch until it shows `◐ Auto` (from `Light` two clicks, from `
      the rest of this step but its end, or choose "Auto (match terminal)" for this step (it is then
      your Claude Code's theme until you choose yours again, at the end of this step).
    - **What it picked, and a switch while it runs.** Expected: Claude Code draws its light theme
-     (dark text on the light terminal). Now click the switch once (**Light → Dark**): the terminal
-     turns dark at once. What Claude Code does then is not documented: its documentation (read
+     (dark text on the light terminal). Now pick `Dark` (**Light → Dark**): the terminal turns dark
+     at once. What Claude Code does then is not documented: its documentation (read
      2026-11-18) says only "Selecting the auto option detects your terminal's light or dark
      background, so the theme follows OS appearance changes whenever your terminal does", not how
      or when it detects. It may keep its light theme (skydeck tells a running program the new
      colours only when it asks again) or change to its dark one; wait a few seconds, then write
      down which it does. Then end it: the terminal has the keyboard (`Focus: terminal`) and the
      header shows the throwaway session's short id; type `/exit`, then `Close` on its ended bar.
-     Start a second throwaway session the same way (the form, the path, no prompt), with `◐ Dark`
-     shown. Expected: Claude Code draws its dark theme from its start (expected, not tried).
+     Start a second throwaway session the same way (the form, the path, no prompt), with Mode
+     `Dark`. Expected: Claude Code draws its dark theme from its start (expected, not tried).
    - **The end of this step.** Look that the header shows the throwaway session's short id and the
      key bar says `Focus: terminal` (else Ctrl+Shift+L until it does). When you chose "Auto (match
      terminal)" above, type `/theme` and Enter, choose the theme you wrote down, then `/theme` once
      more: it is marked as the current one; press Esc. Then type `/exit`, and `Close` on its ended
      bar.
-7. **The end.** Click the switch until it shows what you wrote down in the setup, and look that the
-   window is as it was. Windows' mode is as the setup wrote it down (step 5 put it back), and
+7. **The end.** Pick in Mode what you wrote down in the setup, and look that the window is as it
+   was. Windows' mode is as the setup wrote it down (step 5 put it back), and
    Claude Code's theme is the one `/theme` showed in step 6 (its end put it back).
 
 Write down: for steps 1 to 3 whether the window and its terminals were wholly light or dark, what
 a running Claude Code looked like on the light background, and whether the keyboard stayed where
 it was; for step 4, for the reload and the new window, whether anything flashed light and whether
-it was Edge's empty window or a frame of the page, and what the switch showed; for step 5, whether
+it was Edge's empty window or a frame of the page, and what Mode showed; for step 5, whether
 the window followed Windows at `Auto` and not at `Dark` or `Light`; for step 6, Claude Code's theme
 in `/theme`, the theme it drew in each new session, and whether the running one changed after the
-switch.
+pick.
 
 Not tried before this check was written: all of it in Edge and with a real Claude Code. The page
 suite checks the switch in headless Chromium with the system's scheme emulated (the computed colours
@@ -2781,7 +2781,8 @@ against a test server with a sandbox's file; only here does the screen meet Edge
 
 ## W41. A harmless setting changed in the window, and put back
 
-Setup: skydeck updated to a commit that has follow-up F36 (`skydeck update`, W32); the window open.
+Setup: skydeck updated to a commit that has follow-up F39 (`skydeck update`, W32; before it the
+screen had no Advanced, and step 2's click on it is left out); the window open.
 
 1. **Copy the files aside.** In W: `ls -l ~/.config/skydeck/`. Write down whether `config.json` and
    `config.json.skydeck-backup` are listed. Only when `config.json` is: `cp -p
@@ -2789,13 +2790,15 @@ Setup: skydeck updated to a commit that has follow-up F36 (`skydeck update`, W32
    ~/.config/skydeck/config.json` and write down the value (no line: it is not set). Only when
    `config.json.skydeck-backup` is: `cp -p ~/.config/skydeck/config.json.skydeck-backup
    ~/config.json.skydeck-backup.before-w41`.
-2. **Open it.** Click `Settings` at the right end of the title bar. Expected: a dialog over the page
-   whose first lines are `Settings`, `The file: <your config.json>` and where its copy is kept
-   (and, when step 1 found no `config.json`, `The file does not exist yet: a change creates it.`);
-   under `Pull requests` the line `prRefreshMinutes`, its field holding your value (or `5`),
-   `default 5 · set in the file` (or `· not in the file: the default is used`) and `applies at
-   once`; under `Claude Code`, `claudeCommand` shown as text with `names a program: it is changed
-   in the file only` and no button. The keyboard is in the first field (`terminal`'s choice).
+2. **Open it.** Click the gear at the right end of the title bar. Expected: a dialog over the page,
+   `Settings`, its short screen (Appearance, Links, The window; W44 checks it) and at its end
+   `Advanced (14 more settings)`; the keyboard is on `Mode`. Click `Advanced (14 more settings)`.
+   Expected: under it `The file: <your config.json>` and where its copy is kept (and, when step 1
+   found no `config.json`, `The file does not exist yet: a change creates it.`); under `Pull
+   requests` the line `prRefreshMinutes`, its field holding your value (or `5`), `default 5 · set
+   in the file` (or `· not in the file: the default is used`) and `applies at once`; under `Claude
+   Code`, `claudeCommand` shown as text with `names a program: it is changed in the file only` and
+   no button.
 3. **Change it.** Click into the `prRefreshMinutes` field, press Ctrl+A, type `6` (when your value
    is 6 already, type `7`, and read 7 for 6 below) and press Enter. Expected: under the field
    `Saved: it applies at once.`, and the keyboard still in the field. In
@@ -2878,8 +2881,8 @@ Not tried before this check was written: all of it, in Edge.
 The check of the window's notice of a newer skydeck (follow-up F38; design-step-2.md 16.5, 12.1,
 12.13; [install.md](install.md), "Updating", its part "The window says when there is one"): W43,
 in your window, on your own checkout. Its first half (steps 1–6) applies nothing: it presses
-`Check now`, reads the settings screen's block `Updates`, the title bar and `skydeck doctor`, turns
-the switch `window.updateCheck` off and on again, and, only where you have such a remote, looks at
+`Check now`, reads the settings screen's group `Updates`, the title bar and `skydeck doctor`,
+turns its switch `Check for updates every day` (`window.updateCheck`) off and on again, and, only where you have such a remote, looks at
 what a check does with a remote that needs a passphrase or a login. Its second half (steps 7–9)
 applies the update with `Update now`, on your own installation, and only when the dialog lists
 commits. The tests run all of it against a test server, a throwaway checkout and a remote that is
@@ -2895,12 +2898,12 @@ In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git rem
 (write it down: steps 5 and 6 put it back), `grep -n updateCheck ~/.config/skydeck/config.json`
 (write down the line, or that there is none).
 
-1. **Check now.** Click `Settings`. Expected: above the list, the block `Updates` with one line —
-   `Last check: <age> ago — skydeck is up to date (main at <id>, as origin/main)`, or `… — <n> new
-   commits on origin/main` — and `Check now`. Click `Check now`. Expected: `Checking…` for a
-   moment, then `Last check: 0s ago — …` (or `1s`). When it says that new commits are there, the
-   title bar shows `Update available` right before `Settings`; when it says up to date, it shows
-   none. Press Esc: the screen closes, the keyboard is back where it was.
+1. **Check now.** Click the gear. Expected: the short screen's fourth group, `Updates`, after
+   `The window`: the switch `Check for updates every day`, then one line — `Last check: <age> ago —
+   skydeck is up to date (main at <id>, as origin/main)`, or `… — <n> new commits on origin/main` —
+   and `Check now`. Click `Check now`. Expected: `Checking…` for a moment, then `Last check: 0s ago
+   — …` (or `1s`). When it says that new commits are there, the title bar shows `Update available`
+   right before `Switch…` and the gear; when it says up to date, it shows none. Press Esc: the screen closes, the keyboard is back where it was.
 2. **The dialog**, only when the title bar shows `Update available`. Click it. Expected: a dialog
    with the lines `skydeck update --check` prints (in W, `skydeck update --check` prints the same
    lines, then `run skydeck update to apply it`), then `To apply it, in a WSL terminal of your own:
@@ -2912,21 +2915,23 @@ In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git rem
    commits on origin/main (fetched <age> ago); skydeck update applies them`, or `update: skydeck is
    up to date (…) (fetched <age> ago)` — and no `problem` line that step 1's setup did not have.
    doctor used no network for it (it reads what the window's server stored).
-4. **The switch.** In Settings, set `window.updateCheck` to `off` and Save (`Saved: it applies at
-   once.`); in W, `grep -n updateCheck ~/.config/skydeck/config.json` prints `"off"`. `Check now`
-   still checks (`Last check: 0s ago — …`). Then put it back: the value of the setup (`Default`
-   when there was none: `Put back to its default: it applies at once.`); the grep prints the line
-   of the setup, or nothing.
+4. **The switch.** In Settings (the gear), turn `Check for updates every day` off: `Saved.` beside
+   it, no button pressed; in W, `grep -n updateCheck ~/.config/skydeck/config.json` prints
+   `"off"`. `Check now` still checks (`Last check: 0s ago — …`). Then turn it on again: `Saved.`,
+   and the grep prints `"daily"` (when the setup found no line, the key now stays in the file with
+   its default value, which is the same).
 5. **A remote that needs a passphrase**, only when you have an ssh key with a passphrase that this
    checkout's remote host takes (else write down "left out: no such remote"). In W: `git remote
-   set-url origin <the ssh address of the same repository>`. In Settings, `Check now`. Expected:
+   set-url origin <the ssh address of the same repository>`. In Settings' group `Updates`, `Check
+   now`. Expected:
    nothing asks for the passphrase — no prompt in any terminal, no window; the block says either
    `Last check: 0s ago — …` (the key was in an agent) or `The last check failed 0s ago: git fetch
    from origin failed: …` with what was known before. Then `git remote set-url origin <the address
    of the setup>` and `git remote get-url origin` prints it.
 6. **A private https remote**, only when you have a private repository that needs a login and the
    Windows credential manager as git's helper (else write down "left out: no such remote"). In W:
-   `git remote set-url origin <its https address>`. In Settings, `Check now`. Expected: no Windows
+   `git remote set-url origin <its https address>`. In Settings' group `Updates`, `Check now`.
+   Expected: no Windows
    dialog opens; the block says `The last check failed 0s ago: git fetch from origin failed: …`
    (no login stored), or, with a stored login, `Last check: 0s ago — …` and, as the branch does not
    follow that repository's history, whatever the look says. Then `git remote set-url origin <the
@@ -2951,7 +2956,8 @@ many sessions the title bar counts and which slots the Open section shows; in W,
    --format=%h` prints the id of step 7, `skydeck doctor` prints no `problem` line that the setup
    of this half did not have, and its `update:` line says up to date. `tail -5
    ~/.local/state/skydeck/update.log` ends with `updated to <id>`.
-9. **The dialog again.** Expected: no `Update available` in the title bar. In Settings, `Check now`
+9. **The dialog again.** Expected: no `Update available` in the title bar. In Settings' group
+   `Updates`, `Check now`
    says `Last check: 0s ago — skydeck is up to date (main at <id>, as origin/main)`.
 
 Leaves behind: the remote's address as it was, `window.updateCheck` as it was, the remote-tracking
@@ -2966,3 +2972,69 @@ form and the bars read well in your theme.
 Not tried before this check was written: all of it, in Edge; that `GCM_INTERACTIVE` reaches the
 Windows credential manager through `WSLENV` (step 6); an update from the window on a real
 installation (steps 7–9).
+
+## The short settings screen
+
+The check of the short settings screen and the title bar's gear (follow-up F39; design-step-2.md
+12.1, 12.13; [install.md](install.md), "config.json", its paragraph "In the window: Settings", and
+"Colours"): W44, in your window, on your own `config.json`. It changes one harmless setting, `Open
+links in` (`window.links`: where the links the window opens go), and puts it back, and picks the
+theme's Mode and puts it back; a ticket address is only tried with a value the file's rules
+refuse, so it changes nothing. `Keep WSL running` is not touched: a change of it counts at the
+window's next restart. The file, and the window's copy of it, are copied aside first when there
+are any, as in W41. Commands are typed in W, a WSL terminal of your own (never a `!` command inside
+Claude Code). The tests run the screen in headless Chromium; only here does it meet Edge, Windows'
+fonts and your own file.
+
+## W44. The gear, the short screen and Advanced
+
+Setup: skydeck updated to a commit that has follow-up F39 (`skydeck update`, W32); the window open,
+with the terminal of a session shown (any running one; no prompt is typed into it).
+
+1. **Copy the files aside.** As W41's step 1, with `w44` for `w41` in the names; write down the
+   value of `grep -n links ~/.config/skydeck/config.json` (no line: not set, which is `default`).
+2. **The title bar.** Expected: at its right end `Switch… Ctrl+Shift+P` (with `Update available`
+   before it while a newer skydeck is known, W43), then a gear, and no `◐`
+   or `✦` button and no word `Settings`. The gear is a drawing in the title bar's text colour (not a
+   coloured emoji, not a box or a question mark); holding the mouse over it shows `Settings`.
+3. **Open it from the terminal.** Press Ctrl+Shift+L until the key bar says `Focus: terminal`.
+   Press the mouse button on the gear and hold it: the key bar still says `Focus: terminal`. Let go.
+   Expected: a dialog over the page, `Settings`, then `Appearance` (`Mode`, `Colour theme` and
+   under it `Light and dark each keep their own.`), `Links` (`Open links in`, `Ticket address` and
+   its hint about `{key}`), `The window` (`Keep WSL running`, a switch with `after a restart`
+   beside it; `Typed commands start sessions in` and its hint), `Updates` (follow-up F38: the
+   switch `Check for updates every day`, the line of the last check and `Check now`; W43 tries
+   them), and at the end `Advanced (14 more settings)` and `Close`. No `Save`, no `Default`, no file name. The keyboard
+   is on `Mode`. Write down what Mode and Colour theme show.
+4. **The theme.** Choose the other of `Light` and `Dark` in Mode (from `Auto`, `Dark`). Expected:
+   the whole window behind the dialog changes at once, the terminal too. Choose another `Colour
+   theme`: the colours change at once. Press Ctrl+Shift+R (the page reloads; the dialog is gone):
+   the window comes back in that mode and theme from its first frame. Open Settings with the gear
+   again, choose the Mode and then the Colour theme written down in step 3. Expected: the window
+   as before step 4.
+5. **A choice saved at once.** In `Open links in` choose the other one (`Edge` or `The default
+   browser`). Expected: `Saved.` beside it at once, no button pressed; in W the grep of step 1
+   prints the new value (`"edge"` or `"default"`). Choose the one you wrote down again: `Saved.`,
+   and the grep prints what step 1 printed (`"default"` when it printed nothing: the key stays in
+   the file with its default value, which is the same).
+6. **A refused address.** Write down what `Ticket address` holds. Click into it, press Ctrl+A,
+   type `nope` and press Enter. Expected: beside it, in the refusal's colour, `"ticketUrl" must be
+   null or an http or https address with {key} once, after its host`; the field still holds `nope`;
+   in W, `grep -n ticketUrl ~/.config/skydeck/config.json` prints what it printed before (or
+   nothing). Press Ctrl+A, type back what you wrote down and click on `Mode`: `Saved.` or nothing
+   beside the field (when the text is what the file holds, nothing is sent).
+7. **Advanced, by keyboard.** Press Tab until `Advanced (14 more settings)` has the keyboard (a
+   ring around it), then Enter: it opens, `The file: <your config.json>` at its top, then the
+   settings of W41. Space closes it again. Press Esc: the dialog closes and the key bar says
+   `Focus: terminal`. Open Settings with the gear once more: Advanced is closed. Press Esc.
+8. **The end.** The window's copy: as W41's step 6, with `w44` for `w41`. The file: when step 1
+   found no `config.json`, `rm ~/.config/skydeck/config.json` (step 5 made it, holding only
+   `window.links`); else, when you changed nothing else in it since step 1, `cp -p
+   ~/config.json.before-w44 ~/.config/skydeck/config.json` (it was only `window.links`, and the
+   value written back is the one the window uses: nothing needs a restart), then
+   `rm ~/config.json.before-w44`.
+
+Write down: for each step whether it went as expected, and the words where they differ; whether
+the gear looked right, and the screen read well in your theme.
+
+Not tried before this check was written: all of it, in Edge.

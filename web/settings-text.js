@@ -1,10 +1,12 @@
-// Follow-up F36's words and rules for the settings screen (web/settings.js), pure (no DOM): what it
-// says of when a change applies, of the default and the file, of a value the running server does
+// Follow-up F36's words and rules for the settings screen (web/settings.js), pure (no DOM; from
+// F39 also the short screen's few words, its table being web/settings-short.js): what it says of
+// when a change applies, of the default and the file, of a value the running server does
 // not use yet and of a shown-only setting, and what a field's text becomes in the request. The
 // page decides nothing about a value: the server checks it by config.json's own rules and answers
 // the refusal's words, which the screen shows beside the field.
 
 /** @import { SettingApplies, SettingPayload, SettingValue } from '../src/window/protocol.ts' */
+/** @import { KeyEntry } from './settings-short.js' */
 
 export const SETTINGS_TEXTS = {
   heading: 'Settings',
@@ -26,7 +28,61 @@ export const SETTINGS_TEXTS = {
   /** A text longer than a request carries (VALUE_LIMIT): refused before it is sent. */
   tooLong: 'Longer than the window sends (4,096 bytes as UTF-8): change it in the file by hand.',
   help: 'Enter saves the field you are in; Esc closes. One setting is saved at a time.',
+  /** F39, the short screen: beside a setting whose change counts after the window restarts, and
+   *  beside a value the running server does not use yet. */
+  afterRestart: 'after a restart',
+  /** F39, the short screen: a change the server saved. */
+  saved: 'Saved.',
 };
+
+/**
+ * F39: the short screen's mark beside a setting whose change counts after a restart, or whose
+ * value the running server does not use yet: `after a restart`, and while the server uses another
+ * value, which one, in the words the control shows (`after a restart: still on until then`).
+ * @param {KeyEntry} entry
+ * @param {SettingPayload} setting
+ * @returns {string}
+ */
+export function restartText(entry, setting) {
+  if (setting.pending !== true || setting.runningText === null) {
+    return SETTINGS_TEXTS.afterRestart;
+  }
+  /** @type {unknown} */
+  let running;
+  try {
+    running = JSON.parse(setting.runningText);
+  } catch {
+    running = setting.runningText;
+  }
+  let word;
+  if (entry.control === 'switch') {
+    word = running === entry.on ? 'on' : 'off';
+  } else if (entry.control === 'choice') {
+    word = `“${typeof running === 'string' ? (entry.words[running] ?? running) : String(running)}”`;
+  } else {
+    word = typeof running === 'string' && running !== '' ? `“${running}”` : 'empty';
+  }
+  return `${SETTINGS_TEXTS.afterRestart}: still ${word} until then`;
+}
+
+/**
+ * F39: the key bar's words for a short text saved as the dialog closed, which the server refused.
+ * @param {string} label  the setting's label on the short screen
+ * @param {string} refusal  the server's words
+ * @returns {string}
+ */
+export function notSavedText(label, refusal) {
+  return `${label} was not saved: ${refusal}`;
+}
+
+/**
+ * F39: the closed section's button, with the count of the settings it holds.
+ * @param {number} count
+ * @returns {string}
+ */
+export function advancedText(count) {
+  return `Advanced (${count} more setting${count === 1 ? '' : 's'})`;
+}
 
 /** The most bytes of UTF-8 a setting's text may hold in a request (S2 8.2.3, the URL limit). */
 export const VALUE_LIMIT = 4096;
