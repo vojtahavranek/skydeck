@@ -64,6 +64,9 @@ export interface TickDeps {
   /** F19: the server's reads of a ticket's status; every refresh offers it a round over the
    *  tickets of the sessions the pages listed. Absent: no status is read by the tick. */
   tickets?: Pick<TicketFetches, 'round'>;
+  /** F38: the check for a newer skydeck, offered every second (updates.ts). The call starts a
+   *  check in the background, which the checker catches itself; `attempt` covers the call alone. */
+  updates?: { tick(): void };
 }
 
 export interface Tick {
@@ -416,6 +419,12 @@ export function createTick(deps: TickDeps): Tick {
     }
     const looked = look();
     await attempt('the keep-alive', () => deps.keepAlive.tick());
+    const updates = deps.updates;
+    if (updates !== undefined) {
+      await attempt('the update check', () => {
+        updates.tick();
+      });
+    }
     if (now % 2 === 0 && !stopped) {
       refreshStep(); // its lists carry what the look changed
     } else if (looked && !stopped) {

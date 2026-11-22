@@ -79,6 +79,8 @@ export interface Restorer {
   /** Aborts a running restore with the reason `the window's server is stopping`, resolves once it
    *  is over; nothing starts afterwards. */
   stop(): Promise<void>;
+  /** F38: whether a run goes on (an update from the window is refused while one does). */
+  running(): boolean;
 }
 
 const ALREADY_RUNNING = 'a restore is already running; wait until it has finished';
@@ -407,5 +409,6 @@ export function createRestorer(deps: RestorerDeps): Restorer {
       current.controller.abort(STOPPING);
       return current.done;
     },
+    running: () => current !== null,
   };
 }

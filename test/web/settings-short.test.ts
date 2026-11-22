@@ -1,5 +1,6 @@
 // Follow-up F39's short settings screen (web/settings-short.js), held against the server's table
-// (src/window/settings.ts): its three groups and six controls in order, under plain labels; every
+// (src/window/settings.ts): its four groups and seven controls in order (the fourth group,
+// Updates, is F38's), under plain labels; every
 // key it names is a changeable one of the server's table, a choice's words name exactly the values
 // the server takes and a switch's two sides the two it takes, so the page decides no rule (S2 4.3);
 // the screen's Advanced holds every other key, and its button counts them.
@@ -13,24 +14,33 @@ import { advancedText } from '../../web/settings-text.js';
 
 const isKey = (key: string): key is SettingKey => Object.hasOwn(SETTINGS, key);
 
-test('three groups, six controls, in this order, under plain labels', () => {
+test('four groups, seven controls, in this order, under plain labels', () => {
   assert.deepEqual(
     SHORT.map((group) => [group.title, group.entries.map((entry) => entry.label)]),
     [
       ['Appearance', ['Mode', 'Colour theme']],
       ['Links', ['Open links in', 'Ticket address']],
       ['The window', ['Keep WSL running', 'Typed commands start sessions in']],
+      ['Updates', ['Check for updates every day']],
     ],
   );
   assert.deepEqual(
     SHORT.flatMap((group) =>
       group.entries.map((entry) => ('key' in entry ? entry.key : entry.local)),
     ),
-    ['mode', 'palette', 'window.links', 'ticketUrl', 'window.keepAlive', 'terminal'],
+    [
+      'mode',
+      'palette',
+      'window.links',
+      'ticketUrl',
+      'window.keepAlive',
+      'terminal',
+      'window.updateCheck',
+    ],
   );
   assert.deepEqual(
     SHORT.map((group) => group.id),
-    ['appearance', 'links', 'window'],
+    ['appearance', 'links', 'window', 'updates'],
   );
 });
 
@@ -93,11 +103,15 @@ test('every key is a changeable one of the server’s table, named once, its con
       ['ticketUrl', 'text'],
       ['window.keepAlive', 'switch'],
       ['terminal', 'choice'],
+      ['window.updateCheck', 'switch'],
     ],
   );
   const keepAlive = keys.find((entry) => entry.key === 'window.keepAlive');
   assert.ok(keepAlive?.control === 'switch');
   assert.deepEqual([keepAlive.on, keepAlive.off], ['wsl', 'off'], 'on keeps WSL running');
+  const updateCheck = keys.find((entry) => entry.key === 'window.updateCheck');
+  assert.ok(updateCheck?.control === 'switch');
+  assert.deepEqual([updateCheck.on, updateCheck.off], ['daily', 'off'], 'on checks every day');
 });
 
 test('Advanced holds every other key of the server’s table: 14 today, counted on its button', () => {

@@ -22,8 +22,9 @@ chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follo
 session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status"; W40 checks
 a copy that Claude Code's background feature makes (follow-up F33), at "A copy made in agent view";
 W41 checks the window's settings screen (follow-up F36), at "The settings screen"; W42 checks moving
-a session of Open by hand (follow-up F37), at "Moving a session in Open"; W44 checks the short
-settings screen and its gear (follow-up F39), at "The short settings screen".
+a session of Open by hand (follow-up F37), at "Moving a session in Open"; W43 checks the window's
+notice of a newer skydeck (follow-up F38), at "The update notice"; W44 checks the short settings
+screen and its gear (follow-up F39), at "The short settings screen".
 
 Setup:
 
@@ -2875,6 +2876,103 @@ version and your two layouts.
 
 Not tried before this check was written: all of it, in Edge.
 
+## The update notice
+
+The check of the window's notice of a newer skydeck (follow-up F38; design-step-2.md 16.5, 12.1,
+12.13; [install.md](install.md), "Updating", its part "The window says when there is one"): W43,
+in your window, on your own checkout. Its first half (steps 1–6) applies nothing: it presses
+`Check now`, reads the settings screen's group `Updates`, the title bar and `skydeck doctor`,
+turns its switch `Check for updates every day` (`window.updateCheck`) off and on again, and, only where you have such a remote, looks at
+what a check does with a remote that needs a passphrase or a login. Its second half (steps 7–9)
+applies the update with `Update now`, on your own installation, and only when the dialog lists
+commits. The tests run all of it against a test server, a throwaway checkout and a remote that is
+a folder (the second half with a real server of a throwaway copy of skydeck); only here does a
+check meet your own remote, your network, ssh and the Windows credential manager, and an update
+meet Edge, your sessions and your own checkout. Commands are typed in
+W, a WSL terminal of your own (never a `!` command inside Claude Code).
+
+## W43. The update notice, and Update now
+
+Setup: skydeck updated to a commit that has follow-up F38 (`skydeck update`, W32); the window open.
+In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git remote get-url origin`
+(write it down: steps 5 and 6 put it back), `grep -n updateCheck ~/.config/skydeck/config.json`
+(write down the line, or that there is none).
+
+1. **Check now.** Click the gear. Expected: the short screen's fourth group, `Updates`, after
+   `The window`: the switch `Check for updates every day`, then one line — `Last check: <age> ago —
+   skydeck is up to date (main at <id>, as origin/main)`, or `… — <n> new commits on origin/main` —
+   and `Check now`. Click `Check now`. Expected: `Checking…` for a moment, then `Last check: 0s ago
+   — …` (or `1s`). When it says that new commits are there, the title bar shows `Update available`
+   right before `Switch…` and the gear; when it says up to date, it shows none. Press Esc: the screen closes, the keyboard is back where it was.
+2. **The dialog**, only when the title bar shows `Update available`. Click it. Expected: a dialog
+   with the lines `skydeck update --check` prints (in W, `skydeck update --check` prints the same
+   lines, then `run skydeck update to apply it`), then `To apply it, in a WSL terminal of your own:
+   skydeck update`, and two buttons, `Update now` and `Close`; `Close` has the keyboard, and Tab
+   goes to `Update now` and back. Ctrl+Shift+N says `close the dialog first (Esc)`. Press Esc
+   (do not press `Update now` here): it closes. Nothing was applied: `git log -1 --format=%h` prints
+   the id the block's line had before (`skydeck doctor`'s first line names it too).
+3. **doctor.** In W: `skydeck doctor`. Expected: an `info` line `update: …` — `update: <n> new
+   commits on origin/main (fetched <age> ago); skydeck update applies them`, or `update: skydeck is
+   up to date (…) (fetched <age> ago)` — and no `problem` line that step 1's setup did not have.
+   doctor used no network for it (it reads what the window's server stored).
+4. **The switch.** In Settings (the gear), turn `Check for updates every day` off: `Saved.` beside
+   it, no button pressed; in W, `grep -n updateCheck ~/.config/skydeck/config.json` prints
+   `"off"`. `Check now` still checks (`Last check: 0s ago — …`). Then turn it on again: `Saved.`,
+   and the grep prints `"daily"` (when the setup found no line, the key now stays in the file with
+   its default value, which is the same).
+5. **A remote that needs a passphrase**, only when you have an ssh key with a passphrase that this
+   checkout's remote host takes (else write down "left out: no such remote"). In W: `git remote
+   set-url origin <the ssh address of the same repository>`. In Settings' group `Updates`, `Check
+   now`. Expected:
+   nothing asks for the passphrase — no prompt in any terminal, no window; the block says either
+   `Last check: 0s ago — …` (the key was in an agent) or `The last check failed 0s ago: git fetch
+   from origin failed: …` with what was known before. Then `git remote set-url origin <the address
+   of the setup>` and `git remote get-url origin` prints it.
+6. **A private https remote**, only when you have a private repository that needs a login and the
+   Windows credential manager as git's helper (else write down "left out: no such remote"). In W:
+   `git remote set-url origin <its https address>`. In Settings' group `Updates`, `Check now`.
+   Expected: no Windows
+   dialog opens; the block says `The last check failed 0s ago: git fetch from origin failed: …`
+   (no login stored), or, with a stored login, `Last check: 0s ago — …` and, as the branch does not
+   follow that repository's history, whatever the look says. Then `git remote set-url origin <the
+   address of the setup>`, `git remote get-url origin` prints it, and `Check now` once more gives
+   the line of step 1 (`git fetch` may have fetched that repository's objects; they are unused and
+   `git gc` removes them in time).
+
+The second half, only when step 2's dialog listed commits and you want them now (else write down
+"left out: up to date"). It types into no session. Before step 7, in the window, write down how
+many sessions the title bar counts and which slots the Open section shows; in W, `skydeck doctor`
+(write down its `problem` lines, if any) and `git log -1 --format=%h`.
+
+7. **Update now.** Click `Update available`, then `Update now`. Expected: the dialog shows
+   `skydeck is being updated to <id>. The window comes back by itself.` with no button, and
+   Ctrl+Shift+N says `skydeck is being updated`. Within a few seconds the bar `skydeck is being
+   updated (since <time>): … the update's log says why: <path of update.log> — read it first; then,
+   in a WSL terminal: skydeck window` may show for a moment; then the window reloads itself and a
+   bar says `updated to <id>`, the id the dialog listed. No second window opens. Click the bar's ×:
+   it goes.
+8. **Everything still there.** Expected: the title bar counts the same sessions, Open shows the
+   same slots, and each terminal shows its session (its screen rebuilt). In W, `git log -1
+   --format=%h` prints the id of step 7, `skydeck doctor` prints no `problem` line that the setup
+   of this half did not have, and its `update:` line says up to date. `tail -5
+   ~/.local/state/skydeck/update.log` ends with `updated to <id>`.
+9. **The dialog again.** Expected: no `Update available` in the title bar. In Settings' group
+   `Updates`, `Check now`
+   says `Last check: 0s ago — skydeck is up to date (main at <id>, as origin/main)`.
+
+Leaves behind: the remote's address as it was, `window.updateCheck` as it was, the remote-tracking
+refs as a `git fetch` leaves them, and `kv window_update_check` with the last check. `git status
+--short` prints what it printed in the setup. After the second half: the checkout at the new
+commit, the window's server of the new code, and `update.log` with the update's lines.
+
+Write down: for each step whether it went as expected, and the words where they differ; which of
+steps 5 and 6, or the second half, were left out; whether the control, the dialog, the running
+form and the bars read well in your theme.
+
+Not tried before this check was written: all of it, in Edge; that `GCM_INTERACTIVE` reaches the
+Windows credential manager through `WSLENV` (step 6); an update from the window on a real
+installation (steps 7–9).
+
 ## The short settings screen
 
 The check of the short settings screen and the title bar's gear (follow-up F39; design-step-2.md
@@ -2895,7 +2993,8 @@ with the terminal of a session shown (any running one; no prompt is typed into i
 
 1. **Copy the files aside.** As W41's step 1, with `w44` for `w41` in the names; write down the
    value of `grep -n links ~/.config/skydeck/config.json` (no line: not set, which is `default`).
-2. **The title bar.** Expected: at its right end `Switch… Ctrl+Shift+P`, then a gear, and no `◐`
+2. **The title bar.** Expected: at its right end `Switch… Ctrl+Shift+P` (with `Update available`
+   before it while a newer skydeck is known, W43), then a gear, and no `◐`
    or `✦` button and no word `Settings`. The gear is a drawing in the title bar's text colour (not a
    coloured emoji, not a box or a question mark); holding the mouse over it shows `Settings`.
 3. **Open it from the terminal.** Press Ctrl+Shift+L until the key bar says `Focus: terminal`.
@@ -2903,8 +3002,9 @@ with the terminal of a session shown (any running one; no prompt is typed into i
    Expected: a dialog over the page, `Settings`, then `Appearance` (`Mode`, `Colour theme` and
    under it `Light and dark each keep their own.`), `Links` (`Open links in`, `Ticket address` and
    its hint about `{key}`), `The window` (`Keep WSL running`, a switch with `after a restart`
-   beside it; `Typed commands start sessions in` and its hint), and at the end
-   `Advanced (14 more settings)` and `Close`. No `Save`, no `Default`, no file name. The keyboard
+   beside it; `Typed commands start sessions in` and its hint), `Updates` (follow-up F38: the
+   switch `Check for updates every day`, the line of the last check and `Check now`; W43 tries
+   them), and at the end `Advanced (14 more settings)` and `Close`. No `Save`, no `Default`, no file name. The keyboard
    is on `Mode`. Write down what Mode and Colour theme show.
 4. **The theme.** Choose the other of `Light` and `Dark` in Mode (from `Auto`, `Dark`). Expected:
    the whole window behind the dialog changes at once, the terminal too. Choose another `Colour

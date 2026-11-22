@@ -40,7 +40,7 @@ import type { Command } from '../command.ts';
 import { sayMigrated } from '../deck.ts';
 import { EXIT } from '../exit.ts';
 import { styleFor } from '../style.ts';
-import { versionLine } from '../version.ts';
+import { checkoutFacts } from '../version.ts';
 import { WINDOW_CHECKS, windowView } from '../window-checks.ts';
 import type { WindowCheck, WindowView } from '../window-checks.ts';
 
@@ -126,7 +126,7 @@ export const command: Command = {
         ctx.io.stdout(`${line}\n`);
       };
     const { places, config, problem } = readConfiguration(platform);
-    await reportVersions(platform, config, reportIn('Versions'));
+    const commit = await reportVersions(platform, config, reportIn('Versions'));
     const report = reportIn('Recording');
     if (problem !== null) {
       report('problem', problem);
@@ -146,7 +146,7 @@ export const command: Command = {
           report('problem', `${check.name}: could not be checked (${describeError(error)})`);
         }
       }
-      const view = windowView({ platform, places, config, store });
+      const view = windowView({ platform, places, config, store, commit });
       const inWindow = reportIn('Window');
       const windowReport: Report = (kind, text) => {
         inWindow(kind === 'problem' && !view.used ? 'info' : kind, text);
@@ -197,16 +197,19 @@ function readConfiguration(platform: Platform): {
 
 /**
  * Follow-up F20: what runs, before anything is judged. Each line is `info` whatever it says, and
- * none of them can end the report.
+ * none of them can end the report. The full id of the commit the first line names (null: not
+ * known) is given back for the update line (F38).
  */
 async function reportVersions(
   platform: Platform,
   config: Config | null,
   report: Report,
-): Promise<void> {
-  report('info', `skydeck ${await versionLine(platform)}`);
+): Promise<string | null> {
+  const facts = await checkoutFacts(platform);
+  report('info', `skydeck ${facts.line}`);
   report('info', await claudeCodeLine(platform, config));
   report('info', systemLine(platform));
+  return facts.id;
 }
 
 /**

@@ -48,6 +48,7 @@ import type { TicketFetches } from './ticket-fetches.ts';
 import { parsePageMessage } from './protocol.ts';
 import type { ActMessage, ResultMessage, SettingsPayload } from './protocol.ts';
 import type { Settings } from './settings.ts';
+import type { Updates } from './updates.ts';
 import { linkToOpen } from './windows.ts';
 
 export interface ActionDeps {
@@ -80,6 +81,9 @@ export interface ActionDeps {
   settings?: Settings;
   /** F36: a setting was changed: every page's screen follows (the server's `pages.settings`). */
   settingsChanged?(payload: SettingsPayload): void;
+  /** F38: the check for a newer skydeck (updates.ts, one per server). Absent: its kinds answer
+   *  "skydeck cannot do that action". */
+  updates?: Pick<Updates, 'check' | 'look' | 'apply' | 'seen'>;
   /** F37 (S2 12.9): `act reorder` for the page that sent it (reorder.ts); a busy store is thrown.
    *  Absent: the kind answers "skydeck cannot do that action". */
   reorder?(
@@ -446,6 +450,27 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'setting-set':
       case 'setting-default':
         return changeSetting(action);
+      case 'update-check':
+      case 'update-look': {
+        // F38: the checker decides everything and never rejects; the answer is its state.
+        const updates = deps.updates;
+        if (updates === undefined) return refusal(NOT_AN_ACTION);
+        const update = await (action.kind === 'update-check' ? updates.check() : updates.look());
+        return { ...DONE, update };
+      }
+      case 'update-apply': {
+        // Milestone 2: the checker refuses or starts the updater; either way its state goes back.
+        const updates = deps.updates;
+        if (updates === undefined) return refusal(NOT_AN_ACTION);
+        const applied = await updates.apply(action.to);
+        return applied.ok
+          ? { ...DONE, update: applied.update }
+          : { ...refusal(applied.error), update: applied.update };
+      }
+      case 'update-seen':
+        return deps.updates === undefined
+          ? refusal(NOT_AN_ACTION)
+          : { ...DONE, update: deps.updates.seen() };
       case 'reorder':
         // Its slots' change pushes every page's list (the registry's change): no `changed()`.
         return deps.reorder === undefined
@@ -498,7 +523,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
 
   return {
     async act(page, given) {
-      const { ok, lines, error, sessionId, ended, settings } = await answer(page, given);
+      const { ok, lines, error, sessionId, ended, settings, update } = await answer(page, given);
       // Every text of a result passes the sanitiser step 1 prints with (ruled, review 2 of task
       // 32): whatever a message quotes, no escape sequence or line break reaches the page.
       return {
@@ -511,6 +536,8 @@ export function createActions(deps: ActionDeps): ActionHandler {
         ...(ended === undefined ? {} : { ended }),
         // F36: its texts are sanitised by settings.ts; a control's `value` is sent exactly.
         ...(settings === undefined ? {} : { settings }),
+        // F38: its texts are sanitised by the checker (src/update/record.ts).
+        ...(update === undefined ? {} : { update }),
       };
     },
   };

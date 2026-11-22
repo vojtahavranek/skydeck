@@ -65,6 +65,10 @@ function everythingSkydeckWrites(d: TestPlatform): void {
     'keepers.log.1',
     '.server.log.1.tmp',
     '.keepers.log.1.tmp',
+    // F38: the log of an update started from the window, its rotation and its temporary.
+    'update.log',
+    'update.log.1',
+    '.update.log.1.tmp',
   ]) {
     writeFileSync(join(places.stateDir, name), '');
   }
@@ -186,6 +190,18 @@ describe('uninstall --purge: a directory that is not only skydeck’s is left al
       r.stderr.includes(`it holds ${runDir}/mine.txt, which skydeck did not write`),
       r.stderr,
     );
+  });
+
+  test("update.log.2 is not skydeck's (F38: only the log and its one rotation are): the state directory left alone", async (t) => {
+    const d = await installed(t);
+    everythingSkydeckWrites(d);
+    writeFileSync(join(d.places.stateDir, 'update.log.2'), '');
+
+    const r = await purge(d.platform);
+
+    assert.equal(r.code, 1, r.stdout);
+    assert.ok(r.stderr.includes('it holds update.log.2, which skydeck did not write'), r.stderr);
+    still(join(d.places.stateDir, 'update.log'));
   });
 
   test('an entry of the wrong kind is not skydeck’s: left alone', async (t) => {

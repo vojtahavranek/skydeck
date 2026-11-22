@@ -516,7 +516,9 @@ you pick it: **Appearance** (the window's colours, "Colours" below), **Links** �
 (`window.links`) and `Ticket address` (`ticketUrl`; saved on Enter, or when you leave the field, if
 you changed it; Esc closes Settings without saving it) — and **The window** — `Keep WSL running`
 (`window.keepAlive`; it counts `after a restart`, `skydeck window --restart`) and `Typed commands
-start sessions in` (`terminal`). A value the file's rules refuse is refused beside it in their words
+start sessions in` (`terminal`) — and **Updates** — `Check for updates every day`
+(`window.updateCheck`), with the last check and `Check now` under it ("The window says when there
+is one", in "Updating"). A value the file's rules refuse is refused beside it in their words
 (`"ticketUrl" must be null or an http or https address with {key} once, after its host`), and the
 file stays as it was.
 
@@ -797,6 +799,7 @@ In `config.json` ("Configuration" above), all optional; "In the window" and "App
 | `window.profileDir` | `null` | shown | `skydeck window`, at its next run | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
 | `window.keepAlive` | `"wsl"` | change, first | after the window restarts | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`: without it, WSL stops 15 seconds after its last Windows terminal closes, ending every session in the window. |
 | `window.links` | `"default"` | change, first | at once | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
+| `window.updateCheck` | `"daily"` | change, first | at once | `"daily"`: the window's server looks for a newer skydeck when it starts and once a day, with a `git fetch` of skydeck's own checkout, and the title bar says `Update available` while one is known ("Updating" below); nothing is applied without a click. `"off"`: it does not look by itself; Check now in Settings still does. Anything else: `<file>: "window.updateCheck" must be "daily" or "off"`. |
 
 With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
 "Starting sessions in the window from a terminal (stage C)" below. An example, for a PC with two
@@ -815,7 +818,9 @@ on port 47613:
 A key inside `window` that skydeck does not know is an error, as everywhere in the file
 (`skydeck: /home/you/.config/skydeck/config.json: unknown key "window.prot"`). The server reads the
 file when it starts: after a change by hand, run `skydeck window --restart`. A change in the
-window's Settings ("Configuration" above) of a key that applies at once needs none; one of
+window's Settings ("Configuration" above) of a key that applies at once needs none (turning
+`window.updateCheck` on checks at once when the server has not checked for a day, or for an hour
+after a check that failed); one of
 `window.keepAlive` applies after the restart (a keep-alive that runs keeps running until then).
 
 ### Keeping WSL running
@@ -2057,6 +2062,7 @@ judged as before.
 | the window's server | Normally `info`: whether one runs, its pid, checkout, build, up time, pages, terminals, and where its environment came from. A problem when it runs another build of this checkout (`skydeck window --restart`), runs from another checkout, is alive but does not answer, answers its ping but not its status, or is starting and did not finish within 5 seconds. |
 | port | Something that is not this installation's server listens on `127.0.0.1:<window.port>` inside WSL (`doctor` only reads `/proc/net/tcp`; a program on the Windows side cannot be seen from WSL). Stop it, or set `window.port`. |
 | launch alarm | A launch address was used twice, so another program may have skydeck's key: run `skydeck window --new-secret`. |
+| update | Never a problem: what the window's last check for a newer skydeck found ("Updating" below) — `update: 3 new commits on origin/main (fetched 2h ago); skydeck update applies them`, `update: skydeck is up to date (…) (fetched 2h ago)`, or `update: never checked …` —, and, when its last fetch failed, when and why. `doctor` itself uses no network: it reads what the window's server stored. |
 | keep-alive | A server or a terminal runs and neither the keep-alive nor `instanceIdleTimeout=-1` is in effect (above). |
 | interop | `WSL_INTEROP` is not set in this shell (it cannot start Windows programs), or `<runtimeDir>/interop`, the link the sessions' Windows programs (an image paste) go through, points at nothing that answers: `skydeck window --restart`. |
 | the C: drive | It is not mounted at `/mnt/c`. |
@@ -2082,7 +2088,10 @@ answering, then reloads itself for the new page and connects again, and the comm
 seconds for it, so it opens no second window. Sessions keep running; every terminal's screen is
 rebuilt (see "Known limits"). Keepers that run keep the code they started with; new terminals get
 the new keeper. No `npm ci`, no `skydeck install`. "Updating" below says what each line means,
-when the command refuses and what to do then.
+when the command refuses and what to do then. The window also says by itself when there is a newer
+skydeck ("The window says when there is one" below): `Update available` in its title bar, whose
+dialog's `Update now` does the same as `skydeck update` without a terminal ("Update now in the
+window" below).
 
 By hand — for a checkout that does not have `skydeck update` yet, or when it refuses —:
 
@@ -2186,9 +2195,11 @@ branch follows, and restarts the window's server for the new code. In this order
    ("Going back") says how to return to 1a2b3c4`, with the commit the checkout is at (see "Going
    back" below). With nothing new it says `skydeck is up to date (main at 1a2b3c4, as origin/main)` and does nothing
    else: no server is looked at, stopped or started.
-2. **`--check` ends here**, with `run skydeck update to apply it`. Its fetch has changed the
-   checkout's remote-tracking refs (`origin/main`) and nothing else: not your files, not your
-   branch, not the window or the sessions. It also works inside Claude Code.
+2. **`--check` ends here**, with `run skydeck update to apply it`. Its fetch has changed what a
+   `git fetch` changes — the remote-tracking refs (`origin/main`), the tags it follows, and what
+   your own git configuration asks of a fetch (`fetch.prune`, say) — and nothing else: not your
+   files, not the index, not your branch or HEAD, not the window or the sessions. It also works
+   inside Claude Code.
 3. **It stops the window's server** of this checkout (`skydeck: stopped skydeck's window server; 2
    terminals in the window keep running`), then **moves the branch forward** to the commit it
    listed (a fast-forward, never a merge commit), then, when a window was open, **runs the new
@@ -2228,8 +2239,9 @@ the one skydeck's server serves, and its key could not be stored, so it cannot r
 skydeck window again`. The `skydeck window` the update runs is that run: after its 7 seconds it
 opens a new window; close the old one (its ×). The new server gets the environment of the shell you typed
 `skydeck update` in, as with `skydeck window` ("Starting it" above): run it from a plain shell.
-A window that was not open is never opened; one that does not come back within the 7 seconds is
-replaced by a new one, as `skydeck window` does.
+With `skydeck update` typed in a terminal, a window that was not open is never opened (an update
+started from the window, "Update now in the window" below, always brings it back); one that does
+not come back within the 7 seconds is replaced by a new one, as `skydeck window` does.
 
 A server of another checkout is left as it is (`skydeck: the window's server runs from another
 checkout (<path>); it is left as it is`), and so is the server when the database was written by a
@@ -2253,6 +2265,9 @@ When it refuses, it says why in one line and changes nothing (exit 1):
 | `the window's server (pid <n>) does not answer; skydeck window --restart stops it; nothing was changed` (or the line for a server that is starting) | `skydeck window --restart`, or wait for its start, then again. |
 | `git <command> failed: <git's line>; nothing was changed` | git's line says why; `git status`. |
 | a line of the window's server or of the database, then `; nothing was changed` | As that line says, then again. |
+| `<upstream> is at <id>, not at <id>, the commit the window listed; check again in the window; nothing was changed` | Only after `Update now` (the window's bar shows it): the remote moved on since the dialog looked. Open the dialog again. |
+| `<why>, so the update started from the window was not applied; nothing was changed` | Only after `Update now` (the window's bar shows it): the window's server of this checkout was not running when the update began (`no window server of this checkout runs`), or the one that runs is another checkout's, or the database was written by a newer skydeck, so nothing was stopped and nothing merged. `skydeck window`, then `Update now` again; or `skydeck update` in a terminal of your own. |
+| `nothing was applied: this checkout is already at <id>; run skydeck window in a terminal of your own to restart the window for it` | Only after `Update now` (the window's bar shows it): the checkout was updated by hand meanwhile, and the window still runs the old code: in a WSL terminal of your own, `skydeck window` (it restarts a server of another build). |
 
 More ends, each with exit 1:
 
@@ -2308,6 +2323,83 @@ More ends, each with exit 1:
 - `updated to <id>, but skydeck window could not be started or was ended by a signal; run skydeck
   window`: the update is in, but the new `skydeck window` did not run to its end; run
   `skydeck window`.
+
+### The window says when there is one
+
+The window's server looks for a newer skydeck when it starts and once a day, and an hour after a
+check that failed (no network, say): a `git fetch` of skydeck's own checkout from the remote its
+branch follows, which writes what `skydeck update --check`'s fetch writes — the remote-tracking
+refs (`origin/main`), the tags it follows, and what your git configuration asks of a fetch —,
+never your files, the index or HEAD. The check applies nothing; `Update now` in its dialog does,
+after your second click (below).
+
+- **The title bar.** While a newer version is known, every window shows `Update available` right
+  before `Switch…` and the gear. A click opens a dialog that looks at the checkout again (without the network)
+  and lists the new commits as `skydeck update --check` does, the line about the database's
+  upgrade steps included, and gives the command: `To apply it, in a WSL terminal of your own:
+  skydeck update`. When the checkout cannot be updated as it is — a change to a tracked file that
+  is not committed, commits of your own that the remote does not have — the dialog says why and
+  `Once that is set right, in a WSL terminal of your own: skydeck update`; when the branch follows
+  no branch of a remote any more, `skydeck cannot tell here whether there is an update: …` and the
+  same. Esc or `Close` closes it; `Update now` stands beside `Close` when the update can be
+  applied as the checkout is.
+- **Settings** (the gear). The group **Updates**, after The window: the switch `Check for updates
+  every day` (`window.updateCheck`: on is `"daily"`, the default; off is `"off"`, which stops the
+  checks at the start and every day), saved as you pick it; then a line that says when the last
+  check ended and what it found (`Last check: 2h ago — 3 new commits on origin/main`), or, when it
+  failed, when and why (`The last check failed 5m ago: git fetch from origin failed: …`) and what
+  is known from the last fetch that worked (`Known from 2h ago: …`); and `Check now`, which checks
+  at once, also with the switch off.
+- **`skydeck doctor`** prints the same in one `info` line: `update: 3 new commits on origin/main
+  (fetched 2h ago); skydeck update applies them`, or `update: skydeck is up to date (…)`, and a
+  failed last check beside it. doctor itself uses no network.
+- **It never asks.** The check runs with no terminal, no askpass program and no credential
+  manager's dialog (`GCM_INTERACTIVE=never`), so a remote that needs a passphrase or a login is a
+  check that fails (the block and doctor say so), never a prompt; it gives up after 60 seconds and
+  is tried again an hour later. A fetch that fails hides nothing: an update an earlier check found
+  stays shown. A git call that fails, or a check that cannot run git at all, shows no notice:
+  Settings and doctor say why.
+
+### Update now in the window
+
+The dialog's `Update now` does what `skydeck update` does, in the same order, without your
+terminal: the window's server starts `skydeck update` of its own checkout in the background, which
+stops the server, fast-forwards the checkout to the commit the dialog listed (by its id — it does
+not fetch again, so nothing can ask for a passphrase), and starts the new server with the
+environment the old one had. Every window shows `skydeck is being updated to <id>. The window comes
+back by itself.`, closes any other dialog it showed (a text half typed in it is dropped) and takes
+no keys or clicks meanwhile; the sessions keep running. Two clicks are always
+needed: `Update available`, then `Update now`. Once the update has stopped the window's server, the
+window is always brought back, also when the window that clicked was closed meanwhile (unlike
+`skydeck update` typed in a terminal, which opens no window that was not open).
+
+- **It worked.** The window reloads itself and a bar says `updated to <id>`; its × dismisses it in
+  every window.
+- **git refused the merge** (a file of yours where the new commit puts one, say). The checkout is
+  as it was and the window comes back on the old code; the bar gives git's line (`the update could
+  not be applied: …; the checkout is as it was`).
+- **Refused before anything was stopped** (an index lock, a change made since the dialog
+  opened, the remote moved on): the window stays, and the bar or the dialog says why.
+- **The window does not come back.** While the server is away the bar reads `skydeck is being
+  updated (since …): … If it is not back within two minutes, the update's log says why:
+  <stateDir>/update.log — read it first; then, in a WSL terminal: skydeck window`. Read the log
+  first: when it says that the checkout may not be as it was, set it right as "Updating" above
+  says before you run `skydeck window`.
+- **It is not offered** when the checkout has a change that is not committed, has commits of
+  your own that the remote does not have, or follows no branch of a remote: the dialog says why
+  and gives `skydeck update` to run in a terminal of your own once that is set right. A second
+  window cannot start a second update (`an update is already running`), no update starts while a
+  check or a restore runs, and no check starts while an update runs. When the window's server
+  cannot be found running from this checkout as the update begins, nothing is changed and the bar
+  says why.
+- **A window that comes back late.** If the window is not back within `skydeck window`'s waits
+  and the terminal the server was started from is long closed, no second window opens, and the
+  log's last line says `…, but skydeck window ended with exit 1; run skydeck window` although the
+  server runs; the window that comes back later shows `updated to <id>`. Running `skydeck window`
+  then is harmless: it says that a window is already open.
+
+The log, `<stateDir>/update.log`, holds the update's own lines, as the terminal would have shown
+them; `skydeck uninstall --purge` removes it with the server's logs.
 
 ### Updating by hand
 
@@ -2557,6 +2649,7 @@ kept the backup /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
 | Claude Code's global config file and the backup of it | `~/.claude.json`, `~/.claude.json.skydeck-backup-*` (inside a named `claudeHome`, see "Places") |
 | The compile cache | `~/.cache/skydeck/compile-cache` (see "Environment variables") |
 | The window's server and keepers: their own diagnostics, never conversation content | `<stateDir>/server.log`, `<stateDir>/keepers.log` (at 1 MiB copied to `.1` and emptied) |
+| What an update started from the window printed (`Update now`) | `<stateDir>/update.log` (at 1 MiB copied to `.1` and emptied) |
 | The window's sockets and `.pid` files (`server.json`, `server.sock`, `terms/`, the keep-alive's files, the `interop` link) | The runtime directory, which `skydeck doctor` names (see `XDG_RUNTIME_DIR` under "Environment variables") |
 | The window's Edge profile | The profile folder on Windows ("The profile folder"); Edge's, not skydeck's |
 | The window's xterm.js | `vendor/` in the checkout |
@@ -2570,6 +2663,10 @@ file.
 | You see | Do |
 |---|---|
 | `skydeck: the database … was not upgraded: its copy … could not be written (<reason>)` | Before an upgrade skydeck keeps a copy of the database, and this one could not be written: make room on the disk, or move away what is in the way (the reason says which), then run the command again. The database is as it was ("Going back"). |
+| Settings' group `Updates` or `doctor` says `the last check failed …: git fetch from origin failed: <git's line>` | The window's check for a newer skydeck could not fetch: git's line says why (no network, a remote that needs a login or a passphrase, which the check never asks for). Nothing else is affected, and it tries again an hour later; `skydeck update --check` in a terminal of your own fetches with your login. `window.updateCheck` `"off"` stops the daily check. |
+| The window's bar says `an update started from the window at <time> did not record how it ended; its log says: <stateDir>/update.log` | The update ran but could not write its outcome where the window reads it (its database was busy, say). Read the log's last lines: `updated to <id>` means it worked; otherwise they say why not. `skydeck doctor`'s first line names the commit the checkout is at. |
+| After `Update now` the window does not come back (the bar says `skydeck is being updated (since …)` for more than two minutes) | Read `<stateDir>/update.log` first: its last line says what happened. When it says that the checkout may not be as it was, set it right as "Updating" says; then, in a WSL terminal of your own, `skydeck window`. |
+| `git fetch` (yours, the window's, `skydeck update`'s) says `cannot lock ref 'refs/remotes/origin/main': Unable to create '…/.git/refs/remotes/origin/main.lock': File exists` | A git that was cut off left that file: the window's check is ended with SIGTERM first (git then removes its locks) and killed only 2 seconds later, but a machine that went down in the middle of a fetch can leave one. When no git runs in the checkout, remove the file git names (`rm <path>`), then again. A `git pull` of yours at the very moment of a check can meet the check's lock once: run it again. |
 | `skydeck needs Node.js 24.12 or newer but found ...` | Set `SKYDECK_NODE` to a newer `node` (Install, step 2), then run `bin/skydeck install` so that the link `<dataDir>/node` points at it. |
 | `skydeck: cannot run 'node'; install Node.js or set SKYDECK_NODE ...` (exit 127) | There is no `node` on `PATH` and no working link. Install Node.js 24.12 or newer, or set `SKYDECK_NODE`. |
 | `skydeck: not started through bin/skydeck` | A `--here` start needs the launcher. Run skydeck as `~/.local/bin/skydeck` or `bin/skydeck`, not as `node bin/bootstrap.mjs`. |

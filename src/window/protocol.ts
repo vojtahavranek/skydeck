@@ -6,7 +6,8 @@
  * group, note, done, undone, pr-refresh, pr-add and pr-rm (plan D 2.2); stage C's are restore and
  * dismiss-restore, the banner, and `POST /resume`, `/new` and `/restore` (plan C 2.2); follow-up
  * F36's are settings, setting-set and setting-default, the server's `settings` and the settings
- * screen's payload (S2 12.13).
+ * screen's payload (S2 12.13); F38's are update-check and update-look, the server's `update` and
+ * its payload (S2 16.5).
  *
  * The validators read foreign input: they never throw and return `{ ok: false, kind }` with a fixed
  * kind that never quotes the input (plan A22), so a caller can log the kind. This module imports
@@ -160,6 +161,14 @@ export interface ResizeMessage {
  *  the file (back to its default). Which keys may be changed, and what a value may be, is the
  *  server's table and config.json's own rules (src/window/settings.ts).
  *
+ *  F38 (S2 16.5): `update-check` is Check now (a check for a newer skydeck, with the network,
+ *  whatever the switch says; answered when it has ended), `update-look` the dialog's look without
+ *  the network. Neither carries a field: the checkout, its remote and the program are the
+ *  server's. The result's `update` is the state. Milestone 2: `update-apply` is Update now for
+ *  the commit `to` (a full id) the dialog listed — compared with what the server's own look
+ *  names, never passed to git by the server —, and `update-seen` dismisses the result of the last
+ *  update on every page.
+ *
  *  F37 (S2 12.9): `reorder` moves the session's row of Open one place up or down; the server
  *  computes the move over Open as it draws it and gives the slots out again
  *  (src/window/reorder.ts), refusing it while the page's last `view` sets a filter or a chip. */
@@ -196,6 +205,8 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'settings' }
   | { t: 'act'; id: number; kind: 'setting-set'; key: string; value: string | number | null }
   | { t: 'act'; id: number; kind: 'setting-default'; key: string }
+  | { t: 'act'; id: number; kind: 'update-check' | 'update-look' | 'update-seen' }
+  | { t: 'act'; id: number; kind: 'update-apply'; to: string }
   | { t: 'act'; id: number; kind: 'reorder'; sessionId: string; direction: 'up' | 'down' };
 /** Follow-up F13: the page's colours changed while it is open — Mode or Colour theme was picked in
  *  the settings screen (F39; before it, the title bar's switches) here or in another window of the
@@ -619,6 +630,9 @@ export interface ResultMessage {
   /** F36, `settings`, `setting-set` and `setting-default` only, also with a refusal: the settings
    *  screen as the file and the running server are now. Absent for every other kind. */
   settings?: SettingsPayload;
+  /** F38, the four update kinds only (`update-check`, `update-look`, `update-apply`,
+   *  `update-seen`), also with a refusal of `update-apply`: the state. Absent for every other kind. */
+  update?: UpdatePayload;
 }
 /** F36 (S2 12.13): a JSON value, as config.json holds one. */
 export type SettingValue =
@@ -673,6 +687,44 @@ export interface SettingsPayload {
   problem: string | null;
   settings: SettingPayload[];
 }
+/**
+ * F38 (S2 16.5): what the last look for a newer skydeck says. `summary`: the look's line for
+ * `cannot`; `skydeck is up to date (<branch> at <id>, as <upstream>)` or `nothing new on …` for
+ * `current`; `<n> new commits on <upstream>` for `available`, with `lines` exactly `skydeck update
+ * --check`'s (the database line included), `to` the new commit's full id and `blocked` why it
+ * cannot be applied as it is. Every text sanitised and clipped.
+ */
+export type UpdateCheckPayload =
+  | { state: 'cannot'; summary: string }
+  | { state: 'current'; summary: string }
+  | { state: 'available'; summary: string; to: string; lines: string[]; blocked: string | null };
+/** F38: the window's check for a newer skydeck, as every page is told it. */
+export interface UpdatePayload {
+  /** A check runs. */
+  checking: boolean;
+  /** What the last look says; null: none yet (this server sends no stored one before its own). */
+  check: UpdateCheckPayload | null;
+  /** When the last check ended, whatever its result; null: none yet. */
+  checkedAtNs: NsText | null;
+  /** When the last fetch that worked ended. */
+  fetchedAtNs: NsText | null;
+  /** The last check failed (its fetch, a git call, the check itself): when, and why (sanitised,
+   *  clipped); null once a check ended without a failure. */
+  failure: { atNs: NsText; line: string } | null;
+  /** Milestone 2: an update started from a window runs — to which commit (its full id), since
+   *  when; null: none. */
+  applying: { to: string; sinceNs: NsText } | null;
+  /** The update's log, `<stateDir>/update.log`: where a page that loses its server sends the user. */
+  log: string;
+  /** How the last update from the window ended (`updated to <id>`, or why not), until a page
+   *  dismisses it (`update-seen`); null: nothing to say. */
+  result: { ok: boolean; text: string } | null;
+}
+/** F38: the check's state, to a page right after its `start` and to every page on each change. */
+export interface UpdateMessage {
+  t: 'update';
+  update: UpdatePayload;
+}
 /** F36: a setting was changed in some window: every page's screen follows. */
 export interface SettingsMessage {
   t: 'settings';
@@ -720,7 +772,8 @@ export type ServerMessage =
   | NoticeMessage
   | ByeMessage
   | NotifyMessage
-  | SettingsMessage;
+  | SettingsMessage
+  | UpdateMessage;
 
 /** Output frames (S2 8.2.3): byte 1, the channel as 4-byte big-endian, the record's bytes.
  *  RangeError for a channel that is not a whole number 0–2³²−1. */
@@ -807,6 +860,8 @@ function matching(pattern: RegExp): Check {
     return pattern.test(value) ? null : `${where}: wrong value`;
   };
 }
+/** F38: a full commit id, as git names a commit: 40 lower-case hex digits, or 64 (SHA-256). */
+const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const SESSION: Check = (value, where) => {
   if (typeof value !== 'string') return `${where}: wrong type`;
   return isSessionId(value) ? null : `${where}: wrong value`;
@@ -999,6 +1054,12 @@ const ACTS: Readonly<Record<string, Check>> = {
   settings: object({ t: ANY, id: COUNT, kind: ANY }),
   'setting-set': object({ t: ANY, id: COUNT, kind: ANY, key: TEXT, value: SETTING_VALUE }),
   'setting-default': object({ t: ANY, id: COUNT, kind: ANY, key: TEXT }),
+  // F38 (S2 16.5): Check now and the dialog's look; no field: what is looked at is the server's.
+  'update-check': object({ t: ANY, id: COUNT, kind: ANY }),
+  'update-look': object({ t: ANY, id: COUNT, kind: ANY }),
+  // Milestone 2: Update now names the commit the dialog listed (a full id, only compared).
+  'update-apply': object({ t: ANY, id: COUNT, kind: ANY, to: matching(COMMIT_ID) }),
+  'update-seen': object({ t: ANY, id: COUNT, kind: ANY }),
   // F37 (S2 12.9): a session of Open one place up or down.
   reorder: object({
     t: ANY,

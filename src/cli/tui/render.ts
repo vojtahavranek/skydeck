@@ -5,7 +5,7 @@
 import { isoFromNs } from '../../platform/time.ts';
 import type { ListRow } from '../../sessions/list.ts';
 import { sanitize } from '../../text/sanitize.ts';
-import { clip } from '../clip.ts';
+import { clip } from '../../text/clip.ts';
 import { formatNoteLines, formatPrLine, formatRow, stateDetailSuffix } from '../row.ts';
 import { visibleRows } from './model.ts';
 import type { TuiModel } from './model.ts';

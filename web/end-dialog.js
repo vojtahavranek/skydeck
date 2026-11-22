@@ -267,6 +267,8 @@ export function createEndDialog(root, deps) {
       }
       return true;
     },
+    /** F38: closes the dialog as Cancel does (an update from the window began). */
+    cancel: () => press('cancel'),
     /** @returns {boolean} */
     shown: () => current !== null,
   };

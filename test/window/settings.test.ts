@@ -46,6 +46,7 @@ const CHANGEABLE = [
   'wezterm.domain',
   'window.links',
   'window.keepAlive',
+  'window.updateCheck',
 ];
 const SHOWN_ONLY = [
   'claudeCommand',
@@ -65,6 +66,7 @@ const AT_ONCE = [
   'restoreMinFreeMb',
   'restoreStartTimeoutSeconds',
   'window.links',
+  'window.updateCheck',
 ];
 
 /** Every key of a Config as config.json names it: `<key>`, or `<object>.<key>` one level down. */
@@ -223,6 +225,8 @@ describe('the table (G1): one row for every key of Config', () => {
     assert.deepEqual(SETTINGS.terminal.choices, ['here', 'wezterm', 'window']);
     assert.deepEqual(SETTINGS['window.links'].choices, ['default', 'edge']);
     assert.deepEqual(SETTINGS['window.keepAlive'].choices, ['wsl', 'off']);
+    assert.deepEqual(SETTINGS['window.updateCheck'].choices, ['daily', 'off']);
+    assert.equal(SETTINGS['window.updateCheck'].group, 'The window');
     assert.equal(SETTINGS.ticketUrl.nullable, true);
     assert.equal(SETTINGS['wezterm.domain'].nullable, true);
   });
@@ -313,6 +317,7 @@ describe('what a page may send (G2): every refusal changes nothing', () => {
       ['terminal', 'tab', '"terminal" must be "here", "wezterm" or "window"'],
       ['window.links', 'firefox', '"window.links" must be "default" or "edge"'],
       ['window.keepAlive', null, '"window.keepAlive" must be "wsl" or "off"'],
+      ['window.updateCheck', 'weekly', '"window.updateCheck" must be "daily" or "off"'],
       ['wezterm.domain', '', '"wezterm.domain" must be a non-empty string or null'],
     ];
     for (const [key, value, message] of cases) {
@@ -743,6 +748,7 @@ describe('the screen (payload) and what the running server uses (G4)', () => {
       restoreMinFreeMb: 1024,
       restoreStartTimeoutSeconds: 60,
       'window.links': 'edge',
+      'window.updateCheck': 'off',
     };
     assert.deepEqual(Object.keys(values), AT_ONCE);
     for (const [key, value] of Object.entries(values)) {

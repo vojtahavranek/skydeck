@@ -14,7 +14,10 @@
      follow-up F30's dialog "Mark done" for a session the window can end (`#end-dialog`);
      follow-up F36's settings screen (`#settings`, web/settings.js), opened by the title bar's
      gear after `Switch…` (`#settings-button`, F39: an inline drawing, no font's emoji), with its
-     style sheet; from F39 the theme is chosen in it (web/theme.js). -->
+     style sheet; from F39 the theme is chosen in it (web/theme.js); follow-up F38's `Update
+     available` before `Switch…` and the gear (`#update-button`, shown while a newer skydeck is
+     known) and the dialog it opens (`#update-dialog`, web/update.js), with their style sheet, and
+     the bar that says how an update from the window ended (`#update-result`). -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -32,6 +35,7 @@
     <link rel="stylesheet" href="/assets/__VERSION__/web/banner.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/search.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/settings.css" />
+    <link rel="stylesheet" href="/assets/__VERSION__/web/update.css" />
     <script type="module" src="/assets/__VERSION__/web/app.js"></script>
   </head>
   <body>
@@ -43,6 +47,9 @@
         <span class="title-notice" id="tick" hidden></span>
         <span class="title-notice warning" id="keepalive" hidden>WSL is not kept running</span>
         <button class="notify-on" id="notify-on" type="button" hidden>Turn on notifications</button>
+        <button class="update-button" id="update-button" type="button" hidden>
+          Update available
+        </button>
         <button class="switch-button" id="switch-button" type="button">
           ⌕ Switch… <kbd>Ctrl+Shift+P</kbd>
         </button>
@@ -66,6 +73,10 @@
       <div class="bar info" id="info" role="status" hidden>
         <span id="info-text"></span>
         <button class="bar-close" id="info-close" type="button" title="Dismiss">×</button>
+      </div>
+      <div class="bar info" id="update-result" role="status" hidden>
+        <span id="update-result-text"></span>
+        <button class="bar-close" id="update-result-close" type="button" title="Dismiss">×</button>
       </div>
       <main class="main">
         <section class="zone list-zone" id="list-zone">
@@ -97,6 +108,7 @@
     <div class="editor" id="editor" hidden></div>
     <div class="editor" id="end-dialog" hidden></div>
     <div class="editor" id="settings" hidden></div>
+    <div class="editor" id="update-dialog" hidden></div>
     <div class="help" id="help" hidden></div>
     <div class="toast" id="toast" role="status" hidden></div>
     <div class="switcher" id="switcher" hidden></div>

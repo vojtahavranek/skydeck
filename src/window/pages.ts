@@ -69,6 +69,7 @@ import type {
   ServerMessage,
   SettingsPayload,
   ThemePayload,
+  UpdatePayload,
   ViewMessage,
   WelcomeMessage,
 } from './protocol.ts';
@@ -109,6 +110,8 @@ export interface PagesDeps {
   /** S2 12.4: told each page's focus and selection, its typing (an `input` for which isTyping is
    *  true: never a focus or mouse report) and its end. */
   seen?: Pick<Seen, 'focus' | 'typed' | 'gone'>;
+  /** F38: the check's state, sent to a page right after its `start`. Absent: none is sent. */
+  update?: () => UpdatePayload;
 }
 
 export interface Pages {
@@ -122,6 +125,8 @@ export interface Pages {
   notice(kind: NoticeMessage['kind'], text: string): void;
   /** F36: a setting was changed: `settings` to every open page (its screen follows). */
   settings(payload: SettingsPayload): void;
+  /** F38: the check's state changed: `update` to every open page. */
+  update(payload: UpdatePayload): void;
   /** S2 13: while no page has focus, `message` to the page that had focus last; false when it was
    *  not sent (a page has focus, or none is open — none is once `bye` has run: nothing follows a
    *  `bye`). */
@@ -708,6 +713,11 @@ export function createPages(deps: PagesDeps): Pages {
       hub.setTheme(conn.theme);
     }
     deps.seen?.focus(conn, start.focused, null);
+    // F38: the check's state, so that the title bar's control shows on every page from its start.
+    const update = deps.update;
+    if (update !== undefined) {
+      guard(conn, () => send(conn, { t: 'update', update: update() }));
+    }
   };
 
   const onMessage = (conn: Connection, parsed: Parsed): void => {
@@ -912,6 +922,11 @@ export function createPages(deps: PagesDeps): Pages {
     settings(payload) {
       for (const conn of open) {
         guard(conn, () => send(conn, { t: 'settings', settings: payload }));
+      }
+    },
+    update(payload) {
+      for (const conn of open) {
+        guard(conn, () => send(conn, { t: 'update', update: payload }));
       }
     },
     notify(message) {

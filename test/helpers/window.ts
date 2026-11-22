@@ -325,13 +325,20 @@ export interface StartedServer {
   page(options?: PageOptions): Promise<TestPage>;
 }
 
-/** Contract 2.5: a sandbox (serverSandbox) and one server started on it. */
+/**
+ * Contract 2.5: a sandbox (serverSandbox) and one server started on it. `server` may be a function
+ * of the sandbox, for options that name something made in it first (F38: a checkout).
+ */
 export async function startTestServer(
   t: TestContext,
-  options: ServerSandboxOptions & { server?: StartOptions } = {},
+  options: ServerSandboxOptions & {
+    server?: StartOptions | ((d: ServerSandbox) => StartOptions);
+  } = {},
 ): Promise<StartedServer> {
   const d = serverSandbox(t, options);
-  const test = await d.start(options.server);
+  const test = await d.start(
+    typeof options.server === 'function' ? options.server(d) : options.server,
+  );
   return {
     server: test.server,
     test,
