@@ -2880,12 +2880,15 @@ The check of the window's notice of a newer skydeck (follow-up F38; design-step-
 in your window, on your own checkout. Its first half (steps 1–6) applies nothing: it presses
 `Check now`, reads the settings screen's block `Updates`, the title bar and `skydeck doctor`, turns
 the switch `window.updateCheck` off and on again, and, only where you have such a remote, looks at
-what a check does with a remote that needs a passphrase or a login. The tests run all of it
-against a test server, a throwaway checkout and a remote that is a folder; only here does a check
-meet your own remote, your network, ssh and the Windows credential manager. Commands are typed in
+what a check does with a remote that needs a passphrase or a login. Its second half (steps 7–9)
+applies the update with `Update now`, on your own installation, and only when the dialog lists
+commits. The tests run all of it against a test server, a throwaway checkout and a remote that is
+a folder (the second half with a real server of a throwaway copy of skydeck); only here does a
+check meet your own remote, your network, ssh and the Windows credential manager, and an update
+meet Edge, your sessions and your own checkout. Commands are typed in
 W, a WSL terminal of your own (never a `!` command inside Claude Code).
 
-## W43. The update notice (first half: nothing is applied)
+## W43. The update notice, and Update now
 
 Setup: skydeck updated to a commit that has follow-up F38 (`skydeck update`, W32); the window open.
 In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git remote get-url origin`
@@ -2901,8 +2904,9 @@ In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git rem
 2. **The dialog**, only when the title bar shows `Update available`. Click it. Expected: a dialog
    with the lines `skydeck update --check` prints (in W, `skydeck update --check` prints the same
    lines, then `run skydeck update to apply it`), then `To apply it, in a WSL terminal of your own:
-   skydeck update`, and one button, `Close`, which has the keyboard. Ctrl+Shift+N says `close the
-   dialog first (Esc)`. Press Esc: it closes. Nothing was applied: `git log -1 --format=%h` prints
+   skydeck update`, and two buttons, `Update now` and `Close`; `Close` has the keyboard, and Tab
+   goes to `Update now` and back. Ctrl+Shift+N says `close the dialog first (Esc)`. Press Esc
+   (do not press `Update now` here): it closes. Nothing was applied: `git log -1 --format=%h` prints
    the id the block's line had before (`skydeck doctor`'s first line names it too).
 3. **doctor.** In W: `skydeck doctor`. Expected: an `info` line `update: …` — `update: <n> new
    commits on origin/main (fetched <age> ago); skydeck update applies them`, or `update: skydeck is
@@ -2930,12 +2934,35 @@ In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git rem
    the line of step 1 (`git fetch` may have fetched that repository's objects; they are unused and
    `git gc` removes them in time).
 
+The second half, only when step 2's dialog listed commits and you want them now (else write down
+"left out: up to date"). It types into no session. Before step 7, in the window, write down how
+many sessions the title bar counts and which slots the Open section shows; in W, `skydeck doctor`
+(write down its `problem` lines, if any) and `git log -1 --format=%h`.
+
+7. **Update now.** Click `Update available`, then `Update now`. Expected: the dialog shows
+   `skydeck is being updated to <id>. The window comes back by itself.` with no button, and
+   Ctrl+Shift+N says `skydeck is being updated`. Within a few seconds the bar `skydeck is being
+   updated (since <time>): … the update's log says why: <path of update.log> — read it first; then,
+   in a WSL terminal: skydeck window` may show for a moment; then the window reloads itself and a
+   bar says `updated to <id>`, the id the dialog listed. No second window opens. Click the bar's ×:
+   it goes.
+8. **Everything still there.** Expected: the title bar counts the same sessions, Open shows the
+   same slots, and each terminal shows its session (its screen rebuilt). In W, `git log -1
+   --format=%h` prints the id of step 7, `skydeck doctor` prints no `problem` line that the setup
+   of this half did not have, and its `update:` line says up to date. `tail -5
+   ~/.local/state/skydeck/update.log` ends with `updated to <id>`.
+9. **The dialog again.** Expected: no `Update available` in the title bar. In Settings, `Check now`
+   says `Last check: 0s ago — skydeck is up to date (main at <id>, as origin/main)`.
+
 Leaves behind: the remote's address as it was, `window.updateCheck` as it was, the remote-tracking
 refs as a `git fetch` leaves them, and `kv window_update_check` with the last check. `git status
---short` prints what it printed in the setup.
+--short` prints what it printed in the setup. After the second half: the checkout at the new
+commit, the window's server of the new code, and `update.log` with the update's lines.
 
 Write down: for each step whether it went as expected, and the words where they differ; which of
-steps 5 and 6 were left out; whether the control, the dialog and the block read well in your theme.
+steps 5 and 6, or the second half, were left out; whether the control, the dialog, the running
+form and the bars read well in your theme.
 
 Not tried before this check was written: all of it, in Edge; that `GCM_INTERACTIVE` reaches the
-Windows credential manager through `WSLENV` (step 6).
+Windows credential manager through `WSLENV` (step 6); an update from the window on a real
+installation (steps 7–9).

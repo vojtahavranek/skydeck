@@ -1089,7 +1089,7 @@ could not be resumed; see above`).
 | Name | Default | Holds |
 |---|---|---|
 | `dataDir` | `${XDG_DATA_HOME:-~/.local/share}/skydeck` | `skydeck.db` and the copies kept before its migrations (9.2), the `node` and `skydeck-hook` links. |
-| `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`; `locks/` is created but unused (resume locks are in the database, 7.6). |
+| `stateDir` | `${XDG_STATE_HOME:-~/.local/state}/skydeck` | `spool/`, `hook.log`; `locks/` is created but unused (resume locks are in the database, 7.6). Since step 2 also the window's logs (design-step-2.md 4.2), among them `update.log`, the log of an update started from the window (follow-up F38). |
 | `configDir` | `${XDG_CONFIG_HOME:-~/.config}/skydeck` | `config.json`. |
 | `claudeHome` | the configuration key `claudeHome`, else `$CLAUDE_CONFIG_DIR`, else `~/.claude` | Claude Code's own files. |
 | `claudeGlobalConfig` | `<claudeHome>/.claude.json` when the configuration key or `$CLAUDE_CONFIG_DIR` names `claudeHome`, else `~/.claude.json`; also `~/.claude.json` when the configuration key is the default `~/.claude` written out (those sessions run without `CLAUDE_CONFIG_DIR`), unless `$CLAUDE_CONFIG_DIR` names that same directory, when it is `~/.claude/.claude.json` | Claude Code's global config file (follow-up F11). Claude Code keeps it in the home directory, and inside `CLAUDE_CONFIG_DIR` when that is set; a configured `claudeHome` stands for the `CLAUDE_CONFIG_DIR` Claude Code runs with, since only that variable moves Claude Code's home. |
