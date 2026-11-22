@@ -384,6 +384,14 @@ function checkUpdate(view: WindowView, report: Report): void {
       report('info', `update: ${outcome.line} ${fetched}${failed}`);
       return;
     case 'cannot':
+      // A check that failed is its own `cannot`: its line is said once, with its age.
+      if (entry.failure !== null && entry.failure.line === outcome.line) {
+        report(
+          'info',
+          `update: ${outcome.line} (the last check failed ${ago(entry.failure.atNs)})`,
+        );
+        return;
+      }
       report('info', `update: ${outcome.line}${failed}`);
       return;
   }

@@ -120,6 +120,22 @@ describe("the settings screen's block", () => {
     ]);
   });
 
+  test('a check that failed is its own cannot: its line once, with its age', () => {
+    for (const line of [
+      'skydeck could not check for an update (Error (EAGAIN))',
+      'git symbolic-ref failed: no answer within 10 s; nothing was changed',
+    ]) {
+      const update = payload({
+        check: { state: 'cannot', summary: line },
+        checkedAtNs: ago(0n),
+        failure: { atNs: ago(0n), line },
+      });
+      assert.deepEqual(settingsLines(update, String(NOW)), [
+        `The last check failed 0s ago: ${line}`,
+      ]);
+    }
+  });
+
   test('a failure with nothing fetched before', () => {
     const failure = { atNs: ago(5n), line: 'git fetch from origin failed: no answer within 60 s' };
     assert.deepEqual(

@@ -605,6 +605,29 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
     );
   });
 
+  test('a check that failed is its own cannot: its line once, with the age of the failure', async (t) => {
+    const m = machine(t);
+    mkdirSync(root(m), { recursive: true });
+    const now = String(m.platform.clock.nowNs());
+    for (const line of [
+      'skydeck could not check for an update (Error (EAGAIN))',
+      'git symbolic-ref failed: no answer within 10 s; nothing was changed',
+    ]) {
+      writeCheck(
+        m.deck.store,
+        entry(m, root(m), {
+          head: null,
+          lookedAtNs: now,
+          checkedAtNs: now,
+          failure: { atNs: now, line },
+          outcome: { kind: 'cannot', line },
+        }),
+      );
+      const found = lineOf((await doctorAt(m)).r, 'info', /^info {5}update: /);
+      assert.equal(found, `info     update: ${line} (the last check failed 0s ago)`);
+    }
+  });
+
   test("a failure line at the clip's length is shown whole", async (t) => {
     const m = machine(t);
     mkdirSync(root(m), { recursive: true });

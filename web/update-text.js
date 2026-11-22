@@ -85,11 +85,15 @@ export function settingsLines(update, nowNs) {
     lines.push(UPDATE_TEXTS.never);
   } else if (update.failure !== null) {
     lines.push(`The last check failed ${ago(update.failure.atNs)}: ${update.failure.line}`);
-    lines.push(
-      update.fetchedAtNs === null
-        ? UPDATE_TEXTS.nothingFetched
-        : `Known from ${ago(update.fetchedAtNs)}: ${check.summary}`,
-    );
+    // A check that failed is its own `cannot`: its line is said once.
+    const same = check.state === 'cannot' && check.summary === update.failure.line;
+    if (!same) {
+      lines.push(
+        update.fetchedAtNs === null
+          ? UPDATE_TEXTS.nothingFetched
+          : `Known from ${ago(update.fetchedAtNs)}: ${check.summary}`,
+      );
+    }
   } else if (update.checkedAtNs === null) {
     lines.push(`Last check: ${check.summary}`);
   } else {
