@@ -61,7 +61,8 @@ function button(className, text) {
 }
 
 /**
- * One part of a line: text as text, a key as a `kbd`, a control's words marked as such.
+ * One part of a line: text as text, a key as a `kbd`, a text to type as `code`, a control's words
+ * marked as such.
  * @param {Part} part
  * @returns {Node}
  */
@@ -71,6 +72,9 @@ function partNode(part) {
   }
   if ('key' in part) {
     return element('kbd', 'tour-key', part.key);
+  }
+  if ('typed' in part) {
+    return element('code', 'tour-typed', part.typed);
   }
   return element('span', 'tour-ui', part.ui);
 }

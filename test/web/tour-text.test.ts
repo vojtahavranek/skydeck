@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import type { KeyLike } from '../../web/keys.js';
+import { tourCommand } from '../../src/window/view/search/switcher.ts';
 import { listKey, windowChord } from '../../web/keys.js';
 import type { Part, TourStep } from '../../web/tour-text.js';
 import {
@@ -23,7 +24,15 @@ const MODES = ['app', 'tab'] as const;
 function textOf(step: TourStep): string[] {
   return step.lines.map((line) =>
     line
-      .map((part: Part) => (typeof part === 'string' ? part : 'key' in part ? part.key : part.ui))
+      .map((part: Part) =>
+        typeof part === 'string'
+          ? part
+          : 'key' in part
+            ? part.key
+            : 'typed' in part
+              ? part.typed
+              : part.ui,
+      )
       .join(''),
   );
 }
@@ -111,7 +120,20 @@ test('what each step says (the brief, Behaviour 2)', () => {
   assert.match(around?.join(' ') ?? '', /new session/);
   assert.match(settings?.join(' ') ?? '', /gear opens Settings/);
   assert.match(settings?.join(' ') ?? '', /Ctrl\+Shift\+H shows every key/);
-  assert.match(settings?.join(' ') ?? '', /Take the tour/);
+  assert.match(settings?.join(' ') ?? '', /Take the tour in the key help, or > tour in Switch…/);
+});
+
+test('every text a step says to type is a command of the server’s quick switcher (F41: > tour)', () => {
+  for (const mode of MODES) {
+    const typed = tourSteps(mode)
+      .flatMap((step) => step.lines.flat())
+      .filter((part) => typeof part !== 'string' && 'typed' in part) as { typed: string }[];
+    assert.deepEqual(
+      typed.map((part) => part.typed),
+      ['> tour'],
+    );
+    for (const { typed: text } of typed) assert.equal(tourCommand(text), true, text);
+  }
 });
 
 test('the app window names Ctrl+Tab and Ctrl+Shift+N; a browser tab, which keeps them, Ctrl+Shift+O and + New', () => {

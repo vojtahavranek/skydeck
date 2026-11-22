@@ -3,14 +3,17 @@
 // in — the app window, or a browser tab, where the browser keeps Ctrl+Tab and Ctrl+Shift+N for
 // itself (S2 12.9) —; the panel's words; the page's storage key that marks the tour seen; and
 // where the panel goes beside its region (`placeNear`). A line is made of parts: text, a key
-// (`key`, named as the key help names it, with the zone keys.js classifies it in) and the words of
-// a control of the page (`ui`, with the element that carries them). test/web/tour-text.test.ts
-// holds every key against web/keys.js; test-page/tour.test.ts every control against the page.
+// (`key`, named as the key help names it, with the zone keys.js classifies it in), the words of a
+// control of the page (`ui`, with the element that carries them) and a text to type (`typed`: the
+// quick switcher's `> tour`). test/web/tour-text.test.ts holds every key against web/keys.js and
+// every typed text against the server's commands; test-page/tour.test.ts every control against the
+// page.
 
 /** @typedef {'app' | 'tab'} Mode */
 /** @typedef {'list' | 'right' | 'keybar' | 'switch' | 'settings'} Region */
 /**
- * @typedef {string | { key: string, zone: 'window' | 'list' } | { ui: string, at: string }} Part
+ * @typedef {string | { key: string, zone: 'window' | 'list' } | { ui: string, at: string }
+ *   | { typed: string }} Part
  */
 /** @typedef {{ region: Region, title: string, lines: Part[][] }} TourStep */
 /** @typedef {{ left: number, top: number, width: number, height: number }} Box */
@@ -149,9 +152,12 @@ export function tourSteps(mode) {
         ],
         [windowKey('Ctrl+Shift+H'), ' shows every key.'],
         [
-          'This tour starts again from there: ',
+          'This tour again: ',
           { ui: 'Take the tour', at: '#help .help-tour' },
-          '.',
+          ' in the key help, or ',
+          { typed: '> tour' },
+          ' in ',
+          SWITCH,
         ],
       ],
     },

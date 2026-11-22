@@ -181,8 +181,9 @@ export function rankHeading(rank) {
 /**
  * The switcher's footer: `↑ ↓ move · Enter switch · Esc close`, then ` · 3 more: type to narrow`
  * when items were left out.
- * @param {'switch' | 'resume here' | 'restore' | 'open the settings'} action what Enter does on
- *   the highlighted item (F36: the settings command opens the settings screen)
+ * @param {'switch' | 'resume here' | 'restore' | 'open the settings' | 'start the tour'} action
+ *   what Enter does on the highlighted item (F36: the settings command opens the settings screen;
+ *   F41: the tour command starts the tour)
  * @param {number} more how many matching sessions were left out (`list.switcher.more`)
  * @returns {string}
  */

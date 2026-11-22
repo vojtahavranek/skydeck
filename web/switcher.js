@@ -35,9 +35,11 @@ const NO_MATCH = 'No session matches.';
 const NOT_CONNECTED = "skydeck's server is not connected";
 /** Command form (E12) without an offer: the commands, and when the restore is listed. */
 const NO_COMMAND =
-  'No command matches. > settings opens the settings; > restore is listed after Not now on the restore banner, until WSL restarts.';
+  'No command matches. > settings opens the settings; > tour starts the tour of the window; > restore is listed after Not now on the restore banner, until WSL restarts.';
 /** F36: the settings command's line. */
 const SETTINGS_LINE = 'Settings: skydeck’s settings, the plain ones changed here';
+/** F41: the tour command's line. */
+const TOUR_LINE = 'Tour: a minute’s walk round the window, step by step';
 /** The footer's line when app.js cut the text it sent (E3). */
 const WORDS_CUT = 'only the first 16 words are searched';
 const BYTES_CUT = 'only the first 1,024 bytes are searched';
@@ -51,14 +53,16 @@ const ITEM_PX = 40;
  * @property {(item: SwitchItem) => void} pick   Enter on the highlighted item, or a click on one
  * @property {(sessionIds: string[]) => void} restore   Enter on the restore offer (E12)
  * @property {() => void} settings   Enter on (or a click on) the settings command (F36)
+ * @property {() => void} tour   Enter on (or a click on) the tour command (F41)
  * @property {() => void} closed   once whenever it closes, whatever closed it
  * @property {() => string} now   the server's now (stage D's serverNow), for ages
  * @property {() => string} timeZone   the page's time zone, for the offer's time (stage C's)
  */
 
 /**
- * One entry of the panel: the offer, F36's settings command or an item, and its element.
- * @typedef {{ key: string, element: HTMLElement, offer: RestoreOffer | null, item: SwitchItem | null, settings?: true }} Entry
+ * One entry of the panel: the offer, F36's settings command, F41's tour command or an item, and
+ * its element.
+ * @typedef {{ key: string, element: HTMLElement, offer: RestoreOffer | null, item: SwitchItem | null, settings?: true, tour?: true }} Entry
  */
 
 /**
@@ -190,6 +194,19 @@ export function createSwitcher(root, deps) {
       choose(entry);
     }
   });
+  // F41: the tour command starts nothing either, so a click on it acts as Enter does.
+  const tourLine = element('switcher-offer', 'div');
+  tourLine.dataset['offer'] = 'tour';
+  tourLine.textContent = TOUR_LINE;
+  tourLine.addEventListener('click', (event) => {
+    if (event.detail > 1 || !current()) {
+      return;
+    }
+    const entry = entries.find((candidate) => candidate.element === tourLine);
+    if (entry !== undefined) {
+      choose(entry);
+    }
+  });
   const foot = element('switcher-foot', 'div');
   const keys = element('switcher-keys');
   const cut = element('switcher-cut');
@@ -242,6 +259,8 @@ export function createSwitcher(root, deps) {
     close();
     if (entry.settings === true) {
       deps.settings();
+    } else if (entry.tour === true) {
+      deps.tour();
     } else if (entry.offer !== null) {
       deps.restore([...entry.offer.sessionIds]);
     } else if (entry.item !== null) {
@@ -274,11 +293,13 @@ export function createSwitcher(root, deps) {
     const action =
       entry?.settings === true
         ? 'open the settings'
-        : entry?.offer != null
-          ? 'restore'
-          : entry?.item != null && pickResumes(entry.item.row)
-            ? 'resume here'
-            : 'switch';
+        : entry?.tour === true
+          ? 'start the tour'
+          : entry?.offer != null
+            ? 'restore'
+            : entry?.item != null && pickResumes(entry.item.row)
+              ? 'resume here'
+              : 'switch';
     const more = connected && payload !== null && Number.isInteger(payload.more) ? payload.more : 0;
     setText(keys, switcherFooter(action, more));
   };
@@ -405,6 +426,10 @@ export function createSwitcher(root, deps) {
           settings: true,
         });
         children.push(settingsLine);
+      }
+      if (payload.tour === true) {
+        next.push({ key: 'tour', element: tourLine, offer: null, item: null, tour: true });
+        children.push(tourLine);
       }
       const listed = Array.isArray(payload.items) ? payload.items : [];
       /** @type {Set<string>} */

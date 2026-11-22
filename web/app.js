@@ -36,7 +36,8 @@
 //
 // Follow-up F41 (S2 12.14): the tour of the window of web/tour.js. It starts by itself once, at a
 // list while the page is connected and no dialog is shown, when this browser has not seen it
-// (`tour.fresh()`), and again from the key help's `Take the tour`, through `windowChordGate`. It is
+// (`tour.fresh()`), and again from the key help's `Take the tour` and the switcher's `> tour`,
+// each through `windowChordGate`. It is
 // modal as a dialog is: `.app` is inert under it, every window chord but a reload says `close the
 // tour first (Esc)`, a lost connection or a fatal bar ends it unmarked, and when it closes the
 // keyboard goes back where it was.
@@ -420,6 +421,12 @@ const switcher = createSwitcher(dom.switcher, {
   settings: () => {
     if (windowChordGate('settings')) {
       openSettings();
+    }
+  },
+  // F41: `> tour`, through the same gate as the help's `Take the tour`.
+  tour: () => {
+    if (windowChordGate('tour')) {
+      openTour();
     }
   },
   now: () => listNow(),

@@ -50,6 +50,10 @@
 .tour-ui {
   font-weight: 600;
 }
+.tour-typed {
+  font-family: var(--term-font);
+  font-size: 12px;
+}
 .tour-foot {
   display: flex;
   flex-wrap: wrap;

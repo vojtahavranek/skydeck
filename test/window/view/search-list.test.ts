@@ -1102,6 +1102,7 @@ test("switcher: command form — '>restore' lists no session, command true; rest
       more: 0,
       restore: null,
       settings: false,
+      tour: false,
     });
   }
   // A space first is no command: sessions are searched for the word `>restore`.

@@ -21,6 +21,7 @@ import {
   connection,
   honest,
   keyMessage,
+  launched,
   readPage,
   scriptedList,
   selectedRow,
@@ -165,7 +166,15 @@ async function mark(page: Page): Promise<string | null> {
 /** A step's lines as the panel shows them. */
 const textOf = (line: Part[]): string =>
   line
-    .map((part) => (typeof part === 'string' ? part : 'key' in part ? part.key : part.ui))
+    .map((part) =>
+      typeof part === 'string'
+        ? part
+        : 'key' in part
+          ? part.key
+          : 'typed' in part
+            ? part.typed
+            : part.ui,
+    )
     .join('');
 
 /** The list has drawn its rows (or its note on an empty list): the first list came. */
@@ -454,6 +463,47 @@ test('the tour of the window', async (t) => {
       await fromHelp(page);
       assert.equal(await keyMessage(page), 'close the settings first (Esc)');
       assert.equal(await shownTour(page), null);
+    },
+  );
+
+  await t.test(
+    'A4: the quick switcher’s > tour (the server’s command) starts it again, whatever was seen, by Enter and by a click; the keyboard goes back where it was before the switcher',
+    async (t) => {
+      const l = await launched(t, chromium);
+      l.d.resumable(S1);
+      await l.page.waitForSelector(`#list [data-id="${S1}"]`, { state: 'attached' });
+      assert.equal(await shownTour(l.page), null, 'seen: not by itself');
+      await toZone(l.page, 'list');
+      await l.page.keyboard.press('Control+Shift+P');
+      await l.page.keyboard.type('> to');
+      await showsText(
+        l.page,
+        '#switcher .switcher-offer[data-offer="tour"]',
+        /^Tour: a minute’s walk round the window, step by step$/,
+      );
+      await showsText(l.page, '#switcher .switcher-foot', /Enter start the tour/);
+      await l.page.keyboard.press('Enter');
+      await tourStep(l.page, 1);
+      assert.equal(await shownText(l.page, '#switcher'), '', 'the switcher closed');
+      await l.page.keyboard.press('Escape');
+      await tourHidden(l.page);
+      assert.equal(await active(l.page), '#list');
+
+      await l.page.keyboard.press('Control+Shift+P');
+      await l.page.keyboard.type('>T');
+      await l.page.locator('#switcher .switcher-offer[data-offer="tour"]').click();
+      await tourStep(l.page, 1);
+      await l.page.locator('#tour .tour-skip').click();
+      await tourHidden(l.page);
+      assert.equal(await active(l.page), '#list');
+
+      // A command that names none names > tour among the commands.
+      await l.page.keyboard.press('Control+Shift+P');
+      await l.page.keyboard.type('> x');
+      await showsText(l.page, '#switcher', /> tour starts the tour of the window/);
+      assert.equal(await l.page.locator('#switcher .switcher-list [data-offer="tour"]').count(), 0);
+      await l.page.keyboard.press('Escape');
+      assert.deepEqual(l.problems, []);
     },
   );
 
