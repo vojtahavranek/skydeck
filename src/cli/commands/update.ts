@@ -135,7 +135,7 @@ async function update(
     say('run skydeck update to apply it');
     return EXIT.ok;
   }
-  return apply(ctx, git, found, record);
+  return apply(ctx, git, found, record, to !== null);
 }
 
 /**
@@ -205,6 +205,8 @@ function windowRecord(ctx: Context, to: string): Recorder {
 interface Stopped {
   stopped: boolean;
   pages: number;
+  /** When none was stopped: why (`--from-window` refuses then, F38). */
+  why: string | null;
 }
 
 /**
@@ -279,9 +281,17 @@ async function merge(git: Git, id: string): Promise<Merged> {
 
 /**
  * U5, in its order. `record` gets the outcome of the merge once it is known, before the window is
- * brought back (F38; a no-op for the typed command).
+ * brought back (F38; a no-op for the typed command). `fromWindow` (--from-window): a page asked
+ * for the update, so step 1 must stop this checkout's server — else nothing is merged — and step
+ * 3 brings the window back whatever the stopped server's page count said.
  */
-async function apply(ctx: Context, git: Git, update: Update, record: Recorder): Promise<number> {
+async function apply(
+  ctx: Context,
+  git: Git,
+  update: Update,
+  record: Recorder,
+  fromWindow: boolean,
+): Promise<number> {
   const { platform } = ctx;
   // Everything steps 3 and 4 need from the platform is taken now, before the merge.
   const times = windowTimes(platform.env);
@@ -298,11 +308,19 @@ async function apply(ctx: Context, git: Git, update: Update, record: Recorder): 
   try {
     // 1. The server of this checkout is stopped; the database is closed again before step 2.
     const step1 = await stopForUpdate(ctx, times, hold);
+    if (fromWindow && !step1.stopped) {
+      // F38: the server that asked runs on (or another checkout's does): a merge now would be
+      // recorded as applied while the old code goes on serving the window.
+      const line = `${step1.why ?? "the window's server was not stopped"}, so the update started from the window was not applied; nothing was changed`;
+      await record({ state: 'failed', line });
+      hold.err(line);
+      return EXIT.failure;
+    }
     if (hold.interrupted()) {
       // A signal during the stop: no merge; the window back on the old code (ruled, S2).
       const line = 'interrupted before the update was applied; the checkout was not changed';
       await record({ state: 'failed', line });
-      const back = await bringBack(ctx, hold, step1, launcher, cwd, env);
+      const back = await bringBack(ctx, hold, step1, launcher, cwd, env, fromWindow);
       hold.err(`${line}${unlessBack(back)}`);
       return EXIT.failure;
     }
@@ -323,14 +341,14 @@ async function apply(ctx: Context, git: Git, update: Update, record: Recorder): 
       }
       const line = `the update could not be applied: ${notApplied.why}; the checkout is as it was`;
       await record({ state: 'failed', line });
-      const back = await bringBack(ctx, hold, step1, launcher, cwd, env);
+      const back = await bringBack(ctx, hold, step1, launcher, cwd, env, fromWindow);
       hold.err(`${line}${unlessBack(back)}`);
       return EXIT.failure;
     }
 
     // 3. The window's server again, only when the stopped one had a page.
     await record({ state: 'applied' });
-    const done = await bringBack(ctx, hold, step1, launcher, cwd, env);
+    const done = await bringBack(ctx, hold, step1, launcher, cwd, env, fromWindow);
     // 4. The result.
     const id = short(update.newId);
     if (done === 'ok') {
@@ -423,14 +441,13 @@ async function stopForUpdate(ctx: Context, times: WindowTimes, hold: Held): Prom
       const found = await findServer(deck, root, computeBuild(deck.platform.files, root), times);
       switch (found.kind) {
         case 'none':
-          return { stopped: false, pages: 0 };
+          return { stopped: false, pages: 0, why: 'no window server of this checkout runs' };
         case 'hung':
           throw new SkydeckError(hungServerLine(found, times));
         case 'other-checkout':
-          hold.err(
-            `the window's server runs from another checkout (${sanitize(found.ping.checkout)}); it is left as it is`,
-          );
-          return { stopped: false, pages: 0 };
+          const other = `the window's server runs from another checkout (${sanitize(found.ping.checkout)})`;
+          hold.err(`${other}; it is left as it is`);
+          return { stopped: false, pages: 0, why: other };
         case 'ours':
         case 'other-build': {
           const pages = await pagesOf(deck);
@@ -438,7 +455,11 @@ async function stopForUpdate(ctx: Context, times: WindowTimes, hold: Held): Prom
           hold.start();
           const { stopped, keepers } = await stopServer(deck, times);
           if (stopped) hold.err(`stopped skydeck's window server; ${keepRunning(keepers)}`);
-          return { stopped, pages };
+          return {
+            stopped,
+            pages,
+            why: stopped ? null : "the window's server ended before it could be stopped",
+          };
         }
       }
     });
@@ -447,7 +468,11 @@ async function stopForUpdate(ctx: Context, times: WindowTimes, hold: Held): Prom
       hold.err(
         "the database was written by a newer skydeck, so the window's server is not looked at; it is left as it is",
       );
-      return { stopped: false, pages: 0 };
+      return {
+        stopped: false,
+        pages: 0,
+        why: "the database was written by a newer skydeck and the window's server was not looked at",
+      };
     }
     if (error instanceof SkydeckError) {
       const left = stopping ? 'the checkout was not changed' : 'nothing was changed';
@@ -475,7 +500,8 @@ async function asItWas(git: Git, oldId: string, untrackedBefore: string): Promis
 }
 
 /**
- * U5 step 3: when step 1 stopped a server that had a page, `<root>/bin/skydeck window` as a new
+ * U5 step 3: when step 1 stopped a server that had a page — or any server, with `always`
+ * (--from-window: a page asked, whatever the count said) —, `<root>/bin/skydeck window` as a new
  * process with the command's own environment, working directory and terminal — its exit code
  * ('ok' for 0; null when it could not be started or a signal ended it). When the stopped server
  * had no page: nothing is started, and a line says so ('ok'). When none was stopped: 'ok'.
@@ -487,9 +513,10 @@ async function bringBack(
   launcher: string,
   cwd: string,
   env: Record<string, string>,
+  always: boolean,
 ): Promise<'ok' | number | null> {
   if (!step1.stopped) return 'ok';
-  if (step1.pages === 0) {
+  if (step1.pages === 0 && !always) {
     hold.err("the window's server was stopped for the update; skydeck window starts it again");
     return 'ok';
   }

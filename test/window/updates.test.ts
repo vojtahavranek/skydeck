@@ -1483,3 +1483,143 @@ os.execv(sys.argv[1], sys.argv[1:])`;
     );
   });
 });
+
+describe('Update now: the guards of review 2', () => {
+  test('a look that does not run to its end after an `available` record: refused, nothing started (a runner that rejects, a files that throws)', async (t) => {
+    for (const kind of ['the runner rejects', 'files throws'] as const) {
+      const broken = { now: false };
+      const w = world(t, {
+        deck: (base) => ({
+          ...base,
+          platform: {
+            ...base.platform,
+            runner: {
+              ...base.platform.runner,
+              run: (command, args, options) =>
+                broken.now && kind === 'the runner rejects'
+                  ? Promise.reject(new Error('boom'))
+                  : base.platform.runner.run(command, args, options),
+            },
+            files: new Proxy(base.platform.files, {
+              get(target, key, receiver) {
+                const value = Reflect.get(target, key, receiver) as unknown;
+                if (typeof value !== 'function') return value;
+                return (...args: unknown[]) => {
+                  if (
+                    broken.now &&
+                    kind === 'files throws' &&
+                    String(args[0]).includes('checkout')
+                  ) {
+                    throw new TypeError('boom from files');
+                  }
+                  return (value as (...a: unknown[]) => unknown).apply(target, args);
+                };
+              },
+            }),
+          },
+        }),
+      });
+      await w.updates.check();
+      assert.equal(w.updates.payload().check?.state, 'available');
+      broken.now = true;
+
+      const answer = await w.updates.apply(NEW);
+
+      assert.deepEqual(answer.ok ? '' : answer.error, APPLY_REFUSED.notListed, kind);
+      assert.deepEqual(w.processes.calls, [], kind);
+      assert.equal(w.d.deck.store.getKv(RUN_KEY), null, kind);
+    }
+  });
+
+  test("an updater that ends once the server's stop has begun: the entry is neither read nor removed, nothing told", async (t) => {
+    const run = updater();
+    const w = world(t, { processes: fakeProcesses(() => run.detached) });
+    await w.updates.check();
+    await w.updates.apply(NEW);
+    writeRun(w.d.deck.store, { v: 1, root: w.root, state: 'applied', to: NEW, atNs: '2' });
+    w.serverStopping.now = true;
+    const told = w.told.length;
+
+    run.end(0);
+    await flush();
+
+    assert.deepEqual(readRunEntry(w.d.deck.store)?.state, 'applied', 'left for the next server');
+    assert.equal(w.updates.payload().result, null);
+    assert.equal(w.told.length, told);
+  });
+
+  test('Check now while an update runs or is being started: nothing starts, the state as it is', async (t) => {
+    const w = world(t);
+    await w.updates.check();
+    const fetches = w.fetches();
+    const applying = w.updates.apply(NEW); // its look still runs: `starting`
+    const during = await w.updates.check();
+    assert.equal(during.checking, false);
+    assert.equal((await applying).ok, true);
+    const after = await w.updates.check();
+    assert.equal(after.checking, false);
+    assert.notEqual(after.applying, null);
+    await flush();
+    assert.equal(w.fetches(), fetches, 'no fetch while an update starts or runs');
+  });
+
+  test("the server's stop during apply's look: refused as stopping, nothing started", async (t) => {
+    const w = world(t);
+    await w.updates.check();
+    const applying = w.updates.apply(NEW);
+    w.serverStopping.now = true;
+    const answer = await applying;
+    assert.equal(answer.ok ? '' : answer.error, APPLY_REFUSED.stopping);
+    assert.deepEqual(w.processes.calls, []);
+  });
+
+  test('no tick starts a check while an update is being started (its look runs)', async (t) => {
+    const w = world(t);
+    await w.updates.check();
+    const fetches = w.fetches();
+    w.d.clock.setNs(T0 + CHECK_EVERY_NS * 2n);
+    const applying = w.updates.apply(NEW);
+    w.updates.tick();
+    await applying;
+    await flush();
+    assert.equal(w.fetches(), fetches);
+  });
+
+  test('a removal that fails at the start: its own log line, and no result shown, so that the next start shows it once', async (t) => {
+    const busy = Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR' });
+    let failing = true;
+    const w = world(t, {
+      before: (deck, root) => {
+        writeRun(deck.store, { v: 1, root, state: 'applied', to: NEW, atNs: '1' });
+      },
+      deck: (deck) =>
+        deckWith(deck, {
+          store: {
+            deleteKv: (key) => {
+              if (failing) throw busy;
+              deck.store.deleteKv(key);
+            },
+          },
+        }),
+    });
+    assert.equal(w.updates.payload().result, null);
+    assert.deepEqual(w.logs, [
+      'update: the entry of the last update could not be removed (Error (ERR_SQLITE_ERROR))',
+    ]);
+    assert.equal(readRunEntry(w.d.deck.store)?.state, 'applied', 'left for the next start');
+    failing = false;
+    const next = createUpdates({
+      deck: w.deck,
+      changed: () => {},
+      log: () => {},
+      serverEnv: SERVER_ENV,
+      coreSoft: null,
+      originDir: () => '/',
+      restoreRunning: () => false,
+      stopping: () => false,
+    });
+    t.after(() => next.stop());
+    assert.deepEqual(next.payload().result, { ok: true, text: 'updated to fedcba9' });
+    assert.equal(w.d.deck.store.getKv(RUN_KEY), null);
+  });
+});

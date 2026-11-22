@@ -272,15 +272,22 @@ export function createUpdates(deps: UpdatesDeps): Updates {
 
   // A server that starts: the entry of its checkout becomes the result, and is removed; another
   // checkout's entry is left as it is.
+  // The result is shown only once its entry is removed: one whose removal fails stays for the next
+  // start, which shows it then, so that no result is shown twice.
   if (root !== null) {
+    let entry: RunRecord | null = null;
     try {
-      const entry = readRun(deck.store, root);
-      if (entry !== null) {
-        result = resultOf(entry);
-        clearRun(deck.store);
-      }
+      entry = readRun(deck.store, root);
     } catch (error) {
       log(`update: the entry of the last update could not be read (${failureKind(error)})`);
+    }
+    if (entry !== null) {
+      try {
+        clearRun(deck.store);
+        result = resultOf(entry);
+      } catch (error) {
+        log(`update: the entry of the last update could not be removed (${failureKind(error)})`);
+      }
     }
   }
 
@@ -381,7 +388,9 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   };
 
   const check = (): Promise<UpdatePayload> => {
-    if (stopped) return Promise.resolve(payload());
+    // While an update from the window runs, or is being started, no check starts (Check now from a
+    // page that has not been told yet): the state as it is.
+    if (stopped || applying !== null || starting) return Promise.resolve(payload());
     if (git === null) return Promise.resolve(noCheckout());
     if (checking !== null) return checking;
     const running = runCheck(git)
@@ -518,12 +527,11 @@ export function createUpdates(deps: UpdatesDeps): Updates {
     starting = true;
     try {
       // A look made now, run to its end, must name `to`, not blocked (it replaces the outcome,
-      // every page told); a check that began meanwhile (Check now) refuses as one that ran.
+      // every page told). No check can begin meanwhile: check() and the tick wait for `starting`.
       if (looking !== null) await looking;
       const ends = lookEnds;
       await look();
       if (stopped || deps.stopping()) return refused(APPLY_REFUSED.stopping);
-      if (checking !== null) return refused(APPLY_REFUSED.checking);
       const check = record === null || lookEnds === ends ? null : checkPayload(record);
       if (check?.state === 'available' && check.to === to && check.blocked !== null) {
         return refused(`${check.blocked}; open the dialog again once that is set right`);
@@ -588,8 +596,8 @@ export function createUpdates(deps: UpdatesDeps): Updates {
         const first = !started;
         started = true;
         if (deck.config.window.updateCheck === 'daily') {
-          if (checking === null && applying === null && !starting && due(platform.clock.nowNs()))
-            void check();
+          // check() itself starts nothing while an update runs or is being started.
+          if (checking === null && due(platform.clock.nowNs())) void check();
         } else if (first && known() !== null) {
           void look();
         }

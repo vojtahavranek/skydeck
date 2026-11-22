@@ -2350,7 +2350,8 @@ terminal: the window's server starts `skydeck update` of its own checkout in the
 stops the server, fast-forwards the checkout to the commit the dialog listed (by its id — it does
 not fetch again, so nothing can ask for a passphrase), and starts the new server with the
 environment the old one had. Every window shows `skydeck is being updated to <id>. The window comes
-back by itself.` and takes no keys meanwhile; the sessions keep running. Two clicks are always
+back by itself.`, closes any other dialog it showed (a text half typed in it is dropped) and takes
+no keys or clicks meanwhile; the sessions keep running. Two clicks are always
 needed: `Update available`, then `Update now`.
 
 - **It worked.** The window reloads itself and a bar says `updated to <id>`; its × dismisses it in
@@ -2368,8 +2369,10 @@ needed: `Update available`, then `Update now`.
 - **It is not offered** when the checkout has a change that is not committed, has commits of
   your own that the remote does not have, or follows no branch of a remote: the dialog says why
   and gives `skydeck update` to run in a terminal of your own once that is set right. A second
-  window cannot start a second update (`an update is already running`), and no update starts
-  while a check or a restore runs.
+  window cannot start a second update (`an update is already running`), no update starts while a
+  check or a restore runs, and no check starts while an update runs. When the window's server
+  cannot be found running from this checkout as the update begins, nothing is changed and the bar
+  says why.
 - **A window that comes back late.** If the window is not back within `skydeck window`'s waits
   and the terminal the server was started from is long closed, no second window opens, and the
   log's last line says `…, but skydeck window ended with exit 1; run skydeck window` although the

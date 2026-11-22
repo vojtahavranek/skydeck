@@ -374,6 +374,73 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
   );
 
   await t.test(
+    'refused before the stop: told `applying`, then `applying` null with a failed result while connected — the form lifted on both pages, not inert, the bar gives the line',
+    async (t) => {
+      const w = await world(t, chromium);
+      const [first] = w.pages;
+      assert.ok(first !== undefined);
+      w.tell(state());
+      await openDialog(w, first, state(), 1);
+      w.tell(APPLYING);
+      for (const page of w.pages) await runningOn(page);
+      const line =
+        "this checkout's git index is locked (/x/.git/index.lock): another git command runs in it, or one was cut off and left the file; nothing was changed";
+      w.tell(state({ result: { ok: false, text: line } }));
+      for (const page of w.pages) {
+        await liftedOn(page);
+        await showsText(page, '#update-result-text', new RegExp(`^${escape(line)}$`));
+        await connection(page, 'open');
+      }
+    },
+  );
+
+  await t.test(
+    'Settings open on the second page when `applying` comes: it closes; no Tab, click or Esc reaches anything under the running form, and nothing is sent',
+    async (t) => {
+      const w = await world(t, chromium);
+      const [, second] = w.pages;
+      assert.ok(second !== undefined);
+      w.tell(state());
+      await second.locator('#settings-button').click();
+      await until(
+        async () =>
+          (await readPage(second, () => document.getElementById('settings')?.hidden, null)) ===
+          false,
+        'the settings screen is shown',
+      );
+      const box = await second.locator('#settings .settings-check-now').boundingBox();
+      assert.ok(box !== null);
+      w.tell(APPLYING);
+      await runningOn(second);
+      assert.equal(
+        await readPage(second, () => document.getElementById('settings')?.hidden, null),
+        true,
+        'the settings screen closed first',
+      );
+      const sent = (): unknown[] => w.seen.flatMap((s) => s.acts).map((a) => a['kind']);
+      const before = sent();
+      for (let i = 0; i < 6; i++) {
+        await second.keyboard.press('Tab');
+        assert.equal(
+          await readPage(
+            second,
+            () =>
+              document.getElementById('update-dialog')?.contains(document.activeElement) === true,
+            null,
+          ),
+          true,
+          'Tab stays in the running form',
+        );
+      }
+      await second.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await second.keyboard.press('Escape');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await runningOn(second);
+      assert.deepEqual(sent(), before, 'nothing was sent');
+    },
+  );
+
+  await t.test(
     'back with the same build and a failed result: no reload, the bar gives the reason, no running form',
     async (t) => {
       const w = await world(t, chromium);

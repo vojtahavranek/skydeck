@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import type { Files, Net, Platform, Processes, Runner } from '../../../src/platform/types.ts';
 import { checkoutRoot, readRunEntry, RUN_KEY, writeRun } from '../../../src/update/record.ts';
 import type { RunRecord } from '../../../src/update/record.ts';
+import { SCHEMA_VERSION } from '../../../src/store/migrations.ts';
 import { computeBuild } from '../../../src/window/build.ts';
 import { gitTestEnv } from '../../helpers/git-checkout.ts';
 import type { Run } from '../../helpers/install.ts';
@@ -225,10 +226,12 @@ describe('skydeck update --from-window: the flag (S2 16.5)', () => {
 describe('skydeck update --from-window: the look, without the network', () => {
   test('no fetch of either kind is made: the look is what the remote-tracking ref says', async (t) => {
     const h = harness(t);
+    await h.serve({ FAKE_SERVE_PAGES: '1' });
     const r = await h.update(scripted(h));
     assert.equal(r.code, 0, r.stderr);
     assert.equal(r.stdout, `${ONE_COMMIT}updated to fedcba9\n`);
     assert.ok(!h.events.some((e) => e.startsWith('git fetch')), h.events.join(', '));
+    assert.ok(h.events.includes('git merge'));
   });
 
   test('the upstream at another commit: the refusal, exit 1, the entry failed with it, no server touched', async (t) => {
@@ -397,8 +400,20 @@ describe('skydeck update --from-window: the outcome of the merge, recorded befor
     h.onRequest = (method, path) => {
       if (path === '/shutdown') captured.signal('SIGINT');
     };
-    const r = await runUpdateOn(h.platform(scripted(h, { launcher: 3 })), h.s, captured, FLAG);
+    let atLaunch: RunRecord | null = null;
+    const runner = scripted(h, {
+      launcher: 3,
+      onCall: (call) => {
+        if (call.command !== 'git') atLaunch = h.entry();
+      },
+    });
+    const r = await runUpdateOn(h.platform(runner), h.s, captured, FLAG);
     const line = 'interrupted before the update was applied; the checkout was not changed';
+    assert.deepEqual(
+      withoutTime(atLaunch),
+      { v: 1, root: h.root, state: 'failed', to: NEW, line },
+      'recorded before the launcher (the bring-back) runs',
+    );
     assert.equal(r.code, 1);
     assert.equal(
       r.stderr,
@@ -458,6 +473,11 @@ describe('skydeck update --from-window: the outcome of the merge, recorded befor
     const h = harness(t);
     const link = join(h.s.root, 'link');
     symlinkSync(h.root, link);
+    await h.serve({
+      FAKE_SERVE_PAGES: '1',
+      FAKE_SERVE_CHECKOUT: link,
+      FAKE_SERVE_BUILD: computeBuild(h.tp.platform.files, link),
+    });
     const r = await runUpdate(
       { ...h.platform(scripted(h, { root: link })), appRoot: link },
       h.s,
@@ -468,6 +488,81 @@ describe('skydeck update --from-window: the outcome of the merge, recorded befor
     assert.equal(entry?.root, h.root);
     assert.equal(entry?.root, checkoutRoot(h.tp.platform.files, link));
     assert.notEqual(link, h.root);
+  });
+});
+
+describe('skydeck update --from-window: a page asked, so its server must be stopped and brought back (review 2)', () => {
+  test('a stopped server whose page count said 0: the window is brought back all the same', async (t) => {
+    const h = harness(t);
+    await h.serve({ FAKE_SERVE_PAGES: '0' });
+    const r = await h.update(scripted(h));
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout, `${ONE_COMMIT}updated to fedcba9\n`);
+    assert.equal(r.stderr, STOPPED);
+    assert.deepEqual(
+      h.launches.map((l) => [l.command, ...l.args]),
+      [[join(h.root, 'bin', 'skydeck'), 'window']],
+    );
+  });
+
+  test("no server of this checkout runs, or another checkout's: refused before the merge, recorded `failed` with why, nothing changed", async (t) => {
+    const none = harness(t);
+    const r1 = await none.update(scripted(none));
+    const line1 =
+      'no window server of this checkout runs, so the update started from the window was not applied; nothing was changed';
+    assert.equal(r1.code, 1);
+    assert.equal(r1.stderr, `skydeck: ${line1}\n`);
+    assert.deepEqual(withoutTime(none.entry()), {
+      v: 1,
+      root: none.root,
+      state: 'failed',
+      to: NEW,
+      line: line1,
+    });
+    assert.ok(!none.events.includes('git merge'));
+    assert.deepEqual(none.launches, []);
+
+    const other = harness(t);
+    const server = await other.serve({
+      FAKE_SERVE_CHECKOUT: '/elsewhere/skydeck',
+      FAKE_SERVE_PAGES: '1',
+    });
+    const r2 = await other.update(scripted(other));
+    const why = "the window's server runs from another checkout (/elsewhere/skydeck)";
+    const line2 = `${why}, so the update started from the window was not applied; nothing was changed`;
+    assert.equal(r2.code, 1);
+    assert.equal(r2.stderr, `skydeck: ${why}; it is left as it is\nskydeck: ${line2}\n`);
+    assert.deepEqual(withoutTime(other.entry()), {
+      v: 1,
+      root: other.root,
+      state: 'failed',
+      to: NEW,
+      line: line2,
+    });
+    assert.ok(!other.events.includes('git merge'));
+    assert.ok(server.running());
+  });
+
+  test('a database written by a newer skydeck: refused before the merge, nothing changed (the entry cannot be written there)', async (t) => {
+    const h = harness(t);
+    mkdirSync(h.tp.places.dataDir, { recursive: true });
+    withStore(h.tp.places, (store) => store.setKv('schema_version', String(SCHEMA_VERSION + 1)));
+    const r = await h.update(scripted(h));
+    const line =
+      "the database was written by a newer skydeck and the window's server was not looked at, so the update started from the window was not applied; nothing was changed";
+    assert.equal(r.code, 1);
+    const lines = r.stderr.split('\n').filter((l) => l !== '');
+    assert.equal(
+      lines[0],
+      "skydeck: the database was written by a newer skydeck, so the window's server is not looked at; it is left as it is",
+    );
+    assert.match(
+      lines[1] ?? '',
+      /^skydeck: the window could not be told how the update ended \(.+\)$/,
+    );
+    assert.equal(lines[2], `skydeck: ${line}`);
+    assert.ok(!h.events.includes('git merge'));
+    assert.deepEqual(h.launches, []);
   });
 });
 

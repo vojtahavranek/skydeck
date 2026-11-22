@@ -2509,8 +2509,9 @@ for one that cannot tell (the branch follows no branch of a remote any more, HEA
 set right, …`. `Close` has the keyboard from the start; for an update that can be applied as it
 is (`available`, not `blocked`) `Update now` stands before it (milestone 2, 16.5 "Update now": it
 sends `act update-apply` with the commit drawn, and a refusal is drawn under the lines; Tab goes
-round the two). While an update runs every connected page shows the dialog's running form (one
-line, no button, Esc does nothing, every window chord says `skydeck is being updated`), lifted
+round the two). While an update runs every connected page closes any other dialog it shows and
+shows the dialog's running form (one line, no button, Esc does nothing, every window chord says
+`skydeck is being updated`), lifted
 when the connection is lost or ends fatal and at every welcome (6.3); a bar under the title bar
 (`#update-result`) says how the last update from the window ended until its × dismisses it on
 every page (`act update-seen`). The look's
@@ -4757,7 +4758,11 @@ command's, because the command is what runs:
   end, says `available`, not blocked, with that commit — else the new state goes to every page and
   the answer is the reason (the `blocked` line and `; open the dialog again once that is set
   right`, or `the window's last check does not name that commit; open the dialog again`). The
-  commit the page sends is only compared; the server never passes it to git.
+  commit the page sends is only compared; the server never passes it to git. The apply compares
+  `to` only: when HEAD was moved back to an older ancestor between the dialog and the click (a
+  `git reset` or a checkout by hand), the fast-forward to `to` also brings back commits that were
+  installed before and that the dialog did not list. While an update runs or is being started,
+  Check now (`act update-check`) and the daily check start nothing and answer the state as it is.
 - **The start.** `kv window_update_run` says `applying` (10.2) and every page is told before
   anything is started; one line goes to `<stateDir>/update.log` (`update to <id> started from the
   window`; rotated at 1 MiB as the server's logs are, 4.2); then the process, with the **server's
@@ -4776,7 +4781,7 @@ command's, because the command is what runs:
   entry, takes `applying` back and answers `the update could not be started (<kind>); run skydeck
   update in a terminal of your own`.
 - **`--from-window <commit>`** (a flag the usage text does not name; with `--check` a usage
-  error; refused under `CLAUDECODE` as the command is) changes three things and nothing else. The
+  error; refused under `CLAUDECODE` as the command is) changes these things and nothing else. The
   look makes **no fetch** (nothing can wait at a prompt, the network is not used) and the
   upstream must be at `<commit>`, else `<upstream> is at <id>, not at <id>, the commit the window
   listed; check again in the window; nothing was changed`. The **outcome of the merge** is written
@@ -4791,8 +4796,13 @@ command's, because the command is what runs:
   of your own to restart the window for it`. **Nothing is recorded after the bring-back**: what
   `skydeck window` did is in the log alone. A write that fails is one line on stderr (the log),
   and the entry then still says `applying`. The entry names its checkout (`checkoutRoot`: the
-  real path, so a path through a link and the one Node resolved cannot differ). The third
-  change: its lines go to its standard output and error, which are the log.
+  real path, so a path through a link and the one Node resolved cannot differ). A page asked
+  for the update, so step (a) must stop this checkout's server: when it stopped none (none runs,
+  the one that runs is another checkout's, or the database was written by a newer skydeck) nothing
+  is merged, and the line — `<why>, so the update started from the window was not applied;
+  nothing was changed` — is recorded as `failed`; and step (c) brings the window back whenever
+  (a) stopped a server, whatever its page count said (a `GET /status` that did not answer counts
+  0). Its lines go to its standard output and error, which are the log.
 - **The outcomes.** A server that starts reads the entry of its checkout, keeps it as the result
   and removes it: `applied` → `updated to <id>`; `failed` → its line; still `applying` (the
   updater never said, or could not write) → `an update started from the window at <time> did not
@@ -4802,16 +4812,21 @@ command's, because the command is what runs:
   ended without saying how (exit <n>); see <log>`, and an entry of another checkout is left as it
   is), takes `applying` back, looks again and tells every page; once its stop has begun it does
   nothing. The result goes with every `update` message until a page dismisses it (`act
-  update-seen`). So: it worked — the new server is another build, the page reloads itself (8.2.2)
+  update-seen`). A result is shown at a start only once its entry is removed: one whose removal
+  fails (the store busy) stays for the next start, which shows it then. When the removal fails
+  after an updater that ended while the server ran, the result is shown at once and can be shown
+  once more at the next start. So: it worked — the new server is another build, the page reloads itself (8.2.2)
   and its bar says `updated to <id>`; git refused the merge, the checkout as it was — the window
   comes back on the old code (the same build: no reload, 6.3's "restarted") and the bar gives the
   line; refused before the stop — the server never stopped, the lock goes and the bar gives the
   line; no server comes back (the checkout may not be as it was, `skydeck window` failed) — the
   page cannot be told, so it knows beforehand: 6.3's bar names the log first and `skydeck window`
   second, and the next server that is started shows the recorded line.
-- **Several pages.** `applying` reaches every page before the server stops; each shows the
-  dialog's running form (`skydeck is being updated to <id>. The window comes back by itself.`, no
-  button, the page inert, every window chord answered `skydeck is being updated`). The form and
+- **Several pages.** `applying` reaches every page before the server stops; each closes any other
+  dialog it shows (the settings screen, "Mark done", the switcher, the editor — a text half typed
+  there is dropped) and shows the dialog's running form (`skydeck is being updated to <id>. The
+  window comes back by itself.`, no button, the page inert, every window chord answered `skydeck
+  is being updated`), so that no key and no click reaches anything under it. The form and
   the lock hold only while the page is connected and told `applying`: they are lifted when the
   connection is lost (6.3), when it ends fatal (8.2.2: a new build whose page cannot reload because
   its key is not stored, a key that is not valid, another protocol — such a page never gets

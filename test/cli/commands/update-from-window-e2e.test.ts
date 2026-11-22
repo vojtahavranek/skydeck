@@ -381,6 +381,14 @@ describe('Update now end to end: a real server, the real launcher, a real fast-f
     assert.equal(after.build, before.build, 'the same build');
     assert.equal(h.c.id(), old, 'HEAD unmoved');
     assert.equal(readFileSync(join(h.root, 'new.txt'), 'utf8'), 'my own\n');
+    // The updater's last line comes once its `skydeck window` has seen the page come back: the
+    // cleanup starts only after it, as in the first case.
+    const logPath = join(h.d.deck.places.stateDir, 'update.log');
+    await until(
+      () => /; the checkout is as it was\n$/.test(readFileSync(logPath, 'utf8')),
+      'update.log ends with the refused merge',
+      2 * WAIT_MS,
+    );
   });
 
   test('a tracked file changed between the check and the click: update-apply refused, nothing started, the server never stopped', async (t) => {

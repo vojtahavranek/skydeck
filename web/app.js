@@ -1048,7 +1048,7 @@ function edit(what, sessionId, key, code) {
  * holder gets it — at once, without waiting for a list.
  */
 function dialogClosed() {
-  appRoot.inert = false;
+  appRoot.inert = modal(); // F38: the running form of an update may stand over it
   state.openedBy = '';
   if (!broughtTakesKeyboard()) {
     giveKeyboard();
@@ -1109,11 +1109,18 @@ function showUpdateResult(result) {
 }
 
 /**
- * Milestone 2: an update runs. The dialog's running form over the inert page, whichever dialog
- * was open; the keyboard is given back where it was once it is lifted.
+ * Milestone 2: an update runs. Every other dialog is closed (Settings, "Mark done", the
+ * switcher, the editor with what was typed in it), then the dialog's running form stands over the
+ * inert page; the keyboard is given back where it was once it is lifted.
  * @param {{ to: string; sinceNs: string }} applying
  */
 function applyingShown(applying) {
+  // Every other dialog goes first (a text half typed in the editor is dropped): nothing but the
+  // running form takes a key or a click while an update runs.
+  if (settingsDialog.shown()) settingsDialog.escape();
+  if (ender.shown()) ender.cancel();
+  if (switcher.shown()) switcher.close();
+  if (editor.shown()) editor.close();
   if (state.updateApplying === null && !updateDialog.shown()) {
     help.hide();
     state.updateFrom = document.activeElement;
@@ -1213,7 +1220,7 @@ function openSettings() {
  * to the zone's holder; a terminal this page's resume brought meanwhile takes it first.
  */
 function settingsClosed() {
-  appRoot.inert = false;
+  appRoot.inert = modal(); // F38: the running form of an update may stand over it
   state.openedBy = '';
   const from = state.settingsFrom;
   state.settingsFrom = null;
@@ -1270,7 +1277,7 @@ function switcherText(value) {
  * brought meanwhile (E11); after a pick, `switcherPick` moves it on.
  */
 function switcherClosed() {
-  appRoot.inert = false;
+  appRoot.inert = modal(); // F38: the running form of an update may stand over it
   state.openedBy = '';
   const from = state.switcherFrom;
   state.switcherFrom = null;
@@ -1464,7 +1471,7 @@ function openEnder(row, fromList) {
  * @param {'end' | 'keep' | 'cancel' | 'gone'} choice
  */
 function enderClosed(choice) {
-  appRoot.inert = false;
+  appRoot.inert = modal(); // F38: the running form of an update may stand over it
   const from = state.enderFrom;
   state.enderFrom = null;
   if (broughtTakesKeyboard()) {
