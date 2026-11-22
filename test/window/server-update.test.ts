@@ -74,7 +74,6 @@ describe('the check on a running server', () => {
     const a = await connectTestPage(t, k.d, server.server);
     const current = await updateWhere(a, (u) => u.check !== null, 'the start check');
     assert.equal(current.check?.state, 'current', JSON.stringify(current));
-    assert.equal(current.auto, true);
     assert.match(
       current.check.summary,
       /^skydeck is up to date \(main at [0-9a-f]{7}, as origin\/main\)$/,
@@ -115,7 +114,6 @@ describe('the check on a running server', () => {
     const server = await k.start();
     const a = await connectTestPage(t, k.d, server.server);
     const first = await a.next('update', 'the update after start', WAIT_MS);
-    assert.equal(first.update.auto, false);
     assert.equal(first.update.check, null);
     await sleep(2500); // a few ticks
     assert.equal(k.c.id('origin/main'), before, 'the remote-tracking ref has not moved');
@@ -128,6 +126,54 @@ describe('the check on a running server', () => {
 });
 
 describe("the server's stop during a check", () => {
+  test("a stop during the dialog's look: the git call that runs gets SIGTERM, no further one starts, the stop ends in time", async (t) => {
+    const k = checked(t, 'off');
+    const started = join(k.d.s.root, 'status-started');
+    const termed = join(k.d.s.root, 'status-termed');
+    const calls = join(k.d.s.root, 'git-calls');
+    // The sandbox's git: `status` traps TERM (a marker, exit 143) and would wait 30 s; every
+    // other call is the real git's, and every call is counted.
+    rmSync(join(k.d.s.bin, 'git'));
+    writeFileSync(
+      join(k.d.s.bin, 'git'),
+      [
+        '#!/bin/sh',
+        `echo "$*" >> '${calls}'`,
+        'for a in "$@"; do',
+        '  if [ "$a" = status ]; then',
+        `    trap "echo termed > '${termed}'; exit 143" TERM`,
+        `    echo started > '${started}'`,
+        '    sleep 30 >/dev/null 2>&1 &',
+        '    wait',
+        '    exit 0',
+        '  fi',
+        'done',
+        `exec '${k.c.gitPath}' "$@"`,
+        '',
+      ].join('\n'),
+    );
+    chmodSync(join(k.d.s.bin, 'git'), 0o755);
+    const server = await k.start();
+    const page = await connectTestPage(t, k.d, server.server);
+    void page.act({ kind: 'update-look' }, WAIT_MS).catch(() => undefined);
+    await until(() => existsSync(started), 'the look reached status', WAIT_MS);
+    const before = readFileSync(calls, 'utf8').split('\n').length;
+
+    const at = Date.now();
+    await server.server.stop('the test stops it');
+    const took = Date.now() - at;
+
+    // Without the stop's signal the call would run until its own 10 s were over.
+    assert.ok(took < 8_000, `the stop took ${took} ms`);
+    assert.equal(readFileSync(termed, 'utf8'), 'termed\n');
+    assert.equal(
+      readFileSync(calls, 'utf8').split('\n').length,
+      before,
+      'no git call after the stop',
+    );
+    assert.equal(k.d.deck.store.getKv('window_update_check'), null);
+  });
+
   test('SIGTERM first: a git that traps it ends within the grace, though a helper of its holds the pipe; nothing is stored', async (t) => {
     const k = checked(t, 'daily');
     const marker = join(k.d.s.root, 'git-termed');

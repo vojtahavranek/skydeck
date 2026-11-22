@@ -131,7 +131,13 @@ describe("lookForUpdate, the window's order (tolerant)", () => {
     for (const [over, line] of cases) {
       const l = looker(t, over);
       const looked = await l.look(QUIET, true);
-      assert.deepEqual(looked, { kind: 'cannot', line, head: null });
+      assert.deepEqual(looked, {
+        kind: 'cannot',
+        line,
+        head: null,
+        failed: false,
+        fetchFailed: null,
+      });
       assert.ok(!l.trace().includes('fetch'));
     }
     const notCheckout = looker(t, { toplevel: null });
@@ -139,13 +145,37 @@ describe("lookForUpdate, the window's order (tolerant)", () => {
       kind: 'cannot',
       line: `${notCheckout.root} is not a git checkout; update it the way it was installed`,
       head: null,
+      failed: false,
+      fetchFailed: null,
     });
     const missing = looker(t, { answers: { 'rev-parse --show-toplevel': { notFound: true } } });
     assert.deepEqual(await missing.look(QUIET, true), {
       kind: 'cannot',
       line: 'git was not found on PATH; skydeck update needs it',
       head: null,
+      failed: true,
+      fetchFailed: null,
     });
+  });
+
+  test('a git call that fails or times out is a cannot that failed; a state of the checkout is not', async (t) => {
+    const timedOut = looker(t, {
+      answers: { 'rev-parse --show-toplevel': { code: null, timedOut: true } },
+    });
+    const slow = await timedOut.look(QUIET, true);
+    assert.ok(slow.kind === 'cannot' && slow.failed, JSON.stringify(slow));
+    const failing = looker(t, {
+      answers: { 'symbolic-ref --quiet HEAD': { code: 128, stderr: 'fatal: bad\n' } },
+    });
+    assert.deepEqual(await failing.look(QUIET, true), {
+      kind: 'cannot',
+      line: 'git symbolic-ref failed: fatal: bad; nothing was changed',
+      head: null,
+      failed: true,
+      fetchFailed: null,
+    });
+    const detached = await looker(t, { branch: null }).look(QUIET, true);
+    assert.ok(detached.kind === 'cannot' && !detached.failed);
   });
 
   test("fetch 'none' makes no fetch call and no look after one", async (t) => {
@@ -208,7 +238,22 @@ describe("lookForUpdate, the window's order (tolerant)", () => {
       kind: 'cannot',
       line: 'this checkout changed while git fetch ran (main at fedcba9); run skydeck update again',
       head: OLD,
+      failed: false,
+      fetchFailed: null,
     });
+  });
+
+  test('a fetch that failed is not lost when the look then ends as changed while it ran', async (t) => {
+    const l = looker(t, {
+      afterFetch: { head: NEW },
+      quietFetch: { code: 128, stderr: 'fatal: gone\n' },
+    });
+
+    const looked = await l.look(QUIET, true);
+
+    assert.ok(looked.kind === 'cannot');
+    assert.equal(looked.failed, false);
+    assert.equal(looked.fetchFailed, 'git fetch from origin failed: fatal: gone');
   });
 
   test('the database line comes with report() for a commit that changes the upgrade steps', async (t) => {
@@ -231,12 +276,16 @@ describe("lookForUpdate, the command's order (not tolerant)", () => {
       kind: 'cannot',
       line: "git fetch from origin failed (git's own message is above); nothing was changed",
       head: OLD,
+      failed: true,
+      fetchFailed: null,
     });
     const quiet = looker(t, { quietFetch: { code: 1, stderr: 'fatal: no\n' } });
     assert.deepEqual(await quiet.look(QUIET, false), {
       kind: 'cannot',
       line: 'git fetch from origin failed: fatal: no',
       head: OLD,
+      failed: true,
+      fetchFailed: 'git fetch from origin failed: fatal: no',
     });
   });
 
@@ -247,6 +296,8 @@ describe("lookForUpdate, the command's order (not tolerant)", () => {
       kind: 'cannot',
       line: CHANGES,
       head: null,
+      failed: false,
+      fetchFailed: null,
     });
     assert.deepEqual(l.trace(), ['rev-parse', 'symbolic-ref', 'for-each-ref', 'status']);
   });
@@ -258,6 +309,8 @@ describe("lookForUpdate, the command's order (not tolerant)", () => {
       kind: 'cannot',
       line: 'this checkout has 1 commit that origin/main does not have; update it with git yourself',
       head: OLD,
+      failed: false,
+      fetchFailed: null,
     });
   });
 });

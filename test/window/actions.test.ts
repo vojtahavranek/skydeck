@@ -1849,7 +1849,7 @@ test("resume is refused while a lost terminal's program may still run (task 82):
 
 describe("F38's update-check and update-look (S2 16.5)", () => {
   const STATE: UpdatePayload = {
-    auto: true,
+    checkedAtNs: '1',
     checking: false,
     check: { state: 'current', summary: 'skydeck is up to date (main at 0123456, as origin/main)' },
     fetchedAtNs: '1',

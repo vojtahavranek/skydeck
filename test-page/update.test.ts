@@ -7,7 +7,7 @@
 // repository beside it; the switch off, so that only Check now fetches. Never a real home or the
 // network.
 import assert from 'node:assert/strict';
-import { renameSync, writeFileSync } from 'node:fs';
+import { renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -350,13 +350,102 @@ test('the update notice (F38, S2 16.5)', async (t) => {
       await openSettings(w.l.page);
       const lines = await checkNow(
         w.l.page,
-        /^Last check: the branch main follows no branch of a remote/,
+        /^Last check: [01]s ago — the branch main follows no branch of a remote/,
       );
-      assert.deepEqual(lines, [
-        'Last check: the branch main follows no branch of a remote; update it with git yourself',
-      ]);
+      assert.equal(lines.length, 1);
+      assert.match(
+        lines[0] ?? '',
+        /^Last check: [01]s ago — the branch main follows no branch of a remote; update it with git yourself$/,
+      );
       assert.equal(await noticeShown(w.l.page), false);
       assert.equal(await noticeShown(w.other), false);
+      assert.deepEqual(w.l.problems, []);
+    },
+  );
+
+  await t.test(
+    'while a check runs the block says Checking…, drawn from the update every page is told',
+    async (t) => {
+      const w = await world(t, chromium);
+      // The sandbox's git, from now on: the fetch waits two seconds, so that the check is seen
+      // running; every call is the real git's.
+      const bin = join(w.l.d.s.bin, 'git');
+      rmSync(bin);
+      writeFileSync(
+        bin,
+        [
+          '#!/bin/sh',
+          'for a in "$@"; do [ "$a" = fetch ] && sleep 2; done',
+          `exec '${w.c.gitPath}' "$@"`,
+          '',
+        ].join('\n'),
+        { mode: 0o755 },
+      );
+      w.c.push('a commit to bring', { 'a.txt': 'a\n' });
+      await openSettings(w.l.page);
+      await w.l.page.locator('#settings .settings-check-now').click();
+      await until(
+        async () => (await blockLines(w.l.page)).includes('Checking…'),
+        'the block says Checking…',
+      );
+      // The second page's screen, opened while the check runs, follows the same messages.
+      await openSettings(w.other);
+      await until(async () => {
+        const lines = await blockLines(w.other);
+        return /^Last check: [0-9]+s ago — 1 new commit on origin\/main$/.test(lines[0] ?? '');
+      }, 'the second page follows the end of the check');
+      assert.deepEqual(w.l.problems, []);
+    },
+  );
+
+  await t.test(
+    "opened from the keyboard on its own control: the page inert, Tab stays on Close, the key help refused, another window's check drawn again; Esc gives the keyboard back to the control",
+    async (t) => {
+      const w = await world(t, chromium);
+      w.c.push('the first commit to bring', { 'a.txt': 'a\n' });
+      await openSettings(w.l.page);
+      await checkNow(w.l.page, /^Last check: [01]s ago — 1 new commit on origin\/main$/);
+      await closeSettings(w.l.page);
+      await noticeIs(w.l.page, true, 'the control');
+
+      await w.l.page.locator('#update-button').focus();
+      assert.equal(await active(w.l.page), '#update-button');
+      await w.l.page.keyboard.press('Enter');
+      let lines: string[] = [];
+      await until(async () => {
+        lines = await dialogLines(w.l.page);
+        return lines.length > 0 && lines[0] !== 'Looking at the checkout…';
+      }, 'the dialog answered');
+      assert.match(lines[0] ?? '', /^1 new commit on origin\/main/);
+      const inert = (): Promise<boolean> =>
+        readPage(w.l.page, () => (document.querySelector('.app') as HTMLElement).inert, null);
+      assert.equal(await inert(), true, 'the page under the dialog is inert');
+      const holder = (): Promise<string> =>
+        readPage(w.l.page, () => document.activeElement?.className ?? '', null);
+      for (const key of ['Tab', 'Shift+Tab', 'Tab']) {
+        await w.l.page.keyboard.press(key);
+        assert.equal(await holder(), 'update-close', `${key} stays on Close`);
+      }
+      await w.l.page.keyboard.press('Control+Shift+H');
+      await showsText(w.l.page, '#key-message', /^close the dialog first \(Esc\)$/);
+      assert.equal(
+        await readPage(w.l.page, () => document.getElementById('help')?.hidden, null),
+        true,
+        'the key help stays hidden',
+      );
+
+      // Another window's Check now: the open dialog follows what every page is told.
+      w.c.push('the second commit to bring', { 'b.txt': 'b\n' });
+      await openSettings(w.other);
+      await checkNow(w.other, /^Last check: [01]s ago — 2 new commits on origin\/main$/);
+      await until(
+        async () => /^2 new commits on origin\/main/.test((await dialogLines(w.l.page))[0] ?? ''),
+        'the open dialog is drawn again',
+      );
+
+      await closeDialog(w.l.page);
+      assert.equal(await inert(), false);
+      assert.equal(await active(w.l.page), '#update-button', 'the keyboard back on the control');
       assert.deepEqual(w.l.problems, []);
     },
   );

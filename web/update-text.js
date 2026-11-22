@@ -64,8 +64,9 @@ export function dialogLines(check) {
 }
 
 /**
- * The settings screen's block: when the last check ran and what it says; with a failed last
- * fetch, first when and why, then what is known and from when; `Checking…` while one runs.
+ * The settings screen's block: when the last check ended and what it says; with a failed last
+ * check, first when and why, then what is known and from when (the last fetch that worked);
+ * `Checking…` while one runs.
  * `nowNs`: the server's time now, as the list gives it ('' before the first list: no age).
  * @param {UpdatePayload | null} update
  * @param {string} nowNs
@@ -89,10 +90,11 @@ export function settingsLines(update, nowNs) {
         ? UPDATE_TEXTS.nothingFetched
         : `Known from ${ago(update.fetchedAtNs)}: ${check.summary}`,
     );
-  } else if (update.fetchedAtNs === null) {
+  } else if (update.checkedAtNs === null) {
     lines.push(`Last check: ${check.summary}`);
   } else {
-    lines.push(`Last check: ${ago(update.fetchedAtNs)} — ${check.summary}`);
+    // The time the last check ended, whatever it found (not that of the last fetch that worked).
+    lines.push(`Last check: ${ago(update.checkedAtNs)} — ${check.summary}`);
   }
   if (update?.checking === true) {
     lines.push(UPDATE_TEXTS.checking);

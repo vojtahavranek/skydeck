@@ -75,7 +75,8 @@ describe('the quiet fetch on the fake runner', () => {
     const env = tp.runner.calls[0]?.options?.env ?? {};
     assert.equal(env.GIT_TERMINAL_PROMPT, '0');
     assert.equal(env.GIT_ASKPASS, '');
-    assert.equal('SSH_ASKPASS' in env, false);
+    // An ssh older than 8.4 ignores SSH_ASKPASS_REQUIRE: its askpass is a program that asks nothing.
+    assert.equal(env.SSH_ASKPASS, '/bin/false');
     assert.equal(env.SSH_ASKPASS_REQUIRE, 'never');
     assert.equal(env.GCM_INTERACTIVE, 'never');
     for (const name of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_CONFIG_PARAMETERS', 'GIT_NAMESPACE']) {
@@ -83,6 +84,31 @@ describe('the quiet fetch on the fake runner', () => {
     }
     assert.equal(env.GIT_SSH_COMMAND, 'ssh -i key'); // the owner's, as for git pull
     assert.equal(env.HOME, tp.sandbox.home);
+  });
+
+  test("with the stop's signal every call carries it with the grace, and none starts once it fired", async (t) => {
+    const tp = testPlatform(t);
+    const root = join(tp.sandbox.root, 'checkout');
+    const controller = new AbortController();
+    const git = gitOn(tp.platform, root, { signal: controller.signal });
+
+    await git.run(['status']);
+    await git.output(['rev-parse', 'HEAD']);
+    assert.deepEqual(
+      tp.runner.calls.map((call) => [call.options?.signal, call.options?.killGraceMs]),
+      [
+        [controller.signal, FETCH_GRACE_MS],
+        [controller.signal, FETCH_GRACE_MS],
+      ],
+    );
+    controller.abort();
+    await assert.rejects(git.run(['status']), { name: 'AbortError' });
+    await assert.rejects(git.fetchQuietly('origin'), { name: 'AbortError' });
+    assert.equal(tp.runner.calls.length, 2, 'nothing started after the stop');
+    // Without it (skydeck update) nothing of this is passed.
+    await gitOn(tp.platform, root).run(['status']);
+    assert.equal(tp.runner.calls.at(-1)?.options?.signal, undefined);
+    assert.equal(tp.runner.calls.at(-1)?.options?.killGraceMs, undefined);
   });
 
   test('WSLENV gains GCM_INTERACTIVE once, what is there kept', () => {
@@ -209,7 +235,7 @@ describe('the quiet fetch with the real git', () => {
     assert.match(recorded, /^GIT_ASKPASS=$/m);
     assert.match(recorded, /^SSH_ASKPASS_REQUIRE=never$/m);
     assert.match(recorded, /^GCM_INTERACTIVE=never$/m);
-    assert.doesNotMatch(recorded, /^SSH_ASKPASS=/m);
+    assert.match(recorded, /^SSH_ASKPASS=\/bin\/false$/m);
     assert.deepEqual(locks(join(r.root, '.git')), []);
   });
 

@@ -30,9 +30,9 @@ const CURRENT: UpdateCheckPayload = {
 
 function payload(over: Partial<UpdatePayload> = {}): UpdatePayload {
   return {
-    auto: true,
     checking: false,
     check: AVAILABLE,
+    checkedAtNs: ago(90n),
     fetchedAtNs: ago(90n),
     failure: null,
     ...over,
@@ -91,8 +91,24 @@ describe("the settings screen's block", () => {
       'Last check: 1m ago — 2 new commits on origin/main',
     ]);
     assert.deepEqual(
-      settingsLines(payload({ check: CURRENT, fetchedAtNs: ago(0n) }), String(NOW)),
+      settingsLines(payload({ check: CURRENT, checkedAtNs: ago(0n) }), String(NOW)),
       [`Last check: 0s ago — ${CURRENT.summary}`],
+    );
+  });
+
+  test("the age is the last check's end, whatever it found, not the last fetch that worked", () => {
+    // A check that ended `cannot` a moment ago, after a fetch that worked three days before.
+    const line = 'this checkout is not on a branch (detached HEAD); update it with git yourself';
+    assert.deepEqual(
+      settingsLines(
+        payload({
+          check: { state: 'cannot', summary: line },
+          checkedAtNs: ago(2n),
+          fetchedAtNs: ago(3n * 86_400n),
+        }),
+        String(NOW),
+      ),
+      [`Last check: 2s ago — ${line}`],
     );
   });
 
@@ -119,7 +135,11 @@ describe("the settings screen's block", () => {
     const line = 'the branch main follows no branch of a remote; update it with git yourself';
     assert.deepEqual(
       settingsLines(
-        payload({ check: { state: 'cannot', summary: line }, fetchedAtNs: null }),
+        payload({
+          check: { state: 'cannot', summary: line },
+          checkedAtNs: null,
+          fetchedAtNs: null,
+        }),
         String(NOW),
       ),
       [`Last check: ${line}`],

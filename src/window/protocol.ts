@@ -689,15 +689,16 @@ export type UpdateCheckPayload =
   | { state: 'available'; summary: string; to: string; lines: string[]; blocked: string | null };
 /** F38: the window's check for a newer skydeck, as every page is told it. */
 export interface UpdatePayload {
-  /** The switch: window.updateCheck is "daily". */
-  auto: boolean;
   /** A check runs. */
   checking: boolean;
   /** What the last look says; null: none yet (this server sends no stored one before its own). */
   check: UpdateCheckPayload | null;
+  /** When the last check ended, whatever its result; null: none yet. */
+  checkedAtNs: NsText | null;
   /** When the last fetch that worked ended. */
   fetchedAtNs: NsText | null;
-  /** The last check's fetch failed: when, and why (sanitised, clipped). */
+  /** The last check failed (its fetch, a git call, the check itself): when, and why (sanitised,
+   *  clipped); null once a check ended without a failure. */
   failure: { atNs: NsText; line: string } | null;
 }
 /** F38: the check's state, to a page right after its `start` and to every page on each change. */

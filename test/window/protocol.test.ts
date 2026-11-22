@@ -1494,7 +1494,7 @@ describe("parsePageMessage: F38's acts (S2 16.5)", () => {
 
   test('the update message and the result carrying it compile, and travel as JSON', () => {
     const update: UpdatePayload = {
-      auto: true,
+      checkedAtNs: '1794474000000000000',
       checking: false,
       check: {
         state: 'available',

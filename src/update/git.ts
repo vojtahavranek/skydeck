@@ -74,21 +74,24 @@ export function gitEnv(env: Env): Record<string, string> {
 /**
  * The window's fetch's environment (F38): git's (gitEnv), and nothing that could ask. git asks
  * nothing on a terminal (GIT_TERMINAL_PROMPT=0) and runs no askpass program (an empty GIT_ASKPASS,
- * beside `-c core.askPass=`: whichever git reads first); ssh starts no askpass (SSH_ASKPASS
- * removed, SSH_ASKPASS_REQUIRE=never); Git Credential Manager opens no dialog
+ * beside `-c core.askPass=`: whichever git reads first); ssh starts no askpass that could ask
+ * (SSH_ASKPASS_REQUIRE=never, and SSH_ASKPASS=/bin/false for an ssh older than 8.4); Git Credential Manager opens no dialog
  * (GCM_INTERACTIVE=never). On WSL the usual credential helper is the Windows
  * `git-credential-manager.exe`, which gets only the variables WSLENV names, so GCM_INTERACTIVE is
  * added to WSLENV (what is there kept; not twice). The owner's GIT_SSH_COMMAND stays.
  */
 export function quietEnv(env: Env): Record<string, string> {
   const quiet = gitEnv(env);
-  delete quiet.SSH_ASKPASS;
   const names = (quiet.WSLENV ?? '').split(':').filter((entry) => entry !== '');
   const named = names.some((entry) => entry.split('/')[0] === 'GCM_INTERACTIVE');
   return {
     ...quiet,
     GIT_TERMINAL_PROMPT: '0',
     GIT_ASKPASS: '',
+    // An ssh older than 8.4 does not know SSH_ASKPASS_REQUIRE and, with no terminal and a
+    // DISPLAY, runs SSH_ASKPASS (or its default program when unset): /bin/false asks nothing.
+    // git itself reads GIT_ASKPASS first, whose empty value ends its search.
+    SSH_ASKPASS: '/bin/false',
     SSH_ASKPASS_REQUIRE: 'never',
     GCM_INTERACTIVE: 'never',
     WSLENV: named ? (quiet.WSLENV ?? '') : [...names, 'GCM_INTERACTIVE'].join(':'),
@@ -129,14 +132,26 @@ export interface Git {
   fetchQuietly(remote: string, options?: QuietFetchOptions): Promise<string | null>;
 }
 
-export function gitOn(platform: Platform, root: string): Git {
+/** What only the window's checker gives gitOn (F38). */
+export interface GitOptions {
+  /**
+   * The server's stop: once it fires, a git call that runs gets SIGTERM (SIGKILL after
+   * FETCH_GRACE_MS) and every later call rejects with an AbortError before it starts.
+   */
+  signal?: AbortSignal;
+}
+
+export function gitOn(platform: Platform, root: string, gitOptions: GitOptions = {}): Git {
   const env = gitEnv(platform.env);
+  const { signal } = gitOptions;
+  const stoppable = signal === undefined ? {} : { signal, killGraceMs: FETCH_GRACE_MS };
   let ownSessions = false;
   const run = async (args: readonly string[], timeoutMs = GIT_MS): Promise<RunResult> => {
     const result = await platform.runner.run('git', ['-C', root, ...args], {
       env,
       timeoutMs,
       ...(ownSessions ? { newSession: true } : {}),
+      ...stoppable,
     });
     if (result.notFound) throw new SkydeckError(GIT_NOT_FOUND);
     return result;
@@ -155,6 +170,7 @@ export function gitOn(platform: Platform, root: string): Git {
     interactive: (args) => platform.runner.runInteractive('git', ['-C', root, ...args], { env }),
     async fetchQuietly(remote, options = {}) {
       const timeoutMs = options.timeoutMs ?? FETCH_MS;
+      const fetchSignal = options.signal ?? signal;
       const result = await platform.runner.run(
         'git',
         ['-C', root, '-c', 'core.askPass=', 'fetch', '--quiet', '--', remote],
@@ -164,7 +180,7 @@ export function gitOn(platform: Platform, root: string): Git {
           timeoutMs,
           killGraceMs: FETCH_GRACE_MS,
           maxOutputBytes: FETCH_OUTPUT_BYTES,
-          ...(options.signal === undefined ? {} : { signal: options.signal }),
+          ...(fetchSignal === undefined ? {} : { signal: fetchSignal }),
         },
       );
       if (result.code === 0 && !result.timedOut && !result.notFound) return null;

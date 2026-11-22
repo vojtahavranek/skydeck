@@ -760,7 +760,8 @@ A key inside `window` that skydeck does not know is an error, as everywhere in t
 (`skydeck: /home/you/.config/skydeck/config.json: unknown key "window.prot"`). The server reads the
 file when it starts: after a change by hand, run `skydeck window --restart`. A change in the
 window's Settings ("Configuration" above) of a key that applies at once needs none (turning
-`window.updateCheck` on checks at once when the server has not checked for a day); one of
+`window.updateCheck` on checks at once when the server has not checked for a day, or for an hour
+after a check that failed); one of
 `window.keepAlive` applies after the restart (a keep-alive that runs keeps running until then).
 
 ### Keeping WSL running
@@ -2118,9 +2119,11 @@ branch follows, and restarts the window's server for the new code. In this order
    ("Going back") says how to return to 1a2b3c4`, with the commit the checkout is at (see "Going
    back" below). With nothing new it says `skydeck is up to date (main at 1a2b3c4, as origin/main)` and does nothing
    else: no server is looked at, stopped or started.
-2. **`--check` ends here**, with `run skydeck update to apply it`. Its fetch has changed the
-   checkout's remote-tracking refs (`origin/main`) and nothing else: not your files, not your
-   branch, not the window or the sessions. It also works inside Claude Code.
+2. **`--check` ends here**, with `run skydeck update to apply it`. Its fetch has changed what a
+   `git fetch` changes — the remote-tracking refs (`origin/main`), the tags it follows, and what
+   your own git configuration asks of a fetch (`fetch.prune`, say) — and nothing else: not your
+   files, not the index, not your branch or HEAD, not the window or the sessions. It also works
+   inside Claude Code.
 3. **It stops the window's server** of this checkout (`skydeck: stopped skydeck's window server; 2
    terminals in the window keep running`), then **moves the branch forward** to the commit it
    listed (a fast-forward, never a merge commit), then, when a window was open, **runs the new
@@ -2243,9 +2246,11 @@ More ends, each with exit 1:
 
 ### The window says when there is one
 
-The window's server looks for a newer skydeck when it starts and once a day: a `git fetch` of
-skydeck's own checkout from the remote its branch follows, which changes the remote-tracking refs
-(`origin/main`) and nothing else, as `skydeck update --check` does. It applies nothing.
+The window's server looks for a newer skydeck when it starts and once a day, and an hour after a
+check that failed (no network, say): a `git fetch` of skydeck's own checkout from the remote its
+branch follows, which writes what `skydeck update --check`'s fetch writes — the remote-tracking
+refs (`origin/main`), the tags it follows, and what your git configuration asks of a fetch —,
+never your files, the index or HEAD. It applies nothing.
 
 - **The title bar.** While a newer version is known, every window shows `Update available` right
   before `Settings`. A click opens a dialog that looks at the checkout again (without the network)
@@ -2256,18 +2261,19 @@ skydeck's own checkout from the remote its branch follows, which changes the rem
   `Once that is set right, in a WSL terminal of your own: skydeck update`; when the branch follows
   no branch of a remote any more, `skydeck cannot tell here whether there is an update: …` and the
   same. Its only button is `Close`; Esc closes it.
-- **Settings.** Above the list, the block `Updates` says when the last check ran and what it found
-  (`Last check: 2h ago — 3 new commits on origin/main`), or, when its fetch failed, when and why
+- **Settings.** Above the list, the block `Updates` says when the last check ended and what it
+  found (`Last check: 2h ago — 3 new commits on origin/main`), or, when it failed, when and why
   (`The last check failed 5m ago: git fetch from origin failed: …`) and what is known from the
-  check before. `Check now` checks at once. The switch is `window.updateCheck`: `"daily"` (the
+  last fetch that worked (`Known from 2h ago: …`). `Check now` checks at once. The switch is `window.updateCheck`: `"daily"` (the
   default) or `"off"`, which stops the checks at the start and every day; `Check now` still works.
 - **`skydeck doctor`** prints the same in one `info` line: `update: 3 new commits on origin/main
   (fetched 2h ago); skydeck update applies them`, or `update: skydeck is up to date (…)`, and a
   failed last check beside it. doctor itself uses no network.
 - **It never asks.** The check runs with no terminal, no askpass program and no credential
   manager's dialog (`GCM_INTERACTIVE=never`), so a remote that needs a passphrase or a login is a
-  check that fails (the block and doctor say so), never a prompt; it gives up after 60 seconds.
-  A check that fails hides nothing: an update an earlier check found stays shown.
+  check that fails (the block and doctor say so), never a prompt; it gives up after 60 seconds and
+  is tried again an hour later. A check that fails hides nothing: an update an earlier check found
+  stays shown.
 
 ### Updating by hand
 
@@ -2530,7 +2536,7 @@ file.
 | You see | Do |
 |---|---|
 | `skydeck: the database … was not upgraded: its copy … could not be written (<reason>)` | Before an upgrade skydeck keeps a copy of the database, and this one could not be written: make room on the disk, or move away what is in the way (the reason says which), then run the command again. The database is as it was ("Going back"). |
-| Settings' block `Updates` or `doctor` says `the last check failed …: git fetch from origin failed: <git's line>` | The window's check for a newer skydeck could not fetch: git's line says why (no network, a remote that needs a login or a passphrase, which the check never asks for). Nothing else is affected; `skydeck update --check` in a terminal of your own fetches with your login. `window.updateCheck` `"off"` stops the daily check. |
+| Settings' block `Updates` or `doctor` says `the last check failed …: git fetch from origin failed: <git's line>` | The window's check for a newer skydeck could not fetch: git's line says why (no network, a remote that needs a login or a passphrase, which the check never asks for). Nothing else is affected, and it tries again an hour later; `skydeck update --check` in a terminal of your own fetches with your login. `window.updateCheck` `"off"` stops the daily check. |
 | `git fetch` (yours, the window's, `skydeck update`'s) says `cannot lock ref 'refs/remotes/origin/main': Unable to create '…/.git/refs/remotes/origin/main.lock': File exists` | A git that was cut off left that file: the window's check is ended with SIGTERM first (git then removes its locks) and killed only 2 seconds later, but a machine that went down in the middle of a fetch can leave one. When no git runs in the checkout, remove the file git names (`rm <path>`), then again. A `git pull` of yours at the very moment of a check can meet the check's lock once: run it again. |
 | `skydeck needs Node.js 24.12 or newer but found ...` | Set `SKYDECK_NODE` to a newer `node` (Install, step 2), then run `bin/skydeck install` so that the link `<dataDir>/node` points at it. |
 | `skydeck: cannot run 'node'; install Node.js or set SKYDECK_NODE ...` (exit 127) | There is no `node` on `PATH` and no working link. Install Node.js 24.12 or newer, or set `SKYDECK_NODE`. |

@@ -53,8 +53,19 @@ export interface LookOptions {
 }
 
 export type Looked =
-  /** Nothing is known: U2's line; `head` is HEAD's full id when the look got that far. */
-  | { kind: 'cannot'; line: string; head: string | null }
+  /**
+   * Nothing is known: U2's line; `head` is HEAD's full id when the look got that far. `failed`: a
+   * git call failed or timed out (git missing, an answer that is not one) — not a state of the
+   * checkout (not a checkout, a detached HEAD, no branch of a remote, a change while the fetch
+   * ran). `fetchFailed`: the quiet fetch's line, when it ran and failed before the look ended so.
+   */
+  | {
+      kind: 'cannot';
+      line: string;
+      head: string | null;
+      failed: boolean;
+      fetchFailed: string | null;
+    }
   /** What is known; `blocked`: why it cannot be applied as it is; `fetchFailed`: the fetch's line. */
   | { kind: 'known'; update: Update; blocked: string | null; fetchFailed: string | null };
 
@@ -101,18 +112,43 @@ function aheadLine(ahead: number, upstream: string): string {
 }
 
 /**
+ * A refusal the look makes itself, with its line (U2's words); `failed` when what it says comes
+ * from a git call that failed or timed out rather than from the checkout's state.
+ */
+class Refusal extends SkydeckError {
+  readonly failed: boolean;
+  constructor(line: string, failed: boolean) {
+    super(line);
+    this.failed = failed;
+  }
+}
+
+/** What the look saw before it ended: HEAD, and the quiet fetch's failure. */
+interface Seen {
+  head: string | null;
+  fetchFailed: string | null;
+}
+
+/**
  * The look (U2–U4). The command's order with `tolerant: false`, the window's with `true` (see
  * LookOptions). A SkydeckError of a git call inside is a `cannot` with its message; any other
  * error (an AbortError of the window's stop, a runner that failed) is thrown on.
  */
 export async function lookForUpdate(git: Git, files: Files, options: LookOptions): Promise<Looked> {
-  let head: string | null = null;
+  const seen: Seen = { head: null, fetchFailed: null };
   try {
-    return await look(git, files, options, (id) => {
-      head = id;
-    });
+    return await look(git, files, options, seen);
   } catch (error) {
-    if (error instanceof SkydeckError) return { kind: 'cannot', line: error.message, head };
+    if (error instanceof SkydeckError) {
+      return {
+        kind: 'cannot',
+        line: error.message,
+        head: seen.head,
+        // A refusal says whether git failed; any other SkydeckError is a git call that failed.
+        failed: error instanceof Refusal ? error.failed : true,
+        fetchFailed: seen.fetchFailed,
+      };
+    }
     throw error;
   }
 }
@@ -121,11 +157,11 @@ async function look(
   git: Git,
   files: Files,
   { fetch, tolerant }: LookOptions,
-  sawHead: (id: string) => void,
+  seen: Seen,
 ): Promise<Looked> {
   const { root } = git;
-  const cannot = (line: string): never => {
-    throw new SkydeckError(line);
+  const cannot = (line: string, failed = false): never => {
+    throw new Refusal(line, failed);
   };
   // 2, 3: git is found, and the root is the top of a work tree of its own.
   const top = await git.run(['rev-parse', '--show-toplevel']);
@@ -137,7 +173,11 @@ async function look(
     files.realpath(topDir) === null ||
     files.realpath(topDir) !== files.realpath(root)
   ) {
-    cannot(`${sanitize(root)} is not a git checkout; update it the way it was installed`);
+    // A rev-parse that timed out tells nothing about the checkout: a git failure.
+    cannot(
+      `${sanitize(root)} is not a git checkout; update it the way it was installed`,
+      top.timedOut,
+    );
   }
   // 4: on a branch.
   const ref = await headRef(git);
@@ -172,7 +212,7 @@ async function look(
     if (changes !== null) cannot(changes);
   }
   const oldId = await commitOf(git, 'HEAD');
-  sawHead(oldId);
+  seen.head = oldId;
   // 7: the fetch.
   let fetchFailed: string | null = null;
   if (fetch === 'terminal') {
@@ -180,11 +220,13 @@ async function look(
     if ((await git.interactive(['fetch', '--quiet', '--', remote])) !== 0) {
       cannot(
         `git fetch from ${sanitize(remote)} failed (git's own message is above); nothing was changed`,
+        true,
       );
     }
   } else if (fetch !== 'none') {
     fetchFailed = await git.fetchQuietly(remote, fetch.quiet);
-    if (fetchFailed !== null && !tolerant) cannot(fetchFailed);
+    seen.fetchFailed = fetchFailed; // kept when the look then ends as a `cannot`
+    if (fetchFailed !== null && !tolerant) cannot(fetchFailed, true);
   }
   if (fetch !== 'none') {
     // The fetch can wait at a prompt while the checkout is used: what was looked at before it is

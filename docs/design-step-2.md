@@ -1587,7 +1587,7 @@ Server → page:
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
 | `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; else null); from follow-up F36, for `settings`, `setting-set` and `setting-default` only, `settings`: the settings screen as below; from follow-up F38, for `update-check` and `update-look` only, `update`: the check's state as below. |
 | `settings` | Follow-up F36, 12.13: `settings`, the settings screen, to every page after a change: `path` (the file's), `backup` (where its copy goes), `exists`, `problem` (why the window changes nothing in the file until it is mended by hand, or null) and `settings`, in the server's table's order, each with `key`, `group`, `meaning`, `kind` (`change` or `show`), `names` (`program`, `folder` or `port` for a shown one, else null), `control` (`number`, `text` or `choice`), `choices`, `nullable`, `applies` (`now`, `restart`, `commands` or `install`), `default` and `defaultText`, `inFile`, `value` (exact) and `valueText`, `pending` (the running server uses another value) and `runningText`. Every text but `value` is sanitised. |
-| `update` | Follow-up F38, 16.5: `update`, the check for a newer skydeck, to a page right after its `start` and to every page on each change: `auto` (`window.updateCheck` is `"daily"`), `checking` (one runs), `check` (null: this server's own first check or look has not ended — it sends no stored outcome before), `fetchedAtNs` (when the last fetch that worked ended, or null) and `failure` (`{ atNs, line }` when the last check's fetch failed, else null). `check` is `{ state: 'cannot', summary }` (the look could not tell: its line), `{ state: 'current', summary }` (`skydeck is up to date (<branch> at <id>, as <upstream>)`, or `nothing new on <upstream>: this checkout has <n> commits that it does not have`) or `{ state: 'available', summary, to, lines, blocked }` (`<n> new commits on <upstream>`; `to` the new commit's full id; `lines` exactly `skydeck update --check`'s, the database line included; `blocked` why it cannot be applied as it is, or null). Every text sanitised and clipped to 300 characters. |
+| `update` | Follow-up F38, 16.5: `update`, the check for a newer skydeck, to a page right after its `start` and to every page on each change: `checking` (one runs), `check` (null: this server's own first check or look has not ended — it sends no stored outcome before), `checkedAtNs` (when the last check ended, whatever it found, or null), `fetchedAtNs` (when the last fetch that worked ended, or null) and `failure` (`{ atNs, line }` when the last check failed — its fetch, a git call of its look, or the check itself —, else null). `check` is `{ state: 'cannot', summary }` (the look could not tell: its line), `{ state: 'current', summary }` (`skydeck is up to date (<branch> at <id>, as <upstream>)`, or `nothing new on <upstream>: this checkout has <n> commits that it does not have`) or `{ state: 'available', summary, to, lines, blocked }` (`<n> new commits on <upstream>`; `to` the new commit's full id; `lines` exactly `skydeck update --check`'s, the database line included; `blocked` why it cannot be applied as it is, or null). Every text sanitised and clipped to 300 characters. |
 | `notify` | `sessionId`, `title` (the row's, sanitised), `reason` (the kind: `asks`, `ended` or `finished`, 12.4; the page writes the words), `detail` (the row's attention detail, else null) (13). |
 | `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. `restore-progress`: one report line of a restore, sanitised, to every page, whoever asked for the restore (11.3, 12.7; stage C). |
 | `bye` | `reason` (5.5). |
@@ -1930,15 +1930,17 @@ tick offers the checker a turn. With `window.updateCheck` `"daily"` (read at eac
 in the settings screen applies at once) it starts a check in the background, never delaying the
 tick or the server's start, when none runs and this server has made no check yet — the first tick
 is part of the start, so every server start checks — or its last one ended 24 hours ago or more by
-the wall clock, or the clock stepped back behind it (`CHECK_EVERY_NS`); after a check whose fetch
-failed the wait is `RETRY_AFTER_FAILURE_NS`, which is also 24 hours for now (whether a failure is
-tried again sooner is the owner's to decide). So "daily" is: at every start, then every 24 hours
-from the last check this server made, a Check now included. With the switch `"off"` no check
+the wall clock, or the clock stepped back behind it (`CHECK_EVERY_NS`); after a check that failed
+— its fetch failed, a git call of its look failed or timed out, or the check itself threw (a git
+that could not be started) — the wait is `RETRY_AFTER_FAILURE_NS`, one hour (the owner's decision
+of 2026-11-22). So "daily" is: at every start, then every 24 hours from the last check this
+server made, a Check now included, and an hour after one that failed. With the switch `"off"` no check
 starts by itself; a server that finds a stored outcome of its checkout looks once without the
 network at its first tick, so that a notice does not outlive an update made by hand. A server
 sends no stored outcome before its own first check or look has ended. The checker's own promises
 each end in a catch that logs the failure by kind, so nothing it does can end the server; the
-server's stop ends a running check (SIGTERM, then 2 seconds, 16.5) before the store is closed.
+server's stop ends a running check or look (its git call gets SIGTERM, then 2 seconds, and no
+further one starts, 16.5) before the store is closed.
 
 Cost, from step 1's measurements: an idle refresh is about 16 ms at 3,000 recorded sessions and
 about 60 ms when 3,000 transcripts are listed; at one every 2 seconds that is under 3% of one core.
@@ -2037,7 +2039,7 @@ install.md "Going back").
 | `window_restore_dismissed` | The boot id whose restore the user dismissed with "Not now" (12.7): written only when it is the earlier boot the banner offers; while it names that boot the banner is not shown. |
 | `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; at an orderly stop the server writes it once more as its pages are, and when it dies it stays as the last refresh left it, so that the next server knows that a window may come back (ruled by the plan owner, plan task 74). |
 | `window_favourites` | The new form's favourite flags (12.6, follow-up F15): a JSON array of their texts, in the order they were added, at most 12; absent while there is none (the last one removed takes the entry away). One write is one transaction that reads the list first. A value that is not such an array is read as no favourite, and of an array only the entries 12.6's rule takes are read; the next save writes the list afresh. An older skydeck reads only the keys it knows and leaves this one alone. |
-| `window_update_check` | Follow-up F38 (16.5): what the window's server's last look for a newer skydeck said, as JSON: `{ v: 1, root, lookedAtNs, fetchedAtNs, failure, head, outcome }` — `root` the checkout it looked at (its real path: one database serves every checkout of the user), `fetchedAtNs` when the last fetch that worked ended (null: never), `failure` `{ atNs, line }` while the last check's fetch failed, `head` HEAD's full id at the look, and `outcome` one of `{ kind: 'cannot', line }`, `{ kind: 'current', line }` and `{ kind: 'available', upstream, count, to, lines, blocked }`. Written by the server only, after each check and look; read by it and by `doctor`. Every line in it clipped to 300 characters. A value that is not exactly such a record is read as none, and so is one of another root, which the next look writes over. |
+| `window_update_check` | Follow-up F38 (16.5): what the window's server's last look for a newer skydeck said, as JSON: `{ v: 1, root, lookedAtNs, checkedAtNs, fetchedAtNs, failure, head, outcome }` — `root` the checkout it looked at (its real path: one database serves every checkout of the user), `checkedAtNs` when the last check ended, whatever it found (null: none yet), `fetchedAtNs` when the last fetch that worked ended (null: never), `failure` `{ atNs, line }` while the last check failed, `head` HEAD's full id at the look, and `outcome` one of `{ kind: 'cannot', line }`, `{ kind: 'current', line }` and `{ kind: 'available', upstream, count, to, lines, blocked }`. Written by the server only, after each check and look; read by it and by `doctor`. Every line in it clipped to 300 characters. A value that is not exactly such a record is read as none, and so is one of another root, which the next look writes over. |
 
 ### 10.3 When a turn ends
 
@@ -4022,10 +4024,12 @@ editing the file by hand stay as they are, and the file's format does not change
   accent ground); every text is text, a value only an input's value or text: one with markup stays
   text, a long one wraps, a right-to-left one keeps its order.
 - **Updates** (follow-up F38, 16.5). Above the list, a block `Updates` says what the window's server
-  last found when it looked for a newer skydeck: `Last check: <age> ago — <summary>` (`No check was
-  made yet.`; a look that could not tell and fetched nothing: `Last check: <its line>`); when the
-  last check's fetch failed, first `The last check failed <age> ago: <git's line>`, then `Known from
-  <age> ago: <summary>` (`Nothing was fetched before.`); `Checking…` while a check runs. `Check now`
+  last found when it looked for a newer skydeck: `Last check: <age> ago — <summary>`, the age that
+  of the last check's end, whatever it found (`No check was made yet.`); when the last check
+  failed, first `The last check failed <age> ago: <its line>` (git's, or `skydeck could not check
+  for an update (<kind>)`), then `Known from <age> ago: <summary>`, the age that of the last fetch
+  that worked (`Nothing was fetched before.`); a check that ends without a failure takes that line
+  away; `Checking…` while a check runs. `Check now`
   runs a check at once (`act update-check`), whether `window.updateCheck` is `"daily"` or `"off"`,
   and the block follows every `update` message while the screen is shown. A checkout whose branch
   follows no branch of a remote never shows the title bar's `Update available` (12.1); this block
@@ -4112,7 +4116,7 @@ editing the file by hand stay as they are, and the file's format does not change
 | **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s and stops reading a keeper whose records its screen side has not applied (7.3), so the keeper closes that connection at its send cap and the server reconnects; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
 | **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. The server's own connection waits at most 250 ms for another process's write lock (the commands wait 5 s), so a lock held for long never freezes the server: the piece of work that met it is given up and tried again — the tick's store work at the next tick, an action answers `skydeck's database is busy; try again`, a `hello` is closed with 1013 and the page tries again, and a found keeper's decision (7.3) is put off to the next refresh while its deadline allows; a start that meets it fails at once (5.2), leaving nothing behind (ruled, plan task 23). |
 | **skydeck is updated** | 16.5. |
-| **The check for a newer skydeck fails** (follow-up F38: no network, a remote that needs a login, a remote gone, git missing) | No notice of its own: an update an earlier fetch brought stays shown, and the settings screen's block and `doctor` say that the last check failed, when, and git's line (12.13, 16.3). It never asks for a password or a passphrase and never waits at a prompt; it ends after 60 seconds at most. A check that was cut can leave a ref's `.lock`; 16.5 says what then. |
+| **The check for a newer skydeck fails** (follow-up F38: no network, a remote that needs a login, a remote gone, git missing) | No notice of its own: an update an earlier fetch brought stays shown, and the settings screen's block and `doctor` say that the last check failed, when, and git's line (12.13, 16.3). It never asks for a password or a passphrase and never waits at a prompt; it ends after 60 seconds at most, and a failed check is tried again an hour later. A check that was cut can leave a ref's `.lock`; 16.5 says what then. |
 | **The key is wrong** (after `--new-secret`, a launch address used too late or given up, a stale bookmark) | The page says that its key is not valid and to run `skydeck window` again (8.2.2). |
 | **A launch token is presented twice** | Another program may have the secret: the alarm (8.2.2) — the page, the waiting `skydeck window` and `doctor` all say to run `skydeck window --new-secret`. |
 | **Something else answers on the port** (a program on the Windows side, 15.3) | An open window gets no server proof, sends nothing, and says `something answers on port <n> that is not skydeck's server`. |
@@ -4187,7 +4191,9 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   that checkout again without the network (`act update-look`). Neither carries a field: it cannot
   name a remote, a branch, a path or a program, and nothing it sends reaches a git argument. What
   the fetch brings is what the checkout's remote serves, as for `skydeck update --check`, and it
-  changes the remote-tracking refs and `FETCH_HEAD` only; nothing is applied. Every text of the
+  writes what a `git fetch` writes (16.5: the remote-tracking refs, the tags it follows,
+  `FETCH_HEAD`, what the owner's git configuration asks of a fetch), never the work tree, the
+  index or HEAD; nothing is applied. Every text of the
   dialog and the settings block is git's or skydeck's, sanitised, written as text. A program in a
   terminal cannot press the page's buttons (15.4).
 - **Browser extensions.** An extension that may read `127.0.0.1` pages could read the terminals and
@@ -4547,35 +4553,48 @@ available` (12.1), its dialog, the settings screen's block `Updates` and `Check 
   <upstream>: this checkout has <n> commits that it does not have`).
 - **The fetch that never asks.** `git -C <root> -c core.askPass= fetch --quiet -- <remote>` through
   the runner, with git's environment of step 1 and `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS`
-  (with `-c core.askPass=`: whichever git reads first), no `SSH_ASKPASS` and
-  `SSH_ASKPASS_REQUIRE=never`, and `GCM_INTERACTIVE=never`, also named in `WSLENV` (on WSL the
+  (with `-c core.askPass=`: whichever git reads first, and an empty one ends git's search),
+  `SSH_ASKPASS_REQUIRE=never` and `SSH_ASKPASS=/bin/false` (an ssh older than 8.4 does not know
+  `SSH_ASKPASS_REQUIRE` and, with no terminal and a `DISPLAY` — WSLg sets one —, runs its askpass:
+  then a program that asks nothing; `DISPLAY` itself is left alone, a credential helper may need
+  it), and `GCM_INTERACTIVE=never`, also named in `WSLENV` (on WSL the
   usual credential helper is the Windows `git-credential-manager.exe`, which gets only the
   variables `WSLENV` names); in a session of its own (no controlling terminal: neither git nor ssh
   can open `/dev/tty`, also under `skydeck serve --foreground`), stdin `/dev/null`, 60 seconds, its
   output capped at 16 KiB. The owner's `GIT_SSH_COMMAND` and `core.sshCommand` are not rewritten:
   with no terminal and no askpass ssh cannot ask. It writes what `skydeck update --check` writes:
-  the fetched objects, the remote-tracking refs and `FETCH_HEAD`. Its failure line is `git fetch
+  the fetched objects, the remote-tracking refs, the tags it follows and `FETCH_HEAD`, and what
+  the owner's git configuration asks of a fetch (`fetch.prune`, a `gc --auto` or maintenance it
+  starts); never the work tree, the index or HEAD (git refuses to fetch into the checked-out
+  branch). Its failure line is `git fetch
   from <remote> failed: <git's first line>` (or `no answer within 60 s`), clipped to 300
   characters.
 - **When** (10.1): with `window.updateCheck` `"daily"` (the default, 16.4), at every server start —
   in the background, never delaying it — and then 24 hours after the last check this server made,
-  a Check now included (`CHECK_EVERY_NS`); after a check whose fetch failed the wait is
-  `RETRY_AFTER_FAILURE_NS`, the same 24 hours until the owner decides otherwise. Check now
+  a Check now included (`CHECK_EVERY_NS`); after a check that failed (its fetch, a git call of its
+  look that failed or timed out — not a state of the checkout such as a detached HEAD —, or the
+  check itself, which threw) the wait is `RETRY_AFTER_FAILURE_NS`, one hour. Check now
   (`act update-check`) checks whatever the switch says; with the switch `"off"` a server that finds
   a stored outcome looks once without the network. One check runs at a time; a request while one
   runs joins it. The dialog's look (`act update-look`) runs without the network, so that what it
   says is true now (a change made, a branch switched, a `git pull` since the check).
-- **What a failed fetch leaves.** It hides nothing: what the look says without the network stands,
-  so an update an earlier fetch brought stays shown, and the failure — its line and its time — is
-  kept beside it for the settings screen and `doctor` until a check whose fetch works. A failure
-  makes no notice of its own, and a look that cannot tell shows none.
+- **What a failed check leaves.** It hides nothing: what the look says without the network stands
+  — or, when the look could tell nothing (a git call failed, the check threw), what was known
+  before —, so an update an earlier fetch brought stays shown, and the failure — its line and its
+  time — is kept beside it for the settings screen and `doctor` until a check that ends without
+  one; a failed fetch is kept also when the look after it ends `this checkout changed while git
+  fetch ran`. A failure makes no notice of its own, and a look that cannot tell shows none. The
+  settings screen gives the time the last check ended, whatever it found (`checkedAtNs`), and the
+  time of the last fetch that worked for what is known (`fetchedAtNs`).
 - **What is stored.** `kv window_update_check` (10.2), naming the checkout it is of; a server sends
   no stored outcome before its own first check or look has ended, so the window that comes back
   after an update never shows the notice of the update it just applied.
 - **What a check can leave or meet.** The server's stop (5.5) and the 60 seconds end a check with
   SIGTERM, on which git removes its lock files, and with SIGKILL only 2 seconds later
   (`RunOptions.killGraceMs`), sent to git alone; the runner answers at git's exit, not when its
-  pipes close (an ssh or a credential helper git started may hold them), so the stop waits at most
+  pipes close (an ssh or a credential helper git started may hold them). Every git call of a check
+  and of a look gets the stop's signal (`gitOn`'s `signal`): the one that runs is ended the same
+  way, and no further one starts — the rest of the look is not run. So the stop waits at most
   those 2 seconds. A git that is killed anyway, or dies with the machine, can leave a ref's
   `.lock`, and every later fetch — the window's and the user's own — then fails with `cannot lock
   ref …` until the file git names is removed (install.md, "If something goes wrong"). The user's

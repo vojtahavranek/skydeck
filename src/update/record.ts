@@ -36,9 +36,14 @@ export interface CheckRecord {
   root: string;
   /** When the look ended (ns, decimal). */
   lookedAtNs: string;
+  /** When the last check (a look with the fetch) ended, whatever its result; null: none yet. */
+  checkedAtNs: string | null;
   /** When the last fetch that worked ended; null: never. */
   fetchedAtNs: string | null;
-  /** The last check's fetch failed: when, and its line; null once a check's fetch worked. */
+  /**
+   * The last check failed — its fetch, a git call of its look, or the check itself: when, and its
+   * line; null once a check ends without a failure.
+   */
   failure: { atNs: string; line: string } | null;
   /** HEAD's full id at the look; null when the look did not get that far. */
   head: string | null;
@@ -99,10 +104,20 @@ function isOutcome(value: unknown): value is CheckOutcome {
 /** `value` when it is exactly a CheckRecord, else null. */
 function asRecord(value: unknown): CheckRecord | null {
   if (!isObject(value)) return null;
-  if (!hasKeys(value, ['v', 'root', 'lookedAtNs', 'fetchedAtNs', 'failure', 'head', 'outcome'])) {
+  const keys = [
+    'v',
+    'root',
+    'lookedAtNs',
+    'checkedAtNs',
+    'fetchedAtNs',
+    'failure',
+    'head',
+    'outcome',
+  ];
+  if (!hasKeys(value, keys)) {
     return null;
   }
-  const { v, root, lookedAtNs, fetchedAtNs, failure, head, outcome } = value;
+  const { v, root, lookedAtNs, checkedAtNs, fetchedAtNs, failure, head, outcome } = value;
   const failureOk =
     failure === null ||
     (isObject(failure) &&
@@ -114,6 +129,7 @@ function asRecord(value: unknown): CheckRecord | null {
     !isText(root) ||
     root === '' ||
     !isDecimal(lookedAtNs) ||
+    !(checkedAtNs === null || isDecimal(checkedAtNs)) ||
     !(fetchedAtNs === null || isDecimal(fetchedAtNs)) ||
     !failureOk ||
     !(head === null || isCommit(head)) ||

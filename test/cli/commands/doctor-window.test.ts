@@ -469,6 +469,7 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
       v: 1,
       root,
       lookedAtNs: String(now - 2n * HOUR),
+      checkedAtNs: String(now - 2n * HOUR),
       fetchedAtNs: String(now - 2n * HOUR),
       failure: null,
       head: HEAD,
@@ -547,6 +548,27 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
       (await doctorAt(m)).r,
       'info',
       /^info {5}update: the branch main follows no branch of a remote; update it with git yourself$/,
+    );
+    // A look that could not tell, beside a failed last check: the failure goes on its line too.
+    writeCheck(
+      m.deck.store,
+      entry(m, root(m), {
+        head: null,
+        fetchedAtNs: null,
+        failure: {
+          atNs: String(m.platform.clock.nowNs() - HOUR),
+          line: 'git fetch from origin failed: x',
+        },
+        outcome: {
+          kind: 'cannot',
+          line: 'this checkout changed while git fetch ran (main at 0123456); run skydeck update again',
+        },
+      }),
+    );
+    lineOf(
+      (await doctorAt(m)).r,
+      'info',
+      /^info {5}update: this checkout changed while git fetch ran \(main at 0123456\); run skydeck update again; the last check failed 1h ago: git fetch from origin failed: x$/,
     );
   });
 

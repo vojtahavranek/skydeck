@@ -6,21 +6,24 @@
  *   the one `SKYDECK_TEST_UPDATE_CHECKOUT` names, and without that variable no check or look ever
  *   runs git (S2 17: every root a test runs git on lies inside its sandbox).
  * - A check (network) is the look of src/update/look.ts with the quiet fetch, in the window's
- *   tolerant order; one at a time, a second request joins the first. A fetch that fails hides
- *   nothing: the outcome is what the look says without the network, so an update an earlier fetch
- *   brought stays shown, and the failure — its line and its time — is kept beside it until a check
- *   whose fetch works. A failure makes no notice of its own.
+ *   tolerant order; one at a time, a second request joins the first. A check fails when its fetch
+ *   fails, when a git call of its look fails or times out (not a state of the checkout), or when
+ *   it throws. A failure hides nothing: the outcome is what the look says without the network (or,
+ *   when the look could tell nothing, the outcome before), so an update an earlier fetch brought
+ *   stays shown, and the failure — its line and its time — is kept beside it until a check that
+ *   ends without one. A failure makes no notice of its own.
  * - When: at every tick (each second) with the switch on, when none runs and this server has made
  *   no check yet ("at start") or its last one ended CHECK_EVERY_NS ago or more by the wall clock (or
- *   the clock stepped back behind it); after a check whose fetch failed the wait is
- *   RETRY_AFTER_FAILURE_NS. With the switch off a server that finds a stored outcome looks once
- *   without the network, so that a stale notice does not survive an update made by hand.
+ *   the clock stepped back behind it); after a check that failed the wait is
+ *   RETRY_AFTER_FAILURE_NS, an hour. With the switch off a server that finds a stored outcome looks
+ *   once without the network, so that a stale notice does not survive an update made by hand.
  * - The dialog's look runs without the network and replaces the outcome, keeping the times of the
  *   last fetch and the last failure; while a check runs it starts nothing.
  * - A server sends no stored outcome before its own first check or look has ended.
  * - Nothing it does can end the server: every chain ends in a catch that logs the failure by its
  *   kind (failureKind), never a message; a record that cannot be written or read leaves the state in
- *   memory, still sent; once stop() was called nothing touches the store or the pages again.
+ *   memory, still sent; once stop() was called nothing touches the store or the pages again, a
+ *   git call that runs gets SIGTERM (SIGKILL two seconds later) and no further one starts.
  */
 import type { Ns } from '../platform/types.ts';
 import type { Deck } from '../sessions/deck.ts';
@@ -42,11 +45,8 @@ import type { UpdatePayload } from './protocol.ts';
 
 /** "Daily": a check this long after the last one this server made (S2 10.1). */
 export const CHECK_EVERY_NS = 24n * 60n * 60n * 1_000_000_000n;
-/**
- * The wait after a check whose fetch failed. The same as CHECK_EVERY_NS for now: whether a
- * failure is tried again sooner is the owner's to decide, and a decision changes this one line.
- */
-export const RETRY_AFTER_FAILURE_NS = CHECK_EVERY_NS;
+/** The wait after a check that failed (no network, say): an hour (the owner's decision). */
+export const RETRY_AFTER_FAILURE_NS = 60n * 60n * 1_000_000_000n;
 
 /** What a look without a checkout to look at says (a marked test sandbox without the seam). */
 export const NO_CHECKOUT_LINE = 'no update is looked for in a test sandbox';
@@ -110,16 +110,19 @@ function outcomeOf(looked: Looked): CheckOutcome {
 export function createUpdates(deps: UpdatesDeps): Updates {
   const { deck, log } = deps;
   const { platform } = deck;
+  const controller = new AbortController();
   const checkout = checkoutOf(deck);
   const root = checkout === null ? null : checkoutRoot(platform.files, checkout);
-  const git: Git | null = checkout === null ? null : gitOn(platform, checkout);
-  const controller = new AbortController();
+  // Every git call gets the stop's signal: once it fired none starts, and one that runs ends.
+  const git: Git | null =
+    checkout === null ? null : gitOn(platform, checkout, { signal: controller.signal });
 
-  /** The state in memory: what the last look said (null: none yet), and whether it is shown. */
+  /**
+   * The state in memory: what this server's own last check or look said; null until the first
+   * has ended (a stored outcome is never sent before it).
+   */
   let record: CheckRecord | null = null;
-  /** This server's own first check or look has ended: from then on the outcome is sent. */
-  let shown = false;
-  /** When this server's last check ended (wall clock), and whether its fetch failed. */
+  /** When this server's last check ended (wall clock), and whether it failed. */
   let lastCheck: { atNs: Ns; failed: boolean } | null = null;
   /** The first tick has happened (the switch-off look is made at most once). */
   let started = false;
@@ -127,19 +130,16 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   let looking: Promise<UpdatePayload> | null = null;
   let stopped = false;
 
-  const payload = (): UpdatePayload => {
-    const own = shown ? record : null;
-    return {
-      auto: deck.config.window.updateCheck === 'daily',
-      checking: checking !== null,
-      check: own === null ? null : checkPayload(own),
-      fetchedAtNs: own?.fetchedAtNs ?? null,
-      failure:
-        own?.failure == null
-          ? null
-          : { atNs: own.failure.atNs, line: payloadText(own.failure.line) },
-    };
-  };
+  const payload = (): UpdatePayload => ({
+    checking: checking !== null,
+    check: record === null ? null : checkPayload(record),
+    checkedAtNs: record?.checkedAtNs ?? null,
+    fetchedAtNs: record?.fetchedAtNs ?? null,
+    failure:
+      record?.failure == null
+        ? null
+        : { atNs: record.failure.atNs, line: payloadText(record.failure.line) },
+  });
 
   const tell = (): void => {
     if (stopped) return;
@@ -165,7 +165,6 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   const keep = (next: CheckRecord): void => {
     if (stopped) return;
     record = next;
-    shown = true;
     try {
       writeCheck(deck.store, next);
     } catch (error) {
@@ -174,19 +173,41 @@ export function createUpdates(deps: UpdatesDeps): Updates {
     tell();
   };
 
-  /** A record of `looked` at `nowNs`, the times of the last fetch and failure as `fetched` says. */
-  const recordOf = (
-    looked: Looked,
-    nowNs: Ns,
-    times: Pick<CheckRecord, 'fetchedAtNs' | 'failure'>,
-  ): CheckRecord => ({
-    v: 1,
-    root: root ?? '',
-    lookedAtNs: String(nowNs),
-    ...times,
-    head: looked.kind === 'cannot' ? looked.head : looked.update.oldId,
-    outcome: outcomeOf(looked),
-  });
+  /**
+   * A check ended at `nowNs`: with its look, or with the line of what it threw. It failed when its
+   * fetch failed, when a git call of its look failed (`cannot` with `failed`) or when it threw;
+   * then the outcome before stands where the look could tell nothing, and the failure is kept.
+   */
+  const endCheck = (nowNs: Ns, ended: Looked | { thrown: string }): void => {
+    const before = known();
+    const at = String(nowNs);
+    const thrown = 'thrown' in ended;
+    const failureLine = thrown
+      ? ended.thrown
+      : ended.kind === 'known'
+        ? ended.fetchFailed
+        : (ended.fetchFailed ?? (ended.failed ? ended.line : null));
+    const toldNothing = thrown || (ended.kind === 'cannot' && ended.failed);
+    const fetchWorked = !thrown && ended.kind === 'known' && ended.fetchFailed === null;
+    const what: Pick<CheckRecord, 'lookedAtNs' | 'head' | 'outcome'> = !toldNothing
+      ? {
+          lookedAtNs: at,
+          head: ended.kind === 'cannot' ? ended.head : ended.update.oldId,
+          outcome: outcomeOf(ended),
+        }
+      : before !== null
+        ? { lookedAtNs: before.lookedAtNs, head: before.head, outcome: before.outcome }
+        : { lookedAtNs: at, head: null, outcome: { kind: 'cannot', line: failureLine ?? '' } };
+    lastCheck = { atNs: nowNs, failed: failureLine !== null };
+    keep({
+      v: 1,
+      root: root ?? '',
+      ...what,
+      checkedAtNs: at,
+      fetchedAtNs: fetchWorked ? at : (before?.fetchedAtNs ?? null),
+      failure: failureLine === null ? null : { atNs: at, line: failureLine },
+    });
+  };
 
   /** In a marked sandbox without the seam: the state says so; nothing is stored, git never runs. */
   const noCheckout = (): UpdatePayload => {
@@ -195,12 +216,12 @@ export function createUpdates(deps: UpdatesDeps): Updates {
         v: 1,
         root: '',
         lookedAtNs: String(platform.clock.nowNs()),
+        checkedAtNs: null,
         fetchedAtNs: null,
         failure: null,
         head: null,
         outcome: { kind: 'cannot', line: NO_CHECKOUT_LINE },
       };
-      shown = true;
       tell();
     }
     return payload();
@@ -218,21 +239,7 @@ export function createUpdates(deps: UpdatesDeps): Updates {
       tolerant: true,
     });
     if (stopped) return;
-    const nowNs = platform.clock.nowNs();
-    const before = known();
-    const fetchFailed = looked.kind === 'known' ? looked.fetchFailed : null;
-    const times =
-      looked.kind === 'known' && fetchFailed === null
-        ? { fetchedAtNs: String(nowNs), failure: null }
-        : {
-            fetchedAtNs: before?.fetchedAtNs ?? null,
-            failure:
-              fetchFailed === null
-                ? (before?.failure ?? null)
-                : { atNs: String(nowNs), line: fetchFailed },
-          };
-    lastCheck = { atNs: nowNs, failed: fetchFailed !== null };
-    keep(recordOf(looked, nowNs, times));
+    endCheck(platform.clock.nowNs(), looked);
   };
 
   const check = (): Promise<UpdatePayload> => {
@@ -241,7 +248,18 @@ export function createUpdates(deps: UpdatesDeps): Updates {
     if (checking !== null) return checking;
     const running = runCheck(git)
       .catch((error: unknown) => {
-        if (!stopped) log(`update check: failed (${failureKind(error)})`);
+        if (stopped) return; // the stop's abort: nothing of it is kept
+        const kind = failureKind(error);
+        log(`update check: failed (${kind})`);
+        // A check that threw (a git that could not be started, say) is a failed check: it is
+        // said, and tried again after the hour, not at the next tick.
+        try {
+          endCheck(platform.clock.nowNs(), {
+            thrown: `skydeck could not check for an update (${kind})`,
+          });
+        } catch (again) {
+          log(`update check: its failure could not be kept (${failureKind(again)})`);
+        }
       })
       .then(() => {
         checking = null;
@@ -262,12 +280,18 @@ export function createUpdates(deps: UpdatesDeps): Updates {
       const looked = await lookForUpdate(g, platform.files, { fetch: 'none', tolerant: true });
       if (stopped) return payload();
       const before = known();
-      keep(
-        recordOf(looked, platform.clock.nowNs(), {
-          fetchedAtNs: before?.fetchedAtNs ?? null,
-          failure: before?.failure ?? null,
-        }),
-      );
+      // A look whose git failed tells nothing: what was known stands.
+      if (looked.kind === 'cannot' && looked.failed && before !== null) return payload();
+      keep({
+        v: 1,
+        root: root ?? '',
+        lookedAtNs: String(platform.clock.nowNs()),
+        checkedAtNs: before?.checkedAtNs ?? null,
+        fetchedAtNs: before?.fetchedAtNs ?? null,
+        failure: before?.failure ?? null,
+        head: looked.kind === 'cannot' ? looked.head : looked.update.oldId,
+        outcome: outcomeOf(looked),
+      });
       return payload();
     })()
       .catch((error: unknown) => {

@@ -176,7 +176,6 @@ describe('when a check runs', () => {
     await flush();
     assert.equal(w.fetches(), 0);
     assert.equal(w.runner.calls.length, 0);
-    assert.equal(w.updates.payload().auto, false);
 
     const answer = await w.updates.check();
     assert.equal(w.fetches(), 1);
@@ -191,7 +190,6 @@ describe('when a check runs', () => {
     assert.equal(w.fetches(), 0);
 
     w.setSwitch('daily');
-    assert.equal(w.updates.payload().auto, true);
     w.updates.tick();
     await flush();
 
@@ -424,6 +422,7 @@ describe('the store and the server', () => {
       v: 1,
       root: '/another/checkout',
       lookedAtNs: '1',
+      checkedAtNs: '1',
       fetchedAtNs: '1',
       failure: null,
       head: OLD,
@@ -461,6 +460,7 @@ describe('the store and the server', () => {
           v: 1,
           root,
           lookedAtNs: '1',
+          checkedAtNs: '1',
           fetchedAtNs: '1',
           failure: null,
           head: OLD,
@@ -493,6 +493,7 @@ describe('the store and the server', () => {
           v: 1,
           root,
           lookedAtNs: '1',
+          checkedAtNs: '1',
           fetchedAtNs: '1',
           failure: null,
           head: OLD,
@@ -585,4 +586,228 @@ describe('the store and the server', () => {
     assert.deepEqual(w.logs, []);
     assert.deepEqual(seen, []);
   });
+});
+
+describe('a check that fails (review of milestone 1)', () => {
+  test('the waits: a day after a check, an hour after one that failed', () => {
+    assert.equal(CHECK_EVERY_NS, 24n * 3_600_000_000_000n);
+    assert.equal(RETRY_AFTER_FAILURE_NS, 3_600_000_000_000n);
+  });
+
+  test('a check that throws (a git that cannot be started) is a failed check: said, and tried again an hour later, not at every tick', async (t) => {
+    const w = world(t, {
+      repo: {
+        quietFetch: () =>
+          Promise.reject(Object.assign(new Error('spawn git EAGAIN'), { code: 'EAGAIN' })),
+      },
+    });
+
+    for (let i = 0; i < 10; i++) {
+      w.d.clock.setNs(T0 + BigInt(i) * 1_000_000_000n);
+      w.updates.tick();
+      await flush();
+    }
+    assert.equal(w.fetches(), 1);
+    const state = w.updates.payload();
+    assert.deepEqual(state.failure, {
+      atNs: String(T0),
+      line: 'skydeck could not check for an update (Error (EAGAIN))',
+    });
+    assert.equal(state.checkedAtNs, String(T0));
+    assert.notEqual(state.check, null, 'Settings does not say that no check was made');
+    assert.deepEqual(w.logs, ['update check: failed (Error (EAGAIN))']);
+    w.d.clock.setNs(T0 + RETRY_AFTER_FAILURE_NS - 1n);
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 1);
+    w.d.clock.setNs(T0 + RETRY_AFTER_FAILURE_NS);
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 2);
+  });
+
+  test('a Check now that throws keeps what an earlier check found, the failure beside it', async (t) => {
+    const w = world(t);
+    await w.updates.check();
+    w.repo.quietFetch = () => Promise.reject(new Error('spawn git EAGAIN'));
+    w.d.clock.setNs(T0 + 5n);
+
+    const answer = await w.updates.check();
+
+    assert.equal(answer.check?.state, 'available');
+    assert.equal(answer.fetchedAtNs, String(T0));
+    assert.equal(answer.checkedAtNs, String(T0 + 5n));
+    assert.equal(answer.failure?.line, 'skydeck could not check for an update (Error)');
+    assert.deepEqual(w.stored()?.failure, answer.failure);
+  });
+
+  test('a cannot that a git failure made is a failed check: the outcome before stands, the hour', async (t) => {
+    const w = world(t);
+    await w.updates.check();
+    w.repo.answers['rev-parse --show-toplevel'] = { code: null, timedOut: true };
+    w.d.clock.setNs(T0 + 7n);
+
+    const answer = await w.updates.check();
+
+    assert.equal(answer.check?.state, 'available', 'a timeout tells nothing of the checkout');
+    assert.match(answer.failure?.line ?? '', /is not a git checkout/);
+    assert.equal(answer.failure?.atNs, String(T0 + 7n));
+    delete w.repo.answers['rev-parse --show-toplevel'];
+    w.d.clock.setNs(T0 + 7n + RETRY_AFTER_FAILURE_NS - 1n);
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 1, 'not before the hour');
+    w.d.clock.setNs(T0 + 7n + RETRY_AFTER_FAILURE_NS);
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 2, 'checked again after the hour (the timed-out look made none)');
+  });
+
+  test('a check that ends cannot by a state of the checkout: its own time, and no stale failure', async (t) => {
+    const w = world(t, { repo: { quietFetch: { code: 128, stderr: 'fatal: gone\n' } } });
+    const failed = await w.updates.check();
+    assert.notEqual(failed.failure, null);
+
+    w.repo.branch = null; // detached since
+    w.d.clock.setNs(T0 + 3n * 86_400_000_000_000n);
+    const answer = await w.updates.check();
+
+    assert.deepEqual(answer.check, {
+      state: 'cannot',
+      summary: 'this checkout is not on a branch (detached HEAD); update it with git yourself',
+    });
+    assert.equal(answer.failure, null);
+    assert.equal(answer.checkedAtNs, String(T0 + 3n * 86_400_000_000_000n));
+    // A state of the checkout is no failure: the next check is a day later, not an hour.
+    const calls = w.runner.calls.length;
+    w.d.clock.setNs(T0 + 3n * 86_400_000_000_000n + RETRY_AFTER_FAILURE_NS);
+    w.updates.tick();
+    await flush();
+    assert.equal(w.runner.calls.length, calls);
+  });
+
+  test('a failed fetch is not lost when the look then ends as changed while the fetch ran', async (t) => {
+    const w = world(t, {
+      repo: { quietFetch: { code: 128, stderr: 'fatal: gone\n' }, afterFetch: { head: NEW } },
+    });
+
+    const answer = await w.updates.check();
+
+    assert.equal(answer.check?.state, 'cannot');
+    assert.equal(answer.failure?.line, 'git fetch from origin failed: fatal: gone');
+  });
+
+  test('a stored outcome that cannot be read: the check goes on, one log line', async (t) => {
+    const busy = Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR' });
+    const w = world(t, {
+      deck: (deck) =>
+        deckWith(deck, {
+          store: {
+            getKv: () => {
+              throw busy;
+            },
+          },
+        }),
+    });
+
+    const answer = await w.updates.check();
+
+    assert.equal(answer.check?.state, 'available');
+    assert.deepEqual(w.logs, [
+      'update check: the stored outcome could not be read (Error (ERR_SQLITE_ERROR))',
+    ]);
+  });
+});
+
+describe('a stop in the middle (review of milestone 1)', () => {
+  /** A world whose git calls go through `onCall` with the checker, to stop it at a given call. */
+  function stoppable(
+    t: TestContext,
+    at: (args: readonly string[], fetched: boolean) => boolean,
+  ): { w: World; stopped(): boolean; callsAfter(): number } {
+    let updates: Updates | null = null;
+    let fetched = false;
+    let stopped = false;
+    let after = 0;
+    let root = '';
+    const w = world(t, {
+      repo: {
+        onCall: (call) => {
+          const args = gitArgs(call, root);
+          if (stopped) {
+            after += 1;
+            return;
+          }
+          if (args.includes('fetch')) fetched = true;
+          else if (updates !== null && at(args, fetched)) {
+            stopped = true;
+            void updates.stop();
+          }
+        },
+      },
+    });
+    root = w.root;
+    updates = w.updates;
+    return { w, stopped: () => stopped, callsAfter: () => after };
+  }
+
+  test('a stop after the fetch has answered, in the look that follows: nothing stored or told, no further git call', async (t) => {
+    const s = stoppable(t, (args, fetched) => fetched && args.includes('symbolic-ref'));
+    const told = s.w.told.length;
+
+    await s.w.updates.check();
+    await flush();
+
+    assert.ok(s.stopped(), 'the stop came after the fetch');
+    assert.equal(s.w.d.deck.store.getKv(CHECK_KEY), null);
+    assert.equal(s.w.told.length, told + 1, 'only the start of the check was told');
+    assert.equal(s.callsAfter(), 0);
+    assert.deepEqual(s.w.logs, []);
+  });
+
+  test('a stop during a look: nothing stored or told, no further git call', async (t) => {
+    const s = stoppable(t, (args) => args.includes('for-each-ref'));
+
+    await s.w.updates.look();
+    await flush();
+
+    assert.ok(s.stopped());
+    assert.equal(s.w.d.deck.store.getKv(CHECK_KEY), null);
+    assert.deepEqual(s.w.told, []);
+    assert.equal(s.callsAfter(), 0);
+    assert.deepEqual(s.w.logs, []);
+  });
+});
+
+describe("a stop at the look's last git call (review of milestone 1)", () => {
+  for (const kind of ['check', 'look'] as const) {
+    test(`${kind}: the look answers after the stop, and nothing of it is stored or told`, async (t) => {
+      let updates: Updates | null = null;
+      let root = '';
+      let trees = 0;
+      let stopped = false;
+      const w = world(t, {
+        repo: {
+          onCall: (call) => {
+            // The second ls-tree is the look's last call: the stop comes while it is answered.
+            if (gitArgs(call, root)[0] === 'ls-tree' && ++trees === 2 && updates !== null) {
+              stopped = true;
+              void updates.stop();
+            }
+          },
+        },
+      });
+      root = w.root;
+      updates = w.updates;
+      const told = w.told.length;
+
+      await (kind === 'check' ? w.updates.check() : w.updates.look());
+      await flush();
+
+      assert.ok(stopped);
+      assert.equal(w.d.deck.store.getKv(CHECK_KEY), null);
+      assert.equal(w.told.length, told + (kind === 'check' ? 1 : 0));
+      assert.equal(w.updates.payload().check, null);
+    });
+  }
 });

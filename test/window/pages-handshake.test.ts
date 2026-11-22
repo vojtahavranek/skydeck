@@ -874,7 +874,7 @@ describe('pages: welcome', () => {
 
 describe("pages: F38's update message", () => {
   const STATE: UpdatePayload = {
-    auto: true,
+    checkedAtNs: '1',
     checking: false,
     check: { state: 'current', summary: 'skydeck is up to date (main at 0123456, as origin/main)' },
     fetchedAtNs: '1',
