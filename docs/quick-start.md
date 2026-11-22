@@ -119,9 +119,10 @@ Group, and Flags for claude. **Start** opens it in the window.
 ### Bring an old session back
 
 Click a session under Recent (or under Earlier, once unfolded). The right side shows the command it
-will run. **Resume here**, Enter or a double click resumes it in the window, in its own folder and
-with the flags it was started with (for a session that began before you installed skydeck, they
-are not known, and the right side says so). A single click never resumes anything.
+will run. **Resume here**, Enter in the list (`Focus: list`) or a double click resumes it in the
+window, in its own folder and with the flags it was started with (for a session that began before
+you installed skydeck, they are not known, and the right side says so). A single click never resumes
+anything.
 
 ### Give it a label, a group and a note
 
@@ -137,28 +138,29 @@ next start. The group is, by default, the ticket key at the start of the title, 
 
 ### Mark it done, and find it again
 
-Press `d` in the list (`Focus: list`), or **Done** in the header. The session leaves the list (a running one stays under Open
-until it ends), and a message with **Undo** shows for 5 seconds. Done deletes nothing. For a
-session running in the window it asks first: **End session and mark done** ends that `claude` as
-closing its terminal would, **Mark done, keep it running** (where the keyboard starts) only
-marks it done. The list's footer counts the hidden ones (`2 done hidden · show`): **show**, `a` in the list or the
-switch **Show done** lists them again, and `d` in the list (or **Undone** in the header) on one of them takes
-the mark away. A done session that gets new activity comes back by itself.
+Press `d` in the list (`Focus: list`), or **Done** in the header. The session leaves the list (a
+running one stays under Open until it ends), and a message with **Undo** shows for 5 seconds. Done
+deletes nothing. For a session running in the window it asks first: **End session and mark done**
+ends that `claude` as closing its terminal would, **Mark done, keep it running** (where the keyboard
+starts) only marks it done. The list's footer counts the hidden ones (`2 done hidden · show`):
+**show**, `a` in the list or the switch **Show done** lists them again, and `d` in the list (or
+**Undone** in the header) on one of them takes the mark away. A done session that gets new activity
+comes back by itself.
 
 ### Attach a pull request and a ticket
 
-The pull requests a session touched are attached by themselves. To attach one yourself, press `p` in the list
-(`Focus: list`; or **+ PR**, or **Pull requests**, in the header), paste its whole link, such as
-`https://github.com/example/shop/pull/42`, and press **Attach**. The chip shows the status, read
-with `gh`: `PR · failing`, `PR · review`, `PR · approved` and so on.
+The pull requests a session touched are attached by themselves. To attach one yourself, press `p` in
+the list (`Focus: list`; or **+ PR**, or **Pull requests**, in the header), paste its whole link,
+such as `https://github.com/example/shop/pull/42`, and press **Attach**. The chip shows the status,
+read with `gh`: `PR · failing`, `PR · review`, `PR · approved` and so on.
 
-For the ticket, press `t` in the list (or **+ ticket** in the header) and paste its link. A key alone, such as
-`ABC-123`, works once skydeck knows how a key becomes a link: open **Settings** in the title bar,
-type `https://tickets.example.com/browse/{key}` into `ticketUrl` and press Enter (it applies at
-once). Settings shows every setting of `~/.config/skydeck/config.json`; those that name a program,
-a folder or the port you change in the file itself (and then run `skydeck window --restart`). The ticket's status shows as a chip when the ticket is a GitHub issue,
-or when you name a program that reads it (the guide's
-[A ticket's status](install.md#a-tickets-status)).
+For the ticket, press `t` in the list (or **+ ticket** in the header) and paste its link. A key
+alone, such as `ABC-123`, works once skydeck knows how a key becomes a link: open **Settings** in
+the title bar, type `https://tickets.example.com/browse/{key}` into `ticketUrl` and press Enter (it
+applies at once). Settings shows every setting of `~/.config/skydeck/config.json`; those that name a
+program, a folder or the port you change in the file itself (and then run `skydeck window
+--restart`). The ticket's status shows as a chip when the ticket is a GitHub issue, or when you name
+a program that reads it (the guide's [A ticket's status](install.md#a-tickets-status)).
 
 ### Find a session
 
