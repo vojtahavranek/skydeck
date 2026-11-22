@@ -30,7 +30,7 @@
 // list does; the restore offer sends `act restore` (E12).
 //
 // Follow-up F36 (S2 12.13): the settings screen of web/settings.js, opened by the title bar's
-// `Settings` and by the switcher's command `> settings`, each through `windowChordGate`. It is modal
+// gear (F39) and by the switcher's command `> settings`, each through `windowChordGate`. It is modal
 // as a dialog is (D2): `.app` is inert under its scrim, every window chord but Ctrl+Shift+H says
 // `close the settings first (Esc)`, Esc closes it, and the keyboard goes back where it was.
 //
@@ -61,7 +61,7 @@ import { cutWords } from './search-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
 import { createSettingsDialog } from './settings.js';
-import { createPaletteSwitch, createThemeSwitch } from './theme.js';
+import { createTheme } from './theme.js';
 import { createToast } from './toast.js';
 
 // S2 8.2.2: before anything else.
@@ -117,8 +117,6 @@ const dom = {
   notifyOn: /** @type {HTMLButtonElement} */ (byId('notify-on')),
   switcher: byId('switcher'),
   switchButton: byId('switch-button'),
-  themeButton: /** @type {HTMLButtonElement} */ (byId('theme-button')),
-  paletteButton: /** @type {HTMLButtonElement} */ (byId('palette-button')),
   measure: byId('cell-measure'),
 };
 /** The page under a dialog: inert while one is shown (D2), so that nothing in it takes the keyboard. */
@@ -313,10 +311,23 @@ const ender = createEndDialog(dom.endDialog, {
   gone: (text) => toast.show(text, null),
   closed: (choice) => enderClosed(choice),
 });
+// Follow-up F13: the window's theme (web/theme.js), chosen in the settings screen's Appearance
+// (F39). Whenever the page's colours may have changed — a choice, another window's change, the
+// system's scheme while the page follows it — the server is told them again (`theme`), so that it
+// answers OSC 10 / 11 with the colours the terminals have (S2 7.2); while the connection is down,
+// the next `start` carries them. The terminal view repaints its terminals by itself (it watches
+// <html data-theme> and the colour themes' attributes).
+const pageTheme = createTheme({
+  changed: () => {
+    send({ t: 'theme', theme: theme() });
+  },
+});
 // F36: the settings screen (web/settings.js).
 const settingsDialog = createSettingsDialog(dom.settings, {
   act: (action) => act(action),
   closed: () => settingsClosed(),
+  say: (text) => say(text),
+  theme: pageTheme,
 });
 // Stage B (B15): a click on a notification passes the gate of a window chord, then selects. A
 // session this page's list does not show (its filter, the folded Earlier) and that has no terminal
@@ -398,27 +409,12 @@ dom.switchButton.addEventListener('click', () => {
     openSwitcher();
   }
 });
-// F36: the title bar's `Settings`, through the same gate; it takes no keyboard on a click either.
+// F36: the title bar's gear (F39), through the same gate; it takes no keyboard on a click either.
 dom.settingsButton.addEventListener('click', () => {
   if (windowChordGate('settings')) {
     openSettings();
   }
 });
-// Follow-up F13: the title bar's theme switch (web/theme.js). Whenever the page's colours may have
-// changed — a click, another window's change, the system's scheme while the page follows it — the
-// server is told them again (`theme`), so that it answers OSC 10 / 11 with the colours the
-// terminals have (S2 7.2); while the connection is down, the next `start` carries them. The
-// terminal view repaints its terminals by itself (it watches <html data-theme> and the colour
-// themes' attributes). A click passes no gate: it moves no keyboard and changes no selection. The
-// colour themes' switch beside it (S2 12.1) tells the server the same way.
-/** @type {{ changed(): void }} */
-const coloursChanged = {
-  changed: () => {
-    send({ t: 'theme', theme: theme() });
-  },
-};
-createThemeSwitch(dom.themeButton, coloursChanged);
-createPaletteSwitch(dom.paletteButton, coloursChanged);
 
 /** Whether a dialog or the switcher is shown (D2, E11, F30, F36: then the page is modal). */
 function modal() {
@@ -588,8 +584,8 @@ function area(forAct = false) {
 
 /**
  * The terminal's colours as `#rrggbb` (S2 8.2.2 `start.theme`, and follow-up F13's `theme`), from
- * style.css's variables as the page's scheme has them now (the system's, or the title bar's
- * switch).
+ * style.css's variables as the page's scheme has them now (the system's, or the one Settings'
+ * Mode forces).
  * @returns {{ fg: string, bg: string }}
  */
 function theme() {
@@ -1022,7 +1018,7 @@ function broughtTakesKeyboard() {
 // --- F36: the settings screen -------------------------------------------------------------------
 
 /**
- * `Settings` or the switcher's `> settings`, once past the gate: the help hidden, the page inert
+ * The gear or the switcher's `> settings`, once past the gate: the help hidden, the page inert
  * under the dialog, which asks the server for the screen; it remembers what had the keyboard.
  */
 function openSettings() {

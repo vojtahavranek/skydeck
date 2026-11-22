@@ -1,12 +1,10 @@
-// The title bar's theme switch (follow-up F13; S2 12.1): its three states and the stored value
-// each stands for, the order a click walks them in and what the button says (web/theme-text.js,
-// pure); the script that applies the stored choice before the first paint (web/theme-early.js, a
+// The window's theme (follow-up F13; S2 12.1; chosen in Settings' Appearance from F39): its three
+// modes and the stored value each stands for, their order and words (web/theme-text.js, pure); the script that applies the stored choice before the first paint (web/theme-early.js, a
 // classic script, run here in a VM context of its own) reads exactly what theme-text.js reads; and
 // every style sheet of web/ that has a dark scheme writes it twice — the system's, unless forced
 // light, and forced dark — with the same declarations in the same order, so that forced dark is
 // exactly the system's dark (the page suite compares the computed values, test-page/theme.test.ts).
-// The colour themes of the second switch likewise: each scheme's themes and stored values, the
-// order a click walks them, the words; the early script applies each scheme's stored theme by the
+// The colour themes likewise: each scheme's themes and stored values, their order, the words; the early script applies each scheme's stored theme by the
 // same rule; and each theme of style.css and terminal-view.css is laid over its scheme as style.css
 // says (a light one ahead of the dark scheme and within its properties, a dark one a block and its
 // twin).
@@ -16,16 +14,13 @@ import { describe, test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 
 import {
-  nextPalette,
-  nextTheme,
+  MODES,
   PALETTE_KEYS,
   paletteOf,
   PALETTES,
-  paletteTitle,
   paletteWord,
   THEME_KEY,
   themeOf,
-  themeTitle,
   themeWord,
 } from '../../web/theme-text.js';
 import type { Palette, Scheme } from '../../web/theme-text.js';
@@ -52,7 +47,7 @@ const NOT_A_CHOICE: unknown[] = [
   {},
 ];
 
-describe('the states and what the button says (web/theme-text.js)', () => {
+describe('the modes and their words (web/theme-text.js)', () => {
   test('one key of the page’s localStorage', () => {
     assert.equal(THEME_KEY, 'skydeck-theme');
   });
@@ -65,22 +60,9 @@ describe('the states and what the button says (web/theme-text.js)', () => {
     }
   });
 
-  test('a click goes Auto → Light → Dark → Auto', () => {
-    assert.equal(nextTheme('system'), 'light');
-    assert.equal(nextTheme('light'), 'dark');
-    assert.equal(nextTheme('dark'), 'system');
-  });
-
-  test('the word of each state', () => {
-    assert.equal(themeWord('system'), 'Auto');
-    assert.equal(themeWord('light'), 'Light');
-    assert.equal(themeWord('dark'), 'Dark');
-  });
-
-  test('the hover title says the state and what a click does', () => {
-    assert.equal(themeTitle('system'), 'Theme: follows the system. Click for light.');
-    assert.equal(themeTitle('light'), 'Theme: light. Click for dark.');
-    assert.equal(themeTitle('dark'), 'Theme: dark. Click to follow the system.');
+  test('the screen offers Auto, Light and Dark, in this order', () => {
+    assert.deepEqual(MODES, ['system', 'light', 'dark']);
+    assert.deepEqual(MODES.map(themeWord), ['Auto', 'Light', 'Dark']);
   });
 });
 
@@ -96,7 +78,7 @@ const NO_THEME: unknown[] = [
   'dark',
 ];
 
-describe('the colour themes and what their button says (web/theme-text.js)', () => {
+describe('the colour themes and their words (web/theme-text.js)', () => {
   test('one key of the page’s localStorage for each scheme', () => {
     assert.deepEqual(PALETTE_KEYS, {
       light: 'skydeck-palette-light',
@@ -123,23 +105,10 @@ describe('the colour themes and what their button says (web/theme-text.js)', () 
     }
   });
 
-  test('a click goes through the scheme’s themes and back to the default', () => {
-    assert.equal(nextPalette('light', 'default'), 'iris');
-    assert.equal(nextPalette('light', 'iris'), 'default');
-    assert.equal(nextPalette('dark', 'default'), 'iris');
-    assert.equal(nextPalette('dark', 'iris'), 'pleiades');
-    assert.equal(nextPalette('dark', 'pleiades'), 'default');
-  });
-
-  test('the word and the hover title of each theme', () => {
+  test('the name of each theme', () => {
     assert.equal(paletteWord('default'), 'Default');
     assert.equal(paletteWord('iris'), 'Iris');
     assert.equal(paletteWord('pleiades'), 'Pleiades');
-    assert.equal(paletteTitle('light', 'default'), 'Light colours: Default. Click for Iris.');
-    assert.equal(paletteTitle('light', 'iris'), 'Light colours: Iris. Click for Default.');
-    assert.equal(paletteTitle('dark', 'default'), 'Dark colours: Default. Click for Iris.');
-    assert.equal(paletteTitle('dark', 'iris'), 'Dark colours: Iris. Click for Pleiades.');
-    assert.equal(paletteTitle('dark', 'pleiades'), 'Dark colours: Pleiades. Click for Default.');
   });
 });
 
@@ -330,7 +299,7 @@ describe('one set of dark values (H4): the media block and its twin', () => {
         return;
       }
       assert.equal(system.length, 1, 'one default dark block');
-      // No other rule reads the switch: what forced dark draws is the twins' variables only.
+      // No other rule reads the mode: what forced dark draws is the twins' variables only.
       assert.equal(
         css.match(/data-theme/g)?.length,
         2 + 2 * darkThemes,
