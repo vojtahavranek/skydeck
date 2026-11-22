@@ -7,14 +7,14 @@
      title bar (`#notify-on`, plan B task 55); stage C's restore banner (`#banner`) at the top of
      the list zone (plan C task 75); stage E's style sheet of search and the page's own icon and
      manifest (S2 12.12, plan E task 97), and its quick switcher (`#switcher`), the title bar's
-     `Switch…` and the key bar's hint (S2 12.8, plan E task 98); follow-up F13's theme switch
-     beside `Switch…` (`#theme-button`, web/theme.js), the colour themes' switch before it
-     (`#palette-button`), and the classic script that applies their stored choices before the
-     first paint, ahead of the style sheets (web/theme-early.js);
+     `Switch…` and the key bar's hint (S2 12.8, plan E task 98); follow-up F13's classic script that
+     applies the stored theme before the first paint, ahead of the style sheets
+     (web/theme-early.js);
      follow-up F22's line on the right side while the list holds no session (`#right-none`);
      follow-up F30's dialog "Mark done" for a session the window can end (`#end-dialog`);
      follow-up F36's settings screen (`#settings`, web/settings.js), opened by the title bar's
-     `Settings` after `Switch…` (`#settings-button`), with its style sheet. -->
+     gear after `Switch…` (`#settings-button`, F39: an inline drawing, no font's emoji), with its
+     style sheet; from F39 the theme is chosen in it (web/theme.js). -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -43,16 +43,21 @@
         <span class="title-notice" id="tick" hidden></span>
         <span class="title-notice warning" id="keepalive" hidden>WSL is not kept running</span>
         <button class="notify-on" id="notify-on" type="button" hidden>Turn on notifications</button>
-        <button class="theme-button" id="palette-button" type="button">
-          <span class="theme-glyph" aria-hidden="true">✦</span><span class="theme-word"></span>
-        </button>
-        <button class="theme-button" id="theme-button" type="button">
-          <span class="theme-glyph" aria-hidden="true">◐</span><span class="theme-word"></span>
-        </button>
         <button class="switch-button" id="switch-button" type="button">
           ⌕ Switch… <kbd>Ctrl+Shift+P</kbd>
         </button>
-        <button class="settings-button" id="settings-button" type="button">Settings</button>
+        <button
+          class="settings-button"
+          id="settings-button"
+          type="button"
+          title="Settings"
+          aria-label="Settings"
+        >
+          <svg class="gear" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle class="gear-teeth" cx="12" cy="12" r="9" />
+            <circle class="gear-body" cx="12" cy="12" r="6" />
+          </svg>
+        </button>
       </header>
       <div class="bar gone" id="gone" role="alert" hidden>
         <span id="gone-text"></span>

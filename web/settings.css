@@ -1,13 +1,15 @@
-/* Follow-up F36 (S2 12.13): the title bar's `Settings` and the settings screen (web/settings.js),
+/* Follow-up F36 (S2 12.13): the title bar's gear (F39) and the settings screen (web/settings.js),
    a dialog over the page as stage D's (edit.css: .edit-scrim, .edit-dialog, .edit-field). It is
    wider and taller than they are, and scrolls inside itself in a small window; its texts are
    --text and --dim on --panel (and --crash for a refusal, a problem on its own ground), which every
    theme holds to 4.5 : 1. A value is text: a long one wraps anywhere, a right-to-left one keeps its
    order (bdi, dir="auto"). */
+/* The gear: an inline drawing in the text's colour (no font's emoji, so it looks the same on every
+   system), the size of the title bar's text, in the room and the manner of `Switch…`. */
 .settings-button {
   display: flex;
   align-items: center;
-  padding: 2px 8px;
+  padding: 3px 6px;
   border: 1px solid transparent;
   border-radius: 6px;
   background: none;
@@ -23,6 +25,20 @@
 .settings-button:focus-visible {
   outline: 2px solid var(--selline);
   outline-offset: 1px;
+}
+.settings-button .gear {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+}
+/* Eight teeth: a thick ring cut into dashes, 2π·9 / 16 each; the body a ring around the hole. */
+.settings-button .gear-teeth {
+  stroke-width: 3;
+  stroke-dasharray: 3.534 3.534;
+}
+.settings-button .gear-body {
+  stroke-width: 4;
 }
 
 .edit-dialog.settings-dialog {
@@ -165,4 +181,136 @@
 }
 .settings-actions {
   margin-top: 12px;
+}
+
+/* F39: the short screen's groups (web/settings-short.js): a label, its control, `after a restart`
+   and the answer's words on one line — the words beside the control, so that a save when a field
+   is left moves no row under a pointer —, a short hint under it where there is one. */
+.settings-short-group .settings-group {
+  margin-top: 10px;
+}
+.settings-short-group[hidden],
+.short-setting[hidden],
+.short-line [hidden],
+.short-note[hidden],
+.settings-advanced-button[hidden],
+.settings-advanced[hidden] {
+  display: none;
+}
+.short-setting {
+  padding: 6px 0;
+  font-size: 12.5px;
+}
+.short-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+.short-label {
+  flex: 0 0 190px;
+  color: var(--text);
+}
+.short-line .short-control {
+  flex: 0 1 260px;
+  min-width: 0;
+  margin: 0;
+}
+.short-line .short-value {
+  flex: 0 1 260px;
+}
+.short-switch {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.short-switch:focus-visible {
+  outline: 2px solid var(--selline);
+  outline-offset: 2px;
+}
+/* The mark keeps to the room beside its control and wraps there, however long a running value it
+   names; its ground is on its words, line by line. */
+.short-mark {
+  flex: 1 1 120px;
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.short-mark-text {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--wait-bg);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.short-message {
+  flex: 1 1 160px;
+  min-width: 0;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.short-message:empty {
+  display: none;
+}
+.short-message[data-outcome='refused'] {
+  color: var(--crash);
+}
+.short-hint,
+.short-note {
+  margin: 3px 0 0 202px;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.short-note {
+  color: var(--text);
+}
+/* Advanced: a button that opens and closes its section, a triangle before its words. */
+.settings-advanced-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 0;
+  padding: 4px 8px 4px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.settings-advanced-button::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid currentColor;
+}
+.settings-advanced-button[aria-expanded='true']::before {
+  transform: rotate(90deg);
+}
+.settings-advanced-button:hover {
+  border-color: var(--line);
+}
+.settings-advanced-button:focus-visible {
+  outline: 2px solid var(--selline);
+  outline-offset: 1px;
+}
+.settings-advanced {
+  margin-top: 6px;
+  padding-top: 6px;
+}
+/* A narrow window: the label above its control. */
+@media (max-width: 520px) {
+  .short-label {
+    flex-basis: 100%;
+  }
+  .short-hint,
+  .short-note {
+    margin-left: 0;
+  }
 }

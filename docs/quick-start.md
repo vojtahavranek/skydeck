@@ -155,10 +155,11 @@ such as `https://github.com/example/shop/pull/42`, and press **Attach**. The chi
 read with `gh`: `PR · failing`, `PR · review`, `PR · approved` and so on.
 
 For the ticket, press `t` in the list (or **+ ticket** in the header) and paste its link. A key
-alone, such as `ABC-123`, works once skydeck knows how a key becomes a link: open **Settings** in
-the title bar, type `https://tickets.example.com/browse/{key}` into `ticketUrl` and press Enter (it
-applies at once). Settings shows every setting of `~/.config/skydeck/config.json`; those that name a
-program, a folder or the port you change in the file itself (and then run `skydeck window
+alone, such as `ABC-123`, works once skydeck knows how a key becomes a link: open **Settings** with
+the gear at the right end of the title bar, type `https://tickets.example.com/browse/{key}` into
+**Ticket address** and press Enter (it applies at once). Settings shows the settings worth changing
+first, and every other setting of `~/.config/skydeck/config.json` under **Advanced**; those that
+name a program, a folder or the port you change in the file itself (and then run `skydeck window
 --restart`). The ticket's status shows as a chip when the ticket is a GitHub issue, or when you name
 a program that reads it (the guide's [A ticket's status](install.md#a-tickets-status)).
 

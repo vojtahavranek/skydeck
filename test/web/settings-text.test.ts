@@ -8,6 +8,8 @@ import { test } from 'node:test';
 import type { SettingApplies, SettingPayload } from '../../src/window/protocol.ts';
 import {
   appliesText,
+  notSavedText,
+  restartText,
   controlText,
   factsText,
   faithful,
@@ -138,5 +140,60 @@ test('what a control shows of a value: a number as its digits, null as an empty 
   assert.equal(
     controlText(setting({ control: 'text', value: '<b>x</b> \u200f\u05e9\u05dc\u05d5\u05dd' })),
     '<b>x</b> \u200f\u05e9\u05dc\u05d5\u05dd',
+  );
+});
+
+test('F39: a short text refused after the screen closed: its label and the refusal, for the key bar', () => {
+  assert.equal(
+    notSavedText('Ticket address', '"ticketUrl" must be null'),
+    'Ticket address was not saved: "ticketUrl" must be null',
+  );
+});
+
+test('F39: the short screen’s mark: `after a restart`, and while the server uses another value, that value in the control’s words', () => {
+  const keepAlive = {
+    key: 'window.keepAlive',
+    label: 'Keep WSL running',
+    hint: null,
+    control: 'switch',
+    on: 'wsl',
+    off: 'off',
+  } as const;
+  const links = {
+    key: 'window.links',
+    label: 'Open links in',
+    hint: null,
+    control: 'choice',
+    words: { default: 'The default browser', edge: 'Edge' },
+  } as const;
+  const ticket = {
+    key: 'ticketUrl',
+    label: 'Ticket address',
+    hint: null,
+    control: 'text',
+  } as const;
+  assert.equal(
+    restartText(keepAlive, setting({ pending: false, runningText: null })),
+    'after a restart',
+  );
+  assert.equal(
+    restartText(keepAlive, setting({ pending: true, runningText: '"off"' })),
+    'after a restart: still off until then',
+  );
+  assert.equal(
+    restartText(keepAlive, setting({ pending: true, runningText: '"wsl"' })),
+    'after a restart: still on until then',
+  );
+  assert.equal(
+    restartText(links, setting({ pending: true, runningText: '"default"' })),
+    'after a restart: still “The default browser” until then',
+  );
+  assert.equal(
+    restartText(ticket, setting({ pending: true, runningText: '"https://t.example.com/{key}"' })),
+    'after a restart: still “https://t.example.com/{key}” until then',
+  );
+  assert.equal(
+    restartText(ticket, setting({ pending: true, runningText: 'null' })),
+    'after a restart: still empty until then',
   );
 });
