@@ -125,7 +125,7 @@ describe('install: a system without a boot id is refused before anything', () =>
 
       assert.equal(r.code, 0, r.stderr);
       assert.ok(!r.stderr.includes('WSL2'), r.stderr);
-      assert.ok(r.reads.includes('readLine Add them? [y/N] '), r.reads.join('\n'));
+      assert.ok(r.reads.includes('readLine > Add them? [y/N] '), r.reads.join('\n'));
       assert.notDeepEqual(tree(d.sandbox.root), before);
       assert.notEqual(readFileSync(settingsFile(d.places), 'utf8'), SETTINGS);
     });

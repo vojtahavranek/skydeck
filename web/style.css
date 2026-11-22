@@ -46,7 +46,7 @@
   --kbd: #e9ebef;
   --term-bg: #fbfbf9;
   --term-fg: #24292f;
-  --term-font: 'Cascadia Mono', 'Cascadia Code', Consolas, 'Segoe UI Symbol', monospace;
+  --term-font: 'Cascadia Mono', 'Cascadia Code', Consolas, monospace;
   --term-font-size: 14px;
   color-scheme: light;
 }

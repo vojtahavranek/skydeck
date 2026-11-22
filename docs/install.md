@@ -170,63 +170,81 @@ and only when the link is gone does it fall back to `node` on `PATH`.
 bin/skydeck install
 ```
 
-It shows the exact change to Claude Code's settings file and asks once. This goes to stderr (cut
-here to one of the two events):
+It prints in sections, each a heading and its explanation, and each question on a line of its own
+that starts with `> `. First the exact change to Claude Code's settings file, one line per hook
+entry (the event, the whole command as it is written to the file, and its timeout), and the
+question (on stderr):
 
 ```
-skydeck will add these hook entries to /home/you/.claude/settings.json:
-{
-  "SessionStart": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "'/home/you/.local/share/skydeck/skydeck-hook' SessionStart >/dev/null 2>&1 || true",
-          "timeout": 5
-        }
-      ]
-    }
-  ],
-  "SessionEnd": [ ... the same, with SessionEnd ... ]
-}
-Add them? [y/N]
+Hooks
+  skydeck adds these hook entries to /home/you/.claude/settings.json
+  (the file is backed up first):
+
+    SessionStart  '/home/you/.local/share/skydeck/skydeck-hook' SessionStart >/dev/null 2>&1 || true  timeout 5 s
+    SessionEnd    '/home/you/.local/share/skydeck/skydeck-hook' SessionEnd >/dev/null 2>&1 || true    timeout 5 s
+
+> Add them? [y/N]
 ```
 
-Answer `y` (or `yes`). Anything else, or the end of input, is a no: install prints
-`settings not changed`, exits 1 and leaves no skydeck folder, database or link behind (the launcher's
-compile cache, `~/.cache/skydeck`, is made by every run). After a yes, with an existing settings
-file:
+(An entry whose command holds a character a terminal would act on is shown as JSON instead, with
+that character escaped, so that what you see is what is written.) Answer `y` (or `yes`). Anything
+else, or the end of input, is a no: install prints `settings not changed`, exits 1 and leaves no
+skydeck folder, database or link behind (the launcher's compile cache, `~/.cache/skydeck`, is made
+by every run). After a yes, with an existing settings file, the results follow the question (on
+stdout), and the end of the install lists what it changed and what to do next:
 
 ```
-linked /home/you/.local/share/skydeck/skydeck-hook -> /home/you/skydeck/bin/skydeck-hook
-linked /home/you/.local/bin/skydeck -> /home/you/skydeck/bin/skydeck
-linked /home/you/.local/share/skydeck/node -> /home/you/.nvm/versions/node/v24.19.0/bin/node
-added the hook entries to /home/you/.claude/settings.json; the file as it was is kept in /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
+> Add them? [y/N] y
+  linked  /home/you/.local/share/skydeck/skydeck-hook -> /home/you/skydeck/bin/skydeck-hook
+  linked  /home/you/.local/bin/skydeck -> /home/you/skydeck/bin/skydeck
+  linked  /home/you/.local/share/skydeck/node -> /home/you/.nvm/versions/node/v24.19.0/bin/node
+  added   the hook entries to /home/you/.claude/settings.json
+  backup  /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
+
+Claude Code's ← shortcut
+  It is off.
+
+Changed
+  database      /home/you/.local/share/skydeck/skydeck.db (new)
+  link          /home/you/.local/share/skydeck/skydeck-hook
+  link          /home/you/.local/bin/skydeck
+  link          /home/you/.local/share/skydeck/node
+  hook entries  /home/you/.claude/settings.json
+  backup        /home/you/.claude/settings.json.skydeck-backup-20261113T090105Z
+
 skydeck is installed
-Open a new terminal: skydeck is found there (if not, add ~/.local/bin to your PATH).
-skydeck doctor checks the installation.
-skydeck ls lists the sessions: those Claude Code already has, and new ones as they start.
-skydeck window opens the window, from a terminal of your own, not from inside Claude Code.
-The guide: /home/you/skydeck/README.md
+
+Next
+  1. Open a new terminal: skydeck is found there (if not, add ~/.local/bin to your PATH).
+  2. skydeck doctor checks the installation.
+  3. skydeck ls lists the sessions: those Claude Code already has, and new ones as they start.
+  4. skydeck window opens the window, from a terminal of your own, not from inside Claude Code.
+  The guide: /home/you/skydeck/README.md
 ```
 
-The five lines after `skydeck is installed` say what to do next, and come last, after every other
-line, also from an install that finds everything in place (the last one names the README of your
-checkout).
+`Changed` names every file this install changed and the backup of each one it changed rather than
+created: Claude Code's files, the links it made or pointed anew, and the database when this install
+created it. Next comes last, after every other line, also from an install that finds everything in
+place (its last line names the README of your checkout). On a terminal the headings and questions
+are bold and the backup and link lines dim; with `NO_COLOR` set, `TERM=dumb`, or the output going
+to a file or a pipe there is no colour.
 
-When there is no settings file yet (only Claude Code's folder, as can be the case on a fresh machine), the question
-is the same, no backup is made, and the line reads
-`added the hook entries to /home/you/.claude/settings.json (a new file)`. Uninstall later removes
+When there is no settings file yet (only Claude Code's folder, as can be the case on a fresh
+machine), the explanation says `(a new file):` instead, no backup is made, and the result reads
+`added   the hook entries to /home/you/.claude/settings.json (a new file)`. Uninstall later removes
 that file again, as long as nobody changed it since: `removed /home/you/.claude/settings.json: there
 was none before skydeck install`.
 
 When Claude Code already has sessions with old transcripts, install asks one more question,
-**once** (a later install never asks again, whatever you answered), after one line that says what
-"done" does (both on stderr):
+**once** (a later install never asks again, whatever you answered), in a section that says what
+"done" does (on stderr; a yes adds `marked  3 sessions as done (skydeck ls --all shows them)`):
 
 ```
-"Done" only hides a session from skydeck's list: nothing is deleted, it can still be resumed, and skydeck ls --all shows it.
-Mark 3 sessions older than 7 days as done? [y/N]
+Old sessions
+  "Done" only hides a session from skydeck's list: nothing is deleted,
+  it can still be resumed, and skydeck ls --all shows it.
+
+> Mark 3 sessions older than 7 days as done? [y/N]
 ```
 
 "Done" only hides a session from the list. `skydeck ls --all` still shows it, `skydeck undone <ref>`
@@ -248,10 +266,14 @@ the `.claude.json` inside `CLAUDE_CONFIG_DIR` when that is set (inside `claudeHo
 says so and asks (on stderr):
 
 ```
-Claude Code's ← shortcut is on: ← on an empty prompt sends the session to the background and opens agent view.
-← also closes a group in skydeck's list, so a ← meant for the list can send a window terminal's session away.
-Turning it off sets only leftArrowOpensAgents in /home/you/.claude.json, after a backup; agent view itself stays (claude agents, /bg).
-Turn the shortcut off? [y/N]
+Claude Code's ← shortcut
+  It is on: ← on an empty prompt sends the session to the background and opens
+  agent view. ← also closes a group in skydeck's list, so a ← meant for the list
+  can send a window terminal's session away. Turning it off sets only
+  leftArrowOpensAgents in /home/you/.claude.json, after a backup;
+  agent view itself stays (claude agents, /bg).
+
+> Turn the shortcut off? [y/N]
 ```
 
 `y` (or `yes`) turns off only the shortcut. Agent view stays: `claude agents` opens it, `/bg` sends
@@ -259,8 +281,10 @@ a session there, and in a session you attached to from agent view ← on an empt
 detaches. After the `y`:
 
 ```
-turned Claude Code's ← shortcut off in /home/you/.claude.json; the file as it was is kept in /home/you/.claude.json.skydeck-backup-20261113T090105Z
-the shortcut is off for sessions started from now on; a session already running keeps it until it is started again
+> Turn the shortcut off? [y/N] y
+  turned off  the ← shortcut in /home/you/.claude.json
+  backup      /home/you/.claude.json.skydeck-backup-20261113T090105Z
+  note        only for sessions started from now on; a session already running keeps it until it is started again
 ```
 
 Claude Code reads that file when a session starts, so a session that already runs keeps the shortcut
@@ -275,20 +299,21 @@ saved the file in the meantime, install reads it again, and after the third time
 file then stays as the other session left it):
 
 ```
-/home/you/.claude.json kept changing while skydeck wrote it, so skydeck left it as it is; to turn the ← shortcut off: /config in Claude Code ("← opens agents")
+  note        /home/you/.claude.json kept changing while skydeck wrote it, so skydeck left it as it is; to turn the ← shortcut off: /config in Claude Code ("← opens agents")
 ```
 
 Any other answer, or none (a run without a terminal), leaves the file alone:
 
 ```
-the ← shortcut stays on; to turn it off later: /config in Claude Code ("← opens agents"), or skydeck install again
+  note        the ← shortcut stays on; to turn it off later: /config in Claude Code ("← opens agents"), or skydeck install again
 ```
 
-When the shortcut is off already, install prints `Claude Code's ← shortcut is off` and asks nothing.
-When it cannot tell, it asks nothing, changes nothing and says why:
+When the shortcut is off already, the section says `It is off.` and asks nothing. When install
+cannot tell, it asks nothing, changes nothing and says why:
 
 ```
-Claude Code's ← shortcut: left /home/you/.claude.json alone (it does not exist); to turn it off: /config in Claude Code ("← opens agents")
+Claude Code's ← shortcut
+  left /home/you/.claude.json alone (it does not exist); to turn it off: /config in Claude Code ("← opens agents")
 ```
 
 The reason in brackets is one of `it does not exist` (Claude Code has not run yet, or keeps the file
@@ -303,7 +328,7 @@ edit its text safely`. When the write fails, install says so on stderr, still en
 installed` and the next steps, and exits 0:
 
 ```
-could not turn Claude Code's ← shortcut off: cannot write /home/you/.claude.json (EACCES); it was not changed; to turn it off: /config in Claude Code ("← opens agents")
+  note        could not turn Claude Code's ← shortcut off: cannot write /home/you/.claude.json (EACCES); it was not changed; to turn it off: /config in Claude Code ("← opens agents")
 ```
 
 (After `off:` there can also be `cannot write a backup of … (<code>); it was not changed`, `cannot
@@ -324,8 +349,10 @@ To turn the shortcut back on: in Claude Code, `/config`, the option "← opens a
 not copy the backup back: it would also undo whatever Claude Code saved in the file since.
 `skydeck uninstall` leaves the key as it is.
 
-Running `install` again changes nothing: it prints `hook entries already present` and makes no
-backup. While the ← shortcut is on, it asks that question again.
+Running `install` again changes nothing: its Hooks section says `hook entries already present in
+/home/you/.claude/settings.json`, it makes no backup, and in place of `Changed` it says `nothing was
+changed`. While the ← shortcut is on, it asks that question again. When python3 3.9 or newer is
+missing, a section `Window` says that the window needs it and the commands do not.
 
 **4. Put `~/.local/bin` on `PATH`.** Install creates the folder and the link `~/.local/bin/skydeck`.
 
@@ -346,12 +373,17 @@ export PATH="$HOME/.local/bin:$PATH"
 skydeck doctor
 ```
 
-On a healthy machine every line is `ok` or `info`, and the exit code is 0:
+It prints its checks in groups, one line per check under the group's heading, and ends with a
+verdict. On a healthy machine every line is `ok` or `info`, the verdict is `no problems`, and the
+exit code is 0 (the window's own lines, under Window after the terminal's, are left out here):
 
 ```
+Versions
 info     skydeck 0.1.0 (f1fce49, 2026-11-19)
 info     Claude Code 2.1.0
 info     system: Ubuntu 24.04.1 LTS, Linux 6.6.87.2-microsoft-standard-WSL2
+
+Recording
 ok       hook entries present in /home/you/.claude/settings.json
 ok       /home/you/.local/share/skydeck/skydeck-hook -> /home/you/skydeck/bin/skydeck-hook
 ok       Node.js 24.19.0 (/home/you/.nvm/versions/node/v24.19.0/bin/node)
@@ -362,16 +394,30 @@ ok       /home/you/.local/state/skydeck/spool/bad: no files that could not be re
 info     hook.log is empty
 info     scripted runs dropped: 0
 ok       the last refresh skipped nothing
+
+Claude Code
 ok       /home/you/.claude/sessions can be read
 ok       transcripts: 12 files under /home/you/.claude/projects
 ok       Claude Code's ← shortcut is off (/home/you/.claude.json)
+
+GitHub
 ok       gh version 2.69.0 (2025-03-19)
 ok       gh is logged in
+
+Window
 ok       terminal: here (sessions start in the terminal skydeck runs in)
+ok       python3 3.12.3 for the window's terminals
+…
+
+no problems
 ```
 
-`doctor` exits 1 when any line starts with `problem`. "Checking" below says what each check means.
-A `gh` that is not logged in is not healthy either: `doctor` prints
+`doctor` exits 1 when any line starts with `problem`; the verdict then says how many there are
+(`1 problem`, `3 problems`) and repeats each problem line under it. A group with no line to show
+(its checks need a configuration that cannot be read) has no heading. On a terminal the headings
+are bold, `ok` green and `problem` red; with `NO_COLOR` set, `TERM=dumb` or the output going to a
+file or a pipe there is no colour. "Checking" below says what each check means. A `gh` that is
+not logged in is not healthy either: `doctor` prints
 `problem  gh is not logged in, or GitHub cannot be reached (gh auth status: exit 1); run gh auth status to see why`
 and exits 1. That happens, for example, after a clone with an SSH key and no `gh auth login`.
 
@@ -2073,14 +2119,16 @@ resize. It installs nothing; from then on the terminal's size changes only with 
 
 ## Checking: `skydeck doctor`
 
-`doctor` prints one line per check, `ok`, `info` or `problem`, and exits 1 when any line is a
-problem. It does not read new sessions in and creates nothing (but the copy of the database, when
+`doctor` prints one line per check, `ok`, `info` or `problem`, under the heading of its group
+(Versions, Recording, Claude Code, GitHub, Window; a group with no line has no heading), then a
+blank line and the verdict: `no problems`, or `1 problem` / `<n> problems` with each problem line
+again. It exits 1 when any line is a problem. It does not read new sessions in and creates nothing (but the copy of the database, when
 it is the first command to open one that an update upgrades: "Going back"), so it can run on a
 broken installation.
 
 | Check | A `problem` means |
 |---|---|
-| skydeck, Claude Code, system | Never a problem: the first three lines say what runs, so that a report of a problem can say it too. `skydeck` is the line `skydeck --version` prints. `Claude Code` is the first line that `<claudeCommand> --version` prints, without the ` (Claude Code)` at its end (at most 60 characters), or `Claude Code: version not read (<why>)`: `not installed`, `timed out after 5 s`, `exited <n>`, `ended by a signal`, `printed no version`, `could not be started: <code>` (such as `EACCES`), or `the configuration cannot be read` (then nothing is started). `system` is the distribution's name (`PRETTY_NAME` in `/etc/os-release`) and the kernel's release (on WSL it ends in `WSL2`), `unknown` for what cannot be read. |
+| skydeck, Claude Code, system | Never a problem: the three lines under Versions, first of all, say what runs, so that a report of a problem can say it too. `skydeck` is the line `skydeck --version` prints. `Claude Code` is the first line that `<claudeCommand> --version` prints, without the ` (Claude Code)` at its end (at most 60 characters), or `Claude Code: version not read (<why>)`: `not installed`, `timed out after 5 s`, `exited <n>`, `ended by a signal`, `printed no version`, `could not be started: <code>` (such as `EACCES`), or `the configuration cannot be read` (then nothing is started). `system` is the distribution's name (`PRETTY_NAME` in `/etc/os-release`) and the kernel's release (on WSL it ends in `WSL2`), `unknown` for what cannot be read. |
 | hook entries | `SessionStart` or `SessionEnd` has no entry in the settings file that is exactly what install writes for `<dataDir>/skydeck-hook`. Run `skydeck install`. |
 | the hook link | `<dataDir>/skydeck-hook` does not resolve to a file. Run `bin/skydeck install` from the checkout. |
 | Node.js | The Node.js that runs `doctor` is older than 24.12. |

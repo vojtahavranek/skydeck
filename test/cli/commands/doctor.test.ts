@@ -18,6 +18,7 @@ import { command } from '../../../src/cli/commands/doctor.ts';
 import { hookEntry } from '../../../src/claude/settings.ts';
 import { NS_PER_DAY, NS_PER_SECOND } from '../../../src/platform/time.ts';
 import type { Files, Ns, Platform, RunResult } from '../../../src/platform/types.ts';
+import { doctorReport, reportLines } from '../../helpers/doctor.ts';
 import { claudeFolders, run, settingsFile, withStore } from '../../helpers/install.ts';
 import type { Run } from '../../helpers/install.ts';
 import { S1, SEC, T0, fakeRunner, runResult, testPlatform } from '../../helpers/platform.ts';
@@ -68,7 +69,7 @@ async function doctor(
     runResult(answers[[call.command, ...call.args].join(' ')] ?? {}),
   );
   const r = await run({ ...d.platform, runner, ...options.platform }, ['doctor']);
-  const lines = r.stdout.split('\n').filter((line) => line !== '');
+  const lines = reportLines(r.stdout);
   return { ...r, lines, problems: lines.filter((line) => line.startsWith('problem  ')), runner };
 }
 
@@ -673,4 +674,127 @@ describe("doctor: Claude Code's ← shortcut (follow-up F11, L4)", () => {
         `skydeck leaves it alone; to turn it off: ${HOW}`,
     ]);
   });
+});
+
+describe('doctor: groups and a verdict', () => {
+  /** doctor as doctor() runs it, with what its standard output is and the environment it sees. */
+  async function doctorOn(
+    d: TestPlatform,
+    options: { tty?: boolean; env?: Record<string, string>; gh?: Partial<RunResult> } = {},
+  ): Promise<Run> {
+    const runner = fakeRunner((call) =>
+      runResult(call.command === 'gh' && call.args[0] === 'auth' ? (options.gh ?? {}) : {}),
+    );
+    const env = { ...d.platform.env, ...options.env };
+    return run({ ...d.platform, runner, env }, ['doctor'], { stdoutTTY: options.tty ?? false });
+  }
+
+  const LOGGED_OUT = { code: 1 };
+
+  test('the groups in their order, a blank line between them, each check line at the start of its line; no problems', async (t) => {
+    const d = await installedMachine(t);
+
+    const r = await doctorOn(d);
+    const report = doctorReport(r.stdout);
+
+    assert.equal(r.code, 0, r.stdout);
+    assert.deepEqual(
+      report.groups.map((group) => group.heading),
+      ['Versions', 'Recording', 'Claude Code', 'GitHub', 'Window'],
+      r.stdout,
+    );
+    assert.ok(r.stdout.startsWith('Versions\ninfo     skydeck '), r.stdout);
+    assert.doesNotMatch(r.stdout, /\n\n\n/);
+    for (const { lines } of report.groups) {
+      assert.ok(lines.length > 0, r.stdout);
+      for (const line of lines) assert.match(line, /^(ok {7}|info {5}|problem {2})\S/, r.stdout);
+    }
+    const [versions, recording, claude, github] = report.groups;
+    assert.equal(versions?.lines.length, 3);
+    assert.match(recording?.lines[0] ?? '', /^ok {7}hook entries present in /);
+    assert.ok(claude?.lines.some((line) => line.includes("Claude Code's ← shortcut")));
+    assert.deepEqual(github?.lines, ['ok       gh is installed', 'ok       gh is logged in']);
+    assert.ok(r.stdout.endsWith('\n\nno problems\n'), r.stdout);
+    assert.deepEqual(report.repeated, []);
+    assert.doesNotMatch(r.stdout, /\x1b/);
+  });
+
+  test('one problem: "1 problem" and its line again under it, as it stands in its group; exit 1', async (t) => {
+    const d = await installedMachine(t);
+
+    const r = await doctorOn(d, { gh: LOGGED_OUT });
+    const report = doctorReport(r.stdout);
+
+    assert.equal(r.code, 1);
+    const github = report.groups.find((group) => group.heading === 'GitHub');
+    const problem = github?.lines.find((line) => line.startsWith('problem  gh is not logged in'));
+    assert.ok(problem, r.stdout);
+    assert.equal(report.verdict, '1 problem');
+    assert.deepEqual(report.repeated, [problem]);
+  });
+
+  test('more than one: "<n> problems", each line again in the order of the report', async (t) => {
+    const d = await installedMachine(t);
+    writeFileSync(settingsFile(d.places), '{"model":"opus"}');
+
+    const r = await doctorOn(d, { gh: LOGGED_OUT });
+    const report = doctorReport(r.stdout);
+    const problems = reportLines(r.stdout).filter((line) => line.startsWith('problem'));
+
+    assert.equal(r.code, 1);
+    assert.equal(problems.length, 3, r.stdout); // two hook entries, gh
+    assert.equal(report.verdict, '3 problems');
+    assert.deepEqual(report.repeated, problems);
+  });
+
+  test('a group without lines has no heading: no configuration, no Claude Code checks', async (t) => {
+    const d = await installedMachine(t);
+    writeFileSync(d.places.configPath, '{"nope":1}');
+
+    const r = await doctorOn(d);
+    const headings = doctorReport(r.stdout).groups.map((group) => group.heading);
+
+    assert.deepEqual(headings, ['Versions', 'Recording', 'GitHub', 'Window'], r.stdout);
+    assert.match(
+      doctorReport(r.stdout).groups[1]?.lines[0] ?? '',
+      /^problem {2}configuration: /,
+      r.stdout,
+    );
+  });
+
+  test('on a terminal: bold headings and verdict, ok green, problem red; the rest as without colour', async (t) => {
+    const d = await installedMachine(t);
+    writeFileSync(d.places.hookLog, 'cannot write \x1b[31m\x1b]0;title\x07spool\n');
+
+    const plain = await doctorOn(d, { gh: LOGGED_OUT });
+    const coloured = await doctorOn(d, { gh: LOGGED_OUT, tty: true, env: { TERM: 'xterm' } });
+
+    assert.equal(coloured.code, plain.code);
+    assert.match(coloured.stdout, /^\x1b\[1mVersions\x1b\[22m\n/);
+    assert.match(coloured.stdout, /^\x1b\[32mok\x1b\[39m {7}hook entries present/m);
+    assert.match(coloured.stdout, /^\x1b\[31mproblem\x1b\[39m {2}gh is not logged in/m);
+    assert.match(coloured.stdout, /\n\n\x1b\[1m1 problem\x1b\[22m\n\x1b\[31mproblem/);
+    // The hook.log line is foreign: sanitised, and nothing of its own colour comes through.
+    assert.ok(
+      coloured.stdout.includes('\ninfo     hook.log: cannot write spool\n'),
+      coloured.stdout,
+    );
+    const ours = /\x1b\[(?:1|22|31|32|39)m/g;
+    assert.doesNotMatch(coloured.stdout.replaceAll(ours, ''), /[\x1b\x07]/);
+    assert.equal(coloured.stdout.replaceAll(ours, ''), plain.stdout);
+  });
+
+  for (const [why, env] of [
+    ['NO_COLOR', { TERM: 'xterm', NO_COLOR: '1' }],
+    ['TERM=dumb', { TERM: 'dumb' }],
+  ] as const) {
+    test(`on a terminal with ${why}: no escape sequence at all`, async (t) => {
+      const d = await installedMachine(t);
+
+      const r = await doctorOn(d, { gh: LOGGED_OUT, tty: true, env });
+
+      assert.equal(r.code, 1);
+      assert.doesNotMatch(r.stdout, /\x1b/);
+    });
+  }
 });

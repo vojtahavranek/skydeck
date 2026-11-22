@@ -66,14 +66,20 @@ question gets a no, so the second line shows the exact entries install would add
 (but skydeck's compile cache in `~/.cache/skydeck`) and exits 1, as expected. It prints:
 
 ```text
-skydeck will add these hook entries to /home/you/.claude/settings.json:
-{ ... the two entries, as JSON ... }
-Add them? [y/N] settings not changed
+Hooks
+  skydeck adds these hook entries to /home/you/.claude/settings.json
+  (the file is backed up first):
+
+    SessionStart  '/home/you/.local/share/skydeck/skydeck-hook' SessionStart …  timeout 5 s
+    SessionEnd    '/home/you/.local/share/skydeck/skydeck-hook' SessionEnd …    timeout 5 s
+
+> Add them? [y/N]
+settings not changed
 ```
 
-A line `the rest of the file will be rewritten …` means install would also reformat the file, and
-names its backup; `ExperimentalWarning: SQLite …` and its next line (some Node.js 24 versions, at
-any place) are harmless. Show the human the whole output. Anything else (a refusal): STOP, show it.
+With no settings file yet, its third line reads `(a new file):`. A line `the rest of the file will
+be rewritten …` means install would also reformat the file, and names its backup. Show the human
+the whole output. Anything else (a refusal): STOP, show it.
 
 **4. The human installs.** In a terminal of their own, where they can type the answers, they run
 `cd ~/skydeck && bin/skydeck install` (with `SKYDECK_NODE=...` in front of `bin/skydeck` when their
@@ -91,8 +97,9 @@ or feed them from a pipe (`printf 'y\n' |`, `yes |`). Tell them first what a yes
 tell you: it must print their `~/.local/bin/skydeck` (nothing: give them
 `export PATH="$HOME/.local/bin:$PATH"` for `~/.bashrc` or `~/.zshrc`, which you never edit; another
 path: tell them that program answers). Then run `~/.local/bin/skydeck doctor` and
-`~/.local/bin/skydeck ls` and read them out. doctor's lines start `ok`, `info` or `problem`,
-versions first; normal when new: `info     no events yet`, a `problem` (exit 1) for a missing or
+`~/.local/bin/skydeck ls` and read them out. doctor's lines start `ok`, `info` or `problem`, under
+group headings, versions first, and a verdict ends it (`no problems`, or `1 problem` and the line
+again); normal when new: `info     no events yet`, a `problem` (exit 1) for a missing or
 logged-out `gh`, `info` for the window's until it is used. Other problems are theirs.
 
 **6. Tell the human, at the end:** what changed (above), and that `skydeck uninstall` undoes it

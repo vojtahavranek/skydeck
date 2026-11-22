@@ -1007,6 +1007,13 @@ describe('bin/skydeck with the real node', () => {
     assert.equal(r.stderr, '');
   });
 
+  test('a command that opens the database prints nothing on stderr: no Node.js warning that node:sqlite is experimental', (t) => {
+    const r = run(t, ['ls']);
+
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stderr, '');
+  });
+
   test('an unknown command prints the usage on stderr and exits 2', (t) => {
     const r = run(t, ['frobnicate']);
 
@@ -1051,11 +1058,7 @@ describe('bin/skydeck when its standard output or error is closed before it writ
     assert.equal(r.status, 0, r.stderr);
     const data = join(s.skydeckHome, 'data');
     return {
-      // Node 24.12 warns once that node:sqlite is experimental, on every run; that is not ours.
-      stderr: r.stderr
-        .split('\n')
-        .filter((line) => line !== '' && !/ExperimentalWarning|--trace-warnings/.test(line))
-        .join('\n'),
+      stderr: r.stderr,
       status: readFileSync(statusFile, 'utf8').trim(),
       left: existsSync(data) ? readdirSync(data) : [],
     };

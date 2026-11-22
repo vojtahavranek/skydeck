@@ -65,27 +65,33 @@ question for good.
 
 Expected:
 
-- Before the question, the two hook entries (`SessionStart` and `SessionEnd`) are printed: exactly what
-  is going to be added. When the file is not in skydeck's formatting (four-space indentation, no
-  newline at the end), one more line follows: `the rest of the file will be rewritten in skydeck's
-  formatting; the file as it is now is kept in <backup path>`.
-- Three `linked ...` lines (fewer when links already exist), then
-  `added the hook entries to ...; the file as it was is kept in ...settings.json.skydeck-backup-<UTC time>`,
-  then the question about old sessions if it is asked (after the line `"Done" only hides a
-  session from skydeck's list: …`), then `skydeck is installed` and five lines on what to do next,
-  the last naming the README of your checkout.
+- No `ExperimentalWarning` line anywhere. A section `Hooks`: before the question, the two hook
+  entries (`SessionStart` and `SessionEnd`), one line each with the whole command and `timeout 5
+  s`: exactly what is going to be added, no JSON. When the file is not in skydeck's formatting
+  (four-space indentation, no newline at the end), one more line follows: `the rest of the file
+  will be rewritten in skydeck's formatting; the file as it is now is kept in <backup path>`. The
+  question is on a line of its own, `> Add them? [y/N]`, after a blank line.
+- Under it three `linked ... -> ...` lines (fewer when links already exist), then
+  `added   the hook entries to ...` and `backup  ...settings.json.skydeck-backup-<UTC time>`,
+  then the section `Old sessions` if its question is asked, the section `Claude Code's ← shortcut`,
+  `Changed` with every file this install changed and its backup, `skydeck is installed`, and
+  `Next` with what to do next, its last line naming the README of your checkout. Each section has
+  a blank line before it; on a terminal the headings and questions are bold.
 - The backup exists, is readable by you only (`ls -l` shows `-rw-------`) and is the file you copied:
   `cmp /tmp/settings.before.json ~/.claude/settings.json.skydeck-backup-*` prints nothing (with
   more than one backup, name the one that was printed).
 - `~/.claude/settings.json` still has everything it had, plus the two entries. Its layout may
   change: it is written with two-space indentation and a newline at the end.
-- `skydeck doctor` prints no line that starts with `problem`, and `echo $?` right after it prints
-  `0`. (It needs `gh` logged in.)
-- `bin/skydeck install` a second time prints `hook entries already present` and makes no new backup.
+- `skydeck doctor` prints its lines under the headings Versions, Recording, Claude Code, GitHub and
+  Window, no line that starts with `problem`, and `no problems` last; `echo $?` right after it
+  prints `0`. (It needs `gh` logged in.) In a terminal the headings are bold and each `ok` green;
+  `skydeck doctor | cat` and `NO_COLOR=1 skydeck doctor` show the same lines without colour.
+- `bin/skydeck install` a second time prints `hook entries already present in ...` and
+  `nothing was changed`, and makes no new backup.
 
 With no settings file (only the folder `~/.claude`): skip the `cp` and every `cmp` and `ls -l` of the
-backup. The entries are shown and the question asked as above, and the line is
-`added the hook entries to <settings file> (a new file)`. No backup is made.
+backup. The entries are shown (after `(a new file):`) and the question asked as above, and the
+line is `added   the hook entries to <settings file> (a new file)`. No backup is made.
 
 ## 2. Session start
 
@@ -525,13 +531,19 @@ edit in the prompt).
 
 Write down every key that arrived wrong or did something else.
 
-## W9. Claude Code's symbols are drawn (real claude)
+## W9. Claude Code's symbols and emoji are drawn (real claude)
 
 In the throwaway session, send a prompt that makes Claude Code use a tool (`list the files here`).
 Its tool lines start with `⏺`, their results with `⎿`; Shift+Tab shows `⏵⏵` in the mode line.
-Expected: drawn as symbols, not as empty boxes.
+Expected: drawn as symbols, not as empty boxes, and in the colours Claude Code gives them: a
+finished tool's `⏺` is green (red after a failed one), never a colour emoji (a blue button).
 
-Write down which symbols show as boxes.
+Then send `print 🔴 🟠 🟡 ⚪ 🤷‍♂️ 👨‍👩‍👧 on one line, with a space between them`. Expected: the four
+circles red, orange, yellow and white, told apart at a glance (not four grey discs); the shrug and
+the family each one picture, two cells wide, not their parts squashed together (#154).
+
+Write down which symbols show as boxes or as colour emoji, and which emoji show in one colour or
+in parts.
 
 ## W10. Emoji line up (real claude)
 
@@ -1949,28 +1961,39 @@ Then type `ls -la ~ | grep -F claude.json` and write down what it lists: names, 
 only (it also lists a `..claude.json.<12 hex digits>.tmp`, with two dots, that an interrupted
 install would leave).
 
-1. **The question.** In W, type `skydeck install`. Expected, among its usual lines (`hook entries
-   already present`, perhaps the python3 line): the three lines and the question
+1. **The question.** In W, type `skydeck install`. Expected, after its usual sections (Hooks with
+   `hook entries already present in …`, perhaps Window with the python3 line): the section and
+   the question
 
    ```
-   Claude Code's ← shortcut is on: ← on an empty prompt sends the session to the background and opens agent view.
-   ← also closes a group in skydeck's list, so a ← meant for the list can send a window terminal's session away.
-   Turning it off sets only leftArrowOpensAgents in /home/<you>/.claude.json, after a backup; agent view itself stays (claude agents, /bg).
-   Turn the shortcut off? [y/N]
+   Claude Code's ← shortcut
+     It is on: ← on an empty prompt sends the session to the background and opens
+     agent view. ← also closes a group in skydeck's list, so a ← meant for the list
+     can send a window terminal's session away. Turning it off sets only
+     leftArrowOpensAgents in /home/<you>/.claude.json, after a backup;
+     agent view itself stays (claude agents, /bg).
+
+   > Turn the shortcut off? [y/N]
    ```
 
-   Read them. When the third line names a file other than your `~/.claude.json`, type `n`, write
+   Read them. When the fourth line names a file other than your `~/.claude.json`, type `n`, write
    the path down and stop. Else type `y` and Enter. Expected:
 
    ```
-   turned Claude Code's ← shortcut off in /home/<you>/.claude.json; the file as it was is kept in /home/<you>/.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>
-   the shortcut is off for sessions started from now on; a session already running keeps it until it is started again
+     turned off  the ← shortcut in /home/<you>/.claude.json
+     backup      /home/<you>/.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>
+     note        only for sessions started from now on; a session already running keeps it until it is started again
+
+   Changed
+     ← shortcut  /home/<you>/.claude.json
+     backup      /home/<you>/.claude.json.skydeck-backup-<YYYYMMDDTHHMMSSZ>
+
    skydeck is installed
    ```
 
-   then the five lines on what to do next, and `echo $?` prints `0`. Any other line about the shortcut (`… kept changing while skydeck
-   wrote it …`, `could not turn Claude Code's ← shortcut off: …`, `… left … alone (…)`): write it
-   down. The file is then as it was; leave out the rest of the check, and turn the shortcut off
+   then Next with what to do next, and `echo $?` prints `0`. Any other line about the shortcut
+   (`… kept changing while skydeck wrote it …`, `could not turn Claude Code's ← shortcut off: …`,
+   `… left … alone (…)`): write it down. The file is then as it was; leave out the rest of the check, and turn the shortcut off
    with `/config` in Claude Code ("← opens agents") if you want it off.
 2. **What changed.** In W, `ls -la ~ | grep -F claude.json`. Expected: no
    `..claude.json.<12 hex digits>.tmp` that was not there in the setup; `.claude.json` with mode

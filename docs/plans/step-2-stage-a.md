@@ -3885,7 +3885,7 @@ rounding of its screen (S2 8.2.6) — not by `addon-fit`, whose division depends
 terminal's current size and has no fixed point at some widths (ruled by the plan owner, M4 of
 task 28's review; `addon-fit` stays vendored, its removal a follow-up); scrollback 5,000; the
 DOM renderer; the font list `"Cascadia Mono", "Cascadia Code", Consolas, "Segoe UI Symbol",
-monospace` (W9 checks it). The size is set only from `snap` and `size`; a page that is not the
+monospace` (W9 checks it) — superseded by #154: no symbol or emoji font is named (S2 12.6). The size is set only from `snap` and `size`; a page that is not the
 owner shows "sized by another window". Up to 8 terminals stay attached, the least recently shown
 detached beyond that, all but the shown one detached while the window is hidden. Parser handlers
 swallow the queries of S2 9.3; OSC 52 as S2 9.5; Ctrl+click on an OSC 8 link or a plain

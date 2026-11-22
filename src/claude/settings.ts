@@ -4,6 +4,7 @@
 import { join } from 'node:path';
 
 import { SkydeckError } from '../platform/errors.ts';
+import { sanitize } from '../text/sanitize.ts';
 
 export const HOOK_EVENTS = ['SessionStart', 'SessionEnd'] as const;
 export type HookEvent = 'SessionStart' | 'SessionEnd';
@@ -29,6 +30,41 @@ export function hookEntry(
   event: HookEvent,
 ): { hooks: [{ type: 'command'; command: string; timeout: 5 }] } {
   return { hooks: [{ type: 'command', command: hookCommand(hookPath, event), timeout: 5 }] };
+}
+
+/**
+ * What `skydeck install` shows of an entry on one line (design 8): its command and its timeout,
+ * when that is all the entry holds — exactly `{ hooks: [{ type: 'command', command, timeout }] }`
+ * with a finite timeout — and the command reads on a terminal as it is in the file (sanitising
+ * leaves it as it is, and it has no space at either end). null otherwise: install then shows the
+ * entry as JSON, so that the question never shows less than what is written.
+ */
+export function hookEntryLine(entry: unknown): { command: string; timeout: number } | null {
+  if (!hasExactly(entry, ['hooks']) || !Array.isArray(entry['hooks'])) {
+    return null;
+  }
+  const hooks: unknown[] = entry['hooks'];
+  const hook = hooks.length === 1 ? hooks[0] : undefined;
+  if (!hasExactly(hook, ['type', 'command', 'timeout']) || hook['type'] !== 'command') {
+    return null;
+  }
+  const { command, timeout } = hook;
+  if (typeof command !== 'string' || typeof timeout !== 'number' || !Number.isFinite(timeout)) {
+    return null;
+  }
+  if (command === '' || command.trim() !== command || sanitize(command) !== command) {
+    return null;
+  }
+  return { command, timeout };
+}
+
+/** An object with exactly these keys, no more and no fewer. */
+function hasExactly(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
+  if (!isObject(value)) {
+    return false;
+  }
+  const own = Object.keys(value);
+  return own.length === keys.length && keys.every((key) => own.includes(key));
 }
 
 export interface SettingsEdit {

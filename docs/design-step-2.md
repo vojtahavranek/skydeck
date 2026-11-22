@@ -3155,6 +3155,14 @@ nothing; `ls` is unchanged.
   which a running Claude Code keeps when the page's scheme changes), or a fixed 256-colour or 24-bit
   colour chosen for a dark background. A colour that can be read already is drawn as it is
   (2026-11-20).
+  The terminal's font list names no symbol or emoji font (`"Cascadia Mono", "Cascadia Code",
+  Consolas, monospace`, the same in `--term-font`): what those fonts lack, Windows' own fallback
+  draws — an emoji in colour, a joined emoji (ZWJ, skin tone) as one picture, and a symbol of
+  text presentation such as Claude Code's `⏺ ⎿ ⏵ ✻ ⚠` in the program's colour. With "Segoe UI
+  Symbol" in the list every emoji was drawn from it, in one colour (the red, orange, yellow and
+  white circles were all grey), and a joined one as its parts squashed into two cells; with "Segoe
+  UI Emoji" ahead of it, `⏺ ⚠ ❤` would be colour emoji too, whatever colour the program gives them
+  (#154; 2026-11-21).
   What the server says about a terminal is shown over that terminal, as the page's own text and
   never written into it (so that the page's screen stays the screen side's): the reconnecting bar
   (7.8) and "sized by another window" (8.2.6) while they hold; a gap or a newer keeper, which the
@@ -4301,8 +4309,8 @@ check let through; a page's `new` flags become `claude` arguments only after des
 ### 16.1 Install
 
 Unchanged in what it writes: the same two hook entries (10.3), the same links, nothing on the
-Windows side. It adds one `info` line when `python3` 3.9 or newer is not found: `the window
-(skydeck window) needs python3 3.9 or newer; the commands do not`. (3.9 is the oldest the keeper's
+Windows side. It adds one line, in a section `Window` of its own (design 8), when `python3` 3.9 or
+newer is not found: `the window (skydeck window) needs python3 3.9 or newer; the commands do not`. (3.9 is the oldest the keeper's
 code allows; it is tested on 3.12, which Ubuntu 24.04 and the CI runners have.)
 
 ### 16.2 Uninstall
@@ -4347,7 +4355,8 @@ holds is `RUNTIME_DIR` in `src/cli/purge.ts`.
 
 ### 16.3 Doctor
 
-New lines, with `ok`, `info` or `problem` as in design 8. It still starts no program but those it
+New lines, with `ok`, `info` or `problem` as in design 8, under its Window heading after the
+terminal's line. It still starts no program but those it
 already runs (`gh`, `wezterm`, and for its first three lines git and `<claudeCommand> --version`,
 design 8, follow-up F20) and `python3 --version`; it starts nothing on Windows, signals
 nothing and creates nothing. While the window has never been used — no `window_secret`, or no
@@ -4879,7 +4888,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W6 | **Real claude**: Shift+Enter inserts a newline; Ctrl+V pastes text; Ctrl+Shift+V pastes a Windows screenshot; Ctrl+Shift+C copies a selection, and a program's OSC 52 write reaches the Windows clipboard. | A | 9.1, 9.5 |
 | W7 | W6's Ctrl+Shift+V again after closing the WSL terminal `skydeck window` was run from (the interop link of 6.4). | A | 6.4 |
 | W8 | Czech layout in Edge: AltGr characters (`\ [ ] { } @ # ~ \|`) and dead keys (háček, čárka) in a terminal; Ctrl+Shift+digit and Ctrl+Shift+H chords; Ctrl+Shift+- reaches Claude Code (undo). | A | 9.1, 12.9 |
-| W9 | Cascadia and Segoe draw Claude Code's `⏺ ⎿ ⏵` (headless Linux showed empty boxes). | A | the page's font list |
+| W9 | Cascadia, Consolas and Windows' fallback draw Claude Code's `⏺ ⎿ ⏵` in its colours, and emoji in colour (headless Linux showed empty boxes; #154). | A | the page's font list |
 | W10 | **Real claude**: rows with emoji, ZWJ and skin-tone sequences line up; `unicode-graphemes` against `unicode11`, compared with Claude Code's own layout. | A | 9.4 |
 | W11 | Desktop notifications are allowed on the PC: the permission prompt, a toast, a click that selects the session; and they still come when the window has been minimised for half an hour (Chromium throttles hidden pages and Edge may put them to sleep). | B | 13 |
 | W12 | Ctrl+click on a link opens it in the user's default browser, logged in; with `window.links` `"edge"` (set only if the user wants to try it) in their main Edge window. The check copies the user's `config.json` aside first and gives it back at the end, and removes no file. | A | 9.6, 16.4 |
@@ -4903,7 +4912,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W30 | On the user's own sessions, without Enter: two words of a ticket in the filter, a short id's first characters, each chip, a block's card closed with ← and opened again with → (blocks are open by default from follow-up F3, drawn as cards with a selectable caption from follow-up F9), a click on a caption, the switcher opened, typed into, moved through with ↑ ↓ and closed with Esc. Whether any answer comes late enough to notice, and whether the order of the switcher is the one wanted. Then **real claude**, the throwaway session only: found in the switcher by the first characters of its short id, the highlighted item's short id checked, and Enter: it resumes into the window (its terminal shows when it runs there). Text is typed only into a field that shows its caret, and no real session is resumed, typed into or marked. | E | 12.2, 12.8 |
 | W31 | Czech and US layouts in the filter's and the switcher's fields: AltGr characters and dead keys type; Ctrl+Shift+P opens and closes the switcher on both. | E | 12.8, 12.9 |
 | W32 | `skydeck update` on the user's own installation, typed in a WSL terminal of the user's own with the window open: `--check` first (the list of new commits, or "up to date"; the window and the sessions stay as they are); then, only when it listed commits, the update itself: the window says for a few seconds that the server is not answering, then reloads itself; every session is there; no second window; `skydeck doctor` has no `problem` line that was not there before. It types into no session and presses no key in the window. | F8 | 16.5, 5.1 |
-| W33 | **Real claude**: `skydeck install` asks whether to turn Claude Code's ← shortcut off (three lines and `Turn the shortcut off? [y/N]`); `y` sets only `leftArrowOpensAgents` to `false` in `~/.claude.json`, after a backup, and `skydeck doctor` then says the shortcut is off; in a throwaway session of the window started after it, ← on its empty prompt leaves the terminal as it is (no agent view). It changes that one key of the user's on purpose and prints neither file. | F11 | 7.9 |
+| W33 | **Real claude**: `skydeck install` asks whether to turn Claude Code's ← shortcut off (its section `Claude Code's ← shortcut`, the explanation, and `> Turn the shortcut off? [y/N]`); `y` sets only `leftArrowOpensAgents` to `false` in `~/.claude.json`, after a backup, and `skydeck doctor` then says the shortcut is off; in a throwaway session of the window started after it, ← on its empty prompt leaves the terminal as it is (no agent view). It changes that one key of the user's on purpose and prints neither file. | F11 | 7.9 |
 | W34 | **Real claude**: the title bar's theme switch in the user's Edge: `Auto`, `Light`, `Dark` — what the page and a terminal show in each, under the Windows mode of the moment and, optionally, the other one; the choice after a reload and after the window is closed and opened again, with no flash of the other theme; with Claude Code's theme "Auto (match terminal)" (looked at in `/theme`, never in its files), a new throwaway session started in each forced state picks the matching one, and whether one already running changes its theme at a switch is written down (not documented). At the end the switch, Windows' mode and Claude Code's theme are as they were. | F13 | 12.1, 7.2, 9.3 |
 | W35 | **Real claude**, a throwaway session started from the New form with `--model` and one more flag: the header's second line ends in those flags, in the short id's grey, after the short id, nothing else of the line moved; its tooltip says `Started with: …`; in a narrower window they are cut first; once it ended and was closed, the resume card's "Will run" has them and the header not; resumed, the header shows them again. | F16 | 12.5 |
 | W36 | The new form's favourite flags on a throwaway folder: a favourite saved with the ★ is there when the form is opened again, also after `skydeck window --restart`; a session started with its chip on runs with those flags (the header's flags, F16, and `skydeck show`); removed with ×, `Undo` puts it back at its place; with a session of the user's in a group selected, the form shows that group's chip, and a click puts the name into the Group field (nothing started). It types no prompt and changes no real session. | F15, F28 | 12.6, 10.2 |
@@ -5059,6 +5068,7 @@ tracks of 2026-11-13; their prototypes and evidence are kept with the research n
 | xterm.js 6.0.0's paste handler sends the pasted text and empties its hidden textarea, but does not cancel the paste event, so the browser then puts the whole text into that textarea: after a paste of 10 MiB in headless Chromium the page sent its input at about 0.4 MB/s and answered a script in seconds; with the paste cancelled after xterm.js took it (the first fix; the page now takes the paste itself, 9.1), the same paste reached the server in under a second (plan task 28). | verified (headless Chromium 1223; the bundle's `handlePasteEvent`) |
 | xterm.js 6.0.0 wraps pasted text unfiltered (`ESC [ 2 0 0 ~`, the text, `ESC [ 2 0 1 ~`): a pasted text that holds `ESC [ 2 0 1 ~` ends its own bracketed paste, and what follows reaches the program as typed keys, Enter included. | verified (headless Chromium 1223; plan task 28's review 2) |
 | xterm.js 6.0.0's DOM renderer writes its colours, cursor and selection rules into `<style>` elements it creates at run time: under `style-src 'self'` a red cell renders black; with `'unsafe-inline'` it renders red. | verified in headless Chromium (review, 2026-11-13) |
+| In Edge 157 on Windows, xterm.js 6.0.0's DOM renderer with a font list that names "Segoe UI Symbol" draws every emoji from that font, which has a glyph of one colour for each (🔴 🟠 🟡 ⚪ grey, 🤷 👨), and a ZWJ sequence as its parts squashed into its two cells; without it Windows' fallback draws emoji in colour and ZWJ and skin-tone sequences as one picture, and `⏺ ⎿ ⏵ ✻ ✓ ⚠ ●` in the cell's colour; with "Segoe UI Emoji" ahead of "Segoe UI Symbol", `⏺ ⚠ ❤` are colour emoji. Flags (🇺🇳) are two letters on Windows either way. | verified (headless Edge 157, Windows fonts, 2026-11-21; #154) |
 | On WSL a crashing process's core dump is piped to WSL's crash collector (`core_pattern` is `\|/wsl-capture-crash …`), which keeps up to `maxCrashDumpCount` (default 10) dumps in `crashDumpFolder` (default `%Temp%\wsl-crashes`). A non-dumpable process (`PR_SET_DUMPABLE` 0) produces no dump, piped or not. For a piped dump the kernel ignores a core limit of 0 and aborts only on a soft limit of exactly 1 byte (`fs/coredump.c` of Linux 6.6). | `core_pattern` verified; documentation (learn.microsoft.com/windows/wsl/wsl-config, `prctl(2)`); kernel source read for 6.6 in review; 6.18 UNVERIFIED (W24) |
 | `/run/user/<uid>` outlives the user's last terminal only when the user lingers; on one machine the user does. | verified |
 | The keeper's code needs python3 3.9 or newer (`os.waitstatus_to_exitcode`); it was run on 3.12 only. | inferred (3.9) / verified (3.12) |
