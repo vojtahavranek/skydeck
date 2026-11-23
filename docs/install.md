@@ -515,8 +515,9 @@ switcher, Ctrl+Shift+P) opens Settings. It shows first what is easy to change, e
 you pick it: **Appearance** (the window's colours, "Colours" below), **Links** — `Open links in`
 (`window.links`) and `Ticket address` (`ticketUrl`; saved on Enter, or when you leave the field, if
 you changed it; Esc closes Settings without saving it) — and **The window** — `Keep WSL running`
-(`window.keepAlive`; it counts `after a restart`, `skydeck window --restart`) and `Typed commands
-start sessions in` (`terminal`) — and **Updates** — `Check for updates every day`
+(`window.keepAlive`; it counts `after a restart`, `skydeck window --restart`), `Typed commands
+start sessions in` (`terminal`) and `Copy on select` (`window.copyOnSelect`, "Keys" in "Using
+the window") — and **Updates** — `Check for updates every day`
 (`window.updateCheck`), with the last check and `Check now` under it ("The window says when there
 is one", in "Updating"). A value the file's rules refuse is refused beside it in their words
 (`"ticketUrl" must be null or an http or https address with {key} once, after its host`), and the
@@ -800,6 +801,7 @@ In `config.json` ("Configuration" above), all optional; "In the window" and "App
 | `window.keepAlive` | `"wsl"` | change, first | after the window restarts | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`: without it, WSL stops 15 seconds after its last Windows terminal closes, ending every session in the window. |
 | `window.links` | `"default"` | change, first | at once | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
 | `window.updateCheck` | `"daily"` | change, first | at once | `"daily"`: the window's server looks for a newer skydeck when it starts and once a day, with a `git fetch` of skydeck's own checkout, and the title bar says `Update available` while one is known ("Updating" below); nothing is applied without a click. `"off"`: it does not look by itself; Check now in Settings still does. Anything else: `<file>: "window.updateCheck" must be "daily" or "off"`. |
+| `window.copyOnSelect` | `true` | change, first | at once | `true`: a selection you make with the mouse in the window's terminal is copied to the clipboard as you let go of the button, the same text Ctrl+Shift+C copies ("Keys" in "Using the window"); every open window uses the new value from its next selection. `false`: only Ctrl+Shift+C copies. `true` or `false` without quotes; anything else: `<file>: "window.copyOnSelect" must be true or false`. |
 
 With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
 "Starting sessions in the window from a terminal (stage C)" below. An example, for a PC with two
@@ -927,7 +929,13 @@ effect.
   in the terminal). Three to know from the start: Ctrl+Shift+L moves the keyboard between list and
   terminal, Ctrl+Shift+C copies from the terminal (plain Ctrl+C interrupts the program), and
   Ctrl+Shift+V is Claude Code's own image paste (it reads the Windows clipboard itself; Ctrl+V
-  pastes text). The key bar at the bottom says where the keyboard is (`Focus: list`,
+  pastes text). **Text you select with the mouse in the terminal is copied as you let go of the
+  button**: a drag (also one that goes past the terminal's edge, which scrolls), a double click (a
+  word), a triple click (a line), Shift+click to extend; while the program takes the mouse
+  itself, hold Shift as you drag. A click that only clears a selection copies nothing, and a
+  selection of blank cells is not copied. Ctrl+Shift+C
+  still copies the selection, and `Copy on select` in Settings (`window.copyOnSelect`) turns the
+  copy at the release off. The key bar at the bottom says where the keyboard is (`Focus: list`,
   `Focus: terminal`). In the list, **Shift+↑ or Shift+K moves the selected session of Open one
   place up, Shift+↓ or Shift+J one place down**; the slot numbers follow, so Ctrl+Shift+1…9 go to
   the row that shows that number, every open window shows the new order, and it stays after a
@@ -1907,7 +1915,9 @@ of the window between light and dark: after one, start or resume the session aga
   underline styles and colours; and a few rarer cases (design-step-2.md, 7.2), among them a
   character cut off from the emoji it modifies at the moment of the snapshot, which takes a cell of
   its own. Most of it heals when the program draws that part again (W26).
-- **Keys.** Ctrl+C with text selected in the terminal interrupts the program; Ctrl+Shift+C copies.
+- **Keys.** Ctrl+C with text selected in the terminal interrupts the program; Ctrl+Shift+C copies
+  (and the selection was copied already when the mouse let go of it, unless `Copy on select` is
+  off).
   On a keyboard layout whose letters are not Latin (Russian, Greek) the Ctrl+Shift letter chords,
   Ctrl+R and Ctrl+V are not recognised; US and Czech are not affected. A key pressed while the
   keyboard was outside the terminal never reaches the program, also when it brings the keyboard

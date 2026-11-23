@@ -57,6 +57,13 @@ async function twoPages(
   return { test, a, b };
 }
 
+/** The first list `page` received. */
+function firstList(page: TestPage): ListMessage | undefined {
+  return page.all.flatMap((item) =>
+    'text' in item && item.text.t === 'list' ? [item.text] : [],
+  )[0];
+}
+
 function rowOf(list: ListMessage): ListMessage['sections'][number]['rows'][number] | undefined {
   return rowsOf(list).find((row) => row.id === S1);
 }
@@ -117,6 +124,20 @@ describe('the settings through the server (S2 12.13, 8.2.3)', () => {
       [{ key: 'groupPattern', value: '(' }, /^"groupPattern" is not a valid regular expression/],
       [{ key: 'restoreBatch', value: 0 }, '"restoreBatch" must be a positive integer'],
       [{ key: 'ticketRefreshMinutes', value: 1441 }, /from 1 to 1440/],
+      // Issue #184: a boolean is a value the parser takes; config.json's rules refuse it here.
+      [{ key: 'prRefreshMinutes', value: true }, '"prRefreshMinutes" must be a positive integer'],
+      [
+        { key: 'window.copyOnSelect', value: 'false' },
+        '"window.copyOnSelect" must be true or false',
+      ],
+      [{ key: 'window.copyOnSelect', value: null }, '"window.copyOnSelect" must be true or false'],
+      // A boolean only: its text and 1 change nothing either (an object closes the connection,
+      // below).
+      [
+        { key: 'window.copyOnSelect', value: 'true' },
+        '"window.copyOnSelect" must be true or false',
+      ],
+      [{ key: 'window.copyOnSelect', value: 1 }, '"window.copyOnSelect" must be true or false'],
     ];
     for (const [fields, error] of refusals) {
       const result = await a.act({ kind: 'setting-set', ...fields } as never);
@@ -135,7 +156,7 @@ describe('the settings through the server (S2 12.13, 8.2.3)', () => {
     assert.deepEqual(screens(a), []);
   });
 
-  test("a message no page sends — a whole configuration, a list, a boolean, an over-long value, a field more — is refused by the page messages' parser: the connection is closed (1008), nothing changed", async (t) => {
+  test("a message no page sends — a whole configuration, a list, an over-long value, a field more — is refused by the page messages' parser: the connection is closed (1008), nothing changed", async (t) => {
     const d = serverSandbox(t, { config: { prRefreshMinutes: 7 } });
     const { test: server, b } = await twoPages(t, d);
     const before = readFileSync(d.deck.places.configPath, 'utf8');
@@ -143,7 +164,9 @@ describe('the settings through the server (S2 12.13, 8.2.3)', () => {
       { kind: 'setting-set', key: 'prRefreshMinutes', value: { prRefreshMinutes: 1 } },
       { kind: 'setting-set', key: 'window', value: { links: 'edge' } },
       { kind: 'setting-set', key: 'prRefreshMinutes', value: [1] },
-      { kind: 'setting-set', key: 'prRefreshMinutes', value: true },
+      { kind: 'setting-set', key: 'window.copyOnSelect', value: [false] },
+      { kind: 'setting-set', key: 'window.copyOnSelect', value: { on: true } },
+      { kind: 'setting-set', key: 'window', value: { copyOnSelect: false } },
       {
         kind: 'setting-set',
         key: 'ticketUrl',
@@ -225,6 +248,28 @@ describe('AT ONCE: the running server uses the new value from its next use (G4)'
     const taken = await a.act({ kind: 'ticket', sessionId: S1, text: 'ABC-13' });
     assert.equal(taken.ok, true, JSON.stringify(taken));
     assert.equal(d.deck.store.meta(S1)?.ticket, 'https://tickets.example.com/browse/ABC-13');
+  });
+
+  test("window.copyOnSelect (issue #184): every page's lists carry the value the server uses, a change reaches every page's next list, and a page that connects later gets it in its first", async (t) => {
+    const d = serverSandbox(t);
+    const { test: server, a, b } = await twoPages(t, d);
+    for (const page of [a, b]) {
+      assert.equal(firstList(page)?.copyOnSelect, true, 'the default, from the first list on');
+    }
+    const off = await a.act({ kind: 'setting-set', key: 'window.copyOnSelect', value: false });
+    assert.equal(off.ok, true, JSON.stringify(off));
+    assert.equal((configOf(d)['window'] as Record<string, unknown>)['copyOnSelect'], false);
+    for (const page of [a, b]) {
+      await page.list((list) => list.copyOnSelect === false, 'the next list says false', 5000);
+    }
+    const c = await connectTestPage(t, d, server.server);
+    await c.list(() => true, "the later page's first list");
+    assert.equal(firstList(c)?.copyOnSelect, false, "the later page's very first list");
+    const on = await b.act({ kind: 'setting-default', key: 'window.copyOnSelect' });
+    assert.equal(on.ok, true, JSON.stringify(on));
+    for (const page of [a, b, c]) {
+      await page.list((list) => list.copyOnSelect === true, 'back to true', 5000);
+    }
   });
 
   test('window.links: the next link goes where the new value says', async (t) => {

@@ -1142,6 +1142,7 @@ describe('writeWindowConfig (A32)', () => {
       keepAlive: 'off',
       links: 'edge',
       updateCheck: 'off',
+      copyOnSelect: true,
     });
   });
 
@@ -1158,6 +1159,8 @@ describe('writeWindowConfig (A32)', () => {
       keepAlive: 'off',
       links: 'edge',
       updateCheck: 'off',
+      // Issue #184: the default; a test that needs it off says so.
+      copyOnSelect: true,
     });
     assert.ok(edgeStub.startsWith(`${s.root}/`), edgeStub);
     assert.ok(!/\.exe$/i.test(edgeStub) && !edgeStub.startsWith('/mnt/'), edgeStub);
@@ -1171,6 +1174,7 @@ describe('writeWindowConfig (A32)', () => {
       links: 'default',
       port: 47000,
       updateCheck: 'daily',
+      copyOnSelect: false,
     });
     const config = loadConfig(realPlatform().files, `${s.skydeckHome}/config/config.json`);
 
@@ -1181,6 +1185,7 @@ describe('writeWindowConfig (A32)', () => {
       keepAlive: 'wsl',
       links: 'default',
       updateCheck: 'daily',
+      copyOnSelect: false,
     });
   });
 

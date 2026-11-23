@@ -2,9 +2,11 @@
 // 6.0.0 per attached terminal, with the vendored addons, fed by the snapshot and the stream of
 // S2 8.2.4 and sized by the server only (S2 8.2.6: the view only computes the proposal sent in
 // `attach` and `resize`, by its own rule of what fits — see `fitIn`). The page's terminal answers
-// no query (S2 9.3), maps the keys of S2 9.1, writes the clipboard only for the shown terminal of
-// a focused window (S2 9.5), opens links only on a Ctrl+click and through the server (S2 9.6),
-// finds in the scrollback (S2 9.7) and ignores the program's window title (S2 15.4).
+// no query (S2 9.3), maps the keys of S2 9.1, writes the clipboard for a program only for the
+// shown terminal of a focused window (S2 9.5) and, while `window.copyOnSelect` is on, a selection
+// the user ends with the mouse in the shown terminal (issue #184, S2 9.5), opens links only on a
+// Ctrl+click and through the server (S2 9.6), finds in the scrollback (S2 9.7) and ignores the
+// program's window title (S2 15.4).
 //
 // Up to eight terminals stay attached, the least recently shown detached beyond that; while the
 // window is hidden only the shown one stays attached (S2 12.6). A detached terminal's xterm.js is
@@ -29,6 +31,8 @@ import { terminalKey } from './keys.js';
  * @property {(message: Record<string, unknown> & { t: string }) => void} send
  * @property {(e: KeyboardEvent) => boolean} chord
  * @property {(url: string) => void} openLink
+ * @property {() => boolean} [copyOnSelect] issue #184: whether a selection the user ends with the
+ *   mouse is copied (`window.copyOnSelect`), asked at each release; absent: never
  */
 
 /** S2 12.6: at most this many terminals stay attached. */
@@ -135,8 +139,74 @@ export function createTerminalView(root, deps) {
   /** @type {Term | null} */
   let shown = null;
   let hidden = false;
+  /**
+   * Copy on select (issue #184): the press of the primary button that is down, on a terminal whose
+   * selection xterm.js starts with it (`startsSelection`): when it came (`timeStamp`), and where that
+   * selection was before the press and right after xterm.js handled it (`selectionPlace`); else
+   * null.
+   * @type {{ t: Term, at: number, before: string, after: string } | null}
+   */
+  let pressed = null;
   const find = findBar();
   root.append(find.element);
+
+  // Issue #184 (S2 9.5): a selection the user made with the mouse is copied at the release that
+  // ends the press which began it, when the press CHANGED the selection — xterm.js cleared or
+  // restarted it at the press (a word, a line), or the moves built or moved it by the release —,
+  // the selection is not empty, and the terminal is still the one shown. So a press that changes
+  // nothing (a Shift+click where the selection ends already, a drag of the scroll bar, which
+  // reaches the page as no press at all) never writes an old selection over the clipboard again;
+  // a drag over the text just copied is a new one (the press cleared it). The places are
+  // compared, not xterm.js's `onSelectionChange`: a press clears the selection without reporting
+  // it, and a release reports nothing when it ends where xterm.js's last report was — also after
+  // a resize or a key cleared it. A selection of blank cells — nothing but spaces, tabs or line
+  // breaks as text — is not copied: written, it would empty the user's clipboard (Ctrl+Shift+C
+  // still copies whatever is selected). The release listener is on the window, in the bubble
+  // phase, so that it reads the selection AFTER xterm.js's own release listener on the document:
+  // that one can still change it (a quick Alt+click is a cursor move there, whose arrow keys clear
+  // the character it selected; scrolled up, xterm.js sends nothing and leaves it, but ends no
+  // selection either: `movesCursor` skips that release in both cases). It misses no release
+  // xterm.js hears, wherever it is (xterm.js follows a drag outside the terminal and scrolls with
+  // it): the only listeners of the page that stop a mouseup (app.js's and switcher.js's guards of
+  // a click sequence) do so in the capture phase on the window, which keeps it from xterm.js's
+  // listener too. Every press of the primary button first forgets the last one (a release the
+  // page never saw: the window lost the mouse); the release of any button ends the press, as
+  // xterm.js ends its own; the window losing the focus (Alt+Tab in the middle of a drag, whose
+  // release it then never hears) forgets it too. A selection made by code comes with no press,
+  // and one made during a press ends it: the search add-on's (it finds again by itself 200 ms
+  // after output or a resize while the find bar is open, and selects its match) forgets the press
+  // (`create`); xterm.js drops its own drag then.
+  window.addEventListener(
+    'mousedown',
+    (event) => {
+      if (event.button === 0) {
+        pressed = null;
+      }
+    },
+    true,
+  );
+  window.addEventListener('blur', () => {
+    pressed = null;
+  });
+  window.addEventListener(
+    'mouseup',
+    (event) => {
+      const press = pressed;
+      pressed = null;
+      if (press === null || press.t !== shown || deps.copyOnSelect?.() !== true) {
+        return;
+      }
+      if (movesCursor(press.t.xterm, event, press.at)) {
+        return;
+      }
+      const now = selectionPlace(press.t.xterm);
+      const changed = press.after !== press.before || now !== press.after;
+      if (now !== '' && changed && press.t.xterm.getSelection().trim() !== '') {
+        copySelection(press.t);
+      }
+    },
+    false,
+  );
 
   // --- the terminals ----------------------------------------------------------------------------
 
@@ -218,6 +288,35 @@ export function createTerminalView(root, deps) {
     });
     xterm.onBinary((data) => sendInput(t, data, true));
     xterm.open(screen);
+    // Issue #184: a press that starts a selection, and where the selection was before it. In the
+    // capture phase: before xterm.js's own listeners (one of which stops the event when Shift
+    // forces a selection under the program's mouse reporting).
+    xterm.element?.addEventListener(
+      'mousedown',
+      (event) => {
+        if (startsSelection(xterm, event)) {
+          const before = selectionPlace(xterm);
+          pressed = { t, at: event.timeStamp, before, after: before };
+        }
+      },
+      true,
+    );
+    // After xterm.js's own listeners of the press (on this element, made by `open` before this
+    // one): where it put the selection — cleared, a word, a line, an end moved by Shift. The scroll
+    // bar sends none of this: it cancels its `pointerdown`, so the browser makes no mouse event of
+    // that press at all, and its drag copies nothing.
+    xterm.element?.addEventListener('mousedown', () => {
+      if (pressed?.t === t) {
+        pressed.after = selectionPlace(xterm);
+      }
+    });
+    // The search add-on selected its match (a find with decorations, which the find bar always
+    // asks for): the selection is the page's, not the user's — the press ends without a copy.
+    t.search.onDidChangeResults(() => {
+      if (pressed?.t === t) {
+        pressed = null;
+      }
+    });
     screen.addEventListener('wheel', (event) => wheelInMargin(t, event), {
       capture: true,
       passive: false,
@@ -336,6 +435,17 @@ export function createTerminalView(root, deps) {
       clipboardWrite(t, data);
       return true;
     });
+  };
+
+  /**
+   * S2 9.1, 9.5: the terminal's selection to the clipboard, when it has one — Ctrl+Shift+C's copy,
+   * and copy on select's (issue #184); a write the browser refuses is swallowed.
+   * @param {Term} t
+   */
+  const copySelection = (t) => {
+    if (t.xterm.hasSelection()) {
+      navigator.clipboard.writeText(t.xterm.getSelection()).catch(() => {});
+    }
   };
 
   /**
@@ -1186,9 +1296,8 @@ export function createTerminalView(root, deps) {
       find.open();
     },
     copy() {
-      const t = shown;
-      if (t !== null && t.xterm.hasSelection()) {
-        navigator.clipboard.writeText(t.xterm.getSelection()).catch(() => {});
+      if (shown !== null) {
+        copySelection(shown);
       }
     },
     pasteRaw() {
@@ -1233,6 +1342,50 @@ export function createTerminalView(root, deps) {
       return fitInside(Math.floor(width), Math.floor(height), cell, shown?.xterm.element ?? root);
     },
   };
+}
+
+/**
+ * Issue #184: whether xterm.js 6.0.0 starts a selection with this press (its SelectionService
+ * `handleMouseDown`): the primary button, and while the program has mouse reporting on only with
+ * the key that forces a selection — Shift here; on a Mac xterm.js uses Alt instead, and only with
+ * its option `macOptionClickForcesSelection`, which this page leaves off. Where this guesses wrong
+ * the press changes no selection, which the release then finds.
+ * @param {Terminal} xterm
+ * @param {MouseEvent} event
+ * @returns {boolean}
+ */
+function startsSelection(xterm, event) {
+  return event.button === 0 && (xterm.modes.mouseTrackingMode === 'none' || event.shiftKey);
+}
+
+/** xterm.js 6.0.0's `ALT_CLICK_MOVE_CURSOR_TIME`: an Alt+click shorter than this moves the cursor. */
+const ALT_CLICK_MS = 500;
+
+/**
+ * Issue #184: whether xterm.js 6.0.0 takes this release as "move the cursor here" (its
+ * SelectionService `_handleMouseUp`, with the option `altClickMovesCursor`, on by default, which
+ * this page leaves): Alt held, at most one character selected, within ALT_CLICK_MS of the press.
+ * It then ends no selection: it reports none; the arrow keys it sends clear that character, and
+ * while the terminal is scrolled up it sends none and leaves the character selected.
+ * @param {Terminal} xterm
+ * @param {MouseEvent} event
+ * @param {number} pressedAt the press's `timeStamp`
+ * @returns {boolean}
+ */
+function movesCursor(xterm, event, pressedAt) {
+  return (
+    event.altKey && xterm.getSelection().length <= 1 && event.timeStamp - pressedAt < ALT_CLICK_MS
+  );
+}
+
+/**
+ * Where the terminal's selection is, as a text to compare (`''` with none).
+ * @param {Terminal} xterm
+ * @returns {string}
+ */
+function selectionPlace(xterm) {
+  const at = xterm.getSelectionPosition();
+  return at === undefined ? '' : `${at.start.x},${at.start.y}-${at.end.x},${at.end.y}`;
 }
 
 /**

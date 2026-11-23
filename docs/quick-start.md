@@ -109,9 +109,10 @@ title bar counts the sessions in each state.
 ### Open a session's terminal
 
 Click a session under Open. Its terminal shows on the right, and what you type goes to Claude
-Code. Ctrl+Shift+C copies from the terminal (Ctrl+C interrupts Claude Code, as always), Ctrl+V
-pastes text. A session that runs in another terminal cannot be shown here: once you `/exit` it
-there, you can resume it in the window.
+Code. Text you select there with the mouse is copied when you let go of the button, and
+Ctrl+Shift+C copies too (Ctrl+C interrupts Claude Code, as always); Ctrl+V pastes text. A session
+that runs in another terminal cannot be shown here: once you `/exit` it there, you can resume it in
+the window.
 
 ### Start a new session
 

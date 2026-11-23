@@ -47,6 +47,7 @@ const CHANGEABLE = [
   'window.links',
   'window.keepAlive',
   'window.updateCheck',
+  'window.copyOnSelect',
 ];
 const SHOWN_ONLY = [
   'claudeCommand',
@@ -67,6 +68,7 @@ const AT_ONCE = [
   'restoreStartTimeoutSeconds',
   'window.links',
   'window.updateCheck',
+  'window.copyOnSelect',
 ];
 
 /** Every key of a Config as config.json names it: `<key>`, or `<object>.<key>` one level down. */
@@ -219,6 +221,16 @@ describe('the table (G1): one row for every key of Config', () => {
       } else {
         assert.deepEqual(row.choices, [], key);
       }
+      // A switch: a key that is true or false, both taken, nothing else (not their texts).
+      if (row.control === 'switch') {
+        assert.equal(typeof at(DEFAULT_CONFIG, key), 'boolean', key);
+        for (const value of [true, false]) parseConfig(fileWith(value), 'config.json');
+        for (const value of ['true', 'false', null, 0, 1]) {
+          assert.throws(() => parseConfig(fileWith(value), 'config.json'), ConfigError, key);
+        }
+      } else {
+        assert.notEqual(typeof at(DEFAULT_CONFIG, key), 'boolean', key);
+      }
       if (row.control === 'number') assert.equal(typeof at(DEFAULT_CONFIG, key), 'number', key);
       if (row.nullable) parseConfig(fileWith(null), 'config.json');
     }
@@ -227,6 +239,12 @@ describe('the table (G1): one row for every key of Config', () => {
     assert.deepEqual(SETTINGS['window.keepAlive'].choices, ['wsl', 'off']);
     assert.deepEqual(SETTINGS['window.updateCheck'].choices, ['daily', 'off']);
     assert.equal(SETTINGS['window.updateCheck'].group, 'The window');
+    assert.deepEqual(
+      Object.keys(SETTINGS).filter((key) => SETTINGS[key as SettingKey].control === 'switch'),
+      ['window.copyOnSelect'],
+    );
+    assert.equal(SETTINGS['window.copyOnSelect'].group, 'The window');
+    assert.equal(SETTINGS['window.copyOnSelect'].nullable, false);
     assert.equal(SETTINGS.ticketUrl.nullable, true);
     assert.equal(SETTINGS['wezterm.domain'].nullable, true);
   });
@@ -276,11 +294,18 @@ describe('what a page may send (G2): every refusal changes nothing', () => {
     assert.equal(existsSync(w.backup), false);
   });
 
-  test('a value that is no string, number or null (a whole configuration, a list, a boolean) is refused', (t) => {
+  test('a value that is no string, number, true, false or null (a whole configuration, a list) is refused', (t) => {
     const w = world(t);
     const before = w.text();
-    for (const value of [{ prRefreshMinutes: 1 }, [1], true, undefined]) {
+    for (const value of [
+      { prRefreshMinutes: 1 },
+      [1],
+      [true],
+      { copyOnSelect: false },
+      undefined,
+    ]) {
       refusedWith(w, w.settings.set('prRefreshMinutes', value as never), /cannot be/);
+      refusedWith(w, w.settings.set('window.copyOnSelect', value as never), /cannot be/);
     }
     // JSON would write them as null, which ticketUrl and wezterm.domain take.
     for (const key of ['ticketUrl', 'wezterm.domain', 'prRefreshMinutes']) {
@@ -319,6 +344,21 @@ describe('what a page may send (G2): every refusal changes nothing', () => {
       ['window.keepAlive', null, '"window.keepAlive" must be "wsl" or "off"'],
       ['window.updateCheck', 'weekly', '"window.updateCheck" must be "daily" or "off"'],
       ['wezterm.domain', '', '"wezterm.domain" must be a non-empty string or null'],
+      // Issue #184: true or false, nothing else; and no other key takes either.
+      ['window.copyOnSelect', 'false', '"window.copyOnSelect" must be true or false'],
+      ['window.copyOnSelect', 'true', '"window.copyOnSelect" must be true or false'],
+      ['window.copyOnSelect', 1, '"window.copyOnSelect" must be true or false'],
+      ['window.copyOnSelect', null, '"window.copyOnSelect" must be true or false'],
+      ['window.copyOnSelect', 0, '"window.copyOnSelect" must be true or false'],
+      ['prRefreshMinutes', true, '"prRefreshMinutes" must be a positive integer'],
+      ['groupPattern', false, '"groupPattern" must be a string'],
+      [
+        'ticketUrl',
+        true,
+        '"ticketUrl" must be null or an http or https address with {key} once, after its host',
+      ],
+      ['window.updateCheck', false, '"window.updateCheck" must be "daily" or "off"'],
+      ['window.keepAlive', true, '"window.keepAlive" must be "wsl" or "off"'],
     ];
     for (const [key, value, message] of cases) {
       const outcome = w.settings.set(key, value as never);
@@ -749,6 +789,7 @@ describe('the screen (payload) and what the running server uses (G4)', () => {
       restoreStartTimeoutSeconds: 60,
       'window.links': 'edge',
       'window.updateCheck': 'off',
+      'window.copyOnSelect': false,
     };
     assert.deepEqual(Object.keys(values), AT_ONCE);
     for (const [key, value] of Object.entries(values)) {
@@ -760,6 +801,23 @@ describe('the screen (payload) and what the running server uses (G4)', () => {
       assert.equal(w.settings.reset(key).ok, true, key);
       assert.deepEqual(at(w.d.deck.config, key), at(DEFAULT_CONFIG, key), key);
     }
+  });
+
+  test('window.copyOnSelect (issue #184): false is written to the file as false, the switch it is, and true again; the screen sends it as it is', (t) => {
+    const w = world(t, { prRefreshMinutes: 7 });
+    assert.equal(setting(w.settings.payload(), 'window.copyOnSelect').value, true);
+    assert.equal(setting(w.settings.payload(), 'window.copyOnSelect').control, 'switch');
+    assert.equal(w.settings.set('window.copyOnSelect', false).ok, true);
+    assert.deepEqual(w.json(), { prRefreshMinutes: 7, window: { copyOnSelect: false } });
+    assert.equal(w.d.deck.config.window.copyOnSelect, false);
+    const off = setting(w.settings.payload(), 'window.copyOnSelect');
+    assert.deepEqual(
+      [off.value, off.valueText, off.inFile, off.pending],
+      [false, 'false', true, false],
+    );
+    assert.equal(w.settings.set('window.copyOnSelect', true).ok, true);
+    assert.deepEqual(w.json(), { prRefreshMinutes: 7, window: { copyOnSelect: true } });
+    assert.equal(w.d.deck.config.window.copyOnSelect, true);
   });
 
   test('a key read at the start (window.keepAlive) is written to the file only: the running server keeps its value, and the screen says it applies after the window restarts', (t) => {
