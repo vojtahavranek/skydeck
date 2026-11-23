@@ -3233,12 +3233,16 @@ terminal of the window and selected.
    text is selected; a letter typed now lands in the prompt (delete it). Press Ctrl+Shift+L
    (`Focus: list`) and do the same: the key bar still says `Focus: list`, and ↓ moves the
    selection in the list (↑ back).
-6. **A dialog.** Open the settings (the gear) and try to drag the border under it: nothing moves.
+6. **The list's scroll bar.** With enough sessions that the list scrolls (`a` shows the done ones
+   too), drag the list's scroll bar at its right edge, right beside the border. Expected: the list
+   scrolls and its width does not change; the pointer shows the column-resize arrow only on the
+   border itself and just right of it. Press `a` again.
+7. **A dialog.** Open the settings (the gear) and try to drag the border under it: nothing moves.
    Press Esc.
-7. **A browser tab.** In W, `skydeck window --print-url`, open the address in a tab of your usual
+8. **A browser tab.** In W, `skydeck window --print-url`, open the address in a tab of your usual
    Edge. Expected: the tab's list keeps a width of its own (400 px the first time: another browser
    profile than the window's), and a drag there leaves the window's width as it is. Close the tab.
-8. **The end.** Double-click the border. Expected: the list is 400 px wide again (as before the
+9. **The end.** Double-click the border. Expected: the list is 400 px wide again (as before the
    update); after Ctrl+Shift+R too.
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge

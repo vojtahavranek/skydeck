@@ -874,9 +874,10 @@ effect.
   soon as it starts), or start one in the window with Ctrl+Shift+N (`+ New` in a browser tab); the
   right side then says `The selected session shows here.`
 - **The list's width**: drag the border between the list and the right side (the pointer shows a
-  column-resize arrow on it) to make the list wider or narrower, from 240 to 800 px; the right side
-  always keeps at least 320 px, so in a narrower window the list shows narrower and comes back to
-  your width when the window is wide again. The browser keeps the width, as it keeps the theme: it
+  column-resize arrow on it) to make the list wider or narrower, from 240 to 800 px. Once you have
+  set a width, the right side keeps at least 320 px in a window of 560 px or more (in a narrower
+  one the list is 240 px): a narrower window shows the list narrower, and it comes back to your
+  width when the window is wide again. Until then the list is 400 px as before, in any window. The browser keeps the width, as it keeps the theme: it
   is there after a reload and the next `skydeck window` (the app window and a browser tab of
   another profile each keep their own), and other windows of the same profile take it at once. A
   double click on the border puts the list back at 400 px. Dragging moves no keyboard: it stays in
