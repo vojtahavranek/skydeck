@@ -1,11 +1,14 @@
 // What the user attaches to a session (design 7.1) and the pull requests they attach by hand (7.3).
-// Nothing here stops a process, and nothing moves a note from one session to another (principle 6).
+// Nothing here stops a process, and nothing moves a note from one session to another (principle 6)
+// but the window's carry over after `/clear` (follow-up F40, `carryFields`), on the user's word:
+// it copies, and the old session keeps its own.
 import { join } from 'node:path';
 
 import { prKey } from '../github.ts';
 import type { PrKey } from '../github.ts';
 import { SkydeckError, UsageError } from '../platform/errors.ts';
 import { sanitize } from '../text/sanitize.ts';
+import type { MetaPatch } from '../store/types.ts';
 import type { Deck } from './deck.ts';
 import { readTicket } from './ticket.ts';
 
@@ -45,6 +48,36 @@ export function requireTicket(text: string, ticketUrl: string | null): string | 
  *  read the text with `requireTicket`. */
 export function setTicket(deck: Deck, sessionId: string, address: string | null): void {
   deck.store.updateMeta(sessionId, { ticket: address }, deck.platform.clock.nowNs());
+}
+
+/** Follow-up F40: the fields a carry over copies, cleaned by the caller; absent is not copied. */
+export interface CarriedFields {
+  label?: string;
+  group?: string;
+  /** The ticket's address. */
+  ticket?: string;
+  note?: string;
+  /** The urls of the pull requests to attach. */
+  prs?: readonly string[];
+}
+
+/**
+ * Follow-up F40 (design 7.1): copies the given fields to the session — one `updateMeta` with the
+ * label, group, ticket and note given (none given: none), then each pull request attached with
+ * origin `manual` (which also clears an earlier detach). It opens no transaction (the caller's
+ * holds it) and cleans nothing (the caller cleaned, as for `setLabel`).
+ */
+export function carryFields(deck: Deck, sessionId: string, fields: CarriedFields): void {
+  const now = deck.platform.clock.nowNs();
+  const patch: MetaPatch = {};
+  if (fields.label !== undefined) patch.label = fields.label;
+  if (fields.group !== undefined) patch.group = fields.group;
+  if (fields.ticket !== undefined) patch.ticket = fields.ticket;
+  if (fields.note !== undefined) patch.note = fields.note;
+  if (Object.keys(patch).length > 0) deck.store.updateMeta(sessionId, patch, now);
+  for (const url of fields.prs ?? []) {
+    deck.store.attachPr(sessionId, url, 'manual', now);
+  }
 }
 
 /** The file `skydeck note`'s editor works on, and keeps when it fails: `<stateDir>/note-<id>.md`. */

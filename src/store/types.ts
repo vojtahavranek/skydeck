@@ -202,6 +202,13 @@ export type KvKey =
   // The slots the sessions last had in the window, per boot (the newest two): a restore's order
   // (design 7.8, F37). A JSON array of { bootId, sessions: { <session id>: <slot> } }.
   | 'window_restore_order'
+  // F40 (S2 10.2): the carry over after `/clear`. The server's clock at its first start with F40,
+  // decimal ns, written once (a `clear` link older than it, less 5 s, makes no offer); the answer
+  // to one new session's offer, `carried` or `dismissed`; the ticks of the last carry over, a
+  // JSON object of booleans.
+  | 'window_carry_over_since'
+  | `window_carry_over:${string}`
+  | 'window_carry_over_ticks'
   // A resume lock (design 7.6, D16): the decimal time in ns it was taken, then `:<id>` of the
   // session's latest event at that moment (0 when it had none; a bare time is a lock an earlier
   // version wrote); one per session id.
