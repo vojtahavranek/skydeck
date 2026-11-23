@@ -1796,8 +1796,9 @@ the sessions the chips leave in it, and a closed one stays closed.
   and the block forms again later.
 - A closed block opens by itself while one of its sessions, the first too, has a terminal of the
   window whose program has not reported its session yet (a start, or a program that ended before it
-  reported, until you close its terminal), so that its row and its slot number show and its slot
-  chord reaches it; it then stays open. While such a session holds it open, ← and a click on the
+  reported, until you close its terminal), so that its row shows — while it starts, under Open,
+  with its slot number, which its slot chord reaches; one that ended has no number —; it then
+  stays open. While such a session holds it open, ← and a click on the
   caption do nothing, and the key bar says why: `this block holds a session that is still starting;
   it stays open` while its terminal may still start (wait, and the block can be closed once the
   session is known), or `this block holds a terminal that ended at its start; close it first` when

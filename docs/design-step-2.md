@@ -1131,7 +1131,8 @@ program is known to be over: when the keeper's `exit` is applied (ended, or not 
 `hello` that says the program exited (a server started while such a keeper still waits for its
 acknowledgement, 7.8), and for a lost keeper (7.8) once its program may no longer run by 7.5's rule
 — the program its keeper reported gone, or 60 seconds after the loss; the server looks once a
-second, and until then the lost terminal keeps its slot. A keeper that only stops answering
+second, and until then the lost terminal keeps its slot: its row under Recent shows no number,
+but Ctrl+Shift+N still reaches it (12.9). A keeper that only stops answering
 (`reconnecting`) keeps its slot and comes back with it. The ended terminal stays listed, with its
 last screen, without a slot, and never takes one again (not at a later `hello`, not after a
 restart); the next new or resumed terminal takes the freed slot by the lowest-free rule, and the
@@ -2788,7 +2789,8 @@ notification's click, a pick in the switcher, the server's own selection after a
 block. A closed block is open too while any of its sessions — its first too — is drawn with a
 terminal of the window that has not reported a session (7.5: a start not yet reported, which may
 stay so, or a program that ended before it reported, until its terminal is closed), so that such a
-row and its slot are on screen and its slot chord reaches it; the page forgets that it was closed,
+row is on screen — while it starts, under Open, with its slot and reached by its slot chord; one
+that ended has no slot (follow-up F43, 7.6) —; the page forgets that it was closed,
 as for a selection, and while such a session holds the block open ← on a session of it and a click
 on its caption do nothing and the key bar says why (ruled on 2026-11-16; two lines from follow-up
 F6): `this block holds a session that is still starting; it stays open` while that session's
@@ -3791,12 +3793,14 @@ ninth takes 9 and the ninth loses its own; a session that does not run in the wi
 number, wherever it sits. Ctrl+Shift+N then goes to the row that shows N. Follow-up F43: a
 terminal whose program ended has no number, its row under Recent or Earlier shows none, and the
 next new or resumed terminal takes the freed number, so Ctrl+Shift+N never goes to an ended
-terminal. A move hands every number
-out again from the top: when a block draws a terminal without a number above numbered ones (12.2),
-any move — also of another row — gives that terminal a number and takes one from the last numbered
-terminal; the first move after a block made the numbers read out of order (`1 3 2`) renumbers all
-of Open once, rows that did not move too. Nothing is renumbered when a session ends (a gap stays a
-gap), and a new or resumed terminal still takes the lowest free number.
+terminal. A terminal that still holds its number while its row is under Recent — a lost one in
+its 60 seconds (7.6), or a running one whose session ended a moment before its program — is still
+reached by Ctrl+Shift+N, through the window's terminals, though its row shows no number. A move
+hands every number out again from the top: when a block draws a terminal without a number above
+numbered ones (12.2), any move — also of another row — gives that terminal a number and takes one
+from the last numbered terminal; the first move after a block made the numbers read out of order
+(`1 3 2`) renumbers all of Open once, rows that did not move too. Nothing is renumbered when a
+session ends (a gap stays a gap), and a new or resumed terminal still takes the lowest free number.
 
 Blocks stay together: inside a block a row trades places with the neighbouring row of the block,
 whatever either's kind; at the block's edge the whole block passes the next row or block; a single
@@ -5637,7 +5641,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W38 | A ticket's status on the throwaway session (follow-up F19), asking no real tracker: a stand-in program the owner writes in a throwaway folder (`~/skydeck-try/status`, its three lines given) answers for a `ticketStatus` rule whose `match` is `https://example.com/try/`; the ticket `https://example.com/try/TRY-1` on the throwaway session shows `TRY-1 · In Progress ↗` in blue in the header and `In Progress` in the row's small chip; the answer changed to each category and ↻ pressed in the ticket dialog: `blocked` red, `review` amber, `doing` blue, `done` green, `todo` and `closed` grey; a failure (the program made not executable) keeps the old status and its tooltip says `status not read: …`; `skydeck show` prints `ticket:` with ` · <status>`. Every step checks the header's short id or the dialog's heading first; at the end the ticket is removed, `config.json` is as it was (restored from a copy), and the stand-in is deleted. | F19 | 12.5, 12.2, 12.3, 10.2 |
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
 | W41 | The settings screen's Advanced on the owner's own `config.json`, copied aside first: the title bar's gear opens it, `Advanced (14 more settings)` opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36, F39 | 12.13 |
-| W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last row and under a filter; follow-up F42: a fourth session of another terminal moved above a numbered one, the numbers unchanged, `/clear` in it keeps its place; `skydeck window --restart` keeps the order. The restore order only where W16's drill runs anyway. | F37, F42 | 7.6, 12.1, 12.9 |
+| W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last row and under a filter; follow-up F42: a fourth session of another terminal moved above a numbered one, the numbers unchanged, `/clear` in it keeps its place; `skydeck window --restart` keeps the order; follow-up F43: `/exit` in a numbered terminal gives its number up (its row under Recent without one, Ctrl+Shift+1 reaches no session), the next new session takes it, also after `Mark done, keep it running`. The restore order only where W16's drill runs anyway. | F37, F42, F43 | 7.6, 12.1, 12.9 |
 | W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Update now` and `Close`; `doctor`'s `update:` line; the group's switch `Check for updates every day` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
 | W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links, The window and (F38) Updates with eight plain labels (from issue #184 `Copy on select` in The window) and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
 | W45 | The tour of the window in the owner's Edge (follow-up F41): it starts by itself at the first opening after the update, over the real list; each step's region stands out and its words read well; Enter, → and ← walk it, a click on the page does nothing, Ctrl+Shift+L says `close the tour first (Esc)`; `Done` gives the keyboard back and a reload shows it no more; the key help's `Take the tour` and the switcher's `> tour` start it again and Esc ends it; an InPrivate window with `--print-url`'s address shows it by itself once, in a tab's words. | F41 | 12.9, 12.14 |

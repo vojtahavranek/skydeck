@@ -2886,8 +2886,8 @@ as the ones after them.
    Ctrl+Shift+1 says `no session in slot 1`. Then Ctrl+Shift+N, the throwaway folder, label
    `move-4`, Enter: `move-4` takes the number 1 and Ctrl+Shift+1 shows its terminal. Then select
    `move-4`, press `d`, choose `Mark done, keep it running`, and type `/exit` in its terminal: the
-   number 1 is free again without `show`, Close or a restart; the next Ctrl+Shift+N session takes
-   it.
+   number 1 is free again without `Show done`, Close or a restart; the next Ctrl+Shift+N session
+   takes it.
 9. **The end.** For each throwaway session: type `/exit` in its terminal (in W too), then `d` in the
    list to mark it done.
 

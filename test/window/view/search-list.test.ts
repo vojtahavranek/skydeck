@@ -661,7 +661,7 @@ test('blocks: a row with an ended terminal of the window and a row that needs yo
   assert.deepEqual(ids(build(shut('week', 'ORB-1'), S2), 'week'), [S1, S2, S3, S4]);
 });
 
-test('blocks: a closed block whose member is drawn with a terminal that has not reported a session is drawn open, so that its row and its slot show (ruled 2026-11-16)', () => {
+test('blocks: a closed block whose member is drawn with a terminal that has not reported a session is drawn open, so that its row shows — with its slot while it starts under Open, none once it ended (F43) (ruled 2026-11-16)', () => {
   // Open: S1 (slot 1, reported) and S2 (slot 2, started for S2, not reported); Recent: S3 and
   // S4, whose terminal (slot 3) ended before its program reported. All of `test`.
   const list = rows(
