@@ -777,7 +777,9 @@ test("the terminal's frame", async (t) => {
       const middle = { x: (text.left + text.right) / 2, y: (text.top + text.bottom) / 2 };
       const points = {
         text: middle,
-        left: { x: box.left + 4, y: middle.y },
+        // From the margin's px 6: its first 5 px at the border are the list's handle (issue #192,
+        // S2 12.1), where a wheel does nothing.
+        left: { x: box.left + 6, y: middle.y },
         top: { x: middle.x, y: box.top + 4 },
         bottom: { x: middle.x, y: box.bottom - 3 },
         right: { x: box.right - SCROLL_BAR - 4, y: middle.y },

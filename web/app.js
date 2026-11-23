@@ -54,6 +54,11 @@
 // an update that runs (F38's running form) ends it unmarked, and when it closes the keyboard goes
 // back where it was.
 //
+// Issue #192 (S2 12.1, 12.9): the handle on the border between the list and the right side of
+// web/list-width.js, which sets the list's width by a drag, keeps it in the page's localStorage,
+// and gives the default back at a double click. It takes no keyboard and does nothing while the
+// page is modal (`modal`).
+//
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
 
@@ -76,6 +81,7 @@ import { createHelp } from './help.js';
 import { cancels, listKey, switcherKey, windowChord } from './keys.js';
 import { createList } from './list.js';
 import { holdsNoSession } from './list-text.js';
+import { createListWidth } from './list-width.js';
 import { newFormDefaults } from './new-form-text.js';
 import { createNotifications } from './notify.js';
 import { blockInfo, movedMru, movedWith, paneFor, sessionRow } from './pane.js';
@@ -397,6 +403,10 @@ const updateDialog = createUpdateDialog(dom.updateDialog, {
 });
 // F41: the tour of the window (web/tour.js).
 const tour = createTour(dom.tour, { closed: () => tourClosed() });
+// Issue #192: the handle between the list and the right side (web/list-width.js). It takes no
+// keyboard, and does nothing while the page is modal; the terminal follows the width by its own
+// refit, and the server hears of it only as of a window resize (`resize`, `focus`).
+createListWidth(byId('list-handle'), { list: dom.listZone, blocked: () => modal() });
 // Stage B (B15): a click on a notification passes the gate of a window chord, then selects. A
 // session this page's list does not show (its filter, the folded Earlier) and that has no terminal
 // of the window is not selected (ruled on review 2): the pane would be empty, and a focused page's

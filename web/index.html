@@ -18,7 +18,10 @@
      available` before `Switch…` and the gear (`#update-button`, shown while a newer skydeck is
      known) and the dialog it opens (`#update-dialog`, web/update.js), with their style sheet, and
      the bar that says how an update from the window ended (`#update-result`); follow-up F41's
-     tour of the window (`#tour`, web/tour.js) over everything, with its style sheet. -->
+     tour of the window (`#tour`, web/tour.js) over everything, with its style sheet; issue #192's
+     classic script that applies the stored width of the list before the first paint
+     (web/list-width-early.js), and the handle on the border between the list and the right side
+     (`#list-handle`, web/list-width.js). -->
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -30,6 +33,7 @@
     />
     <link rel="manifest" href="/manifest.webmanifest" />
     <script src="/assets/__VERSION__/web/theme-early.js"></script>
+    <script src="/assets/__VERSION__/web/list-width-early.js"></script>
     <link rel="stylesheet" href="/assets/__VERSION__/vendor/xterm/xterm/css/xterm.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/style.css" />
     <link rel="stylesheet" href="/assets/__VERSION__/web/list.css" />
@@ -96,6 +100,7 @@
           <div class="cards" id="cards"></div>
           <div class="terminal" id="terminal"></div>
         </section>
+        <div class="list-handle" id="list-handle" aria-hidden="true"></div>
       </main>
       <footer class="keybar">
         <span class="focus-zone" id="focus-zone">Focus: terminal</span>

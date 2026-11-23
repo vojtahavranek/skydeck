@@ -214,7 +214,7 @@ Added to design 11:
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12); from follow-up F37 the move of a session of Open by hand and the slots it gives out (`slot-moves.ts`, 12.9, 7.6); from follow-up F42 Open's order once a move made it the server's, the freeze and the places held after `/clear` (`open-sequence.ts`, 12.1); from follow-up F40 the parts of the offer to carry fields over after `/clear` (`carry-over.ts`, design 7.1: it imports no value). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
 | `src/window/view/search/` | The rules of search as pure functions (stage E, plan E1): the filter's words and chips (12.8), the blocks (12.2; the code calls them stacks), the switcher's ranking (12.8); `build.ts` calls them. No pattern is ever built from a search text. | values: its own files and `text`'s `sanitize` only; types: sessions, `protocol.ts`, `hub.ts`, `view/sections.ts` |
-| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the stored choices of the theme's Mode and colour themes on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
+| `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and two classic scripts, `web/theme-early.js`, that puts the stored choices of the theme's Mode and colour themes on the page before its first paint (12.1; follow-up F13), and `web/list-width-early.js`, that puts the list's stored width there (12.1; issue #192). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
 | `web/carry-over.js`, `web/carry-over-text.js` | Follow-up F40 (12.6, 12.9): the bar that offers to carry fields over after `/clear`, and its words as pure functions. The page draws the server's offer and sends one act; it decides nothing. | `web/carry-over.js`: `web/carry-over-text.js` only |
 | `web/update.js`, `web/update-text.js` | Follow-up F38 (12.1, 12.13, 16.5): the dialog of `Update available`, and its words and the lines of the settings screen's group Updates as pure functions. They put the server's texts into sentences and decide nothing. | `web/format.js` |
@@ -1755,7 +1755,10 @@ page last proposed (`attach`, `resize`). The rules:
   computes its proposal itself (not with the fit addon): the most columns and rows whose screen
   fits the terminal's area, the screen being cell × count rounded to whole pixels as xterm.js
   6.0.0 rounds it, and the room the addon gave its scroll bar (14 px) and the margin the page
-  keeps around the terminal's text (12.6) counted out — read at every count from the element the
+  keeps around the terminal's text (12.6) counted out (its left margin's first 5 px lie under the
+  list's handle, 12.1: they are counted as margin all the same; a press there resizes the list, a
+  wheel there does nothing, and the margin's rule holds from its px 6) — read at every count from
+  the element the
   style sheet gives it to, as lengths, so that the margin drawn and the margin counted cannot
   drift apart (whatever unit or element sets it); the answer does not depend on the terminal's
   current size. A first size the page asks for (an act's, `focus.area`) is counted by the same
@@ -2715,6 +2718,60 @@ structure and the page suite the computed values. As for the mode, there is no k
 `config.json` key and no command-line flag, and nothing of it goes to the server but the colours
 (8.2.3 `theme`).
 
+**The list's width** (issue #192, 2026-11-23: so that the list can be wider for long titles, or
+narrower for a wide terminal). The border between the list and the right side is a handle: a strip
+6 px wide, over the list's 1 px edge and the first 5 px of the right side, none of the list: its
+scroll bar lies at its right edge. Narrower would be hard to hit; in those 5 px the terminal has
+only the first half of its blank 10 px margin (it keeps the other 5 px for a press that gives it
+the keyboard or starts a selection at column 1), and the header, the cards, the New form, the
+carry-over bar, the terminal's bars and the empty note have nothing that takes a click there. A
+press there resizes and a wheel there does nothing, so the margin's rule of 12.6 holds from its
+px 6 (a small named limit). The handle has the column-resize cursor, a line in the accent colour
+on the border line on hover and while it is dragged, and the tooltip `Drag to change the width of
+the list. Double-click: back to 400 px.` (`web/list-width-text.js`). A press of the primary button
+on it and a move change the list's width with the pointer, live. The drag begins once the
+pointer is more than 3 px (CSS px, compared as whole px) from the x of its press; until then the
+press changes nothing and keeps nothing, so a slip of a px or two never stores a width (at any
+display scale). Once begun, the width follows the pointer exactly, also back inside those 3 px.
+The release ends the drag, and so does losing the pointer (the handle captures it, so a release
+outside the window ends it too). A press of another button does nothing. A begun drag released at
+the x of its press (the pointer went and came back) keeps nothing and leaves the width as it was
+before the press: nothing stored stays nothing stored, and a kept width that a narrow window holds
+is not replaced by the width shown; when another window of the profile changed or removed the
+kept width meanwhile, it leaves that one, so both windows agree. A width
+is a whole number of px from 240 to 800; while one is stored, the width shown is also at most the
+window's width less 320 px, so that the right side keeps 320 px, and never under 240 px; a narrower
+window shows less and changes nothing kept, and a wider one shows the kept width again. With
+nothing stored the list is 400 px wide, whatever the window's width, with no such clamp: the
+layout before issue #192; so with nothing stored, in a window under 720 px the first px of a drag
+takes the list from 400 px to the window less 320 px (a named limit). A double click on the handle
+gives 400 px back and removes the stored value, unless its second press became a drag (it went
+more than 3 px from its x): a double click whose presses slip a px or two still resets. The width is
+the page's, as the theme's choice is: one key of its `localStorage`
+(`skydeck-list-width`, decimal px), written when a drag ends with the width shown then, so it holds
+across reloads and restarts of the window and in every window of the profile, each PC keeping its
+own; another window of the profile takes it when the drag ends (the `storage` event). A stored value
+that is no whole number (a word, a fraction, white space) is nothing stored, and a whole number
+outside 240 … 800 (negative, huge) is held to them; storage that throws or is missing keeps the
+width for the life of the page. A classic script of its own (`web/list-width-early.js`, loaded in
+`<head>` right after `web/theme-early.js`) puts the stored width on `<html>` as `--list-width`
+before the first paint, so that a reload does not jump; style.css's `.main` holds it to the
+window (`max(240px, min(var(--list-width), 100vw - 320px))`, 400 px without it), so a window
+resize needs no script; `test/web/list-width.test.ts` holds the script's reading, and the style
+sheet's numbers, equal to `web/list-width-text.js`'s. The handle and the keyboard: 12.9. The
+terminal follows the width as at a window resize, by the page's refit after a size change of its
+area (`resize`, 8.2.6, and `focus`); nothing else goes to the server, and a terminal hidden during
+the drag fits when it is shown. While a dialog, the switcher or the tour is shown the handle does
+nothing, as nothing else under them does, and a drag that meets one (a chord pressed meanwhile)
+ends there as at a release; the tour's ring around the list and the right side lies on their
+boxes as they are (12.14). The rows keep their rules at every width: only the title gives way
+(it ends in an ellipsis), every other part of a row (its number, group, marks, the pull requests'
+chip, the ticket's status, the note mark, the age) keeps its width. So at 240 px a row with the
+title, the number, the age and a short group or one chip fits, with no horizontal scroll bar, and a
+row whose fixed parts are wider than the list scrolls the list sideways, as such a row already did
+at 400 px before issue #192 (a named limit). There is no key for it, no `config.json` key and no
+command-line flag. Check W48.
+
 ### 12.2 Rows
 
 - A running session has two lines: the first as below, the second its state line (`working 4m`,
@@ -3362,7 +3419,9 @@ nothing; `ls` is unchanged.
   (8.2.6); what lies over the terminal (its bars, the hint, the find bar) keeps its place in the
   terminal's box. A wheel in the margin does what a wheel over the nearest cell of the text does,
   once: it scrolls the scrollback, or in the program's mouse mode reaches the program as one
-  report (ruled, F2's review 2). The lines that frame the terminal — the list's right edge, the
+  report (ruled, F2's review 2); at the left from the margin's px 6, since its first 5 px at the
+  border lie under the list's handle (issue #192, 12.1). The lines that frame the terminal — the
+  list's right edge, the
   line under the header (in every pane: one header, one colour; and under an ended bar), the line
   over the key bar — have one colour of their own (`--edge`), softer than the page's other lines
   in both colour schemes; the focused zone's coloured top edge (12.9) is the focus sign and keeps
@@ -4149,6 +4208,17 @@ help's button says that dialog's `close … first (Esc)` and starts nothing; a m
 button moves no keyboard. After `> tour` the keyboard goes back, when the tour closes, where it was
 before the switcher opened.
 
+**The handle between the list and the right side** (issue #192, 12.1) takes no keyboard and no
+key: it is not focusable and lies outside both zones (over the list's border and the right side's
+first px, none of the list's), and every mousedown on it is cancelled, so
+that a press, a drag and a double click move the keyboard nowhere (it stays in the list, the
+terminal, a field), select no text, start no middle-button scroll and change the focus zone, the
+key bar's `Focus: …` and the selection in no way; the next key goes where it went before. While it
+drags it holds the pointer, so the rows and the terminal it passes over get no event: no row is
+selected, and the terminal's program gets no mouse report and no key, also while it asked for the
+mouse (any move reported, or focus reports). A press that slips up to 3 px is no drag (12.1), so
+a double click that slips still resets. Resizing with the keyboard is not offered.
+
 ### 12.10 Done
 
 A session marked done disappears as in design 7.1, except that a running session marked done
@@ -4584,7 +4654,9 @@ none: no made-up data.
   beside it (to its right, else its left, else below, else above it, inside the window; the middle
   of the window when none fits, so that in a narrow window it may lie over the region; placed
   again, with the ring, when the window is resized and when the region changes size without a
-  resize, as when a bar shows above the zones) holds the title, two to four short lines, `Step n
+  resize, as when a bar shows above the zones or another window of the profile changes the list's
+  width, 12.1; so the ring around the list and around the right side lies on them at the width in
+  force) holds the title, two to four short lines, `Step n
   of N`, `Skip the tour`, `Back` (shown disabled on the first step) and `Next` (`Done` on the
   last), with the keyboard on `Next` at each step. It lies over every layer of the
   page, the dialogs' and the toast's too. Its words are in the page's own colours (`--text`,
@@ -5575,6 +5647,35 @@ In the browser suite, besides those:
   and Esc mark it seen and give the keyboard back where it was; the key help's `Take the tour`, also
   refused over a dialog; against a real server the switcher's `> tour` by Enter and by a click; a
   lost connection ends it unmarked.
+- issue #192 (`test-page/list-width.test.ts`; the rule of a stored value and the early script in
+  `test/web/list-width.test.ts`): with nothing stored the list is 400 px at every window width; a
+  drag changes the width live within 240 … 800 and the window less 320, stores it at the release
+  (also one outside the window) and not before, and a press with no move stores nothing; a slip
+  of up to 3 px is no drag (also at a device scale of 2.5), and past it the width follows the
+  pointer exactly; a begun drag released at the x of its press leaves the width as before it
+  (nothing stored, or a kept width a narrow window holds), or as another page set it meanwhile,
+  both pages agreeing; a touch drag that is cancelled ends clean and the next drag works; a
+  secondary and a middle press do nothing; a double click gives 400 px and removes the value, also
+  when a press slips 1 or 2 px, and presses counted 3 and 4 after it do nothing, while a second
+  press that goes past 3 px is a drag; the handle lies over the border and the right
+  side's first px, above the shown terminal, a wheel on it changes neither the width nor the
+  terminal's scroll, a press on the list's last px starts no drag, and one 6 px into the right
+  side starts none and reaches the terminal; a
+  narrower window shows less and keeps the value; each kind of damaged value, and storage that
+  throws, takes nothing or is missing; the stored width from the first painted frame after a
+  reload, with the early script and the modules held back, and without the early script the
+  control; with the keyboard in the terminal and in the list, a press, a drag over the rows and
+  the terminal (whose program asked for the mouse), a double click and the other buttons' presses
+  move no keyboard, select no text or row and send the program nothing (mouse mode 1003), the
+  keyboard in the filter stays there, and a program that asked for focus reports gets none; a
+  second page follows at the drag's end, and another key written by another page changes nothing;
+  with Settings, the switcher or the tour shown nothing happens, and a dialog
+  opened during a drag ends it; the tour's ring on the list and the right side at the width in
+  force; at 240 and 800 px rows whose fixed parts fit give no horizontal scroll bar, no
+  overlapping parts and titles in an ellipsis, and a row whose fixed parts are wider scrolls
+  sideways at 240 px as it does at 400 px with nothing stored; against a
+  real server the terminal's size after a drag is the one a window resize to the same width gives,
+  with no other message than such a resize sends.
 
 No test shows a desktop notification or asks for a permission (stage B, plan B17), whatever a
 server sends: every browser context of the suite is made by `newContext` of
@@ -5718,7 +5819,8 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W45 | The tour of the window in the owner's Edge (follow-up F41): it starts by itself at the first opening after the update, over the real list; each step's region stands out and its words read well; Enter, → and ← walk it, a click on the page does nothing, Ctrl+Shift+L says `close the tour first (Esc)`; `Done` gives the keyboard back and a reload shows it no more; the key help's `Take the tour` and the switcher's `> tour` start it again and Esc ends it; an InPrivate window with `--print-url`'s address shows it by itself once, in a tab's words. | F41 | 12.9, 12.14 |
 | W46 | **Real claude**, copy on select (issue #184): a drag over text in the terminal, then Ctrl+V into Notepad, gives that text; a double click a word; `Copy on select` off in Settings, a new selection leaves the clipboard with the text copied before; on again, the next selection is copied, without a reload. | #184 | 9.5, 12.13 |
 | W47 | **Real claude**, follow-up F40: carry over after `/clear` in a window terminal — the bar without a click, a click on it leaves the keyboard in the prompt, `Carry over`, `×`, two clears, `c` from the list with the list changing under it, a session cleared outside the window, and an old cleared session that shows no bar (manual-checks.md, "Carry over after /clear"). | F40 | 12.6, 12.9, design 7.1 |
-| W48 | **Real claude**, issue #188 part 1: a throwaway session resumed from its card's `Other flags…` with another `--model` — the field filled with the flags it was started with, `f` from the list, the header showing the new flag once Claude Code has started, a plain `Resume here` keeping it (manual-checks.md, "Resuming with other flags"). | #188 | 12.6, 12.9, design 7.6 |
+| W48 | The list's width in the owner's Edge (issue #192): the handle shows its cursor and tooltip on the border, a drag changes the width live and stops at 240 and 800 px and where the right side keeps 320 px; after a reload and after the window is closed and opened again the width is there with no jump; a narrower window shows less and a wider one the kept width again; a double click gives 400 px back, also one with a slight slip; the list's scroll bar right beside the border scrolls the list and leaves its width; a drag with `Focus: terminal`, over a throwaway session's terminal, leaves the keyboard in the prompt and types nothing into it; the terminal fits its new width; a browser tab (`--print-url`) keeps its own width. At the end a double click puts 400 px back. | #192 | 12.1, 12.9 |
+| W49 | **Real claude**, issue #188 part 1: a throwaway session resumed from its card's `Other flags…` with another `--model` — the field filled with the flags it was started with, `f` from the list, the header showing the new flag once Claude Code has started, a plain `Resume here` keeping it (manual-checks.md, "Resuming with other flags"). | #188 | 12.6, 12.9, design 7.6 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
