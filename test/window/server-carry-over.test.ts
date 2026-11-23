@@ -6,13 +6,14 @@
 // servers run on the real clock, as the stand-in's hook does.
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
 import type { Ns } from '../../src/platform/types.ts';
 import { attachManualPr } from '../../src/sessions/meta.ts';
-import { CHANGED, NO_OFFER_TO_DISMISS, SINCE_KEY } from '../../src/window/carry-over.ts';
+import { CHANGED, NO_OFFER_TO_DISMISS, SINCE_KEY, TICKS_KEY } from '../../src/window/carry-over.ts';
 import type { ListMessage } from '../../src/window/protocol.ts';
 import { ghRunner } from '../helpers/gh.ts';
 import { until } from '../helpers/keeper.ts';
@@ -353,5 +354,44 @@ describe('the mark of the first start (F40)', () => {
       (l) => l.selected?.carryOver !== undefined,
     );
     assert.equal(newAgain.selected?.carryOver?.from.id, S1);
+  });
+});
+
+describe('the server calls the module (F40, review of 4035aed)', () => {
+  test('at its start the server sweeps the answer of a stopped session without a transcript; the mark and the ticks stay', async (t) => {
+    const { d, server, page, term, n } = await clearedInWindow(t, () => undefined);
+    // The new session's program ends: it is not running, and it never wrote a transcript.
+    page.send({ t: 'input', term, data: '/exit\r' });
+    await page.list(
+      (list) => list.terminals.some((one) => one.id === term && one.state === 'ended'),
+      'the program ended',
+    );
+    d.deck.store.setKv(`window_carry_over:${n}`, 'dismissed');
+    d.deck.store.setKv(TICKS_KEY, '{"label":false}');
+    const mark = d.deck.store.getKv(SINCE_KEY);
+    await server.server.stop('the test restarts it');
+    await start(d);
+    assert.equal(d.deck.store.getKv(`window_carry_over:${n}`), null);
+    assert.equal(d.deck.store.getKv(SINCE_KEY), mark);
+    assert.equal(d.deck.store.getKv(TICKS_KEY), '{"label":false}');
+  });
+
+  test('a first record of the mark that fails is made again by the tick', async (t) => {
+    const d = serverSandbox(t);
+    const db = new DatabaseSync(d.deck.places.dbPath);
+    t.after(() => db.close());
+    db.exec(`CREATE TRIGGER f40_test_hold BEFORE INSERT ON kv WHEN NEW.key = '${SINCE_KEY}'
+             BEGIN SELECT RAISE(ABORT, 'held by the test'); END`);
+    const server = await start(d);
+    await until(
+      () =>
+        server.logs().some((line) => line.includes('carry-over: the first start was not recorded')),
+      'the failed first record logged',
+      10_000,
+    );
+    assert.equal(d.deck.store.getKv(SINCE_KEY), null);
+    db.exec('DROP TRIGGER f40_test_hold');
+    await until(() => d.deck.store.getKv(SINCE_KEY) !== null, 'the mark written by a tick', 10_000);
+    assert.match(d.deck.store.getKv(SINCE_KEY) ?? '', /^[1-9][0-9]*$/);
   });
 });

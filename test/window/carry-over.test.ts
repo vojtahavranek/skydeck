@@ -2,6 +2,8 @@
 // mark of the first start, the lookups from the store, `rev`, the two acts in one transaction
 // each, and the removal of answers.
 import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
@@ -9,7 +11,7 @@ import { UsageError } from '../../src/platform/errors.ts';
 import type { Ns } from '../../src/platform/types.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
 import { loadRows } from '../../src/sessions/load.ts';
-import { attachManualPr, detachSessionPr } from '../../src/sessions/meta.ts';
+import { attachManualPr, detachSessionPr, keptNotePath } from '../../src/sessions/meta.ts';
 import { acquireLock } from '../../src/sessions/resume.ts';
 import type { Store } from '../../src/store/store.ts';
 import type { LinkKind } from '../../src/store/types.ts';
@@ -558,6 +560,41 @@ describe('carry', () => {
     assert.equal(w.deck.store.meta(O)?.doneAtNs, null);
     w.deck.store.deleteKv(`resume_lock:${O}`);
     assert.deepEqual(offerOf(w)?.done, { ticked: true });
+  });
+});
+
+describe('carry: the review of 4035aed', () => {
+  test('a stored done tick is kept when done is not offered', (t) => {
+    const w = world(t);
+    cleared(w, { label: 'work', doneAtNs: T0 });
+    w.deck.store.setKv(TICKS_KEY, JSON.stringify({ done: false }));
+    assert.equal(offerOf(w)?.done, null);
+
+    assert.deepEqual(w.carry.carry(act(w, { fields: ['label'], done: false })), { ok: true });
+
+    assert.equal(JSON.parse(w.deck.store.getKv(TICKS_KEY) ?? 'null').done, false);
+  });
+
+  test('a carried note removes the note file a failed editor kept for the new session', (t) => {
+    const w = world(t);
+    cleared(w, { note: 'the plan' });
+    const kept = keptNotePath(w.deck, N);
+    mkdirSync(dirname(kept), { recursive: true });
+    writeFileSync(kept, 'unsaved text');
+
+    assert.deepEqual(w.carry.carry(act(w, { fields: ['note'], done: false })), { ok: true });
+
+    assert.equal(w.deck.store.meta(N)?.note, 'the plan');
+    assert.equal(existsSync(kept), false);
+  });
+
+  test('a stored group that cleanGroup refuses (a line separator): the carry throws its refusal and writes nothing', (t) => {
+    const w = world(t);
+    cleared(w, { group: 'a\u2028b' });
+    assert.equal(offerOf(w)?.fields[0]?.name, 'group');
+    const before = snapshot(w);
+    assert.throws(() => w.carry.carry(act(w, { fields: ['group'], done: false })), UsageError);
+    assert.deepEqual(snapshot(w), before);
   });
 });
 
