@@ -9,7 +9,10 @@ import { describe, test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 
 import {
+  atPress,
   DEFAULT_WIDTH,
+  DRAG_SLIP,
+  dragBegun,
   HANDLE_TITLE,
   held,
   LIST_WIDTH_KEY,
@@ -99,6 +102,20 @@ describe('the bounds and the stored value (web/list-width-text.js)', () => {
     assert.equal(shownWidth(800, 1000), 680);
     assert.equal(shownWidth(800, 500), 240);
     assert.equal(shownWidth(240, 2000), 240);
+  });
+
+  test('a press becomes a drag once the pointer is more than 3 px from its x, compared as whole px; back at its x is the same whole px', () => {
+    assert.equal(DRAG_SLIP, 3);
+    for (const dx of [0, 1, 2, 3, -1, -3, 0.4, 3.4, -3.4]) {
+      assert.equal(dragBegun(402, 402 + dx), false, `${dx}`);
+    }
+    for (const dx of [4, -4, 3.5, -3.6, 100]) {
+      assert.equal(dragBegun(402, 402 + dx), true, `${dx}`);
+    }
+    assert.equal(dragBegun(401.6, 405.4), false, '402 and 405 as whole px');
+    assert.equal(atPress(402, 402), true);
+    assert.equal(atPress(402, 402.4), true);
+    assert.equal(atPress(402, 403), false);
   });
 
   test('the handle’s tooltip says what a drag and a double click do', () => {

@@ -703,6 +703,183 @@ await test('the list’s width (issue #192)', async (t) => {
   );
 
   await t.test(
+    'a press that slips up to 3 px changes and stores nothing; past 3 px the drag begins, and from then on the width follows the pointer exactly, also back inside those 3 px',
+    async (t) => {
+      const { page, problems } = await opened(t, chromium);
+      const at = await handleAt(page);
+      const x = Math.round(at.x);
+      await page.mouse.move(x, at.y);
+      await page.mouse.down();
+      for (const dx of [1, 2, 3, -3, -1]) {
+        await page.mouse.move(x + dx, at.y);
+        assert.equal((await widths(page)).list, 400, `a slip of ${dx} px is no drag`);
+      }
+      await page.mouse.move(x + 2, at.y);
+      await page.mouse.up();
+      let now = await widths(page);
+      assert.deepEqual(
+        { list: now.list, stored: now.stored, property: now.property },
+        { list: 400, stored: null, property: '' },
+        'a slip stores nothing',
+      );
+      await page.mouse.move(x, at.y);
+      await page.mouse.down();
+      await page.mouse.move(x + 4, at.y);
+      assert.equal((await widths(page)).list, 404, 'past 3 px: the drag begins');
+      await page.mouse.move(x + 2, at.y);
+      assert.equal((await widths(page)).list, 402, 'and follows back inside the 3 px');
+      await page.mouse.up();
+      now = await widths(page);
+      assert.deepEqual({ list: now.list, stored: now.stored }, { list: 402, stored: '402' });
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'a double click resets to 400 px unless its second press became a drag: a slip of 1 or 2 px in either press, back or not, still resets; a second press that goes past 3 px is a drag',
+    async (t) => {
+      const { page, problems } = await opened(t, chromium, { stored: '600' });
+      /** A double click from a stored 600 whose presses move by `first` and `second` px in turn. */
+      const twice = async (second: number[], first: number[] = []): Promise<unknown> => {
+        await page.evaluate((key) => localStorage.setItem(key, '600'), LIST_WIDTH_KEY);
+        await page.reload();
+        await connection(page, 'open');
+        const at = await handleAt(page);
+        const x = Math.round(at.x);
+        await page.mouse.move(x, at.y);
+        await page.mouse.down({ clickCount: 1 });
+        for (const dx of first) await page.mouse.move(x + dx, at.y);
+        await page.mouse.up({ clickCount: 1 });
+        await page.mouse.down({ clickCount: 2 });
+        for (const dx of second) await page.mouse.move(x + dx, at.y);
+        await page.mouse.up({ clickCount: 2 });
+        await sleep(100);
+        const now = await widths(page);
+        return { list: now.list, stored: now.stored };
+      };
+      const reset = { list: 400, stored: null };
+      assert.deepEqual(await twice([]), reset, 'a plain double click');
+      assert.deepEqual(await twice([1, 0]), reset, 'the second press 1 px and back');
+      assert.deepEqual(await twice([1]), reset, 'the second press 1 px');
+      assert.deepEqual(await twice([2]), reset, 'the second press 2 px');
+      assert.deepEqual(await twice([], [1]), reset, 'the first press 1 px');
+      assert.deepEqual(await twice([], [2, 0]), reset, 'the first press 2 px and back');
+      assert.deepEqual(
+        await twice([4]),
+        { list: 604, stored: '604' },
+        'a second press past 3 px is a drag',
+      );
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'a double click whose second press slipped 1 px resets; two more quick presses after it (counted 3 and 4) change and store nothing; a fresh double click resets again',
+    async (t) => {
+      const { page, problems } = await opened(t, chromium, { stored: '600' });
+      const at = await handleAt(page);
+      const x = Math.round(at.x);
+      await page.mouse.move(x, at.y);
+      await page.mouse.down({ clickCount: 1 });
+      await page.mouse.up({ clickCount: 1 });
+      await page.mouse.down({ clickCount: 2 });
+      await page.mouse.move(x + 1, at.y);
+      await page.mouse.move(x, at.y);
+      await page.mouse.up({ clickCount: 2 });
+      const reset = { list: 400, stored: null, property: '' };
+      const state = async (): Promise<unknown> => {
+        const now = await widths(page);
+        return { list: now.list, stored: now.stored, property: now.property };
+      };
+      assert.deepEqual(await state(), reset, 'the slipped double click resets');
+      const grip = await handleAt(page);
+      await page.mouse.move(Math.round(grip.x), grip.y);
+      for (const count of [3, 4]) {
+        await page.mouse.down({ clickCount: count });
+        await page.mouse.up({ clickCount: count });
+      }
+      assert.deepEqual(await state(), reset, 'presses counted 3 and 4: nothing');
+      await drag(page, [100]);
+      assert.equal((await widths(page)).stored, '500');
+      const again = await handleAt(page);
+      await page.mouse.dblclick(Math.round(again.x), again.y);
+      assert.deepEqual(await state(), reset, 'a fresh double click');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'at a device scale of 2.5 a move of one device px (0.4 CSS px) and back inside 3 px is no drag: it changes and stores nothing',
+    async (t) => {
+      const context = await newContext(chromium, {
+        deviceScaleFactor: 2.5,
+        viewport: { width: 1000, height: 600 },
+      });
+      t.after(() => context.close());
+      const page = await context.newPage();
+      const problems = problemsOf(page);
+      const d = await deck(t);
+      await open(d, page);
+      const at = await handleAt(page);
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down();
+      await page.mouse.move(at.x + 0.4, at.y);
+      await page.mouse.move(at.x + 2.8, at.y);
+      await page.mouse.up();
+      const now = await widths(page);
+      assert.deepEqual(
+        { list: now.list, stored: now.stored, property: now.property },
+        { list: 400, stored: null, property: '' },
+      );
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'another page changes the stored width (a drag) or removes it (a double click) while a drag here is back at its press’s x: the release ends on the other page’s width, and both pages agree',
+    async (t) => {
+      const context = await newContext(chromium);
+      t.after(() => context.close());
+      const one = await context.newPage();
+      const two = await context.newPage();
+      const problems = [one, two].map((page) => problemsOf(page));
+      const d = await deck(t);
+      await open(d, one);
+      await open(d, two);
+      const state = async (page: Page): Promise<unknown> => {
+        const now = await widths(page);
+        return { list: now.list, stored: now.stored, property: now.property };
+      };
+      // Nothing stored; two goes out and back, one drags to 700 meanwhile.
+      const at = await handleAt(two);
+      await two.mouse.move(at.x, at.y);
+      await two.mouse.down();
+      await two.mouse.move(at.x + 50, at.y, { steps: 3 });
+      await two.mouse.move(at.x, at.y, { steps: 3 });
+      await drag(one, [300]);
+      await until(async () => (await widths(two)).list === 700, 'two takes 700 mid-drag');
+      await two.mouse.up();
+      const seven = { list: 700, stored: '700', property: '700px' };
+      assert.deepEqual(await state(two), seven, 'two ends on 700');
+      assert.deepEqual(await state(one), seven, 'and one agrees');
+      // Both at 700; two goes out and back, one double-clicks (removes) meanwhile.
+      const g = await handleAt(two);
+      await two.mouse.move(g.x, g.y);
+      await two.mouse.down();
+      await two.mouse.move(g.x - 50, g.y, { steps: 3 });
+      await two.mouse.move(g.x, g.y, { steps: 3 });
+      const h = await handleAt(one);
+      await one.mouse.dblclick(h.x, h.y);
+      await until(async () => (await widths(two)).list === 400, 'two takes the default mid-drag');
+      await two.mouse.up();
+      const none = { list: 400, stored: null, property: '' };
+      assert.deepEqual(await state(two), none, 'two ends on the default');
+      assert.deepEqual(await state(one), none, 'and one agrees');
+      assert.deepEqual(problems.flat(), []);
+    },
+  );
+
+  await t.test(
     'a drag released at the x of its press stores nothing and leaves the width as it was: nothing stored stays nothing stored (no window clamp appears), and a stored width wider than the window shows is kept',
     async (t) => {
       const { page, problems } = await opened(t, chromium, { width: 600 });

@@ -1,25 +1,36 @@
 // The list's width (issue #192; S2 12.1, 12.9): the handle on the border between the list and the
 // right side (`#list-handle`, index.html). A press of the primary button on it and a move change
-// the list's width with the pointer, live, within web/list-width-text.js's bounds; the release (or
-// the pointer lost: it is captured, so a release outside the window too) ends the drag and keeps
-// the width in the page's own localStorage (LIST_WIDTH_KEY), as the theme's choice is kept
-// (web/theme.js); a drag released at the x of its press stores nothing and leaves the width as it
-// was before the press. A double click gives the default width back and removes the stored value,
-// unless its second press moved (that one was a drag). The width is `--list-width` on <html>,
-// which style.css's `.main` reads and holds to the window, and which web/list-width-early.js puts
-// there before the next load's first paint. Another page of the profile follows at once (the
-// `storage` event). Storage that throws or is missing keeps nothing: the width holds for the life
-// of the page.
+// the list's width with the pointer, live, within web/list-width-text.js's bounds: the drag begins
+// once the pointer is more than DRAG_SLIP px from the x of its press (whole px), and till then the
+// press changes and keeps nothing; once begun the width follows the pointer exactly. The release
+// (or the pointer lost: it is captured, so a release outside the window too) ends the drag and
+// keeps the width in the page's own localStorage (LIST_WIDTH_KEY), as the theme's choice is kept
+// (web/theme.js); a begun drag released at the x of its press stores nothing and leaves the width
+// as it was before the press, or as another page has set it since. A double click gives the
+// default width back and removes the stored value, unless its second press became a drag. The
+// width is `--list-width` on <html>, which style.css's `.main` reads and holds to the window, and
+// which web/list-width-early.js puts there before the next load's first paint. Another page of
+// the profile follows at once (the `storage` event). Storage that throws or is missing keeps
+// nothing: the width holds for the life of the page.
 //
 // The handle takes no keyboard and no key (S2 12.9): it is not focusable, and every mousedown on
 // it is cancelled, so that a press moves the keyboard nowhere, selects no text and starts no
 // middle-button scroll; the list and the terminal see none of its events (the handle lies over
 // the list's border and the right side's first px, outside both zones and none of the list, and
 // holds the pointer while it drags). While `blocked()` (a dialog, the switcher, the tour) a press
-// and a double click do nothing, and a drag that meets one ends as at a release. The terminal follows the new width by its own refit after a size
-// change (web/terminal-view.js), as at a window resize. Nothing of it goes to the server.
+// and a double click do nothing, and a drag that meets one ends as at a release. The terminal
+// follows the new width by its own refit after a size change (web/terminal-view.js), as at a
+// window resize. Nothing of it goes to the server.
 
-import { held, HANDLE_TITLE, LIST_WIDTH_KEY, shownWidth, widthOf } from './list-width-text.js';
+import {
+  atPress,
+  dragBegun,
+  held,
+  HANDLE_TITLE,
+  LIST_WIDTH_KEY,
+  shownWidth,
+  widthOf,
+} from './list-width-text.js';
 
 /** @returns {string | null} the stored value; null when storage throws */
 function read() {
@@ -73,16 +84,21 @@ export function createListWidth(handle, deps) {
   addEventListener('storage', (event) => {
     if (event.key === null || event.key === LIST_WIDTH_KEY) {
       apply(widthOf(read()));
+      // During a drag here, the other page's width is also what a drag released at the x of its
+      // press puts back, so that both pages end on it.
+      if (drag !== null) {
+        drag.before = root.style.getPropertyValue('--list-width');
+      }
     }
   });
 
   /** The drag under way: its pointer, the x of its press and the x it is at now, the width
    *  before the press (`--list-width` on <html>, '' for none), the width it started from and the
-   *  width now, whether it moved.
+   *  width now, whether it has begun (moved more than DRAG_SLIP px from the press's x).
    *  @type {{ pointer: number, x: number, at: number, before: string, from: number, width: number, moved: boolean } | null} */
   let drag = null;
-  /** Whether the last press on the handle moved: the second press of a double click that moved
-   *  was a drag, not a double click. */
+  /** Whether the last press on the handle became a drag: the second press of a double click that
+   *  did was a drag, not a double click. */
   let lastMoved = false;
 
   const end = () => {
@@ -100,7 +116,7 @@ export function createListWidth(handle, deps) {
     if (!moved) {
       return;
     }
-    if (at === x) {
+    if (atPress(x, at)) {
       // Back where it was pressed: the width before the press, and nothing stored, so that
       // nothing stored stays nothing stored and a stored width the window holds is kept.
       if (before === '') {
@@ -136,8 +152,8 @@ export function createListWidth(handle, deps) {
       end();
       return;
     }
-    if (event.clientX === drag.x && !drag.moved) {
-      return;
+    if (!drag.moved && !dragBegun(drag.x, event.clientX)) {
+      return; // a slip: no drag yet
     }
     drag.moved = true;
     drag.at = event.clientX;

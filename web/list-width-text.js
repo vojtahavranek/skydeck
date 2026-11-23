@@ -52,5 +52,31 @@ export function shownWidth(width, windowWidth) {
   return Math.max(MIN_WIDTH, Math.min(width, windowWidth - RIGHT_ROOM));
 }
 
+/** A press on the handle becomes a drag only once the pointer is more than this many CSS px from
+ *  the x of its press (compared as whole px): a slip of a px or two, as in a double click, is no
+ *  drag. */
+export const DRAG_SLIP = 3;
+
+/**
+ * Whether the pointer at `x` has left the x of its press, `pressX`, by more than DRAG_SLIP, both
+ * compared as whole px.
+ * @param {number} pressX
+ * @param {number} x
+ * @returns {boolean}
+ */
+export function dragBegun(pressX, x) {
+  return Math.abs(Math.round(x) - Math.round(pressX)) > DRAG_SLIP;
+}
+
+/**
+ * Whether `x` is the x of the press, `pressX`, as whole px.
+ * @param {number} pressX
+ * @param {number} x
+ * @returns {boolean}
+ */
+export function atPress(pressX, x) {
+  return Math.round(x) === Math.round(pressX);
+}
+
 /** The handle's tooltip. */
 export const HANDLE_TITLE = `Drag to change the width of the list. Double-click: back to ${DEFAULT_WIDTH} px.`;
