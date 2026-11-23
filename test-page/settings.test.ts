@@ -1,6 +1,6 @@
 // The settings screen in the page (follow-up F36, issue #164; S2 12.13): opened by the title bar's
 // gear (F39) and by the switcher's `> settings`. F39's short screen: four groups (the fourth,
-// Updates, F38's), seven controls under plain labels, each saved as it is picked, a refusal beside it, `after a restart`; then the
+// Updates, F38's), eight controls (issue #184's Copy on select) under plain labels, each saved as it is picked, a refusal beside it, `after a restart`; then the
 // closed Advanced, which holds F36's screen of every other setting: the file's path on top, each
 // setting in the server's order under its group, a changeable one in a control that fits it with
 // Save and Default, a shown-only one as text with what it names; a save, a refusal beside the
@@ -253,6 +253,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
         'window.keepAlive',
         'window.links',
         'window.updateCheck',
+        'window.copyOnSelect',
       ]) {
         assert.ok(!drawn.keys.includes(key), `${key} is on the short screen, not in Advanced`);
       }
@@ -892,7 +893,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
     },
   );
   await t.test(
-    'the short screen (F39): four groups, seven controls (F38: Updates) under plain labels, each showing the file’s value; a hint only under three; `after a restart` beside Keep WSL running; no Save, no Default, no line about the default, the file or when a change applies',
+    'the short screen (F39): four groups, eight controls (F38: Updates; #184: Copy on select) under plain labels, each showing the file’s value; a hint only under four; `after a restart` beside Keep WSL running; no Save, no Default, no line about the default, the file or when a change applies',
     async (t) => {
       const l = await launched(t, chromium, {
         config: {
@@ -993,6 +994,15 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
               control: ['That terminal', 'A WezTerm tab', 'The window'],
               value: 'wezterm',
               hint: ['skydeck resume, new and restore, typed in a terminal.'],
+              mark: [],
+            },
+            {
+              // Issue #184: on by default (not in the sandbox's file).
+              label: 'Copy on select',
+              labelled: true,
+              control: 'checkbox switch',
+              value: true,
+              hint: ['Text selected with the mouse in a terminal.'],
               mark: [],
             },
           ],

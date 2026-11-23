@@ -9,6 +9,7 @@
 // terminals run the stand-in, and the page's real modules; the clipboard as the terminal's other
 // copy tests read it.
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import type { Page } from 'playwright';
@@ -527,6 +528,11 @@ test('copy on select (issue #184)', async (t) => {
           'saved',
         );
         await one.keyboard.press('Escape');
+        // The file holds the value itself, true or false.
+        const file = JSON.parse(readFileSync(l.d.deck.places.configPath, 'utf8')) as {
+          window?: Record<string, unknown>;
+        };
+        assert.equal(file.window?.['copyOnSelect'], to);
         for (const page of windows) {
           await until(async () => (await seen(page)) === to, `the window's next list says ${to}`);
         }
