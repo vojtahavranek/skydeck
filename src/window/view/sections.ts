@@ -93,7 +93,8 @@ function noteHead(note: string | null): string[] {
 /**
  * One row as the page receives it (S2 8.2.3): the list row's display fields (its strings were
  * sanitised when the list model was built; the note is sanitised here, line by line), and the
- * window's own: `terminal` and `slot` from the terminal the row is shown with, `elsewhere` with the
+ * window's own: `terminal` and `slot` from the terminal the row is shown with (F43: `claimOf` in
+ * build.ts makes `slot` null for a row not under Open), `elsewhere` with the
  * holder's pid, its terminal device (sanitised: it is read from /proc), the row's directory
  * (S2 7.9) and (F34) `background`, true while that holder's trusted live-session file says Claude
  * Code runs the session in its background (`LiveFile.background`), and `starting` when that

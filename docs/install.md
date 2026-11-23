@@ -943,9 +943,12 @@ effect.
   window's terminals, so the tenth terminal moved above the ninth takes 9 and the ninth loses its
   number, and a session that does not run in the window never has one. Ctrl+Shift+1…9 go to the
   row that shows that number, every open window shows the new order, and it stays after a reload
-  and `skydeck window --restart`. A session that ends leaves a gap (nothing is renumbered), and a
-  new terminal takes the lowest free number, at that number's place: after the terminals with lower
-  numbers, before the next one with a higher number, also when a block shows a terminal out of its
+  and `skydeck window --restart`. A session whose program ends gives its number up at once — also
+  one marked done that you let keep running, and with its ended terminal still on screen; a row
+  under Recent or Earlier never shows a number, and Ctrl+Shift+1…9 never go to an ended session.
+  That leaves a gap (nothing is renumbered), and a new terminal takes the lowest free number, at
+  that number's place: after the terminals with lower numbers, before the next one with a higher
+  number, also when a block shows a terminal out of its
   number's order; once you moved something, a session that opens or ends moves no other row. A block moves as one, and inside a block a session
   trades places with its neighbour; when a block puts a terminal without a number above numbered
   ones, the next move — also of another session — gives that terminal a number and takes one from
@@ -1793,8 +1796,9 @@ the sessions the chips leave in it, and a closed one stays closed.
   and the block forms again later.
 - A closed block opens by itself while one of its sessions, the first too, has a terminal of the
   window whose program has not reported its session yet (a start, or a program that ended before it
-  reported, until you close its terminal), so that its row and its slot number show and its slot
-  chord reaches it; it then stays open. While such a session holds it open, ← and a click on the
+  reported, until you close its terminal), so that its row shows — while it starts, under Open,
+  with its slot number, which its slot chord reaches; one that ended has no number —; it then
+  stays open. While such a session holds it open, ← and a click on the
   caption do nothing, and the key bar says why: `this block holds a session that is still starting;
   it stays open` while its terminal may still start (wait, and the block can be closed once the
   session is known), or `this block holds a terminal that ended at its start; close it first` when

@@ -1126,12 +1126,26 @@ A terminal gets the lowest slot 1–9 that no open terminal has, when it is open
 until it ends; the tenth and later terminals get none. The slot it was opened with is part of the
 keeper's spec and `hello` (its meta), which never changes (7.7).
 
+Follow-up F43: a slot belongs only to a terminal whose program may run. It is free as soon as the
+program is known to be over: when the keeper's `exit` is applied (ended, or not started), at a
+`hello` that says the program exited (a server started while such a keeper still waits for its
+acknowledgement, 7.8), and for a lost keeper (7.8) once its program may no longer run by 7.5's rule
+— the program its keeper reported gone, or 60 seconds after the loss; the server looks once a
+second, and until then the lost terminal keeps its slot: its row shows no number (under Open
+without its terminal while its session still counts as running, else under Recent), but
+Ctrl+Shift+N still reaches it (12.9). A keeper that only stops answering (`reconnecting`) keeps
+its slot and comes back with it. The ended terminal stays listed, with its
+last screen, without a slot, and never takes one again (not at a later `hello`, not after a
+restart); the next new or resumed terminal takes the freed slot by the lowest-free rule, and the
+other terminals keep theirs. A row under Recent or Earlier never shows a number (12.1), so
+Ctrl+Shift+N never goes to an ended terminal (12.9).
+
 Follow-up F37: the user moves a session of Open up or down (12.9), and the slots of Open's
 terminals are given out again so that the numbers read in ascending order top to bottom. Follow-up
 F42: any row of Open moves, and the numbers follow Open's order among the window's terminals: the
 slots Open's terminals of the window hold, sorted, go to the first of those terminals' rows in the
 new drawn order, and every later one has none — the same set (a gap stays a gap), handed out among
-Open's own terminals only (an ended terminal under Recent keeps its slot), so a terminal without a
+Open's own terminals only (an ended terminal has none since F43), so a terminal without a
 slot can gain one (the tenth moved above the ninth takes 9) and the one it passed loses its own. A
 session that does not run in the window never has a slot, wherever it sits. The server computes the
 move (`src/window/view/slot-moves.ts`) and gives the registry the new slots in one synchronous step,
@@ -1154,10 +1168,12 @@ keeper slow to answer after a restart keeps its place; a terminal's own moved sl
 for it.
 
 The map is written (whole, pruned to the terminals listed or being found) before a move is
-applied — a store that cannot be written refuses the move, nothing changed —, at the close of a
-moved terminal (its entry goes, so no later server applies it), and at a `hello` that changed an
-entry. A write outside a move that fails is logged once by kind and tried again after the next
-refresh; a close answers ok whatever the write does. Once the server is stopping nothing is
+applied — a store that cannot be written refuses the move, nothing changed —, when a moved
+terminal's slot is freed at the end of its program (F43: its entry goes, so no later server
+applies it, and its close has nothing left to write; no null is written for it, since the `hello`
+of its keeper says its program exited), at the close of a moved terminal, and at a `hello` that
+changed an entry. A write outside a move that fails is logged once by kind and tried again after
+the next refresh; a close answers ok whatever the write does. Once the server is stopping nothing is
 written to `window_slots` and no `hello` changes a slot. An entry of a keeper never found again
 (another boot) goes at the next write.
 
@@ -1199,8 +1215,9 @@ The server, on `exit`:
 
 - keeps the terminal's last screen in memory and shows it in the terminal pane dimmed, under a bar
   `claude exited (status <n>) at <time> · Resume · Close` (12.6), until the user closes it,
-  resumes the session, or the server restarts. When its session runs again the ended terminal is
-  dropped — forgotten as `close-terminal` forgets it, its slot freed, its keeper allowed to end
+  resumes the session, or the server restarts; its slot is free at once (follow-up F43, 7.6), the
+  terminal stays without one. When its session runs again the ended terminal is
+  dropped — forgotten as `close-terminal` forgets it, its keeper allowed to end
   (ruled by the plan owner, review of plan task 13): a resume from the window closes the
   session's terminals whose program is over (ended, lost, not started) once the guard and the
   lock have let it through and before it opens the new one (a refused resume leaves them), and
@@ -2191,7 +2208,7 @@ install.md "Going back").
 | `window_restore_dismissed` | The boot id whose restore the user dismissed with "Not now" (12.7): written only when it is the earlier boot the banner offers; while it names that boot the banner is not shown. |
 | `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; at an orderly stop the server writes it once more as its pages are, and when it dies it stays as the last refresh left it, so that the next server knows that a window may come back (ruled by the plan owner, plan task 74). |
 | `window_favourites` | The new form's favourite flags (12.6, follow-up F15): a JSON array of their texts, in the order they were added, at most 12; absent while there is none (the last one removed takes the entry away). One write is one transaction that reads the list first. A value that is not such an array is read as no favourite, and of an array only the entries 12.6's rule takes are read; the next save writes the list afresh. An older skydeck reads only the keys it knows and leaves this one alone. |
-| `window_slots` | Follow-up F37 (7.6): the slots moved by hand, a JSON object from terminal id (12 lower-case hex characters) to slot 1–9 or, from follow-up F42, null (a slot a move took away; only a move writes one), holding every live terminal whose slot is not the one of its keeper's meta; absent while there is none. Written whole at a move (before it is applied, in one transaction with `window_open_order`), at the close of a moved terminal and at a `hello` that changed an entry; pruned to the terminals listed or being found. A write that failed outside a move is tried again after the next refresh (7.6). Read tolerantly: an entry with another key or value is left out. An older skydeck leaves it alone and goes by the meta slots. |
+| `window_slots` | Follow-up F37 (7.6): the slots moved by hand, a JSON object from terminal id (12 lower-case hex characters) to slot 1–9 or, from follow-up F42, null (a slot a move took away; only a move writes one), holding every live terminal whose slot is not the one of its keeper's meta; absent while there is none. Written whole at a move (before it is applied, in one transaction with `window_open_order`), when a moved terminal's slot is freed at the end of its program (follow-up F43, 7.6), at the close of a moved terminal and at a `hello` that changed an entry; pruned to the terminals listed or being found. A write that failed outside a move is tried again after the next refresh (7.6). Read tolerantly: an entry with another key or value is left out. An older skydeck leaves it alone and goes by the meta slots. |
 | `window_restore_order` | Follow-up F37, F42 (design 7.8): the order the sessions last had under Open in the window, a JSON array of at most two parts, the newest boot first, each `{ "bootId", "order": [<session id>, …] }`: Open's drawn order (done ones shown) in that boot, with each session that left Open while still a restore's candidate put back after the nearest earlier session still there; at most 500 ids a part. The server takes Open into its own boot's part after each refresh that worked and after a move, writing only when that changes it; nothing changes while Open is empty, so a reboot that ends the keepers first cannot empty it. Read tolerantly: a part F37 wrote, `{ "bootId", "sessions": { <session id>: <slot> } }`, is read as its sessions in the order of their slots. The command's restore reads it too. A limit: an F37 skydeck reads an F42 part as none, restores in list order and drops the part at its next write. |
 | `window_open_order` | Follow-up F42 (12.1): Open's kept order, a JSON array of session ids (at most 500 read, each once); absent until the first move by hand, and while it is absent Open is computed and nothing is written. Written whole at a move (with `window_slots`, one transaction) and, from then on, at every refresh that worked where Open's drawn order changed (the freeze): the drawn order with done ones shown, plus the place held for a process's next session after `/clear`, an in-session `/resume` or a fork in that process (12.9; at most one per running process). A refresh that sees Open empty and holds no place removes it: the kept order ends. A failed write is logged once by kind and tried again at the next refresh. Read tolerantly. An older skydeck leaves it alone; a limit: after a switch back to a version before F42 and forward again, the old kept order wins over the older version's moves until the next move or until a refresh sees Open empty (7.6). |
 | `window_update_check` | Follow-up F38 (16.5): what the window's server's last look for a newer skydeck said, as JSON: `{ v: 1, root, lookedAtNs, checkedAtNs, fetchedAtNs, failure, head, outcome }` — `root` the checkout it looked at (its real path: one database serves every checkout of the user), `checkedAtNs` when the last check ended, whatever it found (null: none yet), `fetchedAtNs` when the last fetch that worked ended (null: never), `failure` `{ atNs, line }` while the last check failed, `head` HEAD's full id at the look, and `outcome` one of `{ kind: 'cannot', line }`, `{ kind: 'current', line }` and `{ kind: 'available', upstream, count, to, lines, blocked }`. Written by the server only, after each check and look; read by it and by `doctor`. Every line in it clipped to 300 characters. A value that is not exactly such a record is read as none, and so is one of another root, which the next look writes over. |
@@ -2516,7 +2533,10 @@ bar at the bottom. The list has three sections:
   Open is then computed again until the next move. Every window and a reloaded page show the kept
   order, and it survives a server restart while the sessions run.
 - **Recent**: not running, last activity within 7 days (a rolling 7 days, not the calendar week),
-  most recent first. Its title is `Recent`; its key in the code and the protocol is `week`. Its
+  most recent first. A row under Recent or Earlier never shows a number (follow-up F43, 7.6): an
+  ended terminal has none, and a row there whose terminal still holds one for a moment (a lost
+  keeper's program in its 60 seconds, a session that ended a moment before its program) is drawn
+  without it. Its title is `Recent`; its key in the code and the protocol is `week`. Its
   header's tooltip says `last active in the last 7 days` (follow-up F5); the other
   two headers have no tooltip.
 - **Earlier**: the rest, folded by default; the folded header shows the count and the time span.
@@ -2770,7 +2790,8 @@ notification's click, a pick in the switcher, the server's own selection after a
 block. A closed block is open too while any of its sessions — its first too — is drawn with a
 terminal of the window that has not reported a session (7.5: a start not yet reported, which may
 stay so, or a program that ended before it reported, until its terminal is closed), so that such a
-row and its slot are on screen and its slot chord reaches it; the page forgets that it was closed,
+row is on screen — while it starts, under Open, with its slot and reached by its slot chord; one
+that ended has no slot (follow-up F43, 7.6) —; the page forgets that it was closed,
 as for a selection, and while such a session holds the block open ← on a session of it and a click
 on its caption do nothing and the key bar says why (ruled on 2026-11-16; two lines from follow-up
 F6): `this block holds a session that is still starting; it stays open` while that session's
@@ -3378,7 +3399,8 @@ nothing; `ls` is unchanged.
   button is disabled. A single click on a row selects it and shows this card; it does not resume
   (a resume costs a process, and history is easy to misclick). Enter, a double click or "Resume
   here" resumes (11.3). Refusals and launch failures show their lines on the card.
-- **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close). Until
+- **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close), without a
+  number (follow-up F43, 7.6). Until
   the page has the terminal's exit the bar says `claude is not running in this terminal`. A
   selected session the list does not show (a filter, the chips, done sessions hidden, a folded
   Earlier; 12.9) has its row in the list's `selectedRow` (8.2.3, stage E): its terminal of the
@@ -3769,12 +3791,17 @@ done moves it like any row.
 The numbers follow the order (7.6): after a move the slots Open's terminals of the window hold are
 handed out again from the top among the window's terminals, ascending, so the tenth moved above the
 ninth takes 9 and the ninth loses its own; a session that does not run in the window never has a
-number, wherever it sits. Ctrl+Shift+N then goes to the row that shows N. A move hands every number
-out again from the top: when a block draws a terminal without a number above numbered ones (12.2),
-any move — also of another row — gives that terminal a number and takes one from the last numbered
-terminal; the first move after a block made the numbers read out of order (`1 3 2`) renumbers all
-of Open once, rows that did not move too. Nothing is renumbered when a session ends (a gap stays a
-gap), and a new or resumed terminal still takes the lowest free number.
+number, wherever it sits. Ctrl+Shift+N then goes to the row that shows N. Follow-up F43: a
+terminal whose program ended has no number, its row under Recent or Earlier shows none, and the
+next new or resumed terminal takes the freed number, so Ctrl+Shift+N never goes to an ended
+terminal. A terminal that still holds its number while its row is under Recent — a lost one in
+its 60 seconds (7.6), or a running one whose session ended a moment before its program — is still
+reached by Ctrl+Shift+N, through the window's terminals, though its row shows no number. A move
+hands every number out again from the top: when a block draws a terminal without a number above
+numbered ones (12.2), any move — also of another row — gives that terminal a number and takes one
+from the last numbered terminal; the first move after a block made the numbers read out of order
+(`1 3 2`) renumbers all of Open once, rows that did not move too. Nothing is renumbered when a
+session ends (a gap stays a gap), and a new or resumed terminal still takes the lowest free number.
 
 Blocks stay together: inside a block a row trades places with the neighbouring row of the block,
 whatever either's kind; at the block's edge the whole block passes the next row or block; a single
@@ -5615,7 +5642,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W38 | A ticket's status on the throwaway session (follow-up F19), asking no real tracker: a stand-in program the owner writes in a throwaway folder (`~/skydeck-try/status`, its three lines given) answers for a `ticketStatus` rule whose `match` is `https://example.com/try/`; the ticket `https://example.com/try/TRY-1` on the throwaway session shows `TRY-1 · In Progress ↗` in blue in the header and `In Progress` in the row's small chip; the answer changed to each category and ↻ pressed in the ticket dialog: `blocked` red, `review` amber, `doing` blue, `done` green, `todo` and `closed` grey; a failure (the program made not executable) keeps the old status and its tooltip says `status not read: …`; `skydeck show` prints `ticket:` with ` · <status>`. Every step checks the header's short id or the dialog's heading first; at the end the ticket is removed, `config.json` is as it was (restored from a copy), and the stand-in is deleted. | F19 | 12.5, 12.2, 12.3, 10.2 |
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
 | W41 | The settings screen's Advanced on the owner's own `config.json`, copied aside first: the title bar's gear opens it, `Advanced (14 more settings)` opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36, F39 | 12.13 |
-| W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last row and under a filter; follow-up F42: a fourth session of another terminal moved above a numbered one, the numbers unchanged, `/clear` in it keeps its place; `skydeck window --restart` keeps the order. The restore order only where W16's drill runs anyway. | F37, F42 | 7.6, 12.1, 12.9 |
+| W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last row and under a filter; follow-up F42: a fourth session of another terminal moved above a numbered one, the numbers unchanged, `/clear` in it keeps its place; `skydeck window --restart` keeps the order; follow-up F43: `/exit` in a numbered terminal gives its number up (its row under Recent without one, Ctrl+Shift+1 reaches no session), the next new session takes it, also after `Mark done, keep it running`. The restore order only where W16's drill runs anyway. | F37, F42, F43 | 7.6, 12.1, 12.9 |
 | W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Update now` and `Close`; `doctor`'s `update:` line; the group's switch `Check for updates every day` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
 | W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links, The window and (F38) Updates with eight plain labels (from issue #184 `Copy on select` in The window) and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
 | W45 | The tour of the window in the owner's Edge (follow-up F41): it starts by itself at the first opening after the update, over the real list; each step's region stands out and its words read well; Enter, → and ← walk it, a click on the page does nothing, Ctrl+Shift+L says `close the tour first (Esc)`; `Done` gives the keyboard back and a reload shows it no more; the key help's `Take the tour` and the switcher's `> tour` start it again and Esc ends it; an InPrivate window with `--print-url`'s address shows it by itself once, in a tab's words. | F41 | 12.9, 12.14 |
