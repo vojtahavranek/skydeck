@@ -1131,9 +1131,10 @@ program is known to be over: when the keeper's `exit` is applied (ended, or not 
 `hello` that says the program exited (a server started while such a keeper still waits for its
 acknowledgement, 7.8), and for a lost keeper (7.8) once its program may no longer run by 7.5's rule
 — the program its keeper reported gone, or 60 seconds after the loss; the server looks once a
-second, and until then the lost terminal keeps its slot: its row under Recent shows no number,
-but Ctrl+Shift+N still reaches it (12.9). A keeper that only stops answering
-(`reconnecting`) keeps its slot and comes back with it. The ended terminal stays listed, with its
+second, and until then the lost terminal keeps its slot: its row shows no number (under Open
+without its terminal while its session still counts as running, else under Recent), but
+Ctrl+Shift+N still reaches it (12.9). A keeper that only stops answering (`reconnecting`) keeps
+its slot and comes back with it. The ended terminal stays listed, with its
 last screen, without a slot, and never takes one again (not at a later `hello`, not after a
 restart); the next new or resumed terminal takes the freed slot by the lowest-free rule, and the
 other terminals keep theirs. A row under Recent or Earlier never shows a number (12.1), so

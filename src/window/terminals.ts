@@ -400,8 +400,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
 
   /**
    * F43 (S2 7.6): the terminal's program is over, so its slot is free at once and for good: no
-   * slot, none at a later hello (`slotFreed`), and its moved entry gone, written, so that no later
-   * server applies it. No null is written for it: a hello of its keeper says its program exited.
+   * slot, none from a later move (`slotFreed`, read by `setSlots`), and its moved entry gone,
+   * written, so that no later server applies it. No null is written for it: a hello of its keeper says its program exited.
    * True when the terminal had a slot (the caller announces the change). Once stopped nothing
    * changes.
    */
