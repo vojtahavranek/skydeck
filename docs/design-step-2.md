@@ -1753,8 +1753,8 @@ page last proposed (`attach`, `resize`). The rules:
   fits the terminal's area, the screen being cell × count rounded to whole pixels as xterm.js
   6.0.0 rounds it, and the room the addon gave its scroll bar (14 px) and the margin the page
   keeps around the terminal's text (12.6) counted out (its left margin's first 5 px lie under the
-  list's handle, 12.1: they are counted as margin all the same, and the margin's wheel rule holds
-  from its px 6) — read at every count from the element the
+  list's handle, 12.1: they are counted as margin all the same; a press there resizes the list, a
+  wheel there does nothing, and the margin's rule holds from its px 6) — read at every count from the element the
   style sheet gives it to, as lengths, so that the margin drawn and the margin counted cannot
   drift apart (whatever unit or element sets it); the answer does not depend on the terminal's
   current size. A first size the page asks for (an act's, `focus.area`) is counted by the same
@@ -2709,14 +2709,16 @@ structure and the page suite the computed values. As for the mode, there is no k
 
 **The list's width** (issue #192, 2026-11-23: so that the list can be wider for long titles, or
 narrower for a wide terminal). The border between the list and the right side is a handle: a strip
-over the list's 1 px edge and the first 5 px of the right side, none of the list (its scroll bar
-lies at its right edge; in those 5 px the terminal has only its blank margin, and the header, the
-cards, the New form, the carry-over bar and the empty note have nothing that takes a click; a
-wheel on the handle does nothing, so the terminal's margin rule of 12.6 holds from its px 6, a
-small named limit), with the column-resize cursor, a line in the
-accent colour on hover and while it is dragged, and the tooltip `Drag to change the width of the
-list. Double-click: back to 400 px.` (`web/list-width-text.js`). A press of the primary button on
-it and a move change the list's width with the pointer, live; the release ends the drag, and so
+6 px wide, over the list's 1 px edge and the first 5 px of the right side, none of the list: its
+scroll bar lies at its right edge. Narrower would be hard to hit; in those 5 px the terminal has
+only the first half of its blank 10 px margin (it keeps the other 5 px for a press that gives it
+the keyboard or starts a selection at column 1), and the header, the cards, the New form, the
+carry-over bar, the terminal's bars and the empty note have nothing that takes a click there. A
+press there resizes and a wheel there does nothing, so the margin's rule of 12.6 holds from its
+px 6 (a small named limit). The handle has the column-resize cursor, a line in the accent colour
+on the border line on hover and while it is dragged, and the tooltip `Drag to change the width of
+the list. Double-click: back to 400 px.` (`web/list-width-text.js`). A press of the primary button
+on it and a move change the list's width with the pointer, live; the release ends the drag, and so
 does losing the pointer (the handle captures it, so a release outside the window ends it too). A
 press of another button does nothing, and a press with no move changes and keeps nothing; nor does
 a drag released at the x of its press (the pointer went and came back), which leaves the width as
@@ -5576,7 +5578,8 @@ In the browser suite, besides those:
   works; a secondary and a middle press do nothing; a double click gives 400 px and removes the
   value, and a second press that drags is a drag; the handle lies over the border and the right
   side's first px, above the shown terminal, a wheel on it changes neither the width nor the
-  terminal's scroll, and a press on the list's last px starts no drag; a
+  terminal's scroll, a press on the list's last px starts no drag, and one 6 px into the right
+  side starts none and reaches the terminal; a
   narrower window shows less and keeps the value; each kind of damaged value, and storage that
   throws, takes nothing or is missing; the stored width from the first painted frame after a
   reload, with the early script and the modules held back, and without the early script the

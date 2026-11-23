@@ -789,6 +789,43 @@ await test('the list’s width (issue #192)', async (t) => {
   );
 
   await t.test(
+    'a press 6 px into the right side, just past the handle, starts no drag and reaches the terminal (its program, in mouse mode, gets the press at column 1)',
+    async (t) => {
+      const { page, d, problems } = await opened(t, chromium, {
+        snap: '\x1b[?1000h\x1b[?1006hready',
+      });
+      await toZone(page, 'list');
+      const { edge, y } = await readPage(
+        page,
+        () => ({
+          edge: (document.getElementById('list-zone') as HTMLElement).getBoundingClientRect().right,
+          y: (document.getElementById('terminal') as HTMLElement).getBoundingClientRect().top + 100,
+        }),
+        null,
+      );
+      const from = d.sent.length;
+      // The right side's px 6 (x from edge + 5, the hit test taking whole px): past the handle.
+      await page.mouse.move(edge + 5, y);
+      await page.mouse.down();
+      await page.mouse.move(edge + 155, y, { steps: 4 });
+      await page.mouse.up();
+      const now = await widths(page);
+      assert.deepEqual({ list: now.list, stored: now.stored }, { list: 400, stored: null });
+      await until(
+        () =>
+          d.sent
+            .slice(from)
+            .some(
+              (message) =>
+                message['t'] === 'input' && String(message['data']).startsWith('\x1b[<0;1;'),
+            ),
+        'the program got the press at column 1',
+      );
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
     'a touch drag that is cancelled ends clean: no drag left armed, no cursor left on the page, the width it reached stored; the next mouse drag works',
     async (t) => {
       const { page, problems } = await opened(t, chromium);
