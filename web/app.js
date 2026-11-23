@@ -57,6 +57,7 @@ import { nextNeeding, windowTitle } from './attention-text.js';
 import { decodeKey, loadKey, takeToken } from './auth.js';
 import { createBanner } from './banner.js';
 import { createCarryOver } from './carry-over.js';
+import { NOTHING_TO_CARRY } from './carry-over-text.js';
 import { createCards } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
@@ -2032,7 +2033,13 @@ function setZone(zone, moveFocus = true) {
     }
     return;
   }
-  if (dom.rightZone.contains(document.activeElement) && document.activeElement !== dom.rightZone) {
+  // A control of the right side keeps the keyboard, but one of the carry-over bar (F40): the
+  // terminal zone is the user's own move there (a zone chord), and the terminal is meant.
+  if (
+    dom.rightZone.contains(document.activeElement) &&
+    document.activeElement !== dom.rightZone &&
+    !carryHost.contains(document.activeElement)
+  ) {
     return;
   }
   giveKeyboard();
@@ -2106,6 +2113,14 @@ function giveKeyboard() {
 document.addEventListener('focusin', (event) => {
   const target = event.target;
   if (!(target instanceof Node)) {
+    return;
+  }
+  // F40 (S2 12.9): while a control of the carry-over bar has the keyboard the page is in the list
+  // zone, where no rule gives the terminal the keyboard.
+  if (carryHost.contains(target)) {
+    if (state.zone !== 'list') {
+      setZone('list', false);
+    }
     return;
   }
   if (dom.listZone.contains(target) && state.zone !== 'list') {
@@ -2360,6 +2375,13 @@ function doListKey(action, event) {
       );
       return true;
     }
+    case 'carry':
+      // F40 (S2 12.9): the keyboard to the carry-over bar whenever the pane shows it, also for a
+      // selection the list does not show (a filter often hides the new session's row).
+      if (!carry.focus()) {
+        say(state.selected === null ? 'no session selected' : NOTHING_TO_CARRY);
+      }
+      return true;
     case 'escape':
       // S2 12.9: Esc clears the filter — the list's, which also clears its field —, then goes
       // back to the terminal; a held Esc does only the first step (Z1, item 6).
@@ -2593,7 +2615,9 @@ function switcherCapture(event) {
  * policy answers without asking —, so that a held Enter there is no list `enter` either. Stage C:
  * the same for Enter pressed on a control of the restore banner, which can go away
  * under it — Restore once a restore runs, Not now once the offer is dismissed, the report's × —;
- * a held Tab there walks on (review 2 of task 75, C4). Stage
+ * a held Tab there walks on (review 2 of task 75, C4); follow-up F40: the same for Enter on a
+ * control of the carry-over bar, which goes away once `Carry over` or `×` is answered, so that
+ * its repeats are no list `enter` (they would resume a session or show its terminal). Stage
  * E: the same for a key pressed while the switcher is shown (`modal()`): the Enter of a pick or the
  * Esc that closes it acts on nothing where the keyboard then goes (E11).
  * @type {Set<string>}
@@ -2614,7 +2638,8 @@ function heldFromDialog(event) {
   if (
     modal() ||
     document.activeElement === dom.notifyOn ||
-    (dom.banner.contains(document.activeElement) && event.key === 'Enter')
+    (dom.banner.contains(document.activeElement) && event.key === 'Enter') ||
+    (carryHost.contains(document.activeElement) && event.key === 'Enter')
   ) {
     if (!event.repeat) {
       pressedInDialog.add(event.code);

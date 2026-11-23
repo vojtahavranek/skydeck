@@ -34,7 +34,8 @@
  * @typedef {{ kind: 'move', by: 1 | -1 | 'home' | 'end' | 'page-up' | 'page-down' }
  *   | { kind: 'fold' } | { kind: 'unfold' } | { kind: 'enter' } | { kind: 'filter' }
  *   | { kind: 'show-done' } | { kind: 'escape' } | { kind: 'reload' }
- *   | { kind: 'edit', what: EditWhat } | { kind: 'done' } | { kind: 'reorder', by: 1 | -1 }} ListAction
+ *   | { kind: 'edit', what: EditWhat } | { kind: 'done' } | { kind: 'reorder', by: 1 | -1 }
+ *   | { kind: 'carry' }} ListAction
  */
 
 /**
@@ -125,7 +126,8 @@ export function terminalKey(e) {
  * done, or undone for a done row (app.js decides which). Follow-up F18: `t` edits the ticket.
  * Follow-up F37: Shift+↑ and Shift+K move the selected session of Open one place up, Shift+↓ and
  * Shift+J one place down (`reorder`) — Shift alone with the key that types k/K or j/J, so Shift+k
- * under Caps Lock too; Caps Lock alone (`K` without Shift) moves nothing.
+ * under Caps Lock too; Caps Lock alone (`K` without Shift) moves nothing. Follow-up F40: `c` gives
+ * the keyboard to the carry-over bar (`carry`).
  * @param {KeyLike} e
  * @returns {ListAction | null}
  */
@@ -167,6 +169,8 @@ export function listKey(e) {
       return { kind: 'edit', what: 'pr' };
     case 'd':
       return { kind: 'done' };
+    case 'c':
+      return { kind: 'carry' };
   }
   if (e.shiftKey) {
     return null;

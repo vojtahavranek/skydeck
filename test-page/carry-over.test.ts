@@ -28,6 +28,7 @@ import {
   selectedRow,
   showsText,
   toZone,
+  zone,
 } from './helpers/shell.ts';
 import type { EditWorld, Launched } from './helpers/shell.ts';
 import {
@@ -865,3 +866,354 @@ test('the carry-over bar on a real server (F40)', async (t) => {
   );
 });
 
+// --- step 7: c in the list, and the bar's keys -------------------------------------------------
+
+/** The `input` messages the page sent (a key that reached the terminal). */
+function inputs(w: EditWorld): number {
+  return w.sent.filter((one) => one['t'] === 'input').length;
+}
+
+/** The acts of `kind` the page sent. */
+function actsOf(w: EditWorld, kind: string): Record<string, unknown>[] {
+  return w.acts().filter((one) => one['kind'] === kind);
+}
+
+const ORDER = ['bar:label', 'bar:group', 'bar:ticket', 'bar:done', 'bar:Carry over', 'bar:×'];
+
+/** `c` from the list: the keyboard on the bar's first checkbox. */
+async function onBar(s: Scripted): Promise<void> {
+  await toZone(s.page, 'list');
+  await s.page.keyboard.press('c');
+  await until(
+    async () => (await keyboardAt(s.page)).startsWith('bar:'),
+    'c: the keyboard on the bar',
+  );
+  await showsText(s.page, '#focus-zone', /^Focus: list$/);
+}
+
+/** A held key: its first keydown, `repeats` auto-repeats, then its release. */
+async function hold(
+  page: Page,
+  key: string,
+  repeats: number,
+  between?: () => Promise<void>,
+): Promise<void> {
+  await page.keyboard.down(key);
+  await between?.();
+  for (let i = 0; i < repeats; i++) await page.keyboard.down(key);
+  await page.keyboard.up(key);
+}
+
+test("the carry-over bar's keys (F40)", async (t) => {
+  const chromium = await browser(t);
+
+  await t.test(
+    'c, Tab, Space, Enter, Esc; with the keyboard on the bar no list key acts',
+    async (t) => {
+      const s = await barWorld(t, chromium, 'terminal');
+      await onBar(s);
+      assert.equal(await keyboardAt(s.page), 'bar:label');
+      for (const expected of ORDER.slice(1)) {
+        await s.page.keyboard.press('Tab');
+        assert.equal(await keyboardAt(s.page), expected);
+      }
+      await s.page.keyboard.press('Tab'); // wraps to the first
+      await s.page.keyboard.press('Tab');
+      assert.equal(await keyboardAt(s.page), 'bar:group');
+      await s.page.keyboard.press('Space');
+      assert.equal((await barOf(s.page)).fields[1]?.[2], false, 'Space unticks group');
+      for (const key of ['d', 'j', 'c']) await s.page.keyboard.press(key);
+      assert.equal(await keyboardAt(s.page), 'bar:group', 'no list key acts');
+      assert.equal(await selectedRow(s.page), NEW);
+      assert.deepEqual(actsOf(s.w, 'done'), []);
+      for (let i = 0; i < 3; i++) await s.page.keyboard.press('Tab');
+      assert.equal(await keyboardAt(s.page), 'bar:Carry over');
+      await s.page.keyboard.press('Enter');
+      const sent = await s.w.act(1);
+      assert.deepEqual(sent['fields'], ['label', 'ticket']);
+      await s.page.waitForTimeout(150);
+      assert.equal(barActs(s.w).length, 1, 'once');
+      s.w.answer(sent, { ok: false, error: CHANGED });
+      await until(async () => (await barOf(s.page)).message === CHANGED, 'refused');
+      await hold(s.page, 'Escape', 4);
+      assert.equal(await keyboardAt(s.page), '#list', 'Esc: the list');
+      await showsText(s.page, '#focus-zone', /^Focus: list$/);
+      assert.equal(inputs(s.w), 0, 'nothing reached the terminal');
+    },
+  );
+
+  for (const smallest of [false, true]) {
+    await t.test(
+      smallest
+        ? 'the trap on the smallest bar (one checkbox, no done) and on one whose new rev hid two checkboxes'
+        : 'the trap: from every control Tab and Shift+Tab stay in the bar and wrap; twenty of each and a held Tab never leave it',
+      async (t) => {
+        const start = smallest
+          ? {
+              ...RUNNING,
+              offer: offer({
+                fields: [{ name: 'label', text: 'fix the retry', ticked: true }],
+                done: null,
+              }),
+            }
+          : RUNNING;
+        const s = await barWorld(t, chromium, 'terminal', start);
+        await onBar(s);
+        const order = smallest ? ['bar:label', 'bar:Carry over', 'bar:×'] : ORDER;
+        for (let at = 0; at < order.length; at++) {
+          await s.page.keyboard.press('Tab');
+          assert.equal(
+            await keyboardAt(s.page),
+            order[(at + 1) % order.length],
+            `Tab from ${order[at]}`,
+          );
+        }
+        for (let at = 0; at < order.length; at++) {
+          await s.page.keyboard.press('Shift+Tab');
+          const expected = order[(order.length - at - 1) % order.length];
+          assert.equal(await keyboardAt(s.page), expected, `Shift+Tab ${at + 1}`);
+        }
+        for (const key of ['Tab', 'Shift+Tab']) {
+          for (let i = 0; i < 20; i++) {
+            await s.page.keyboard.press(key);
+            assert.ok((await keyboardAt(s.page)).startsWith('bar:'), `${key} ${i + 1}`);
+            assert.equal(await zone(s.page), 'Focus: list');
+          }
+        }
+        await hold(s.page, 'Tab', 6);
+        assert.ok((await keyboardAt(s.page)).startsWith('bar:'), 'a held Tab walks on inside');
+        if (smallest) {
+          // A new rev of the full bar, then one that hides group and ticket again.
+          s.set({ offer: offer({ rev: REV2 }) });
+          await until(async () => (await barOf(s.page)).fields.length === 4, 'the full bar');
+          s.set({
+            offer: offer({
+              rev: 'cccccccccccccccc',
+              fields: [{ name: 'label', text: 'fix the retry', ticked: true }],
+            }),
+          });
+          await until(async () => (await barOf(s.page)).fields.length === 2, 'two hidden');
+          await box(s.page, 'label').focus();
+          const seen = new Set<string>();
+          for (let i = 0; i < 8; i++) {
+            await s.page.keyboard.press('Tab');
+            seen.add(await keyboardAt(s.page));
+          }
+          assert.deepEqual([...seen].sort(), ['bar:Carry over', 'bar:done', 'bar:label', 'bar:×']);
+        } else {
+          s.w.holdViews(true);
+          await inBar(s.page, '.carry-apply').focus();
+          await s.page.keyboard.press('Enter');
+          await s.w.act(1);
+          for (let i = 0; i < 6; i++) {
+            await s.page.keyboard.press('Tab');
+            assert.ok((await keyboardAt(s.page)).startsWith('bar:'), 'Tab while the answer waits');
+          }
+        }
+        assert.equal(inputs(s.w), 0, 'no input');
+      },
+    );
+  }
+
+  for (const button of ['Carry over', '×'] as const) {
+    for (const over of ['resume', 'terminal'] as const) {
+      await t.test(
+        `a held Enter on ${button} over a ${over === 'resume' ? 'resume card' : 'running terminal'}: one act, and its repeats are no list key`,
+        async (t) => {
+          const start: World =
+            over === 'resume'
+              ? { rows: [row(NEW), row(OLD)], terminals: [], offer: offer() }
+              : RUNNING;
+          const s = await barWorld(t, chromium, 'list', start);
+          await onBar(s);
+          await (button === 'Carry over' ? apply : dismiss)(s.page).focus();
+          await hold(s.page, 'Enter', 5, async () => {
+            const sent = await s.w.act(1);
+            s.w.answer(sent, { ok: true });
+            await untilBar(s.page, false);
+            s.set({ offer: null });
+            await s.page.waitForTimeout(100);
+          });
+          await s.page.waitForTimeout(200);
+          assert.equal(barActs(s.w).length, 1, 'one act of the bar');
+          assert.deepEqual(actsOf(s.w, 'resume'), [], 'no resume');
+          assert.equal(await keyboardAt(s.page), '#list', 'the list has the keyboard');
+          assert.equal(await zone(s.page), 'Focus: list');
+          assert.equal(inputs(s.w), 0, 'no input');
+          await s.page.keyboard.press('Enter');
+          if (over === 'resume') {
+            await until(() => actsOf(s.w, 'resume').length === 1, 'a fresh Enter resumes');
+          } else {
+            await until(
+              async () => (await active(s.page)) === 'in #terminal',
+              'a fresh Enter shows the terminal',
+            );
+            assert.equal(inputs(s.w), 0);
+          }
+        },
+      );
+    }
+  }
+
+  await t.test(
+    'a redraw with the same rev keeps the focused checkbox; Tab to Carry over, another such list, Enter: one act, nothing typed',
+    async (t) => {
+      const s = await barWorld(t, chromium, 'terminal');
+      await onBar(s);
+      await s.page.keyboard.press('Tab');
+      await readPage(
+        s.page,
+        () => {
+          (window as unknown as { focused: Element | null }).focused = document.activeElement;
+        },
+        null,
+      );
+      for (const state of ['working', 'waiting', 'running']) {
+        s.set({
+          rows: [row(NEW, { state, terminal: TERM_A, slot: 1 }), row(OLD)],
+          offer: offer({
+            fields: [
+              { name: 'label', text: 'fix the retry', ticked: state !== 'working' },
+              { name: 'group', text: 'backend', ticked: state === 'working' },
+              { name: 'ticket', text: 'TRY-1', ticked: false },
+            ],
+          }),
+        });
+        await s.page.waitForTimeout(150);
+        const same = await readPage(
+          s.page,
+          () =>
+            (window as unknown as { focused: Element | null }).focused === document.activeElement,
+          null,
+        );
+        assert.equal(same, true, `the same element after a ${state} list`);
+      }
+      assert.equal(await keyboardAt(s.page), 'bar:group');
+      await s.page.keyboard.press('Tab');
+      await s.page.keyboard.press('Tab');
+      await s.page.keyboard.press('Tab');
+      assert.equal(await keyboardAt(s.page), 'bar:Carry over');
+      s.set({ rows: [row(NEW, { state: 'working', terminal: TERM_A, slot: 1 }), row(OLD)] });
+      await s.page.waitForTimeout(150);
+      await s.page.keyboard.press('Enter');
+      await s.w.act(1);
+      await s.page.waitForTimeout(150);
+      assert.equal(barActs(s.w).length, 1);
+      assert.equal(inputs(s.w), 0, 'nothing reached the terminal');
+    },
+  );
+
+  await t.test(
+    'a new rev that hides the focused checkbox gives the keyboard to the next one, the last field’s to the one before; one while Carry over has it to the first checkbox; Enter then sends nothing',
+    async (t) => {
+      const s = await barWorld(t, chromium, 'terminal');
+      await onBar(s);
+      s.set({
+        offer: offer({
+          rev: REV2,
+          fields: [
+            { name: 'group', text: 'backend', ticked: true },
+            { name: 'ticket', text: 'TRY-1', ticked: true },
+          ],
+          kept: ['label'],
+        }),
+      });
+      await until(async () => (await keyboardAt(s.page)) === 'bar:group', 'the next checkbox');
+      assert.equal(await zone(s.page), 'Focus: list');
+      await s.page.keyboard.press('Enter');
+      await s.page.keyboard.press('Tab');
+      assert.equal(await keyboardAt(s.page), 'bar:ticket');
+      s.set({
+        offer: offer({
+          rev: 'cccccccccccccccc',
+          fields: [{ name: 'group', text: 'backend', ticked: true }],
+          kept: ['label', 'ticket'],
+          done: null,
+        }),
+      });
+      await until(async () => (await keyboardAt(s.page)) === 'bar:group', 'the one before');
+      await s.page.keyboard.press('Tab');
+      assert.equal(await keyboardAt(s.page), 'bar:Carry over');
+      s.set({ offer: offer({ rev: 'dddddddddddddddd' }) });
+      await until(async () => (await keyboardAt(s.page)) === 'bar:label', 'the first checkbox');
+      await s.page.keyboard.press('Enter');
+      await s.page.waitForTimeout(200);
+      assert.deepEqual(barActs(s.w), [], 'no act');
+      assert.equal(inputs(s.w), 0, 'nothing reached the terminal');
+    },
+  );
+
+  await t.test(
+    'the bar answered from another page, or another row clicked, with the keyboard on it: the list takes it; Enter next types nothing',
+    async (t) => {
+      const s = await barWorld(t, chromium, 'terminal');
+      await onBar(s);
+      await apply(s.page).focus();
+      s.set({ offer: null });
+      await untilBar(s.page, false);
+      assert.equal(await keyboardAt(s.page), '#list');
+      assert.equal(await zone(s.page), 'Focus: list');
+      await s.page.keyboard.press('Enter');
+      await until(async () => (await active(s.page)) === 'in #terminal', 'the terminal shown');
+      assert.equal(inputs(s.w), 0, 'the Enter typed nothing');
+      s.set({ offer: offer({ rev: REV2 }) });
+      await untilBar(s.page, true);
+      await onBar(s);
+      await clickRow(s.page, OLD);
+      await untilBar(s.page, false);
+      assert.equal(await zone(s.page), 'Focus: list');
+      assert.equal(inputs(s.w), 0);
+    },
+  );
+
+  await t.test(
+    'Ctrl+Shift+L with the keyboard on the bar gives the terminal the keyboard',
+    async (t) => {
+      const s = await barWorld(t, chromium, 'terminal');
+      await onBar(s);
+      await s.page.keyboard.press('Control+Shift+L');
+      await until(async () => (await active(s.page)) === 'in #terminal', 'the terminal');
+      assert.equal(await zone(s.page), 'Focus: terminal');
+    },
+  );
+
+  await t.test(
+    'under a filter that hides the new row c still reaches the bar, and Enter on Carry over sends the act; c with nothing selected and on a pane without a bar says why',
+    async (t) => {
+      const s = await barWorld(t, chromium, 'terminal');
+      await toZone(s.page, 'list');
+      await s.page.keyboard.press('/');
+      await s.page.keyboard.type('zzz');
+      await s.page.keyboard.press('Enter');
+      const hidden = row(NEW, { state: 'running', terminal: TERM_A, slot: 1 });
+      s.set({ rows: [] });
+      s.w.list(() => ({
+        ...listOf({ rows: [], terminals: RUNNING.terminals, offer: offer() }, NEW),
+        selectedRow: hidden,
+      }));
+      await until(
+        async () =>
+          readPage(s.page, (id) => document.querySelector(`#list [data-id="${id}"]`) === null, NEW),
+        'the row hidden',
+      );
+      await untilBar(s.page, true);
+      await s.page.keyboard.press('c');
+      await until(async () => (await keyboardAt(s.page)) === 'bar:label', 'c: the bar');
+      for (let i = 0; i < 4; i++) await s.page.keyboard.press('Tab');
+      assert.equal(await keyboardAt(s.page), 'bar:Carry over');
+      await s.page.keyboard.press('Enter');
+      const sent = await s.w.act(1);
+      assert.equal(sent['sessionId'], NEW);
+
+      const other = await scripted(t, chromium, { rows: [], terminals: [], offer: null });
+      await toZone(other.page, 'list');
+      await other.page.keyboard.press('c');
+      await showsText(other.page, '#key-message', /^no session selected$/);
+      other.set({ rows: [row(OLD)] });
+      await until(async () => (await selectedRow(other.page)) === OLD, 'OLD selected');
+      await toZone(other.page, 'list');
+      await other.page.keyboard.press('c');
+      await showsText(other.page, '#key-message', /^nothing to carry over to this session$/);
+    },
+  );
+});
