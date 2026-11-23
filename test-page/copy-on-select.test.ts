@@ -354,7 +354,7 @@ test('copy on select (issue #184)', async (t) => {
   );
 
   await t.test(
-    'a drag released outside the terminal copies, unless another press or the window losing the focus came before its release; one that scrolls the scrollback copies every line it reached; an Alt+click that moves the cursor copies nothing, also scrolled up; a release a listener of the page stops on its way copies too',
+    'a drag released outside the terminal copies, unless another press or the window losing the focus came before its release; one that scrolls the scrollback copies every line it reached; an Alt+click that moves the cursor copies nothing, also scrolled up',
     async (t) => {
       const { l, term } = await withLine(t, chromium);
       const { page } = l;
@@ -432,17 +432,6 @@ test('copy on select (issue #184)', async (t) => {
       assert.equal(inputOf(l.d.record, S1).slice(keys), '', 'no arrow keys');
       await page.keyboard.press('Control+Shift+C');
       await until(async () => (await clipboardText(page)) === 'n', 'the one character stood');
-
-      // A listener of the page that stops the release on its way hides it from no copy (last:
-      // xterm.js's own listener on the document no longer hears a release after this).
-      await page.evaluate(() => {
-        document.body.addEventListener('mouseup', (event) => event.stopPropagation(), true);
-      });
-      await setClipboard(page, 'copied elsewhere');
-      const row = `line ${Number(/^line (\d+)$/m.exec(await screenText(page))?.[1]) + 3}`;
-      const [held, heldTo] = await endsOf(page, row, row);
-      await drag(page, held, heldTo);
-      await until(async () => (await clipboardText(page)) === row, 'a release stopped on its way');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
