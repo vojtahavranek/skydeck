@@ -495,7 +495,7 @@ test("the resume card's Other flags… (#188)", async (t) => {
       await w.page.locator('#cards .card-actions button', { hasText: 'Other flags…' }).click();
       await w.page.waitForSelector(FIELD);
       assert.equal((await fieldNow(w.page)).value, '');
-      await showsText(w.page, `${EDITOR} .card-warning`, new RegExp(`^${CANNOT_SHOW}$`));
+      await showsText(w.page, `${EDITOR} .card-lines`, new RegExp(`^${CANNOT_SHOW}$`));
       await w.page.keyboard.press('Escape');
       await w.page.waitForSelector(EDITOR, { state: 'detached' });
 
@@ -507,7 +507,7 @@ test("the resume card's Other flags… (#188)", async (t) => {
       await w.page.locator('#cards .card-actions button', { hasText: 'Other flags…' }).click();
       await w.page.waitForSelector(FIELD);
       assert.equal((await fieldNow(w.page)).value, flagsText(long), 'the field holds them still');
-      await showsText(w.page, `${EDITOR} .card-warning`, new RegExp(`^${escape(TOO_LONG)}$`));
+      await showsText(w.page, `${EDITOR} .card-lines`, new RegExp(`^${escape(TOO_LONG)}$`));
       await w.page.keyboard.press('Enter');
       await showsText(w.page, `${EDITOR} .card-lines`, /^the flags is longer than skydeck takes/);
       assert.deepEqual(resumes(w), [], 'not sent');

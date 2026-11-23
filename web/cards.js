@@ -651,8 +651,8 @@ export function createCards(root, deps) {
   /**
    * Issue #188: the resume card's "Other flags…" — a form of its own in place of the card's
    * action line: F15's flags line (the New form's component: the field, the ★, the chips), Start,
-   * the hint and its own result line. The field starts with `text`; `note`, when not null, is a
-   * line above it. Start (Enter in the field, on the ★ or the chips, a click) sends `act resume`
+   * the hint and its own result line. The field starts with `text`; `note`, when not null, is what
+   * the result line says at once (ruled, R2: why the recorded flags cannot be taken as they are). Start (Enter in the field, on the ★ or the chips, a click) sends `act resume`
    * with the field's text as `flags`; a refusal stays in the form's result line, with the field's
    * text and the keyboard. Esc is app.js's (`closeFlags`).
    * @param {string} sessionId
@@ -685,7 +685,7 @@ export function createCards(root, deps) {
       value: text,
     });
     if (note !== null) {
-      form.append(element('div', 'card-warning', note));
+      lines.textContent = note;
     }
     form.append(line, favourites.line, actions, lines);
     let pending = false;

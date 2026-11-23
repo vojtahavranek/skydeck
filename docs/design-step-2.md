@@ -3402,8 +3402,8 @@ nothing; `ls` is unchanged.
   each `'` in `"…"` —, one space between words (`web/favourite-text.js`'s `flagsText`, held to the
   server's split by a test). When a recorded flag holds what the field cannot hold as it is
   (`resumeFlags` null: a line break, another control character, a bidirectional control) it opens
-  empty, under the line `the flags it was started with hold a character this field cannot show;
-  Resume here passes them on as they are`. The keyboard goes into the field, at its end. Start
+  empty, its result line saying `the flags it was started with hold a character this field cannot
+  show; Resume here passes them on as they are`. The keyboard goes into the field, at its end. Start
   (Enter in the field, on the ★ or on the chips, as in the New form) sends `act resume` with the
   field's text as `flags`; an empty field resumes with no flags at all. A refusal, and a launch
   that failed, show on the form's result line, where the New form shows its own, and the form keeps
@@ -3413,11 +3413,11 @@ nothing; `ls` is unchanged.
   another session, the New form), it goes, and the card shown again later is the plain one, whose
   form opens again with the plain resume's flags. The text is held to `act new`'s bounds (1,024
   bytes of UTF-8: a longer one is refused by the page before it is sent, a named limit for a long
-  recorded system prompt); a text made from the recorded flags that is longer is said when the form
-  opens, not only at Start (ruled): `the flags it was started with are longer than this field takes
-  (at most 1,024 bytes of UTF-8): shorten them before Start, or use Resume here`, the field holding
-  them. Nothing is saved for the session (design 7.6): its start is recorded,
-  and the header shows the new flags once it has started (12.5, follow-up F16).
+  recorded system prompt); a text made from the recorded flags that is longer is said on the form's
+  result line when it opens, not only at Start (ruled): `the flags it was started with are longer
+  than this field takes (at most 1,024 bytes of UTF-8): shorten them before Start, or use Resume
+  here`, the field holding them. Nothing is saved for the session (design 7.6): its start is
+  recorded, and the header shows the new flags once it has started (12.5, follow-up F16).
 - **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close). Until
   the page has the terminal's exit the bar says `claude is not running in this terminal`. A
   selected session the list does not show (a filter, the chips, done sessions hidden, a folded
