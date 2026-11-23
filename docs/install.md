@@ -873,6 +873,14 @@ effect.
   Open and names the two ways to get one: start `claude` in any terminal (it shows in the list as
   soon as it starts), or start one in the window with Ctrl+Shift+N (`+ New` in a browser tab); the
   right side then says `The selected session shows here.`
+- **The list's width**: drag the border between the list and the right side (the pointer shows a
+  column-resize arrow on it) to make the list wider or narrower, from 240 to 800 px; the right side
+  always keeps at least 320 px, so in a narrower window the list shows narrower and comes back to
+  your width when the window is wide again. The browser keeps the width, as it keeps the theme: it
+  is there after a reload and the next `skydeck window` (the app window and a browser tab of
+  another profile each keep their own), and other windows of the same profile take it at once. A
+  double click on the border puts the list back at 400 px. Dragging moves no keyboard: it stays in
+  the list or the terminal, and nothing reaches the program in the terminal.
 - **A session that is not running**: one click selects it and shows its resume card, with the
   exact command it will run. Enter in the list, a double click or `Resume here` resumes it into the
   window.
