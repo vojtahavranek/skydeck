@@ -28,7 +28,8 @@ notice of a newer skydeck (follow-up F38), at "The update notice"; W44 checks th
 screen and its gear (follow-up F39), at "The short settings screen"; W45 checks the tour of the
 window (follow-up F41), at "The tour of the window"; W46 checks copy on select in the window's
 terminal (issue #184), at "Copy on select"; W47 checks the carry over after `/clear` (follow-up
-F40), at "Carry over after /clear".
+F40), at "Carry over after /clear"; W48 checks the list's width set by a drag (issue #192), at "The
+list's width".
 
 Setup:
 
@@ -3205,3 +3206,56 @@ Write down: for each step whether it went as expected, and the words where they 
 the bar read well in your theme and changed the terminal's size only when it came and went.
 
 Not tried before this check was written: all of it, in Edge and with real Claude Code.
+
+## The list's width
+
+The check of the list's width (issue #192; design-step-2.md 12.1, 12.9; [install.md](install.md),
+"Using the window", its point "The list's width"): W48, in your window. It changes nothing but the
+width each browser keeps for the list, and puts the default back at the end. Commands are typed in
+W, a WSL terminal of your own (never a `!` command inside Claude Code). The tests drag the handle
+in headless Chromium; only here does it meet Edge, Windows' pointer and your own list.
+
+## W48. The list's width, dragged
+
+Setup: skydeck updated to a commit that has issue #192 (`skydeck update`, W32); the window open
+and maximised; a throwaway session started from the New form in a scratch folder, running in a
+terminal of the window and selected.
+
+1. **The handle.** Move the pointer slowly over the border between the list and the right side.
+   Expected: on it the pointer becomes the column-resize arrow and a line in the accent colour
+   marks the border; held still, the tooltip `Drag to change the width of the list. Double-click:
+   back to 400 px.`
+2. **A drag.** Press on the border and drag to the right, then to the left, and let go. Expected:
+   the list follows the pointer as you move; it stops growing at 800 px (about twice its old width)
+   and stops shrinking at 240 px; the rows' texts end in `…` where they do not fit, and no part of a
+   row lies over another. Let go at a width you like. Within a moment the terminal's lines fill its
+   new width (a resize of Claude Code's screen, as at a window resize).
+3. **It stays.** Press Ctrl+Shift+R: the page reloads with the list at that width from the first
+   moment (no jump from the old width). Close the window and run `skydeck window` in W: the same.
+4. **A narrower window.** Make the list wide (near 800 px), then make the window narrower by
+   dragging its edge. Expected: from the point where the right side has about 320 px left the list
+   gets narrower with the window, never under 240 px; maximise the window again: the list is as
+   wide as before.
+5. **The keyboard stays.** Click into the throwaway session's prompt (`Focus: terminal`). Drag the
+   border again, passing over the terminal and over the rows, and double-click it. Expected: the key
+   bar still says `Focus: terminal`, no row was selected, nothing was typed into the prompt and no
+   text is selected; a letter typed now lands in the prompt (delete it). Press Ctrl+Shift+L
+   (`Focus: list`) and do the same: the key bar still says `Focus: list`, and ↓ moves the
+   selection in the list (↑ back).
+6. **The list's scroll bar.** With enough sessions that the list scrolls (`a` shows the done ones
+   too), drag the list's scroll bar at its right edge, right beside the border. Expected: the list
+   scrolls and its width does not change; the pointer shows the column-resize arrow only on the
+   border itself and just right of it. Press `a` again.
+7. **A dialog.** Open the settings (the gear) and try to drag the border under it: nothing moves.
+   Press Esc.
+8. **A browser tab.** In W, `skydeck window --print-url`, open the address in a tab of your usual
+   Edge. Expected: the tab's list keeps a width of its own (400 px the first time: another browser
+   profile than the window's), and a drag there leaves the window's width as it is. Close the tab.
+9. **The end.** Double-click the border, letting the pointer slip a px or two between the clicks if
+   your hand does. Expected: the list is 400 px wide again (as before the update); after
+   Ctrl+Shift+R too. A single click on the border that slips a little changes nothing.
+
+Write down: for each step whether it went as expected, and the words where they differ; your Edge
+version; whether the handle is easy enough to find and to grab.
+
+Not tried before this check was written: all of it, in Edge.

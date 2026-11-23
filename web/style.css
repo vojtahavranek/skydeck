@@ -395,11 +395,51 @@ kbd {
   cursor: pointer;
 }
 
+/* The list's width (issue #192): 400 px while none is stored; a stored one (`--list-width` on
+   <html>, put there by web/list-width-early.js and web/list-width.js) is shown at most the window
+   less 320 px, never under 240 px, so that a narrower window shows less of it and keeps it. With no
+   --list-width, --list-shown is invalid at computed-value time and the 400 px fallback holds.
+   test/web/list-width.test.ts holds these numbers equal to web/list-width-text.js's. */
 .main {
+  --list-shown: max(240px, min(var(--list-width), 100vw - 320px));
+  position: relative;
   flex: 1;
   display: grid;
-  grid-template-columns: 400px 1fr;
+  grid-template-columns: var(--list-shown, 400px) 1fr;
   min-height: 0;
+}
+/* Issue #192: the handle, a strip over the border between the list and the right side: the list's
+   1 px edge and the right side's first 5 px, none of the list (its scroll bar is at its right
+   edge; those 5 px of the right side hold nothing that takes a click but the terminal's blank
+   margin), above xterm.js's layers (up to z-index 11) and below the key help and every dialog
+   (edit.css: 100 and up). A line in the accent colour marks it on hover and while dragged;
+   while dragged the whole page shows the column-resize cursor, as the pointer may run ahead of
+   the handle at a bound. */
+.list-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--list-shown, 400px) - 1px);
+  width: 6px;
+  z-index: 12;
+  cursor: col-resize;
+  touch-action: none;
+}
+.list-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+}
+.list-handle:hover::after,
+.list-handle[data-dragging]::after {
+  background: var(--selline);
+}
+:root[data-list-drag],
+:root[data-list-drag] * {
+  cursor: col-resize !important;
 }
 .zone {
   min-height: 0;
