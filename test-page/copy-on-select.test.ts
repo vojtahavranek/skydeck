@@ -279,7 +279,7 @@ test('copy on select (issue #184)', async (t) => {
   );
 
   await t.test(
-    'a double click copies the word, a triple click the line (a fourth click nothing more), a Shift+click the text from the last click to it',
+    'a double click copies the word, a triple click the line (a fourth click nothing more), a Shift+click the text from the last click to it; an Alt+click that moves the cursor copies nothing',
     async (t) => {
       const { l } = await withLine(t, chromium);
       const { page } = l;
@@ -310,6 +310,24 @@ test('copy on select (issue #184)', async (t) => {
         async () => (await clipboardText(page)) === LINE,
         'from the click to the Shift+click',
       );
+
+      // A quick Alt+click over one character is xterm.js's "move the cursor there": at its
+      // release xterm.js sends the arrow keys, which clears that one-character selection; the
+      // release copies nothing.
+      await setClipboard(page, 'copied elsewhere');
+      const keys = inputOf(l.d.record, S1).length;
+      const [a, b] = await endsOf(page, 'h', 'alpha bravo charlie');
+      await page.keyboard.down('Alt');
+      await drag(page, { x: a.x - 1, y: a.y }, { x: b.x + 1, y: b.y });
+      await page.keyboard.up('Alt');
+      await until(
+        () =>
+          Buffer.from(inputOf(l.d.record, S1).slice(keys), 'hex')
+            .toString('latin1')
+            .includes('\x1b'),
+        'the arrow keys that move the cursor',
+      );
+      await stillHolds(page, 'copied elsewhere', 'an Alt+click that moves the cursor');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );

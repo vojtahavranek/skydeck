@@ -1901,8 +1901,13 @@ cleared it) and copies again. The places are compared rather than xterm.js's own
 `onSelectionChange`, which reports neither the clearing at a press nor a release that ends where
 its last report was (also after a resize or a key cleared the selection). Every press of the
 primary button forgets the last one first, and the release of any button ends it, as xterm.js
-ends its own. So nothing else writes the clipboard: not a selection the page or an add-on makes
-(the search's match, 9.7: it comes with no press), not one that only went away (a click clears a
+ends its own; the window losing the focus (Alt+Tab in the middle of a drag, whose release it then
+never hears) forgets it too. The scroll bar cancels its `pointerdown`, so the browser makes no
+mouse event of its press at all. So nothing else writes the clipboard: not a selection the page or
+an add-on makes (the search's match, 9.7: it comes with no press; and while the find bar is open
+the add-on finds again by itself 200 ms after output or a resize and selects its match, which,
+during a press, ends the press without a copy — xterm.js drops its own drag then), not one that
+only went away (a click clears a
 selection at its press, so its release finds nothing; output and a resize that clear one have no
 release), not a terminal that is no longer shown, not a release with nothing selected — the
 clipboard is never emptied — and not output that trims the scrollback under a selection, which
