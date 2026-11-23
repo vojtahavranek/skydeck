@@ -1902,8 +1902,10 @@ cleared it) and copies again. The places are compared rather than xterm.js's own
 its last report was (also after a resize or a key cleared the selection). Every press of the
 primary button forgets the last one first, and the release of any button ends it, as xterm.js
 ends its own; the window losing the focus (Alt+Tab in the middle of a drag, whose release it then
-never hears) forgets it too. The scroll bar cancels its `pointerdown`, so the browser makes no
-mouse event of its press at all. So nothing else writes the clipboard: not a selection the page or
+never hears) forgets it too. The release is heard on the window before any listener of the page
+can stop it; a quick Alt+click that xterm.js takes as moving the cursor (at most one character
+selected, within 500 ms) ends no selection and copies nothing. The scroll bar cancels its
+`pointerdown`, so the browser makes no mouse event of its press at all. So nothing else writes the clipboard: not a selection the page or
 an add-on makes (the search's match, 9.7: it comes with no press; and while the find bar is open
 the add-on finds again by itself 200 ms after output or a resize and selects its match, which,
 during a press, ends the press without a copy — xterm.js drops its own drag then), not one that

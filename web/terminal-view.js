@@ -141,9 +141,10 @@ export function createTerminalView(root, deps) {
   let hidden = false;
   /**
    * Copy on select (issue #184): the press of the primary button that is down, on a terminal whose
-   * selection xterm.js starts with it (`startsSelection`), and where that selection was before the
-   * press and right after xterm.js handled it (`selectionPlace`); else null.
-   * @type {{ t: Term, before: string, after: string } | null}
+   * selection xterm.js starts with it (`startsSelection`): when it came (`timeStamp`), and where that
+   * selection was before the press and right after xterm.js handled it (`selectionPlace`); else
+   * null.
+   * @type {{ t: Term, at: number, before: string, after: string } | null}
    */
   let pressed = null;
   const find = findBar();
@@ -158,16 +159,17 @@ export function createTerminalView(root, deps) {
   // a drag over the text just copied is a new one (the press cleared it). The places are
   // compared, not xterm.js's `onSelectionChange`: a press clears the selection without reporting
   // it, and a release reports nothing when it ends where xterm.js's last report was — also after
-  // a resize or a key cleared it. The listener is on the window, in the bubble phase: after
-  // xterm.js's own on the document has ended its press (an Alt+click that moves the cursor clears
-  // a one-character selection there), and it hears every release xterm.js hears, wherever it is
-  // (xterm.js follows a drag outside the terminal and scrolls with it). Every press of the primary
-  // button first forgets the last one (a release the page never saw: the window lost the mouse);
-  // the release of any button ends the press, as xterm.js ends its own; the window losing the
-  // focus (Alt+Tab in the middle of a drag, whose release it then never hears) forgets it too. A
-  // selection made by code comes with no press, and one made during a press ends it: the search
-  // add-on's (it finds again by itself 200 ms after output or a resize while the find bar is
-  // open, and selects its match) forgets the press (`create`); xterm.js drops its own drag then.
+  // a resize or a key cleared it. The release listener is on the window, in the capture phase, so
+  // that no listener of the page on the way can hide a release, wherever it is (xterm.js follows a
+  // drag outside the terminal and scrolls with it). It runs before xterm.js's own on the document,
+  // which changes no selection but in one case: a quick Alt+click it takes as moving the cursor
+  // ends no selection (`movesCursor`). Every press of the primary button first forgets the last
+  // one (a release the page never saw: the window lost the mouse); the release of any button ends
+  // the press, as xterm.js ends its own; the window losing the focus (Alt+Tab in the middle of a
+  // drag, whose release it then never hears) forgets it too. A selection made by code comes with
+  // no press, and one made during a press ends it: the search add-on's (it finds again by itself
+  // 200 ms after output or a resize while the find bar is open, and selects its match) forgets the
+  // press (`create`); xterm.js drops its own drag then.
   window.addEventListener(
     'mousedown',
     (event) => {
@@ -180,17 +182,24 @@ export function createTerminalView(root, deps) {
   window.addEventListener('blur', () => {
     pressed = null;
   });
-  window.addEventListener('mouseup', () => {
-    const press = pressed;
-    pressed = null;
-    if (press === null || press.t !== shown || deps.copyOnSelect?.() !== true) {
-      return;
-    }
-    const now = selectionPlace(press.t.xterm);
-    if (now !== '' && (press.after !== press.before || now !== press.after)) {
-      copySelection(press.t);
-    }
-  });
+  window.addEventListener(
+    'mouseup',
+    (event) => {
+      const press = pressed;
+      pressed = null;
+      if (press === null || press.t !== shown || deps.copyOnSelect?.() !== true) {
+        return;
+      }
+      if (movesCursor(press.t.xterm, event, press.at)) {
+        return;
+      }
+      const now = selectionPlace(press.t.xterm);
+      if (now !== '' && (press.after !== press.before || now !== press.after)) {
+        copySelection(press.t);
+      }
+    },
+    true,
+  );
 
   // --- the terminals ----------------------------------------------------------------------------
 
@@ -280,7 +289,7 @@ export function createTerminalView(root, deps) {
       (event) => {
         if (startsSelection(xterm, event)) {
           const before = selectionPlace(xterm);
-          pressed = { t, before, after: before };
+          pressed = { t, at: event.timeStamp, before, after: before };
         }
       },
       true,
@@ -1340,6 +1349,25 @@ export function createTerminalView(root, deps) {
  */
 function startsSelection(xterm, event) {
   return event.button === 0 && (xterm.modes.mouseTrackingMode === 'none' || event.shiftKey);
+}
+
+/** xterm.js 6.0.0's `ALT_CLICK_MOVE_CURSOR_TIME`: an Alt+click shorter than this moves the cursor. */
+const ALT_CLICK_MS = 500;
+
+/**
+ * Issue #184: whether xterm.js 6.0.0 takes this release as "move the cursor here" (its
+ * SelectionService `_handleMouseUp`, with the option `altClickMovesCursor`, on by default, which
+ * this page leaves): Alt held, at most one character selected, within ALT_CLICK_MS of the press.
+ * It then ends no selection: it reports none, and the arrow keys it sends clear that character.
+ * @param {Terminal} xterm
+ * @param {MouseEvent} event
+ * @param {number} pressedAt the press's `timeStamp`
+ * @returns {boolean}
+ */
+function movesCursor(xterm, event, pressedAt) {
+  return (
+    event.altKey && xterm.getSelection().length <= 1 && event.timeStamp - pressedAt < ALT_CLICK_MS
+  );
 }
 
 /**
