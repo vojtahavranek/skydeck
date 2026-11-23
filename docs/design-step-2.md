@@ -3792,7 +3792,8 @@ the row of that process's next session that has no place yet takes it — also a
 process, never a copy made in another. At most one place is held per process.
 
 The selection and the keyboard stay on the moved session, and the page scrolls its row into view
-with the first list after the answer. One move of a page waits for its answer at a time: a held key
+once the new order is drawn (at the answer it asks the list to show the row at its next render; a
+render that changes only the zone is no render of the list). One move of a page waits for its answer at a time: a held key
 moves the session at the round trip's pace, and a press meanwhile does nothing. Every window shows
 the new order (the registry's change pushes every page's list), and it survives a page reload and a
 server restart while the sessions run (`window_open_order`, `window_slots`, 7.6, 10.2); a restore
@@ -5462,8 +5463,7 @@ In the browser suite, besides those:
   answers the next loads, and an update check that gets the 404 fails and leaves it registered;
 - follow-up F37 (`test-page/reorder.test.ts`): Shift+↑, Shift+K, Shift+↓ and Shift+J send `reorder`
   for the selected session, a refusal's line shows in the key bar, one act waits at a time, the
-  moved row is scrolled into view (follow-up F42: with the first list after the answer), the last
-  row's refusal shows its line, and against a real server the slot chords reach the rows that show
+  moved row is scrolled into view, (follow-up F42) the last row's refusal shows its line, and against a real server the slot chords reach the rows that show
   their numbers after a move;
 - follow-up F41 (`test-page/tour.test.ts`): the tour starts by itself after the first list, with
   sessions and on an empty list, and never where it was seen, where the storage throws or refuses a

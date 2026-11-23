@@ -1010,10 +1010,10 @@ export function createList(root, hooks) {
       /** @type {HTMLElement} */ (selectedLine).scrollIntoView({ block: 'nearest' });
     }
     selectedSection = sectionNow;
-    // F37, F42: a row this page moved is scrolled into view once, at the render of the first list
-    // after the answer — the one exception to the rule above (a move inside its section). The
-    // request goes with that render whether it drew the row or not, so that no later list scrolls
-    // to it unasked.
+    // F37: a row this page moved is scrolled into view once, at the next render (the list that
+    // answers the move's `view`) — the one exception to the rule above (a move inside its
+    // section). The request goes with that render whether it drew the row or not, so that no
+    // later list scrolls to it unasked.
     if (followLine !== null) {
       /** @type {HTMLElement} */ (followLine).scrollIntoView({ block: 'nearest' });
     }
