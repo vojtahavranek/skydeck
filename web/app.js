@@ -56,6 +56,7 @@
 import { nextNeeding, windowTitle } from './attention-text.js';
 import { decodeKey, loadKey, takeToken } from './auth.js';
 import { createBanner } from './banner.js';
+import { createCarryOver } from './carry-over.js';
 import { createCards } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
@@ -399,6 +400,17 @@ const banner = createBanner(dom.banner, {
 // A control of the banner pressed from the keyboard can take itself away (the report's ×): the
 // zone's holder takes the keyboard back once the click is done, as for the notice's ×.
 dom.banner.addEventListener('click', () => setTimeout(keepKeyboard, 0));
+// F40 (S2 12.6): the carry-over bar, between the right side's header and its card (the two
+// children every cards module makes), so above the terminal or the card.
+const carryHost = document.createElement('div');
+carryHost.className = 'carry-over';
+carryHost.hidden = true;
+dom.cards.querySelector('.card-header')?.after(carryHost);
+const carry = createCarryOver(carryHost, {
+  act: (action) => act(action),
+  say: (text) => say(text),
+  back: () => setZone('list'),
+});
 // A click sequence that began on the banner acts on nothing outside it (ruled on review 2 of task
 // 75, N1): its first click can take its control away (Not now, the report's ×), the list then
 // moves up under the pointer, and the later clicks of a double click would select — and its
@@ -766,9 +778,11 @@ function searchText(text, filter) {
 
 /** The acts whose result a dialog starts from: after this page's own `ok`, it waits for the list
  *  that holds it (C1); F18's ticket too. */
-const EDITS = new Set(['label', 'group', 'note', 'ticket']);
+const EDITS = new Set(['label', 'group', 'note', 'ticket', 'carry-over']);
 /** F15's actions (S2 12.6): the list that holds one can come up to a second after its answer. */
 const FAVOURITE_ACTS = new Set(['favourite-add', 'favourite-remove']);
+/** F40's acts (S2 12.6): on `ok` a `view` asks for the list that holds the answer now. */
+const CARRY_ACTS = new Set(['carry-over', 'dismiss-carry-over']);
 /** Each dialog's list key, for D3's sentence. */
 const KEY_OF = { label: 'l', group: 'g', note: 'n', ticket: 't', pr: 'p' };
 
@@ -968,7 +982,7 @@ function act(action) {
         // (review 2 of task 37, M2).
         sendView();
       }
-      if (result.ok && FAVOURITE_ACTS.has(action.kind)) {
+      if (result.ok && (FAVOURITE_ACTS.has(action.kind) || CARRY_ACTS.has(action.kind))) {
         // F15: the server sends a page at most one list a second, so the list of a change can
         // come up to a second after its answer; a `view` asks for it now (as for EDITS above).
         sendView();
@@ -1919,14 +1933,17 @@ function render() {
       if (pane.ended) {
         cards.endedBar(pane.row, exit);
       }
+      carry.render(pane.row, selected?.carryOver ?? null);
       break;
     case 'elsewhere':
       cards.header(pane.row, selected, null, listNow);
       cards.elsewhere(pane.row);
+      carry.render(pane.row, selected?.carryOver ?? null);
       break;
     case 'resume':
       cards.header(pane.row, selected, null, listNow);
       cards.resumeCard(pane.row, selected, lines);
+      carry.render(pane.row, selected?.carryOver ?? null);
       break;
     case 'new':
       // The selected session's directory (S2 12.6) and, F28, its group as the Group field's chip:
@@ -1934,14 +1951,17 @@ function render() {
       // since its header was what the user saw (new-form-text.js).
       cards.header(null, null, null, listNow);
       cards.newForm(newFormDefaults(state.list, state.selected));
+      carry.render(null, null);
       break;
     case 'group':
       // F9: a closed caption is selected: the group's card, no header, no terminal.
       cards.header(null, null, null, listNow);
       cards.groupCard(pane);
+      carry.render(null, null);
       break;
     case 'none':
       cards.header(null, null, null, listNow);
+      carry.render(null, null);
       break;
   }
   // S2 11.3: a terminal that comes to be shown in the terminal zone gets the keyboard (after a

@@ -510,6 +510,66 @@
   margin-top: 4px;
 }
 
+/* Follow-up F40 (S2 12.6): the carry-over bar, under the header and above the terminal or the
+   card. One line that wraps; the message lies over the heading on one line, so no click or
+   answer changes the bar's height (and with it the terminal's size). */
+.carry-over {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 5px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--edge);
+  font-size: 12.5px;
+  min-width: 0;
+}
+.carry-over[hidden],
+.carry-over [hidden] {
+  display: none;
+}
+.carry-head {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.carry-head[data-message='true'] .carry-heading {
+  visibility: hidden;
+}
+.carry-message {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.carry-message[data-kind='refusal'] {
+  color: var(--crash);
+}
+.carry-message[data-kind='waiting'] {
+  color: var(--dim);
+}
+.carry-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.carry-kept {
+  color: var(--dim);
+}
+.carry-over [aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: default;
+}
+.carry-dismiss {
+  padding: 0 8px;
+}
+
 .card-new {
   margin: 0;
 }
