@@ -26,7 +26,8 @@ a session of Open by hand (follow-up F37; any row of Open, follow-up F42), at "M
 Open"; W43 checks the window's
 notice of a newer skydeck (follow-up F38), at "The update notice"; W44 checks the short settings
 screen and its gear (follow-up F39), at "The short settings screen"; W45 checks the tour of the
-window (follow-up F41), at "The tour of the window".
+window (follow-up F41), at "The tour of the window"; W46 checks copy on select in the window's
+terminal (issue #184), at "Copy on select".
 
 Setup:
 
@@ -1828,37 +1829,34 @@ Setup: the window open after the update to stage E (`git pull` and `skydeck wind
 the short id).
 
 1. Look at the window's taskbar button and at the left end of the window's own title bar (Edge's,
-   above the page): skydeck's icon, not Edge's. Since follow-up F14 the 16, 32 and 48 pixel files
-   show the same picture. Expected, by place:
-   - the **title bar** (the 16 pixel file at a display scale of 100 %; at 125 or 150 % Edge may
-     draw it from the 32 pixel file: the same picture, sharper): a small dark navy rounded square
-     filled by a blue-to-violet cloud outline with a terminal window in front of it and a light
-     `>_` in the window; not crisp;
-   - the **taskbar button**: which of the page's small icons Windows takes for it is not known
-     (Edge may hand it the 16 or the 32 pixel one, and Windows stretches it to 24 to 36 pixels).
-     Most likely the 16 pixel file stretched to about 24 pixels (F12's review 2 reading a
-     screenshot of the taskbar taken before F12 (2026-11-17); not tried in Edge): the same
-     picture, the cloud with the window, filling the square nearly to its edges, so that it is as
-     large as the other buttons' icons, and soft at a display scale of 100 % (a stretched bitmap is
-     never crisp): the cloud and the window read as shapes, the `>_` hardly. It is softer than the
-     window alone that the button showed between F12 and F14: that `>_` had 22 white pixels at 16
-     pixels, this one has 10. After F12 the icon seen was reported as a different icon from the
-     picture; the only small file F12 made different in kind was the 16 pixel one, which is
-     consistent with the button showing the 16 pixel file (not a confirmation: the report did not
-     say where it was seen). If Windows takes the 32 pixel file: the same picture, sharper.
-     Since follow-up F12 the drawing fills the tile; before it the same drawing sat inside a margin
-     of the same navy, which on a dark taskbar is nearly invisible, so the icon looked small. Write
-     down whether you see the cloud with the window, whether the picture is sharp or soft, and
-     whether it is as large as the buttons beside it.
+   above the page): skydeck's icon, not Edge's. Expected at both: a blue-to-violet cloud drawn as
+   a line, a terminal box in front of it and a white `>_` in the box, and nothing behind the
+   drawing (no square or tile: around it the icon is transparent, so the taskbar's own colour
+   shows). The page's `favicon.ico` holds an image drawn for every size the taskbar and the title
+   bar show at a scaling of 100 % to 250 % in steps of 25 % (16, 20, 24, 28, 30, 32, 36, 40, 42, 48,
+   54, 60 and 64 pixels), the lines bolder at 16 and 20: at those scalings neither place should need
+   one resized. At another scaling (above 250 %, or one between those steps) the size is not in the
+   file: there a neighbour is resized, and a soft icon is expected; write it down as such. Expected,
+   by place:
+   - the **taskbar button**, the one that matters most: **the icon is sharp in the taskbar at this
+     display's scaling**: the cloud's line, the box and the `>_` have crisp edges, not the soft
+     look of an icon stretched from a smaller one, and the drawing is about as large as the icons
+     of the buttons beside it. Look up the scaling (Windows' Settings, System, Display, "Scale")
+     and write it down with what you see. Which of the page's images Edge hands to the taskbar is
+     not known (the taskbar shows 24 pixels times the scaling: 24 at 100 %, 30 at 125 %, 36 at
+     150 %, 42 at 175 %, 48 at 200 %): when the icon is soft at your scaling, write down how
+     (blurred, or sharp but small, or large and soft);
+   - the **title bar**, which matters less: the same drawing, smaller (16 pixels times the scaling:
+     16 at 100 %, 20 at 125 %, 24 at 150 %), its lines bolder at the two smallest sizes; the `>_`
+     may only just read.
 
-   The taskbar's look was NOT tried in Edge when F12 and F14 were made: the files were judged from
-   sheets drawn with the same browser engine (Chromium), and this check is the first time they are
-   seen on the taskbar. The icon before F10 was three cards, the front one white with a prompt, on
-   a blue rounded square; between F10 and F12 it was the picture inside its tile; between F12 and
-   F14 the 16 pixel file was the terminal window alone, with no cloud. When the button or the
-   title bar still shows an earlier icon after the page reloaded itself, write it down and treat
-   it as step 3 treats Edge's own icon: look again the next time the window is opened anew (do not
-   close it for this check).
+   The taskbar's look was NOT tried in Edge when the files were made, and nobody has looked at
+   them on a Windows taskbar or title bar: they were judged from enlarged sheets of them on a dark
+   and a light background, and this check is the first time they are seen on the taskbar. The icon
+   before 2026-11-23 was another picture on a dark navy rounded square (from F10; before F10 three
+   cards on a blue rounded square). When the button or the title bar still shows an earlier icon
+   after the page reloaded itself, write it down and treat it as step 3 treats Edge's own icon: look
+   again the next time the window is opened anew (do not close it for this check).
 2. In W: `skydeck window --restart`. Expected: the same window stays and says `skydeck's server
    restarted; your sessions kept running`. Look at the button again.
 3. When the button showed Edge's icon in step 1 or 2, write that down, and look at it again the
@@ -1875,9 +1873,10 @@ the short id).
 
 Write down: the icon the button and the title bar showed, after the update, after the restart (and
 when the window was opened anew, after a WSL restart, or "left out"); what the button showed (the
-cloud with the window, or still the window alone, the icon before F14), sharp or soft, and as
-large as the buttons beside it or not; whether Edge's menu offered to install the page as an app,
-in its own words.
+cloud with the box on the taskbar's own colour, or still an earlier icon on its navy square);
+the display's scaling, and whether the icon is sharp in the taskbar at it or soft; whether it is
+as large as the buttons beside it; whether Edge's menu offered to install the page as an app, in
+its own words.
 
 ## Updating skydeck
 
@@ -3012,9 +3011,10 @@ with the terminal of a session shown (any running one; no prompt is typed into i
    Expected: a dialog over the page, `Settings`, then `Appearance` (`Mode`, `Colour theme` and
    under it `Light and dark each keep their own.`), `Links` (`Open links in`, `Ticket address` and
    its hint about `{key}`), `The window` (`Keep WSL running`, a switch with `after a restart`
-   beside it; `Typed commands start sessions in` and its hint), `Updates` (follow-up F38: the
-   switch `Check for updates every day`, the line of the last check and `Check now`; W43 tries
-   them), and at the end `Advanced (14 more settings)` and `Close`. No `Save`, no `Default`, no file name. The keyboard
+   beside it; `Typed commands start sessions in` and its hint; from issue #184 `Copy on select`,
+   a switch, and its hint `In a session’s terminal; Ctrl+Shift+C copies either way.`),
+   `Updates` (follow-up F38: the switch `Check for updates every day`, the line of the last check
+   and `Check now`; W43 tries them), and at the end `Advanced (14 more settings)` and `Close`. No `Save`, no `Default`, no file name. The keyboard
    is on `Mode`. Write down what Mode and Colour theme show.
 4. **The theme.** Choose the other of `Light` and `Dark` in Mode (from `Auto`, `Dark`). Expected:
    the whole window behind the dialog changes at once, the terminal too. Choose another `Colour
@@ -3099,5 +3099,51 @@ too.
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge
 version; whether a step's words could be shorter or clearer.
+
+Not tried before this check was written: all of it, in Edge.
+
+## Copy on select
+
+The check of copy on select (issue #184; design-step-2.md 9.1, 9.5, 12.13; [install.md](install.md),
+"Using the window", its point "Keys", and "The `window` keys"): W46, in your window, with a real
+session. It switches `Copy on select` (`window.copyOnSelect`) off and on in Settings, which writes
+`config.json` (and the window's copy of it, `config.json.skydeck-backup`): both are copied aside
+first and given back at the end, as in W41. Commands are typed in W, a WSL terminal of your own
+(never a `!` command inside Claude Code). The tests select in headless Chromium and read its own
+clipboard; only here does a selection reach the Windows clipboard through Edge, from a terminal
+with Claude Code in it, for another program to paste.
+
+## W46. A selection copied as the mouse lets go (real claude)
+
+Setup: skydeck updated to a commit that has issue #184 (`skydeck update`, W32); the window open,
+with the terminal of a session shown that has some text on its screen (any running one; no prompt
+is typed into it); Notepad open beside the window.
+
+1. **Copy the files aside.** As W41's step 1, with `w46` for `w41` in the names; write down the
+   value of `grep -n copyOnSelect ~/.config/skydeck/config.json` (no line: not set, which is
+   `true`). Open Settings (the gear): `Copy on select` is a switch in The window. When it is off,
+   click it on (`Saved.` beside it). Close Settings with Esc.
+2. **A drag.** In the terminal, drag over two or three words and let go. Nothing says that it
+   copied. In Notepad, Ctrl+V. Expected: exactly those words. Double click one word in the
+   terminal, Ctrl+V in Notepad: that word.
+3. **A click.** Copy a word in Notepad (select it, Ctrl+C). Click once into the terminal (no drag)
+   and Ctrl+V in Notepad. Expected: the Notepad word, not the terminal's: a click copies nothing.
+4. **Off.** Open Settings, turn `Copy on select` off (`Saved.` beside it), close it with Esc. Copy
+   a word in Notepad, then drag over other words in the terminal and let go, and Ctrl+V in Notepad.
+   Expected: the Notepad word: the clipboard kept the old text. Drag over those words in the
+   terminal again and, at once, without a click, press Ctrl+Shift+C; Ctrl+V in Notepad: the
+   terminal's words (Ctrl+Shift+C still copies).
+5. **On again.** Open Settings, turn `Copy on select` on again (`Saved.`), close it. Drag over a
+   word in the terminal, Ctrl+V in Notepad. Expected: that word, with no reload of the window in
+   between.
+6. **The end.** When step 1 found `Copy on select` off, turn it off again in Settings (`Saved.`),
+   so that the window uses the value the file gets back. The window's copy: as W41's step 6, with
+   `w46` for `w41`. The file: when step 1 found no `config.json`, `rm
+   ~/.config/skydeck/config.json` (the switch made it, holding only `window.copyOnSelect`); else,
+   when you changed nothing else in it since step 1, `cp -p ~/config.json.before-w46
+   ~/.config/skydeck/config.json`, then `rm ~/config.json.before-w46`. Nothing needs a restart.
+
+Write down: for each step whether it went as expected, and the words where they differ; your Edge
+version.
 
 Not tried before this check was written: all of it, in Edge.

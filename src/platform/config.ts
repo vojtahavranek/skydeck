@@ -13,6 +13,9 @@ export interface WindowConfig {
   links: 'default' | 'edge';
   /** F38 (S2 16.5): whether the window's server looks for a newer skydeck at its start and daily. */
   updateCheck: 'daily' | 'off';
+  /** Issue #184 (S2 9.5): a selection the user ends with the mouse in the window's terminal is
+   *  written to the clipboard at once, as Ctrl+Shift+C writes it. */
+  copyOnSelect: boolean;
 }
 
 /**
@@ -68,6 +71,7 @@ export const DEFAULT_CONFIG: Config = {
     keepAlive: 'wsl',
     links: 'default',
     updateCheck: 'daily',
+    copyOnSelect: true,
   },
 };
 
@@ -213,7 +217,7 @@ function readStatusRules(value: unknown, fail: (problem: string) => never): Tick
  * readStatusRules refuses and `ticketRefreshMinutes` not a whole number from 1 to 1440 (F19); in `window` (S2 16.4): an
  * unknown key, `port` outside 1–65535, `edge` not absolute, `profileDir` neither null nor an absolute Windows path,
  * `keepAlive` neither "wsl" nor "off", `links` neither "default" nor "edge", `updateCheck` neither
- * "daily" nor "off" (F38).
+ * "daily" nor "off" (F38), `copyOnSelect` neither true nor false (issue #184).
  *
  * `claudeHome`, `ticketUrl` and `wezterm.domain` may also be `null`, which is their default; an
  * empty `wezterm.domain` is an error like an empty `claudeCommand`.
@@ -362,6 +366,12 @@ export function parseConfig(text: string, source: string): Config {
                 fail('"window.updateCheck" must be "daily" or "off"');
               }
               config.window.updateCheck = item;
+              break;
+            case 'copyOnSelect':
+              if (typeof item !== 'boolean') {
+                fail('"window.copyOnSelect" must be true or false');
+              }
+              config.window.copyOnSelect = item;
               break;
             default:
               fail(`unknown key "window.${name}"`);

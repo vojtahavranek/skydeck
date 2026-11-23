@@ -6,7 +6,9 @@
 // the screen's Advanced holds every key of the server's table that this one does not name.
 // The page decides no rule (S2 4.3): a key's value is still checked and saved by the server, and
 // a choice's words name exactly the values the server's table takes, a switch's two values two of
-// them (test/web/settings-short.test.ts holds the two tables together).
+// them — or, for a key that is true or false (the server's control `switch`), the texts `true` and
+// `false`, which the page sends as the values themselves (settings-text.js `valueToSend`)
+// (test/web/settings-short.test.ts holds the two tables together).
 
 /**
  * A choice of the page's own: the theme's mode, or the colour theme of the scheme shown.
@@ -18,7 +20,8 @@
 
 /**
  * A key of config.json: a choice (`words`: each of the server's values in plain words, in its
- * order), a switch (`on` and `off`: the value each side saves) or a one-line text.
+ * order), a switch (`on` and `off`: the value each side saves, as the control's text: `true` and
+ * `false` for a key that is true or false) or a one-line text.
  * @typedef {{ key: string, label: string, hint: string | null } & (
  *   | { control: 'choice', words: Readonly<Record<string, string>> }
  *   | { control: 'switch', on: string, off: string }
@@ -81,6 +84,17 @@ export const SHORT = [
         hint: 'skydeck resume, new and restore, typed in a terminal.',
         control: 'choice',
         words: { here: 'That terminal', wezterm: 'A WezTerm tab', window: 'The window' },
+      },
+      {
+        // Issue #184: the window's terminal copies a mouse selection at once (web/terminal-view.js);
+        // the hint, because the list's and the header's text is not copied so, and Ctrl+Shift+C
+        // copies with it on or off.
+        key: 'window.copyOnSelect',
+        label: 'Copy on select',
+        hint: 'In a session’s terminal; Ctrl+Shift+C copies either way.',
+        control: 'switch',
+        on: 'true',
+        off: 'false',
       },
     ],
   },

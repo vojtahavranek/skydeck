@@ -157,7 +157,8 @@ export interface ResizeMessage {
  *
  *  F36 (S2 12.13): `settings` asks for the settings screen's payload (the result's `settings`);
  *  `setting-set` sets ONE setting `key` (a text) of config.json to `value` — a string of at most
- *  4,096 bytes, a number or null, never an object or a list —, `setting-default` removes it from
+ *  4,096 bytes, a number, true or false (issue #184: `window.copyOnSelect`) or null, never an
+ *  object or a list —, `setting-default` removes it from
  *  the file (back to its default). Which keys may be changed, and what a value may be, is the
  *  server's table and config.json's own rules (src/window/settings.ts).
  *
@@ -203,7 +204,13 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'favourite-remove'; text: string }
   | { t: 'act'; id: number; kind: 'end-session'; term: string; sessionId: string }
   | { t: 'act'; id: number; kind: 'settings' }
-  | { t: 'act'; id: number; kind: 'setting-set'; key: string; value: string | number | null }
+  | {
+      t: 'act';
+      id: number;
+      kind: 'setting-set';
+      key: string;
+      value: string | number | boolean | null;
+    }
   | { t: 'act'; id: number; kind: 'setting-default'; key: string }
   | { t: 'act'; id: number; kind: 'update-check' | 'update-look' | 'update-seen' }
   | { t: 'act'; id: number; kind: 'update-apply'; to: string }
@@ -472,6 +479,12 @@ export interface ListMessage {
   searching?: boolean;
   /** E8, E9: while view.switcher is a string; else null. */
   switcher?: SwitcherPayload | null;
+  /** Issue #184 (S2 9.5): `window.copyOnSelect` as the running server uses it — a selection the
+   *  user ends with the mouse in the shown terminal is written to the clipboard. The server always
+   *  sends it, so a page has it from its first list and follows a change at its next; optional
+   *  for the reader: absent (a scripted list of the test helpers) is false — the page holds no
+   *  default of its own. */
+  copyOnSelect?: boolean;
   /** E13: the row of the session view.selected names, as the sections would carry it (its
    *  `stack` null), also when they leave it out; null when the view selects none or a session
    *  the view model does not list even with done ones shown. The page uses it only when its id
@@ -656,8 +669,9 @@ export interface SettingPayload {
   kind: 'change' | 'show';
   /** For a shown one, what it names: a program, a folder or the port; null for a changeable one. */
   names: 'program' | 'folder' | 'port' | null;
-  /** The control that fits its type; `choices` for `choice`, else []. */
-  control: 'number' | 'text' | 'choice';
+  /** The control that fits its type (`switch`: true or false, issue #184); `choices` for
+   *  `choice`, else []. */
+  control: 'number' | 'text' | 'choice' | 'switch';
   choices: string[];
   /** A text whose empty field means null (`ticketUrl`, `wezterm.domain`). */
   nullable: boolean;
@@ -1001,10 +1015,11 @@ const CLOSED: Check = (value, where) => {
 
 /** F36: a setting's value — a string held to the path limit (a ticket link of 2,048 characters is
  *  sent whole), a finite number (JSON reads `1e999` as Infinity, which JSON would write as null),
- *  or null; never an object, a list or a boolean (no setting the window changes is one: a whole
- *  configuration is never sent). */
+ *  true or false (issue #184: `window.copyOnSelect`; which key takes which type is config.json's
+ *  rule, at the server), or null; never an object or a list (no setting the window changes is
+ *  one: a whole configuration is never sent). */
 const SETTING_VALUE: Check = (value, where) => {
-  if (value === null) return null;
+  if (value === null || typeof value === 'boolean') return null;
   if (typeof value === 'number') return Number.isFinite(value) ? null : `${where}: wrong value`;
   return typeof value === 'string' ? PATH(value, where) : `${where}: wrong type`;
 };

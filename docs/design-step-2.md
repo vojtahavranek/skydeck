@@ -1613,7 +1613,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `favourite-add` | `text` (the flags field's whole text), and optional `at` (a whole number from 0 to 11: Undo's old place) | 12.6 (follow-up F15): the text, trimmed, becomes a favourite — last, or at place `at` (past the end: last) — unless 12.6's rule refuses it; the refusal's words are the result's error, nothing saved. Every page's `list` follows. |
 | `favourite-remove` | `text` (a favourite's text as `list.favourites` carries it) | 12.6: the favourite with exactly that text goes; `ok` also when there is none (sent twice, or from two windows), and then nothing is written. |
 | `settings` | — | Follow-up F36, 12.13: the result's `settings` is the settings screen as the file and the running server are now. |
-| `setting-set` | `key` (a text: a setting's name as in the file, `window.links`), `value` (a string of at most 4,096 bytes, a number, or null) | Follow-up F36, 12.13: sets that one key of `config.json`. Refused, nothing changed, with the words as the result's error: a key that is not one of the server's table (`skydeck has no setting "<key>"`) or a shown-only one (`<key> names a program: it is changed in the file only (<file>)`; `names a folder`, `is the window's port`); a value `config.json`'s own rules refuse, in their words without the file's path (`"prRefreshMinutes" must be a positive integer`); a file that cannot be parsed or a path that is not a regular file (its problem, as `doctor` names it, then `; mend the file by hand first: nothing was changed`); a copy or a write that fails. The result carries `settings`, a refusal's too. After a change every page gets `settings`, and its `list` (the rows are loaded again at once). |
+| `setting-set` | `key` (a text: a setting's name as in the file, `window.links`), `value` (a string of at most 4,096 bytes, a number, `true` or `false` — issue #184's `window.copyOnSelect`; which key takes which is the file's rule —, or null) | Follow-up F36, 12.13: sets that one key of `config.json`. Refused, nothing changed, with the words as the result's error: a key that is not one of the server's table (`skydeck has no setting "<key>"`) or a shown-only one (`<key> names a program: it is changed in the file only (<file>)`; `names a folder`, `is the window's port`); a value `config.json`'s own rules refuse, in their words without the file's path (`"prRefreshMinutes" must be a positive integer`); a file that cannot be parsed or a path that is not a regular file (its problem, as `doctor` names it, then `; mend the file by hand first: nothing was changed`); a copy or a write that fails. The result carries `settings`, a refusal's too. After a change every page gets `settings`, and its `list` (the rows are loaded again at once). |
 | `setting-default` | `key` | Follow-up F36, 12.13: removes that one key from the file, back to its default; refused as `setting-set`. |
 | `reorder` | `sessionId`, `direction` (`up` or `down`) | Follow-up F37, F42, 12.9: moves the session's row of Open one place — any row of Open, numbered or not, in the window or not —, as the server draws Open for that page without filter, every block open (with done ones shown when its last `view` shows them; the rows it does not draw keep their place), and hands the slots out again from the top (7.6). Refused, nothing changed, while the page's last `view` sets words or a chip (`clear the filter first: sessions move only while no filter or chip is set`), for a session not under Open (`only a session under Open moves`), at the top (`already at the top of Open`) and for the last row downward (`already at the bottom of Open`), when the terminals changed between the reading and the change (`the list changed meanwhile; try again`), when two terminals of the window show a session of Open — the one moved, or one its row would pass — and Open drawn again with the new order and slots would not read as moved with its numbers ascending, or a row would go to another terminal (`a session here is shown by two terminals; close one of them first`: that session's row would go to its other terminal and its slot), while the server stops (`the window's server is stopping`), and with a store that cannot be written (the busy line). Else Open's new order and the new slots are kept together (`window_open_order`, `window_slots`, 10.2), every page's list follows, and the answer is `ok`. |
 | `update-check` | — | Follow-up F38, 16.5: Check now — a check for a newer skydeck with the network (`git fetch` of the server's own checkout), whatever `window.updateCheck` says; one that runs is joined. Answered when it has ended; the result's `update` is the state. |
@@ -1628,8 +1628,9 @@ from 1 to 65,535, a session id that does not pass the session-id rule (a lower-c
 in a `restore` each of its ids, which must also be distinct, at least one and at most 1,000 — or
 a `dismiss-restore` boot id that is not a lower-case UUID (stage C, plan C 2.2), or a
 `favourite-add` whose `at` is not a whole number from 0 to 11 (follow-up F15), or a `setting-set`
-whose `value` is an object, a list or a boolean (never a whole configuration) or a text over the URL
-limit, or whose `key` is not a text of at most 1,024 bytes (follow-up F36). A note may be any
+whose `value` is an object or a list (never a whole configuration; from issue #184 `true` and
+`false` are values, for `window.copyOnSelect`) or a text over the URL limit, or whose `key` is not a
+text of at most 1,024 bytes (follow-up F36). A note may be any
 length (design 7.1), so 1,024 bytes would refuse most notes;
 at 65,536 bytes each the largest note `act`, every character escaped by JSON (six bytes for one),
 stays under the 1 MiB a page's message may hold (8.2.1). A stored note longer than that is not
@@ -1650,7 +1651,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, from follow-up F42 the order they last had under Open, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, from follow-up F42 the order they last had under Open, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); issue #184 `copyOnSelect`: `window.copyOnSelect` as the running server uses it (9.5; always sent, so a page has it from its first list and follows a change in Settings at its next; absent, as in a scripted list of the tests, is false: the page holds no default); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -1834,7 +1835,7 @@ every key in this table, and the page does what the table says:
 | Shift+Enter | sends `\n` and cancels the key | xterm.js 6.0.0 sends `\r` whatever Shift says; Claude Code inserts a newline on Ctrl+J (`\n`) in every terminal without setup (section 21). |
 | Ctrl+V | leaves the key to the browser, which pastes; the page takes the paste before xterm.js does (in the capture phase of the terminal's element), cancels the browser's own action, takes every ESC out of the text and hands the rest to xterm.js's paste, which sends it as a bracketed paste (section 21: xterm.js 6.0.0 neither cancels a paste, so the text would stay in its hidden textarea, nor filters it, so a pasted `ESC [ 2 0 1 ~` would end its own bracketed paste) | Pasting text, as in the developer's terminal. No `\x16` is sent (a page test checks it, 17.4). |
 | Ctrl+Shift+V | sends `\x16` (a raw Ctrl+V) and cancels the key | Claude Code's own image paste: on WSL it reads the Windows clipboard itself (6.4); the browser's clipboard is not involved. |
-| Ctrl+Shift+C | copies the selection to the clipboard and cancels the key | Copy. |
+| Ctrl+Shift+C | copies the selection to the clipboard and cancels the key | Copy. With `window.copyOnSelect` on (issue #184, 9.5) a selection made with the mouse is copied at its release already; Ctrl+Shift+C copies it again, the same text by the same function, with the setting on or off. |
 | the window's own chords (12.9) | acts on them and cancels the key | xterm.js would send nothing for them anyway, so the window takes nothing from Claude Code. |
 | Alt+F4 | nothing: neither sent nor cancelled | The window closes with it (12.9). |
 
@@ -1892,6 +1893,56 @@ terminal that is shown in a focused window, and only up to 1 MiB of text — the
 terminals a page keeps attached (12.6) cannot replace the clipboard behind the user's back. A
 request to read the clipboard (OSC 52 with `?`) is never answered (design 13: programs in a
 terminal can write to the clipboard but not read it).
+
+**Copy on select** (issue #184; the owner's decisions of 2026-11-23: built, on by default, a switch
+in Settings). While `window.copyOnSelect` is `true` (16.4, the default), a selection the user ends
+with the mouse in the shown terminal is written to the clipboard at once: the same text by the same
+function as Ctrl+Shift+C (9.1), once per ended selection, at the release — never at a move. It ends
+at the release that ends the press which began it, wherever the release is (xterm.js follows a drag
+outside the terminal, and scrolls with one past its top or bottom), so every way xterm.js's
+selection takes the mouse counts: a drag, a double click (a word), a triple click (a line), a
+Shift+click that extends. The press counts when xterm.js's own selection takes it (its
+`handleMouseDown`'s rule, one small function of the page): the primary button, and while the
+program has turned mouse reporting on, only with Shift (xterm.js uses another key on a Mac) — a
+plain drag is then the program's, xterm.js makes no selection, and a program's own copy still
+comes by OSC 52 as above. Ruled by the lead (R1): a press that does not CHANGE the selection copies
+nothing. The page compares where the selection is before the press, right after xterm.js handled
+it (cleared, a word, a line, an end moved by Shift) and at the release: a release copies only when
+one of the three differs from the one before, the selection is not empty, and the terminal of the
+press is still the one shown. So a Shift+click where the selection ends already, or a drag of the
+scroll bar (whose press reaches the page as none at all), never writes an old selection over a
+clipboard the user filled since; a drag over the text just copied is a new selection (its press
+cleared it) and copies again. The places are compared rather than xterm.js's own
+`onSelectionChange`, which reports neither the clearing at a press nor a release that ends where
+its last report was (also after a resize or a key cleared the selection). Every press of the
+primary button forgets the last one first, and the release of any button ends it, as xterm.js
+ends its own; the window losing the focus (Alt+Tab in the middle of a drag, whose release it then
+never hears) forgets it too. The page reads the selection at the release after xterm.js's own
+release listener, which can still change it: a quick Alt+click (at most one character selected,
+within 500 ms) is xterm.js's cursor move, whose arrow keys clear that character — scrolled up it
+sends none and leaves the character, but ends no selection either —, and it copies nothing. No
+release xterm.js hears is missed: the only listeners of the page that stop a mouseup do so in the
+capture phase on the window, which keeps it from xterm.js too. A selection of blank cells is not
+copied: one whose text is empty or only spaces, tabs and line breaks would empty the user's
+clipboard (Ctrl+Shift+C copies whatever is selected, blanks too, as before). The scroll bar
+cancels its `pointerdown`, so the browser makes no mouse event of its press at all. So nothing else writes the clipboard: not a selection the page or
+an add-on makes (the search's match, 9.7: it comes with no press; and while the find bar is open
+the add-on finds again by itself 200 ms after output or a resize and selects its match, which,
+during a press, ends the press without a copy — xterm.js drops its own drag then), not one that
+only went away (a click clears a
+selection at its press, so its release finds nothing; output and a resize that clear one have no
+release), not a terminal that is no longer shown, not a release with nothing selected — the
+clipboard is never emptied — and not output that trims the scrollback under a selection, which
+moves it, during a press the program takes. A program cannot cause a copy by its output: the
+copy needs a press of the user's on the terminal and its release, which no output makes; output can
+change only what an ongoing selection covers, as it can for Ctrl+Shift+C. No message, toast or mark
+says that it copied; a write the browser refuses is swallowed as Ctrl+Shift+C's is. The page reads
+the value from each `list` (8.2.3: `copyOnSelect`, the value the running server uses), so a change
+in Settings applies to the next selection of every page of that server without a reload; a page
+holds no default of its own (a list without the field copies nothing). With `false`, only
+Ctrl+Shift+C copies, as before. Text in the header, the list, the cards and the dialogs is not part
+of it (the browser's own selection, copied with Ctrl+C or Ctrl+Shift+C as 12.9 says), and nothing
+pastes on a middle or right click.
 
 ### 9.6 Links
 
@@ -3990,126 +4041,106 @@ lead's decisions under the user's go-ahead to proceed.
 
 The page has an icon of its own, so that the window and its taskbar button need not show Edge's
 default: a picture, and PNG files of 16, 32, 48, 192 and 512 pixels (the 192 and 512 also as
-maskable icons) made from it and committed beside it in `web/icons/` (no build step: the PNGs are
-made once from the picture and committed). `index.html` names the favicon (`<link rel="icon">`) and
-the manifest (`<link rel="manifest">`), whose `name` and `short_name` are `skydeck`, `display`
-`standalone`, and `icons` the PNGs. Whether Edge's app window and its taskbar button show it is
-check W3. Low priority: stage E (19).
+maskable icons) and a `favicon.ico` made from it and committed beside it in `web/icons/` (no build
+step: the files are made once from the picture and committed). `index.html` names the favicon
+(`<link rel="icon">`) and the manifest (`<link rel="manifest">`), whose `name` and `short_name` are
+`skydeck`, `display` `standalone`, and `icons` the PNGs. Whether Edge's app window and its taskbar
+button show it, and whether it is sharp there, is check W3. Low priority: stage E (19).
 
-As built (stage E, plan E14; the picture changed by follow-up F10, 2026-11-17, to the owner's
-picture, drawn at the sizes the window uses, and a second picture for the
-small sizes; the small files redrawn by follow-up F12, 2026-11-18, and the 16 pixel one by
-follow-up F14 the same day):
+As built (stage E, plan E14; the picture changed by follow-ups F10, F12 and F14, 2026-11-17 and
+18; since 2026-11-23 one picture on a transparent background, drawn for every size the taskbar and
+the title bar show at a scaling of 100 % to 250 % in steps of 25 %, its lines bolder below 24
+pixels):
 
-- **The pictures** are the owner's, two of them, 1254 × 1254 pixels, RGBA, transparent outside
-  their dark navy rounded tile, in `scripts/icons/`, not under `web/`: they are not served and not
-  part of the build. Their image data is kept exactly as it was received; the one metadata chunk
-  each came with was removed (follow-up F27, 2026-11-19), so they hold IHDR, IDAT and IEND only,
-  like the drawn files. `skydeck-source.png` (1,670,010 bytes) has
-  a blue-to-violet cloud outline and three stacked terminal windows, the front one with three
-  coloured dots and a prompt (`>_`). `skydeck-source-small.png` (1,349,085 bytes) was made after the
-  first one turned out a blur at 16 pixels: the same tile and cloud outline with ONE terminal window
-  and a bold white `>_`, no stacked windows, no dots. `test/window/icons.test.ts` pins both sha256.
-  Until F10 the source was a drawing of shapes, `web/icons/skydeck.svg` (three cards on the page's
-  accent colour); it is gone.
-- **The files** are `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-192.png` and `icon-512.png`
-  on a transparent background, `icon-192-maskable.png` and `icon-512-maskable.png`, and
-  `favicon.ico` (the 16, 32 and 48 pixel PNGs in one ICO). They were drawn once by
-  `scripts/icons.ts` with the page suite's pinned Chromium, headless and in an environment of its
-  own, and committed; no test and no CI step runs the script. Nothing is fetched from outside, at
-  build time or at run time. **The 16, 32 and 48 pixel files, and so the ICO, are drawn from the
-  small picture; the 192 and 512 pixel files and both maskable files from the first one**: the
-  detailed picture blurs at 48 pixels and below (at 16 it is a ring with a light spot), and the
-  window's taskbar button and title bar show the small sizes.
+- **The picture** is one, `scripts/icons/skydeck-source.png`: 1076 × 903 pixels, RGBA, 749,296
+  bytes, a cloud drawn as a line with a terminal box in front of it and a white `>_` in the box, in
+  a blue-to-violet gradient, on a transparent background. It is not under `web/`: not served and
+  not part of the build. It holds IHDR, IDAT and IEND only, like the drawn files, and it is clean:
+  one solid piece (alpha 32 or more) with its soft edge (fainter pixels within 2 pixels of it) and
+  nothing else, since faint pixels scattered over the transparent parts (alpha 1 to 31) would lay a
+  haze on every file. `test/window/icons.test.ts` pins its sha256 and checks both. Every file is
+  drawn from it. Before: until F10 a drawing of shapes, `web/icons/skydeck.svg` (three cards on the
+  page's accent colour); from F10 to 2026-11-23 two pictures on a dark navy rounded tile, a
+  detailed one for the large files and a simpler one, cropped to its drawing, for the small ones.
+  All three are gone.
+- **The files.** `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-192.png` and `icon-512.png` are
+  the picture on a transparent square: no tile and no crop; the picture centred, its longer side
+  filling the square but for 2 % of the side on each side (the drawing is 0.96 of the icon's width
+  and 0.81 of its height). The corners, and every pixel the picture does not cover, are fully
+  transparent, so that the taskbar's or the title bar's own colour shows around the drawing.
+  **`favicon.ico` holds an image drawn for every size the taskbar and the title bar show at a
+  scaling of 100 % to 250 % in steps of 25 %**, and 64: thirteen images, 16, 20, 24, 28, 30, 32, 36,
+  40, 42, 48, 54, 60 and 64 pixels. Windows' taskbar shows 24 pixels times the scaling (24, 30, 36,
+  42, 48, 54 and 60), a title bar 16 times it (16, 20, 24, 28, 32, 36 and 40). An icon of a size the
+  file does not hold is a neighbour resized, which blurs it (the ICO before held 16, 32 and 48
+  only), as it still is at another scaling. Each image is drawn from the picture for its size, never
+  resized from another; the 16, 32 and 48 pixel ones are the PNG files' bytes. `index.html` names
+  the thirteen in its `sizes`. The files are drawn by `scripts/icons.ts` with the page suite's
+  pinned Chromium, headless and in an environment of its own, and committed; no test and no CI step
+  runs the script, and two runs give the same bytes. Nothing is fetched from outside, at build time
+  or at run time.
 - **How a size is reduced.** Chromium decodes the picture; for each pixel of an icon the script
   averages the picture's pixels under it, weighted by the area they cover, premultiplied and in
   linear light: a box filter at exactly the icon's pixel pitch, so that no pixel of the picture is
   skipped (nothing aliases), nothing rings, and the light of a thin line is kept. Halving on a
   canvas with Chromium's high-quality smoothing was tried first and rejected: it left a grey halo
-  around the tile on a light background and a duller 16 pixel icon. The large files are the whole
-  picture in their box, transparent where the picture is (its rounded corners; the tile itself is
-  at alpha 251 to 254 of 255, the pictures' own).
-- **The small files are not the whole small picture, and not its tile** (follow-up F12, on the
-  owner's report that the icon on the taskbar looked small and blurred and, a day later, still
-  smaller than the others). The taskbar is dark there, where the navy tile is nearly invisible, and
-  the drawing is only 83 % of the tile's width and 70 % of its height (1001 × 844 of the tile's
-  1200 pixels): drawn by its tile, as F10 first did, the icon looked small beside the others. Each
-  small file is a square crop of the picture on the tile's navy (`#01062b`), its corners rounded
-  by a mask of the tile's own relative radius, 273 / 1200 = 0.2275 of the crop's side (a circle
-  fitted to the tile's corner): the corners transparent, and along the straight sides alpha 252 to
-  255 (not always 255: a picture pixel on the crop's edge counts in the mask and again in the area
-  average). The mask is laid on the picture's pixels before the reduction, so its edge is
-  anti-aliased like the rest, and no pixel of the picture under a crop is less than opaque, so the
-  picture's own soft edge and transparent corners are never in a small file.
-  - **One rule for the three: the drawing, at 16, 32 and 48 pixels alike.** The drawing's box
-    (what is more than 40 of 255 from the navy, at least 60 pixels inside the tile) is x 115 to
-    1115 and y 202 to 1045, 1001 × 844 pixels. The crop is centred on it and its side is the width
-    plus 2 % each side, 1041.04 pixels, so the drawing fills the square: at 32 pixels it covers
-    96 % of the icon's width and 81 % of its height, and at every size it reaches the left and the
-    right edge (at 48 to within one pixel), the cloud's outline at its top and the terminal window
-    in front of it.
-  - **Why one rule, and what it costs** (follow-up F14). F12 drew the 16 pixel file from the
-    terminal window alone (its box x 306 to 941 and y 546 to 1045, plus 4 % each side, and what of
-    the cloud's strokes fell in that crop painted the navy), so that the `>_` had more room. The
-    owner asked for their picture there again, the cloud with the window: they want one picture
-    at every size. The cost: in the whole drawing the window is 0.61 of the icon's width (alone it
-    was 0.93), and the `>_` with it, so at 16 pixels the chevron and the bar are 10 white pixels,
-    where the window alone gave 22 (and the picture's whole tile, before F12, 7). A taskbar button
-    that Windows stretches from the 16 pixel file is therefore softer than with F12's file: the
-    cloud and the window still read as shapes, the `>_` as a light mark in the window.
-  - **The numbers are measured from the picture**, and `test/window/icons.test.ts` measures them
-    again from it (the tile's navy, the drawing's box, the tile's corner radius) and holds the
-    script's constants to what it finds; it measures the window's box too, to find the window in
-    the 16 pixel file, whose top frame is its row 7, with 28 pixels of the cloud's blue to violet
-    above it. The test re-derives every file from its picture in plain Node and compares (the
-    three small files within one step of 255 on this build, every file within two); tells the two
-    pictures apart by the white of the `>_` (the small picture's is bold: 3.8 to 3.9 % of a 16, 32
-    or 48 pixel icon is white; the large one's is thin: about 0.5 % of a 192 or 512 pixel one); and
-    pins the six files F14 left as they were byte for byte: the 32 and 48 pixel ones as F12 drew
-    them, and the four large ones (192 and 512 pixels, and the two maskable ones), as they were
-    before F12 too.
-  - **What it looks like.** At 16, 32 and 48 pixels the same picture: on the navy, the cloud's
-    outline in blue to violet with the terminal window in front of it and the `>_` in the window.
-    At 32 and 48 pixels the three read; at 16 the cloud and the window's frame read and the `>_`
-    is a light mark. **Which file the taskbar button takes is not verified. Most likely it is the
-    16 pixel one**, stretched to about 24 pixels: the button shows the cloud with the window, soft
-    (a stretched bitmap is never crisp), the `>_` hardly reading. The evidence is F12's review 2
-    reading a screenshot of the taskbar taken before F12 (2026-11-17), in which the button's 24
-    pixel icon matches the 16 pixel file of that day stretched to 24 far better than the 32 or 48
-    pixel one reduced; not tried in Edge. After F12 the owner reported that the icon they saw was a
-    different icon from their picture; the only small file F12 made different in kind was the 16
-    pixel one, which is consistent with the button showing the 16 pixel file (not a confirmation:
-    the report did not say where they looked). If Windows takes the 32 pixel file instead, the
-    button shows the same picture, sharper. The title bar shows the 16 pixel file at a display
-    scale of 100 %; at 125 or 150 % Edge may draw it from the 32 pixel one. **The taskbar's look
-    was not tried in Edge or on Windows**: it is judged from sheets drawn with the same Chromium (a
-    file resized as a browser does), and W3 asks the owner to write down what they see.
-- **The maskable icons** have a full background of the large picture's tile colour, `#040925` (the
-  average of its opaque pixels between 555 and 585 pixels from its middle), with the picture in the
-  middle at 0.927 of the icon's width: drawn in full within 555 of its 1254 pixels from its middle,
-  faded out to the background over the next 30 and not drawn beyond. The drawing reaches 540.8
-  pixels from the middle, so nothing of it is touched; the tile's own edge (a lighter hairline and a
-  shade, up to 36 steps from its colour, starting 594 pixels from the middle at the nearest, and a
-  tile lighter at its top than at its bottom) is not drawn: left in, it showed as a faint frame
-  inside the background, a tile inside a tile (the first build, a flat `#050925` and the whole
-  picture, had steps of 22 between neighbouring pixels). 0.927 is the largest scale, to three
-  decimals, at which everything of the drawing is inside the safe zone, the circle of 0.4 of the
-  icon's width. The drawing is what differs from the background by more than 40 (of 255) in some
-  channel, composited on it; the farthest of it from the picture's middle is 540.8 pixels, so the
-  scale can be at most 0.4 × 1254 / 540.8 = 0.9275. No pixel of a maskable icon is transparent.
-  In both files, outside the drawing, no step between neighbouring pixels is above 2
-  (`test/window/icons.test.ts` measures it, also along ten lines across the circle where the picture
-  fades out). `scripts/icons.ts` stops if the drawing, scaled, leaves the circle of 0.4 or reaches
-  the fade.
+  on a light background and a duller 16 pixel icon. From 24 pixels up the picture is sharp reduced
+  as it is.
+- **Bolder lines below 24 pixels.** Reduced as it is, at 16 pixels the cloud's line is 1.4 pixels
+  wide and the sign's stroke 1.1: faint and blurred. So the 16 and 20 pixel drawings are made
+  bolder before the reduction: the solid shape (alpha 128 or more) is grown outward, each new pixel
+  opaque in the colour of the nearest solid one (a chamfer distance, 3 a step straight and 4
+  diagonal), on a border around the picture, so that where the drawing touches the picture's edge
+  (the cloud at its top, left and right, the box at its bottom) it grows outward too; the white
+  sign (alpha 224 or more, each channel 190 or more) is grown inside the box; then the reduction;
+  then each pixel's coverage is raised by one fifth (full pixels stay full). The amounts come from
+  two widths measured in the picture, the cloud's line (95 picture pixels: the mean of its width at
+  its top, 93, its left, 93, and its right, 99) and the sign's stroke (76: the underscore's mean
+  height across the middle half of it, 75 to 76), and two targets, the line at least 1.9 pixels
+  and the stroke at least 1.6, each amount to the nearest whole picture pixel: at 16 pixels the
+  shape grows by 19 picture pixels and the sign by 11 (the line 1.90 pixels, the stroke 1.40), at
+  20 by 6 and 7 (1.91 and 1.61). At 24 pixels both are at their targets as drawn (2.03 and 1.63),
+  so nothing grows from 24 up. The sign grows by at most 11: its chevron and its underscore are
+  39.8 picture pixels apart where they come closest, and grown by the 18 each that the stroke's
+  target asks at 16 pixels they would be 3.8 apart, a twentieth of a pixel of the icon: one mark.
+  Down the column through the cloud's top the line covers 2.04 pixels of the 16 and of the 20
+  pixel file (reduced as it is, 1.32 and 1.64).
+- **The maskable icons** are the whole drawing inside the safe zone, the circle of 0.4 of the
+  icon's width, centred, on a full background of `#040925`: the picture's longer side is 0.786 of
+  the icon's width, the largest scale, to three decimals, at which every pixel of the picture that
+  is not transparent lies inside the circle (its farthest corner is 547.2 picture pixels from the
+  picture's middle; 0.4 × 1076 / 547.2 = 0.7865). No fade and no tile: where the picture puts
+  nothing the pixel is the background exactly. No pixel of a maskable icon is transparent.
+  `scripts/icons.ts` stops if the picture at that scale leaves the circle, or if a drawing would
+  lose a part of the picture outside its square.
+- **The tests.** `test/window/icons.test.ts` measures the two widths and the sign's gap again from
+  the picture, derives the amounts and holds the script's numbers to them; draws every PNG and
+  every image of the ICO again from the picture in plain Node (the bolder lines, the reduction) and
+  compares, premultiplied, within 3 steps of 255 (the worst on this build is 2; an image resized
+  from another size at a ratio that is not whole, as 30 from 32 or 48 from 64, eleven pairs tried,
+  is 59 to 157 steps off, and a 16 or 20 pixel one not made bolder 79 to 127; at a whole ratio, as
+  24 from 48, 30 from 60 or 32 from 64, an area average of the area average is the area average,
+  the same drawing, so that each image is drawn from the picture is held by the script, each of
+  whose jobs reduces the picture, not by this bound); and checks the ICO's thirteen entries, the
+  transparency outside the drawing, the line's coverage at 16 and 20, and the maskable files' safe
+  zone and background.
+- **Which image a panel takes is not verified.** No test can look at a Windows taskbar, and nobody
+  has looked at these files on a Windows taskbar or title bar: they were judged from enlarged sheets
+  of them on a dark and a light background. Which image of the ICO (or of the manifest) Edge hands
+  to the taskbar and to the title bar for a window started with `--app` is not known. With an image
+  drawn for each size the two show at a scaling of 100 % to 250 % in steps of 25 %, none should need
+  one resized there; W3 asks whether the icon is sharp in the taskbar at the display's scaling. Edge
+  may keep the old icon until the window is opened anew.
 - **The manifest and the page** are as before: `web/manifest.webmanifest` holds `name`,
   `short_name`, `display` and the seven PNGs, each `src` under the versioned path; it is served at
   `/manifest.webmanifest` with the build put in, and the ICO at `/favicon.ico` (8.2.1). `index.html`
-  names the favicon by its versioned path (`/assets/<build>/web/icons/favicon.ico`,
-  `sizes="16x16 32x32 48x48"`) and the manifest by `/manifest.webmanifest`; the policy's
-  `img-src 'self'` and `manifest-src 'self'` let the page load both. The manifest has no
-  `start_url`, `scope` or `id` (ruled, plan E task 94): the page is not meant to be installed as an
-  app — Chromium counts it as not installable without `start_url`, and an installed app's shortcut
-  would hold no launch token (5.1).
+  names the favicon by its versioned path (`/assets/<build>/web/icons/favicon.ico`, with the
+  thirteen sizes, `sizes="16x16 20x20 24x24 28x28 30x30 32x32 36x36 40x40 42x42 48x48 54x54 60x60
+  64x64"`) and the manifest by
+  `/manifest.webmanifest`; the policy's `img-src 'self'` and `manifest-src 'self'` let the page load
+  both. The manifest has no `start_url`, `scope` or `id` (ruled, plan E task 94): the page is not
+  meant to be installed as an app — Chromium counts it as not installable without `start_url`, and
+  an installed app's shortcut would hold no launch token (5.1).
 
 ### 12.13 Settings
 
@@ -4137,8 +4168,11 @@ screen's describe Advanced, which keeps F36's screen whole.
   - **Links**: `Open links in` (`window.links`: `The default browser`, `Edge`) and `Ticket address`
     (`ticketUrl`, a one-line field; hint `With {key} where the ticket key goes. Empty: no link.`).
   - **The window**: `Keep WSL running` (`window.keepAlive`: a switch, on `wsl`, off `off`; marked
-    `after a restart`) and `Typed commands start sessions in` (`terminal`: `That terminal`, `A
-    WezTerm tab`, `The window`; hint `skydeck resume, new and restore, typed in a terminal.`).
+    `after a restart`), `Typed commands start sessions in` (`terminal`: `That terminal`, `A
+    WezTerm tab`, `The window`; hint `skydeck resume, new and restore, typed in a terminal.`) and,
+    from issue #184, `Copy on select` (`window.copyOnSelect`: a switch, on `true`, off `false`; hint
+    `In a session’s terminal; Ctrl+Shift+C copies either way.`, since the label alone could be read
+    as the group's whole window, whose list and header text it does not copy, 9.5).
   - **Updates** (follow-up F38): `Check for updates every day` (`window.updateCheck`: a switch, on
     `daily`, off `off`), then the group's extra block, the last check and `Check now` (the bullet
     Updates below).
@@ -4147,7 +4181,9 @@ screen's describe Advanced, which keeps F36's screen whole.
   text: `web/settings-short.js` (a new setting or group joins by one entry; a group's extra block
   has one place in `web/settings.js`); a unit test holds it against `src/window/settings.ts` — every
   key a changeable one, a choice's words exactly the server's values in its order, the switch's
-  two sides its two values —, so the page decides no rule (4.3). The server's keys show once its
+  two sides its two values (of a key that is true or false, the texts `true` and `false`, which the
+  page sends as the values themselves) —, so the page decides no rule (4.3). The server's keys show
+  once its
   answer came (`Reading the settings…` until then).
 - **Saved as it is picked** (the short screen). A choice or the switch is sent (`setting-set`) the
   moment it changes; the text field when Enter is pressed in it or the keyboard leaves it (another
@@ -4203,12 +4239,14 @@ screen's describe Advanced, which keeps F36's screen whole.
   its kind, its meaning, its control and when a change applies; the default is the configuration's
   own. Changed in the window, each in a control that fits it — a number field, a text field (an
   empty one is null for `ticketUrl` and `wezterm.domain`), a choice of exactly the values the file
-  takes —, in Advanced with `Save` and `Default`: `terminal`, `wezterm.domain`, `groupPattern`,
+  takes, from issue #184 a switch for a key that is `true` or `false` —, in Advanced with `Save`
+  and `Default`: `terminal`, `wezterm.domain`, `groupPattern`,
   `firstRunDoneAfterDays`, `prRefreshMinutes`, `restoreBatch`, `restoreMinFreeMb`,
   `restoreStartTimeoutSeconds`, `ticketUrl`, `ticketRefreshMinutes`, `window.keepAlive`,
-  `window.links`, `window.updateCheck` (from F39 `terminal`, `ticketUrl`, `window.keepAlive` and
-  `window.links` are on the short screen instead, saved as they are picked, and from F38
-  `window.updateCheck`, in its group Updates). Shown only, its value as text and `names a
+  `window.links`, `window.updateCheck`, `window.copyOnSelect` (from F39 `terminal`, `ticketUrl`,
+  `window.keepAlive` and `window.links` are on the short screen instead, saved as they are picked,
+  from F38 `window.updateCheck`, in its group Updates, and from issue #184 `window.copyOnSelect`,
+  in The window: Advanced holds 14). Shown only, its value as text and `names a
   program: it is changed in the file only` (`names a folder`, `is the window's port`): `claudeHome`,
   `claudeCommand`, `ticketStatus`, `window.port`, `window.edge`, `window.profileDir`.
 - **When a change applies.** At once — the running server reads it at each use, and the change is
@@ -4217,7 +4255,9 @@ screen's describe Advanced, which keeps F36's screen whole.
   `ticketRefreshMinutes` (the next automatic read), `restoreBatch`, `restoreMinFreeMb` and
   `restoreStartTimeoutSeconds` (the next restore; the timeout also the next mapping of terminals,
   10.1), `window.links` (the next link), `window.updateCheck` (the next tick, 16.5: turned on, it
-  checks at once when this server's last check is a day old or there was none). After the window restarts: `window.keepAlive` — the
+  checks at once when this server's last check is a day old or there was none),
+  `window.copyOnSelect` (every page's next list, and with it the next selection, 9.5). After the
+  window restarts: `window.keepAlive` — the
   keep-alive is made from it at the server's start (6.1), and one that runs keeps running until the
   window restarts. Used elsewhere: `terminal` and `wezterm.domain` (read by `resume`, `new`,
   `restore` and the interactive list's `R` at each run; the server never reads them),
@@ -4518,6 +4558,8 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   screen's line for it says that it runs on every title, and the guide's trouble table how to get
   back — the copy, or the key taken out of the file, then `skydeck window --restart`).
   `window.updateCheck` turns the window's daily check for a newer skydeck on or off (16.5).
+  `window.copyOnSelect` decides only whether a selection the user ends with the mouse is copied
+  (9.5): no value of it lets a page or a program write the clipboard without one.
   From follow-up F38 a proven connection can also make the server fetch skydeck's own checkout's
   remote (`act update-check`; one check at a time, a second request joins it) and make it look at
   that checkout again without the network (`act update-look`). Neither carries a field: it cannot
@@ -4735,6 +4777,7 @@ New keys, all optional:
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
 | `window.links` | `"default"` | Ruled by the lead. Where the links the window opens go (9.6): `"default"`, the Windows default browser (`rundll32.exe url.dll,FileProtocolHandler <url>`), or `"edge"`, `window.edge` in the user's own Edge profile. Anything else is refused as every key of the file is: `<file>: "window.links" must be "default" or "edge"`. |
 | `window.updateCheck` | `"daily"` | Follow-up F38. `"daily"`: the window's server looks for a newer skydeck when it starts and once a day (16.5, "The window's check": a `git fetch` of skydeck's own checkout; nothing is applied without a click); `"off"`: only Check now in the settings screen looks (12.13). Read at each tick, so a change in the settings screen applies at once. Anything else is refused as every key of the file is: `<file>: "window.updateCheck" must be "daily" or "off"`. |
+| `window.copyOnSelect` | `true` | Issue #184 (the owner's decisions of 2026-11-23: on by default, a switch in Settings). `true`: a selection the user ends with the mouse in the shown terminal is copied to the clipboard at its release, as Ctrl+Shift+C copies it (9.5); `false`: only Ctrl+Shift+C copies. Every list carries the value the server uses, so a change in the settings screen applies at once, to the next selection of every page (12.13). `true` or `false` only; anything else is refused as every key of the file is: `<file>: "window.copyOnSelect" must be true or false`. |
 | `ticketUrl` | `null` | The details ruled by the lead. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` without a user name or password (`skydeck show` would print it, and Edge's command line would carry it) and with the same host (a host the key went into would differ), and with no `%`, or `%` with one hex digit, right before `{key}` (a key would finish that escape): where the key stands among the address's parts is the parser's to decide, not the text's (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
 | `ticketStatus` | `[]` | Follow-up F19; the details ruled by the lead. The programs that read a ticket's status (12.5): a list of at most 8 rules, each exactly `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` is the start of a ticket's address takes it, before GitHub's own reading of an issue's address. `match`: an `http` or `https` address, printable ASCII with no white space, at most 2,048 characters, with no user name or password, that starts with `<scheme>://<host>/` exactly as the URL parser writes them — scheme and host in lower case, a default port left out —, so that `https://tickets.example.com/` never takes `https://tickets.example.com.other.net/…` and a rule whose scheme or host could never match a stored address is refused instead of silently doing nothing (the rest of its path is not checked). `command`: 1 to 16 non-empty strings without control characters; `command[0]` is the program (a name on `PATH` or a path; a relative path is relative to the home directory), and in the other words every `{url}` becomes the address and every `{key}` the ticket's key (12.5; a rule whose command uses `{key}` is not run for an address that gives none); the program is run without a shell. No credential or token belongs in a rule: a program reads its secret from a file its owner keeps. Anything else is refused as every key of the file is, after `<file>: `: `"ticketStatus" must be a list of at most 8 rules`; `"ticketStatus[N]" must be an object with "match" and "command"`; `unknown key "ticketStatus[N].<key>"`; `"ticketStatus[N].match" must be the start of an http or https address, its scheme and host in lower case and followed by "/", at most 2,048 characters`; `"ticketStatus[N].command" must be a list of 1 to 16 non-empty strings without control characters`. Read at the server's start: after a change, `skydeck window --restart`. |
 | `ticketRefreshMinutes` | `10` | Follow-up F19. How long a ticket's status is left before the server reads it again (12.5, 10.1): a whole number of minutes from 1 to 1440, counted from the last attempt; a status whose category is `done` or `closed` is read again after 12 hours instead. Anything else is refused as every key of the file is: `<file>: "ticketRefreshMinutes" must be a whole number from 1 to 1440`. Read at the server's start; from follow-up F36 a change in the window's settings screen applies at once (12.13). |
@@ -5443,7 +5486,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 |---|---|---|---|
 | W1 | `skydeck window` opens an Edge app window that loads the page and connects. (That Edge reaches a server on `127.0.0.1` in WSL was verified on a Windows PC on 2026-11-13; this checks the command itself: the profile folder, the start, the wait for the page.) Write down how long Edge took from the command to the page's connection, cold and warm: the token and the command's wait last 30 seconds (5.1). | A | 5, 8.2.2 |
 | W2 | The chords of 12.9 that the key test of 2026-11-13 did not press reach the page and the browser does nothing: Ctrl+Shift+P, J, L, F, C, H and 1–9; and Alt+F4 still closes the window once the page is built (12.9). Whether Edge reloads on Shift+F5 and on the BrowserRefresh key (alone, with Shift, with Ctrl) when the page does not cancel them, and whether a cancelled BrowserRefresh still reloads (through `WM_APPCOMMAND`) (12.9, 15.3). In a normal tab (`--print-url`), which chords the browser keeps. | A | 12.9 |
-| W3 | The window has its own taskbar button with skydeck's icon (12.12), the same one after `skydeck window --restart` and after a WSL restart (looked at only when WSL restarts anyway: a restart ends every session; else written down as left out), and the title `(n) skydeck`; a second `skydeck window` opens no second window. Whether Edge's menu offers to install the page as an app (it has a manifest, 12.12): written down, never done. | A, B, E | 5.1, 12.1, 12.12 |
+| W3 | The window has its own taskbar button with skydeck's icon (12.12), sharp in the taskbar at the display's scaling, the same one after `skydeck window --restart` and after a WSL restart (looked at only when WSL restarts anyway: a restart ends every session; else written down as left out), and the title `(n) skydeck`; a second `skydeck window` opens no second window. Whether Edge's menu offers to install the page as an app (it has a manifest, 12.12): written down, never done. | A, B, E | 5.1, 12.1, 12.12 |
 | W4 | **Real claude** in a window terminal: status line, subagent display, spinner, redraw on resize. Then `skydeck window --restart`: the screen is exactly what it was. | A | 7.2, 7.3 |
 | W5 | **Real claude**, the screen side answering alone: does Claude Code use synchronized output; does the OSC 11 answer make its automatic theme right; with an XTVERSION answer `xterm.js(6.0.0)` (a one-line change), any visible effect? | A | 9.3 |
 | W6 | **Real claude**: Shift+Enter inserts a newline; Ctrl+V pastes text; Ctrl+Shift+V pastes a Windows screenshot; Ctrl+Shift+C copies a selection, and a program's OSC 52 write reaches the Windows clipboard. | A | 9.1, 9.5 |
@@ -5483,8 +5526,9 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W41 | The settings screen's Advanced on the owner's own `config.json`, copied aside first: the title bar's gear opens it, `Advanced (14 more settings)` opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36, F39 | 12.13 |
 | W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last row and under a filter; follow-up F42: a fourth session of another terminal moved above a numbered one, the numbers unchanged, `/clear` in it keeps its place; `skydeck window --restart` keeps the order. The restore order only where W16's drill runs anyway. | F37, F42 | 7.6, 12.1, 12.9 |
 | W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Update now` and `Close`; `doctor`'s `update:` line; the group's switch `Check for updates every day` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
-| W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links, The window and (F38) Updates with seven plain labels and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
+| W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links, The window and (F38) Updates with eight plain labels (from issue #184 `Copy on select` in The window) and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
 | W45 | The tour of the window in the owner's Edge (follow-up F41): it starts by itself at the first opening after the update, over the real list; each step's region stands out and its words read well; Enter, → and ← walk it, a click on the page does nothing, Ctrl+Shift+L says `close the tour first (Esc)`; `Done` gives the keyboard back and a reload shows it no more; the key help's `Take the tour` and the switcher's `> tour` start it again and Esc ends it; an InPrivate window with `--print-url`'s address shows it by itself once, in a tab's words. | F41 | 12.9, 12.14 |
+| W46 | **Real claude**, copy on select (issue #184): a drag over text in the terminal, then Ctrl+V into Notepad, gives that text; a double click a word; `Copy on select` off in Settings, a new selection leaves the clipboard with the text copied before; on again, the next selection is copied, without a reload. | #184 | 9.5, 12.13 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
