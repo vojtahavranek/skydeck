@@ -259,3 +259,56 @@ test('a session two terminals of the window show: a move of it, or of a row that
   assert.deepEqual(reorder.reorder(view(), S3, 'up'), { ok: true });
   assert.equal(calls.length, 1);
 });
+
+test("F42: the page's Show done reaches the rule: past a hidden copy the move is one visible step, a Show done page moves past the copy", () => {
+  // S1 in slot 1, the empty copy S3 (another terminal's, hidden without Show done), S2 in slot 2;
+  // kept in that order.
+  const original = '4f9d7a5c-2b6e-4dae-9a7b-6c5d4e3f2a1b';
+  const copy = ds({
+    id: S3,
+    state: 'running',
+    holders: [
+      {
+        process: { bootId: BOOT_A, pid: 9003, procStart: 100 },
+        sinceNs: T0,
+        live: null,
+        scripted: false,
+      },
+    ],
+    marks: ['continued', 'empty-copy'],
+    continuedFrom: original,
+    copyOf: original,
+    transcript: { aiTitle: 'made-up title', lastUserNs: null, lastTurnRole: null },
+  });
+  const orders = (showDone: boolean): string[][] => {
+    const persisted: string[][] = [];
+    const reorder = createReorder({
+      registry: {
+        list: () => [terminal(1, S1), terminal(2, S2)],
+        setSlots(changes, write) {
+          write?.(new Map(changes));
+          return 'ok';
+        },
+      },
+      rows: () =>
+        rows([
+          running(S1, 4001),
+          running(S2, 4002),
+          copy,
+          ds({ id: original, transcript: { aiTitle: 'made-up title' } }),
+        ]),
+      elsewhere: () => new Map([[S3, { pid: 9003, tty: null }]]),
+      nowNs: () => T0,
+      openOrder: { ids: () => [S1, S3, S2], adopt: () => {} },
+      persist: (_moved, order) => {
+        persisted.push([...order]);
+      },
+    });
+    assert.deepEqual(reorder.reorder(view({ showDone }), S2, 'up'), { ok: true });
+    return persisted;
+  };
+  // Without Show done S2 passes S1 (the copy stays after S1, the row it followed).
+  assert.deepEqual(orders(false), [[S2, S1, S3]]);
+  // With Show done S2 passes the copy.
+  assert.deepEqual(orders(true), [[S1, S2, S3]]);
+});
