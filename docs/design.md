@@ -457,7 +457,8 @@ Marks are shown next to the state.
   - *`mark the old one done`* is offered while the old session is not running, not done, and no
     resume of it is under way (its resume lock is not held).
   - *The answer.* `Carry over` writes, in one transaction, the ticked fields to the new session
-    (pull requests attached as by hand; the old session keeps its own) and, when ticked, marks the
+    (pull requests attached as by hand, also one the user had detached from the new session,
+    which is attached to it again; the old session keeps its own) and, when ticked, marks the
     old one done; the old session keeps all its fields. A refusal writes nothing. `×` dismisses
     the offer for good. Either answer is kept in `kv` per new session, so every window agrees. The
     ticks of the last `Carry over` are the starting ticks of the next offer; the first offer ever
