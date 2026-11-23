@@ -197,7 +197,7 @@ describe('moving a session of Open (F37)', () => {
     );
   });
 
-  test("a moved terminal closed while the store is locked: its entry goes at the next refresh's write", async (t) => {
+  test("a moved terminal whose program ends while the store is locked: its entry goes at the next refresh's write; its close answers ok", async (t) => {
     const { d, page } = await threeOpen(t);
     const moved = await page.act({ kind: 'reorder', sessionId: S3, direction: 'up' });
     assert.equal(moved.ok, true, JSON.stringify(moved));
@@ -206,17 +206,18 @@ describe('moving a session of Open (F37)', () => {
     const kept = (): Record<string, number> =>
       JSON.parse(d.deck.store.getKv('window_slots') ?? '{}') as Record<string, number>;
     assert.equal(kept()[term], 3, "S2's terminal moved from 2 to 3");
-    page.send({ t: 'input', term, data: '/exit\r' });
-    await page.list(
-      (candidate) => candidate.terminals.some((one) => one.id === term && one.state === 'ended'),
-      "S2's program ended",
-    );
     const other = new DatabaseSync(d.deck.places.dbPath);
     other.exec('BEGIN IMMEDIATE');
     try {
+      // F43: the number is freed at the end of the program, and the entry written away then.
+      page.send({ t: 'input', term, data: '/exit\r' });
+      await page.list(
+        (candidate) => candidate.terminals.some((one) => one.id === term && one.state === 'ended'),
+        "S2's program ended",
+      );
+      assert.equal(kept()[term], 3, 'the write met the lock: the entry is still stored');
       const closed = await page.act({ kind: 'close-terminal', term });
       assert.equal(closed.ok, true, 'a close answers ok whatever the write does');
-      assert.equal(kept()[term], 3, 'the write met the lock: the entry is still stored');
     } finally {
       other.exec('ROLLBACK');
       other.close();

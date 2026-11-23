@@ -2847,9 +2847,10 @@ only where W16's drill runs anyway.
 
 ## W42. Three throwaway sessions moved up and down (real claude)
 
-Setup: skydeck updated to a commit that has follow-up F42 (`skydeck update`, W32), then the window
-open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Close every other
-terminal of the window first, or read the slots below as the ones after them.
+Setup: skydeck updated to a commit that has follow-up F42 (and F43 for step 8; `skydeck update`,
+W32), then the window open (`skydeck window`); the throwaway folder there
+(`mkdir -p ~/skydeck-try`). Close every other terminal of the window first, or read the slots below
+as the ones after them.
 
 1. **Three throwaway sessions.** Three times: Ctrl+Shift+N, the throwaway folder's full path in the
    directory field (`/home/<you>/skydeck-try`), a label `move-1`, `move-2`, `move-3` in turn, Enter.
@@ -2879,7 +2880,15 @@ terminal of the window first, or read the slots below as the ones after them.
 7. **A restart.** Write down the order and the numbers. In W: `skydeck window --restart`. Expected:
    once the window is back, the same order (the session of W included) and the same numbers, and
    each Ctrl+Shift+1…3 shows the terminal of the row that has that number.
-8. **The end.** For each throwaway session: type `/exit` in its terminal (in W too), then `d` in the
+8. **An ended session gives its number up (follow-up F43).** Type `/exit` in the terminal of the
+   row numbered 1. Expected: its row goes to Recent with no number, its last screen stays on the
+   right under `claude exited (status 0)` with Resume and Close; the other rows keep their numbers;
+   Ctrl+Shift+1 says `no session in slot 1`. Then Ctrl+Shift+N, the throwaway folder, label
+   `move-4`, Enter: `move-4` takes the number 1 and Ctrl+Shift+1 shows its terminal. Then select
+   `move-4`, press `d`, choose `Mark done, keep it running`, and type `/exit` in its terminal: the
+   number 1 is free again without `Show done`, Close or a restart; the next Ctrl+Shift+N session
+   takes it.
+9. **The end.** For each throwaway session: type `/exit` in its terminal (in W too), then `d` in the
    list to mark it done.
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge

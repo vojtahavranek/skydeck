@@ -645,7 +645,7 @@ test('blocks: a row with an ended terminal of the window and a row that needs yo
     );
   const open = build([]);
   assert.equal(rowIn(open, S1).terminal, termId(1));
-  assert.equal(rowIn(open, S1).slot, 1);
+  assert.equal(rowIn(open, S1).slot, null, 'F43: a row under Recent shows no number');
   assert.equal(rowIn(open, S2).attention?.reason, 'ended');
   assert.deepEqual(ids(open, 'week'), [S1, S2, S3, S4]);
   assert.deepEqual(rowIn(open, S1).stack, orb({ size: 4, head: S1, role: 'head' }));
@@ -661,7 +661,7 @@ test('blocks: a row with an ended terminal of the window and a row that needs yo
   assert.deepEqual(ids(build(shut('week', 'ORB-1'), S2), 'week'), [S1, S2, S3, S4]);
 });
 
-test('blocks: a closed block whose member is drawn with a terminal that has not reported a session is drawn open, so that its row and its slot show (ruled 2026-11-16)', () => {
+test('blocks: a closed block whose member is drawn with a terminal that has not reported a session is drawn open, so that its row shows — with its slot while it starts under Open, none once it ended (F43) (ruled 2026-11-16)', () => {
   // Open: S1 (slot 1, reported) and S2 (slot 2, started for S2, not reported); Recent: S3 and
   // S4, whose terminal (slot 3) ended before its program reported. All of `test`.
   const list = rows(
@@ -686,7 +686,8 @@ test('blocks: a closed block whose member is drawn with a terminal that has not 
   assert.equal(rowIn(message, S2).slot, 2);
   assert.deepEqual(captions(message, 'open'), []);
   assert.deepEqual(ids(message, 'week'), [S3, S4]);
-  assert.equal(rowIn(message, S4).slot, 3);
+  assert.equal(rowIn(message, S4).terminal, termId(3));
+  assert.equal(rowIn(message, S4).slot, null, 'F43: a row under Recent shows no number');
   assert.deepEqual(captions(message, 'week'), []);
   // Reported, the block is closed again, as `closed` says.
   const reported = buildListMessage(

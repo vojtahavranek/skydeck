@@ -450,6 +450,52 @@ test('rows: an ended terminal stays on its row, which is no longer open', () => 
   assert.equal(rowIn(message, S1).starting, false);
 });
 
+test('F43: a row under Recent or Earlier shows no number, also when its terminal still holds one; a row under Open shows its own', () => {
+  // S1: a lost terminal whose program may still run (it keeps slot 1 for its 60 s) on a session
+  // that no longer runs. S2: a terminal still running on a session that ended a moment before its
+  // program (Recent, slot 2). S3: Earlier, an ended terminal that would hold 3. S4: under Open.
+  const lostExit = { code: null, signal: 1, atNs: String(NOW), notStarted: null };
+  const message = buildListMessage(
+    input({
+      rows: rows([
+        ds({ id: S1, lastActivityNs: NOW - SEC }),
+        ds({ id: S2, lastActivityNs: NOW - 2n * SEC }),
+        ds({ id: S3, lastActivityNs: NOW - 30n * DAY }),
+        running(S4),
+      ]),
+      terminals: [
+        term(1, { expectedSessionId: S1, state: 'lost', slot: 1, exit: lostExit }),
+        term(2, { expectedSessionId: S2, slot: 2 }),
+        term(3, {
+          expectedSessionId: S3,
+          state: 'ended',
+          slot: 3,
+          exit: { ...lostExit, code: 0, signal: null },
+        }),
+        term(4, { expectedSessionId: S4, slot: 4 }),
+      ],
+      view: { unfolded: ['earlier'] },
+    }),
+  );
+  assert.deepEqual(ids(message, 'open'), [S4]);
+  assert.deepEqual(ids(message, 'week'), [S1, S2]);
+  assert.deepEqual(ids(message, 'earlier'), [S3]);
+  assert.deepEqual(
+    [S1, S2, S3, S4].map((id) => [rowIn(message, id).terminal, rowIn(message, id).slot]),
+    [
+      [termId(1), null],
+      [termId(2), null],
+      [termId(3), null],
+      [termId(4), 4],
+    ],
+  );
+  // The terminals themselves are listed as the registry has them.
+  assert.deepEqual(
+    message.terminals.map((one) => one.slot),
+    [1, 2, 3, 4],
+  );
+});
+
 test('rows: the terminal showing a session wins over one starting for it, then the lower slot', () => {
   const message = buildListMessage(
     input({
