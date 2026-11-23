@@ -280,8 +280,13 @@ interface Scripted {
   set(change: Partial<World>): void;
 }
 
-async function scripted(t: TestContext, chromium: Browser, start: World): Promise<Scripted> {
-  const page = await newPage(t, chromium);
+async function scripted(
+  t: TestContext,
+  chromium: Browser,
+  start: World,
+  options: { tour?: boolean } = {},
+): Promise<Scripted> {
+  const page = await newPage(t, chromium, options);
   let world = start;
   const w = await editWorld(t, page, (selected) => listOf(world, selected));
   return {
@@ -1163,6 +1168,43 @@ test("the carry-over bar's keys (F40)", async (t) => {
       await untilBar(s.page, false);
       assert.equal(await zone(s.page), 'Focus: list');
       assert.equal(inputs(s.w), 0);
+    },
+  );
+
+  await t.test(
+    'F41: in a browser that has not seen the tour, the tour shows over the bar; c, Enter and Tab do not reach the bar; after Esc the bar is there untouched, the keyboard back in the terminal, and c moves it to the bar',
+    async (t) => {
+      const s = await scripted(t, chromium, RUNNING, { tour: true });
+      await untilBar(s.page, true);
+      // The tour's root has no box of its own: attached and not hidden is shown.
+      await s.page.waitForSelector('#tour:not([hidden])', {
+        state: 'attached',
+        timeout: PAGE_WAIT_MS,
+      });
+      const before = await barOf(s.page);
+      const inTour = () =>
+        readPage(
+          s.page,
+          () => document.getElementById('tour')?.contains(document.activeElement) === true,
+          null,
+        );
+      for (const key of ['c', 'Enter', 'Tab', 'Space']) {
+        await s.page.keyboard.press(key);
+        assert.equal(await inTour(), true, `${key}: the keyboard stays in the tour`);
+        assert.ok(!(await keyboardAt(s.page)).startsWith('bar:'), `${key}: not on the bar`);
+      }
+      await s.page.waitForTimeout(200);
+      assert.deepEqual(barActs(s.w), [], 'no act of the bar');
+      await s.page.keyboard.press('Escape');
+      await s.page.waitForSelector('#tour[hidden]', { state: 'attached', timeout: PAGE_WAIT_MS });
+      assert.deepEqual(await barOf(s.page), before, 'the bar is untouched');
+      await until(
+        async () => (await active(s.page)) === 'in #terminal',
+        'the keyboard back in the terminal',
+      );
+      await onBar(s);
+      assert.equal(await keyboardAt(s.page), 'bar:label');
+      assert.equal(inputs(s.w), 0, 'nothing reached the terminal');
     },
   );
 
