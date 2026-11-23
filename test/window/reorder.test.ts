@@ -9,9 +9,12 @@ import { describe, test } from 'node:test';
 import { NS_PER_DAY } from '../../src/platform/time.ts';
 import type { TerminalInfo } from '../../src/window/hub.ts';
 import type { ViewMessage } from '../../src/window/protocol.ts';
-import { createReorder, SERVER_STOPPING } from '../../src/window/reorder.ts';
+import type { KvKey } from '../../src/store/types.ts';
+import { isBusy } from '../../src/window/busy.ts';
+import { createReorder, persistMove, SERVER_STOPPING } from '../../src/window/reorder.ts';
 import type { ReorderDeps } from '../../src/window/reorder.ts';
 import { REORDER_REFUSALS } from '../../src/window/view/slot-moves.ts';
+import { testDeck } from '../helpers/deck.ts';
 import { ds, meta, rows } from '../helpers/derived.ts';
 import { BOOT_A, S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
 
@@ -311,4 +314,56 @@ test("F42: the page's Show done reaches the rule: past a hidden copy the move is
   assert.deepEqual(orders(false), [[S2, S1, S3]]);
   // With Show done S2 passes the copy.
   assert.deepEqual(orders(true), [[S1, S2, S3]]);
+});
+
+test('F42: both or neither — a store whose second write throws keeps neither key, the kept order in memory stays, the move is thrown as busy', (t) => {
+  const d = testDeck(t);
+  const store = d.deck.store;
+  store.setKv('window_slots', JSON.stringify({ '000000000009': 3 }));
+  store.setKv('window_open_order', JSON.stringify([S1, S2]));
+  const busy = (): Error =>
+    Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR', errcode: 5 });
+  // The store as the move sees it: the second write, Open's order, meets a busy database.
+  const failing = {
+    transaction: <T>(fn: () => T): T => store.transaction(fn),
+    setKv: (key: KvKey, value: string): void => {
+      if (key === 'window_open_order') throw busy();
+      store.setKv(key, value);
+    },
+    deleteKv: (key: KvKey): void => {
+      store.deleteKv(key);
+    },
+  };
+  let kept: readonly string[] = [S1, S2];
+  let applied = 0;
+  const reorder = createReorder({
+    registry: {
+      list: () => [terminal(1, S1), terminal(2, S2)],
+      setSlots(changes, write) {
+        write?.(new Map(changes)); // throws: nothing applied
+        applied += 1;
+        return 'ok';
+      },
+    },
+    rows: () => rows([running(S1, 4001), running(S2, 4002)]),
+    elsewhere: () => new Map(),
+    nowNs: () => T0,
+    openOrder: {
+      ids: () => kept,
+      adopt: (ids) => {
+        kept = ids;
+      },
+    },
+    persist: (moved, order) => {
+      persistMove(failing, moved, order);
+    },
+  });
+  assert.throws(
+    () => reorder.reorder(view(), S2, 'up'),
+    (error: unknown) => isBusy(error),
+  );
+  assert.equal(store.getKv('window_slots'), JSON.stringify({ '000000000009': 3 }));
+  assert.equal(store.getKv('window_open_order'), JSON.stringify([S1, S2]));
+  assert.deepEqual(kept, [S1, S2]);
+  assert.equal(applied, 0);
 });

@@ -12,6 +12,9 @@
 import { isSessionId } from '../claude/live.ts';
 import type { Ns } from '../platform/types.ts';
 import type { ListRow } from '../sessions/list.ts';
+import type { Store } from '../store/store.ts';
+import { writeMovedSlots } from './moved-slots.ts';
+import { writeOpenOrder } from './open-order.ts';
 import type { OpenOrder } from './open-order.ts';
 import type { ViewMessage } from './protocol.ts';
 import type { Registry } from './terminals.ts';
@@ -112,6 +115,22 @@ export function planMove(
     slots,
     order: keptNow(after),
   };
+}
+
+/**
+ * F42 (S2 7.6, 10.2): a move's writes, both or neither — the moved numbers (`window_slots`) and
+ * Open's new order (`window_open_order`) in one store transaction. A store that cannot be written
+ * throws (busy), and nothing of either is kept.
+ */
+export function persistMove(
+  store: Pick<Store, 'transaction' | 'setKv' | 'deleteKv'>,
+  moved: ReadonlyMap<string, number | null>,
+  order: readonly string[],
+): void {
+  store.transaction(() => {
+    writeMovedSlots(store, moved);
+    writeOpenOrder(store, order);
+  });
 }
 
 export function createReorder(deps: ReorderDeps): Reorder {
