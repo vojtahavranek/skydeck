@@ -142,7 +142,8 @@ Design 3's words keep their meaning. New:
 | tail | What the keeper has received since the parked snapshot: output chunks and resizes, in order. |
 | record | One element of the stream a keeper produces: an output chunk or a resize. Records are numbered from 1. |
 | attach | A page asks for a terminal's stream: it gets a snapshot, then every later record. |
-| slot | A number 1–9 that a terminal keeps from the moment it is opened until it ends, and moved by 12.9's keys (7.6, follow-up F37). |
+| slot | A number 1–9 that a terminal keeps from the moment it is opened until it ends, and moved by 12.9's keys (7.6, follow-up F37): after a move the numbers in use are handed out again from the top of Open among the window's terminals, so a terminal can gain one and another lose its own (follow-up F42). |
+| Open's order | The order of the rows under Open (12.1): computed until the first move by hand, then the server's, kept per session (`window_open_order`, 10.2), so that a row keeps the place it was first drawn at (follow-up F42). |
 | secret, launch token | The long-lived key page and server prove to each other, and the one-use key that lets a new window obtain it (8.2.2, 15.2). |
 | size owner | The page whose size a terminal has (8.2.6). |
 | needs you | A session the user should look at (12.4): it asks something, a turn finished and was not seen, or its window terminal ended unexpectedly. |
@@ -207,7 +208,7 @@ Added to design 11:
 | `src/update/` | Follow-up F38: the look for a newer skydeck, one copy for three callers — `skydeck update`, the window's server and `doctor` (the server may not import `src/cli/`): `git.ts` (how skydeck runs git on its own checkout, and the window's fetch that never asks; moved from `src/cli/update-git.ts`), `look.ts` (the look in the command's order and in the window's tolerant one, and `--check`'s lines), `record.ts` (the stored outcome, `kv window_update_check`, and the run entry of an update from the window, `kv window_update_run`). | platform, text, store (types), and `protocol.ts`'s types |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
-| `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12); from follow-up F37 the move of a session of Open by hand and the slots it gives out (`slot-moves.ts`, 12.9, 7.6). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
+| `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12); from follow-up F37 the move of a session of Open by hand and the slots it gives out (`slot-moves.ts`, 12.9, 7.6); from follow-up F42 Open's order once a move made it the server's, the freeze and the places held after `/clear` (`open-sequence.ts`, 12.1). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
 | `src/window/view/search/` | The rules of search as pure functions (stage E, plan E1): the filter's words and chips (12.8), the blocks (12.2; the code calls them stacks), the switcher's ranking (12.8); `build.ts` calls them. No pattern is ever built from a search text. | values: its own files and `text`'s `sanitize` only; types: sessions, `protocol.ts`, `hub.ts`, `view/sections.ts` |
 | `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the stored choices of the theme's Mode and colour themes on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
@@ -242,7 +243,8 @@ draws randomness. A long-lived child with pipes is not built in stage A, where n
 
 Every change step 2 makes to code that step 1 built, and the stage (19) that brings it. Nothing
 else of step 1 changes; a command not named here behaves exactly as in step 1. The order of a
-restore changes with follow-up F37 (the last row): the command's restore follows it too.
+restore changes with follow-up F37 (the last row), and follows Open's order since follow-up F42: the
+command's restore follows it too.
 
 | Where | Change | Stage |
 |---|---|---|
@@ -251,13 +253,13 @@ restore changes with follow-up F37 (the last row): the command's restore follows
 | `src/store/` | An option of the connection, used by the server's connection only: before every write transaction and every single-statement write it checks the schema version and refuses a write into a newer store (10.1). Commands' connections do not check: a command that migrates is the newer one. Migration 2 (10.2). | A (the guard), B (migration 2) |
 | `src/terminals/types.ts` | `LaunchSpec` gains `sessionId`, `kind`, the lock value, the start deadline and the label; the `Terminal` names gain `window` (11.1, 11.2). | A |
 | `src/sessions/` | `launchPrepared` moves here from `src/cli/launching.ts` and takes the terminal as a parameter; `prepareNew` takes the directory (11.1). In C, a renewal of a resume lock keeps the mark of its take in the last six digits of the lock's time, which are then not time (a lock's time is read to the millisecond); `sameTake` and `releaseLockOfTake` tell a renewal from a take-over (design 7.6; 7.3, 7.8). | A, C |
-| `src/sessions/restore.ts` | Restore planning moves here from the `restore` command, and returns the earlier boot and its last event time (11.1). `runRestore` takes optional hooks, which only the server passes: a refusal before the guard, a session that can no longer start, a stop signal, and a stop after a batch in which no session started (11.1, 11.3); each report line names the session it ends and how. The command passes none, and its restore is unchanged but for F37's order (the last row). | C |
+| `src/sessions/restore.ts` | Restore planning moves here from the `restore` command, and returns the earlier boot and its last event time (11.1). `runRestore` takes optional hooks, which only the server passes: a refusal before the guard, a session that can no longer start, a stop signal, and a stop after a batch in which no session started (11.1, 11.3); each report line names the session it ends and how. The command passes none, and its restore is unchanged but for F37's order (the last row; F42: Open's order). | C |
 | `src/cli/commands/` | New: `window` and `serve` (5). `doctor`: the lines of 16.3. `install`: the python3 `info` line (16.1). `uninstall`: stops the server, names the profile folder, `--purge` refuses while keepers live (16.2). | A |
 | `src/cli/commands/` | `resume` and `new`: `--window`; `restore` with `"terminal": "window"` (11.4). `show`: `(in the skydeck window)` (11.4). | C |
 | the interactive list (`src/cli/tui/`) | `R` with `"terminal": "window"` sends `POST /resume` (11.4) and shows the answer's lines the way it shows a tab launch's lines today. Nothing else in the list changes. | C |
 | `src/store/`, `src/sessions/`, `src/cli/` | Follow-up F18, a session's ticket (design 7.1, 12.5): migration 3 (10.2) adds `session_meta.ticket_url`; `readTicket`, `ticketText` and `setTicket`; a list row carries the ticket, which the expiry rule (design 7.2) and the filter (design 7.4) count; the new command `skydeck ticket set` / `clear`; `show` prints the ticket as `ticket:` and in `--json`; `t` in the interactive list. | F18 |
 | `src/ticket-status.ts`, `src/github.ts`, `src/platform/config.ts`, `src/store/`, `src/sessions/list.ts`, `src/window/ticket-fetches.ts`, `tick.ts`, `actions.ts`, `protocol.ts`, `src/cli/`, `web/` | Follow-up F19, a ticket's status (design 7.3, 12.2, 12.3, 12.5): the provider of an address (a `ticketStatus` rule, else a GitHub issue: `statusProvider` in `src/github.ts`, beside the issues' key and batch), the configured program and its answer, the due rule and the fetch in `src/ticket-status.ts`; the keys `ticketStatus` and `ticketRefreshMinutes` (16.4); migration 4 (10.2) adds the table `ticket_status`; a list row and `list.selected` carry the status (8.2.3) and the filter finds its text (12.8); the server reads it in the background, one read at a time (10.1; the actions `ticket` and `ticket-refresh`); `skydeck ticket refresh` reads and prints it and `show` prints it (`ticket set` reads nothing, as F18); the page draws the header's chip, the row's small chip and the dialog's line and ↻ (12.2, 12.5). | F19 |
-| `src/sessions/restore.ts`, `src/sessions/restore-order.ts` | Follow-up F37 (design 7.8): `restorePlan` puts its entries in the order of the slots their sessions last had in the window in their boot (`inRememberedOrder`), the others after in list order; the slots are read from the kv key `window_restore_order` (10.2), which the window's server writes. The command's restore (also `--dry-run`, and `POST /restore`) follows that order: it decides the batches, which sessions start before a memory stop, and which one is handed off `--here`. | F37 |
+| `src/sessions/restore.ts`, `src/sessions/restore-order.ts` | Follow-up F37 (design 7.8): `restorePlan` puts its entries in the order of the slots their sessions last had in the window in their boot (`inRememberedOrder`), the others after in list order; the slots are read from the kv key `window_restore_order` (10.2), which the window's server writes. Follow-up F42: the record holds the order the sessions had under Open in their boot (numbered or not, in the window or not), an F37 record is read by slot; `restorable` is `planRestore`'s candidate rule, which the window's memory also uses. The command's restore (also `--dry-run`, and `POST /restore`) follows that order: it decides the batches, which sessions start before a memory stop, and which one is handed off `--here`. | F37 |
 | `package.json`, `.prettierignore`, `tsconfig.json` | Development dependencies: `playwright`, `ws`, and the `@xterm/*` packages of 16.6 (exact versions); scripts `vendor`, `test:page`, `check` (17.5); `vendor/` added to `.prettierignore`, so that the vendored files are kept byte for byte; `web/tsconfig.json` beside the root one. | A |
 | `.github/workflows/ci.yml` | 17.5: `shellcheck` by name, the jobs `lint`, `unit (i/n)` and `page (i/n)` side by side with Node's `--test-shard`, the page suite on the newest leg only, on a runner pin of its own, the time limits. | A |
 
@@ -1118,24 +1120,31 @@ until it ends; the tenth and later terminals get none. The slot it was opened wi
 keeper's spec and `hello` (its meta), which never changes (7.7).
 
 Follow-up F37: the user moves a session of Open up or down (12.9), and the slots of Open's
-terminals are given out again so that the numbers read in ascending order top to bottom: the slots
-in use, sorted, go to Open's slotted rows in the new drawn order — the same set (a gap stays a
-gap), a permutation among Open's own terminals only (an ended terminal under Recent keeps its
-slot). The server computes the move (`src/window/view/slot-moves.ts`) and gives the registry the
-new slots in one synchronous step, so no terminal opens between the reading of the slots and their
-change. Without a move nothing is renumbered: a new or resumed terminal still takes the lowest free
-slot.
+terminals are given out again so that the numbers read in ascending order top to bottom. Follow-up
+F42: any row of Open moves, and the numbers follow Open's order among the window's terminals: the
+slots Open's terminals of the window hold, sorted, go to the first of those terminals' rows in the
+new drawn order, and every later one has none — the same set (a gap stays a gap), handed out among
+Open's own terminals only (an ended terminal under Recent keeps its slot), so a terminal without a
+slot can gain one (the tenth moved above the ninth takes 9) and the one it passed loses its own. A
+session that does not run in the window never has a slot, wherever it sits. The server computes the
+move (`src/window/view/slot-moves.ts`) and gives the registry the new slots in one synchronous step,
+so no terminal opens between the reading of the slots and their change. Without a move nothing is
+renumbered: a slot freed by a terminal that ends stays free, and a new or resumed terminal still
+takes the lowest free slot.
 
-A moved slot is kept in the store's kv key `window_slots` (10.2): a JSON object from terminal id
-to slot, holding every live terminal whose slot is not its meta's. The server reads it at start and
-applies it at every `hello` of that terminal (a reconnect, a restart while the keeper runs), over
-the meta's slot. At a `hello` whose slot — the moved one, else the meta's — another listed terminal
-holds, or that is kept for a keeper still being found, the terminal takes the lowest free slot
-(none only while all nine are held), logged, and that is kept as moved; so no two terminals ever
-share a slot, also when `window_slots` is lost or stale (which one keeps a doubled meta slot then
-depends on the order of the hellos). `nextSlot` leaves out the slots moved to keepers still being
-found, so that a keeper slow to answer after a restart keeps its place; a terminal's own moved slot
-is no conflict for it.
+A moved slot is kept in the store's kv key `window_slots` (10.2): a JSON object from terminal id to
+slot, holding every live terminal whose slot is not its meta's; null (F42) is a slot a move took
+away from a terminal whose meta has one, and only a move writes a null (a terminal that found all
+nine held at its `hello` gets no entry, so it takes its meta's slot back at a later `hello` when
+that one is free). The server reads it at start and applies it at every `hello` of that terminal (a
+reconnect, a restart while the keeper runs), over the meta's slot, a null too. At a `hello` whose
+slot — the moved one, else the meta's — another listed terminal holds, or that is kept for a keeper
+still being found, the terminal takes the lowest free slot (none only while all nine are held),
+logged, and that is kept as moved; so no two terminals ever share a slot, also when `window_slots`
+is lost or stale (which one keeps a doubled meta slot then depends on the order of the hellos).
+`nextSlot` leaves out the slots moved to keepers still being found (a slot, not a null), so that a
+keeper slow to answer after a restart keeps its place; a terminal's own moved slot is no conflict
+for it.
 
 The map is written (whole, pruned to the terminals listed or being found) before a move is
 applied — a store that cannot be written refuses the move, nothing changed —, at the close of a
@@ -1145,8 +1154,14 @@ refresh; a close answers ok whatever the write does. Once the server is stopping
 written to `window_slots` and no `hello` changes a slot. An entry of a keeper never found again
 (another boot) goes at the next write.
 
+A move writes the map and Open's new order (`window_open_order`, 12.1) in one store transaction,
+both or neither. `setSlots` checks the change before it writes: every terminal listed, the values
+before and after the same (none counted as a value), and no two terminals ending with one slot.
+
 A limit: an older skydeck's server reads only the meta slots, so after a move its window can show
-two terminals with one slot until one of them closes.
+two terminals with one slot until one of them closes. An F37 server reads a null entry as none and
+gives that terminal its meta slot at its `hello`; its own `hello` rule still keeps any two terminals
+apart.
 
 ### 7.7 Keeper versions
 
@@ -1600,7 +1615,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `settings` | — | Follow-up F36, 12.13: the result's `settings` is the settings screen as the file and the running server are now. |
 | `setting-set` | `key` (a text: a setting's name as in the file, `window.links`), `value` (a string of at most 4,096 bytes, a number, or null) | Follow-up F36, 12.13: sets that one key of `config.json`. Refused, nothing changed, with the words as the result's error: a key that is not one of the server's table (`skydeck has no setting "<key>"`) or a shown-only one (`<key> names a program: it is changed in the file only (<file>)`; `names a folder`, `is the window's port`); a value `config.json`'s own rules refuse, in their words without the file's path (`"prRefreshMinutes" must be a positive integer`); a file that cannot be parsed or a path that is not a regular file (its problem, as `doctor` names it, then `; mend the file by hand first: nothing was changed`); a copy or a write that fails. The result carries `settings`, a refusal's too. After a change every page gets `settings`, and its `list` (the rows are loaded again at once). |
 | `setting-default` | `key` | Follow-up F36, 12.13: removes that one key from the file, back to its default; refused as `setting-set`. |
-| `reorder` | `sessionId`, `direction` (`up` or `down`) | Follow-up F37, 12.9: moves the session's row of Open one place, as the server draws Open without filter, every block open (7.6). Refused, nothing changed, while the page's last `view` sets words or a chip (`clear the filter first: sessions move only while no filter or chip is set`), for a session not under Open (`only a session under Open moves`), for a row without a slot (`this terminal has no slot (only nine have one), so it does not move`; `a session running in another terminal has no slot, so it does not move`; `a session in Claude Code's background has no slot, so it does not move`), at the top (`already at the top of Open`) and for the last slotted row downward (`already the last session with a slot under Open`), when the terminals changed between the reading and the change (`the list changed meanwhile; try again`), when two terminals of the window show a session of Open — the one moved, or one its row would pass — and Open drawn again with the new slots would not read as moved with its numbers ascending (`a session here is shown by two terminals; close one of them first`: that session's row would go to its other terminal and its slot), while the server stops (`the window's server is stopping`), and with a store that cannot be written (the busy line). Else the new slots are kept (`window_slots`, 10.2), every page's list follows, and the answer is `ok`. |
+| `reorder` | `sessionId`, `direction` (`up` or `down`) | Follow-up F37, F42, 12.9: moves the session's row of Open one place — any row of Open, numbered or not, in the window or not —, as the server draws Open for that page without filter, every block open (with done ones shown when its last `view` shows them; the rows it does not draw keep their place), and hands the slots out again from the top (7.6). Refused, nothing changed, while the page's last `view` sets words or a chip (`clear the filter first: sessions move only while no filter or chip is set`), for a session not under Open (`only a session under Open moves`), at the top (`already at the top of Open`) and for the last row downward (`already at the bottom of Open`), when the terminals changed between the reading and the change (`the list changed meanwhile; try again`), when two terminals of the window show a session of Open — the one moved, or one its row would pass — and Open drawn again with the new order and slots would not read as moved with its numbers ascending, or a row would go to another terminal (`a session here is shown by two terminals; close one of them first`: that session's row would go to its other terminal and its slot), while the server stops (`the window's server is stopping`), and with a store that cannot be written (the busy line). Else Open's new order and the new slots are kept together (`window_open_order`, `window_slots`, 10.2), every page's list follows, and the answer is `ok`. |
 | `update-check` | — | Follow-up F38, 16.5: Check now — a check for a newer skydeck with the network (`git fetch` of the server's own checkout), whatever `window.updateCheck` says; one that runs is joined. Answered when it has ended; the result's `update` is the state. |
 | `update-look` | — | Follow-up F38, 16.5: the dialog's look, without the network; while a check runs it starts nothing and answers the state as it is. The result's `update` is the state. Neither kind carries a field: the checkout, its remote and the program are the server's. |
 | `update-apply` | `to` (a full commit id: 40 or 64 lower-case hexadecimal digits) | Follow-up F38, 16.5 "Update now": the dialog's second click. The server makes a look of its own without the network and starts `skydeck update --from-window <to>` only when that look names `to`, not blocked; `to` is compared, never passed to git by the server. Refused while the server stops, an update runs, a check runs or a restore runs (16.5's words); the result's `update` is the state, also with a refusal. |
@@ -1635,7 +1650,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, from follow-up F42 the order they last had under Open, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -1936,7 +1951,10 @@ In memory only:
 
 Nothing of a terminal is stored but a slot moved by hand (follow-up F37, 7.6: `window_slots`,
 10.2): a server restart rediscovers terminals from `<runtimeDir>/terms/` and their keepers'
-`hello`.
+`hello`. Follow-up F42: once a move made Open's order the server's, every refresh that worked
+takes the order drawn then as the kept one (`window_open_order`, 12.1), and the restore memory takes
+it too (design 7.8); neither runs once the stop began, and neither makes a refresh count as
+failed.
 
 The **tick**, every second: read the live-session files (`readLiveFiles`, cheap) for state changes
 and turn ends (10.3); check the keep-alive. Every second tick: the refresh every command runs
@@ -2095,8 +2113,9 @@ install.md "Going back").
 | `window_restore_dismissed` | The boot id whose restore the user dismissed with "Not now" (12.7): written only when it is the earlier boot the banner offers; while it names that boot the banner is not shown. |
 | `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; at an orderly stop the server writes it once more as its pages are, and when it dies it stays as the last refresh left it, so that the next server knows that a window may come back (ruled by the plan owner, plan task 74). |
 | `window_favourites` | The new form's favourite flags (12.6, follow-up F15): a JSON array of their texts, in the order they were added, at most 12; absent while there is none (the last one removed takes the entry away). One write is one transaction that reads the list first. A value that is not such an array is read as no favourite, and of an array only the entries 12.6's rule takes are read; the next save writes the list afresh. An older skydeck reads only the keys it knows and leaves this one alone. |
-| `window_slots` | Follow-up F37 (7.6): the slots moved by hand, a JSON object from terminal id (12 lower-case hex characters) to slot 1–9, holding every live terminal whose slot is not the one of its keeper's meta; absent while there is none. Written whole at a move (before it is applied), at the close of a moved terminal and at a `hello` that changed an entry; pruned to the terminals listed or being found. A write that failed outside a move is tried again after the next refresh (7.6). Read tolerantly: an entry with another key or value is left out. An older skydeck leaves it alone and goes by the meta slots. |
-| `window_restore_order` | Follow-up F37 (design 7.8): the slots the sessions last had in the window, a JSON array of at most two parts, the newest boot first, each `{ "bootId", "sessions": { <session id>: <slot> } }`; within a boot each slot names the latest session that held it and each session one slot. The server takes the terminals' slots into its own boot's part after each refresh that worked and after a move, writing only when that changes it; nothing is removed when a terminal goes, so a reboot that ends the keepers first cannot empty it. Read tolerantly; the command's restore reads it too. |
+| `window_slots` | Follow-up F37 (7.6): the slots moved by hand, a JSON object from terminal id (12 lower-case hex characters) to slot 1–9 or, from follow-up F42, null (a slot a move took away; only a move writes one), holding every live terminal whose slot is not the one of its keeper's meta; absent while there is none. Written whole at a move (before it is applied, in one transaction with `window_open_order`), at the close of a moved terminal and at a `hello` that changed an entry; pruned to the terminals listed or being found. A write that failed outside a move is tried again after the next refresh (7.6). Read tolerantly: an entry with another key or value is left out. An older skydeck leaves it alone and goes by the meta slots. |
+| `window_restore_order` | Follow-up F37, F42 (design 7.8): the order the sessions last had under Open in the window, a JSON array of at most two parts, the newest boot first, each `{ "bootId", "order": [<session id>, …] }`: Open's drawn order (done ones shown) in that boot, with each session that left Open while still a restore's candidate put back after the nearest earlier session still there; at most 500 ids a part. The server takes Open into its own boot's part after each refresh that worked and after a move, writing only when that changes it; nothing changes while Open is empty, so a reboot that ends the keepers first cannot empty it. Read tolerantly: a part F37 wrote, `{ "bootId", "sessions": { <session id>: <slot> } }`, is read as its sessions in the order of their slots. The command's restore reads it too. A limit: an F37 skydeck reads an F42 part as none, restores in list order and drops the part at its next write. |
+| `window_open_order` | Follow-up F42 (12.1): Open's kept order, a JSON array of session ids (at most 500 read, each once); absent until the first move by hand, and while it is absent Open is computed and nothing is written. Written whole at a move (with `window_slots`, one transaction) and, from then on, at every refresh that worked where Open's drawn order changed (the freeze): the drawn order with done ones shown, plus the place held for a process's next session after `/clear`, an in-session `/resume` or a fork in that process (12.9; at most one per running process). A refresh that sees Open empty and holds no place removes it: the kept order ends. A failed write is logged once by kind and tried again at the next refresh. Read tolerantly. An older skydeck leaves it alone. |
 | `window_update_check` | Follow-up F38 (16.5): what the window's server's last look for a newer skydeck said, as JSON: `{ v: 1, root, lookedAtNs, checkedAtNs, fetchedAtNs, failure, head, outcome }` — `root` the checkout it looked at (its real path: one database serves every checkout of the user), `checkedAtNs` when the last check ended, whatever it found (null: none yet), `fetchedAtNs` when the last fetch that worked ended (null: never), `failure` `{ atNs, line }` while the last check failed, `head` HEAD's full id at the look, and `outcome` one of `{ kind: 'cannot', line }`, `{ kind: 'current', line }` and `{ kind: 'available', upstream, count, to, lines, blocked }`. Written by the server only, after each check and look; read by it and by `doctor`. Every line in it clipped to 300 characters. A value that is not exactly such a record is read as none, and so is one of another root, which the next look writes over. |
 | `window_update_run` | Follow-up F38 (16.5, "Update now"): the one update started from a window, as JSON: `{ v: 1, root, state, to, atNs }`, and `line` for `failed` — `state` `applying` (written by the server that starts the updater), then `applied` or `failed` (written by `skydeck update --from-window` once the merge's outcome is known, before the window is brought back; nothing after it), `root` the checkout (its real path), `to` the commit the window listed, `atNs` when it was written, `line` the command's line without the bring-back's tail, clipped to 600 characters. Read and removed by the next server of that checkout (its result), or by the server whose updater ended while it ran; an entry of another root is left as it is. A value that is not exactly such a record is read as none. |
 
@@ -2277,7 +2296,8 @@ gives them back when its program never started (7.8).
   plan task 32).
 - **Restore.** The banner (12.7) → the shared restore planning (11.1: design 7.8's set and preselection, on rows
   refreshed just before, in the set's order: from follow-up F37 that of the slots the sessions
-  last had in the window in their boot, then list order, design 7.8) → `runRestore` with the
+  last had in the window in their boot, from follow-up F42 the order they last had under Open
+  there, then list order, design 7.8) → `runRestore` with the
   window terminal, the entries in that order, so that their new slots, each the lowest free one,
   ascend in it: batches of `restoreBatch`, the
   memory check, the wait for start events with lock renewal, exactly as from the command line,
@@ -2364,13 +2384,13 @@ gives them back when its program never started (7.8).
   longer in the set is reported `failed <short>: no longer offered for restore`), and runs
   `runRestore` with the
   window terminal (11.3), the selected entries in the set's order (follow-up F37: the order of
-  their remembered slots, then list order). Each terminal starts at the area
-  the page that had focus last reported (8.2.6), read when that terminal is opened; the
-  configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`, `claudeCommand`)
-  is the one the server read at its start. The command prints each report line on stdout as it
-  arrives (sanitised), heartbeats too, and exits with design 7.8's code for the outcome; with 5
-  (the run was stopped) it adds `skydeck: restore stopped before it finished; see above` on stderr
-  (plan C14). **A restore asked for so stops when its command
+  their remembered slots; F42: their remembered order under Open; then list order). Each terminal
+  starts at the area the page that had focus last reported (8.2.6), read when that terminal is
+  opened; the configuration (`restoreBatch`, `restoreMinFreeMb`, `restoreStartTimeoutSeconds`,
+  `claudeCommand`) is the one the server read at its start. The command prints each report line on
+  stdout as it arrives (sanitised), heartbeats too, and exits with design 7.8's code for the
+  outcome; with 5 (the run was stopped) it adds `skydeck: restore stopped before it finished; see
+  above` on stderr (plan C14). **A restore asked for so stops when its command
   goes**: when the command's connection closes before the outcome (Ctrl+C, as in step 1), the run
   stops at its next step — `stopped: the command that asked for it stopped`, the sessions already
   opened go on starting, the rest are `not started`, then the finished line (to the pages); the
@@ -2401,7 +2421,15 @@ bar at the bottom. The list has three sections:
   time, then sessions running in another terminal by the time they started. The order does not
   change while the window is open except when a row joins or leaves, or the user moves one
   (follow-up F37, 12.9: the slots follow the move, 7.6); attention is a mark on the row (12.4),
-  never a move.
+  never a move. Follow-up F42: that order is computed until the first move by hand; from then on
+  it is the server's, kept per session (`window_open_order`, 10.2): every refresh takes the order
+  drawn then as the kept one, so a row keeps the place it was first drawn at and a session that
+  ends or starts moves no other row. A new row is placed by the rule above until then: a terminal
+  of the window with a slot before the first window terminal with a higher slot or none, one
+  without a slot after the window's terminals, a session of another terminal last. The kept order
+  ends when a refresh sees Open empty and holds no place (every reboot, or closing every session):
+  Open is then computed again until the next move. Every window and a reloaded page show the kept
+  order, and it survives a server restart while the sessions run.
 - **Recent**: not running, last activity within 7 days (a rolling 7 days, not the calendar week),
   most recent first. Its title is `Recent`; its key in the code and the protocol is `week`. Its
   header's tooltip says `last active in the last 7 days` (follow-up F5); the other
@@ -2632,46 +2660,48 @@ active within 7 days), and a group with rows in two sections is two blocks. Ever
 is in its block, one that a terminal of the window holds (running, starting or ended: it may hold a
 slot) and one that needs you (12.4) too. A block sits where its first row sits in the section's
 order (12.1), its other rows right after it in that order; the protocol calls that first row its
-head (8.2.3), but in the card no row is special. So the slot numbers of Open can read `1 3 2` when
-a block gathers a later slot under its first row; the first move by hand (12.9, follow-up F37)
-gives Open's slots out again in drawn order, and a move keeps a block together. A row whose group no other row of its section has,
-and a row without a group, are drawn as before; during a typed search (a word in the filter,
-12.8) no block is formed. Under chips alone (follow-up F35) the blocks are formed by this rule over
-the rows the chips leave: a block of fewer than two of them is no block, a closed block stays closed
-and its caption counts the rows left, and setting or clearing a chip opens and closes none by
-itself. A block closed under a chip while the chip hides the selected session, one of the block's
-group (a click on its caption looks only at the rows drawn), is drawn open again when the chip is
-cleared, since it then holds the selected session, as below, and the page forgets that it was
-closed (ruled). A
-block is open unless the page's view names its section and group in `closed` (8.2.3): the
-page remembers the blocks the user closed, per window, until a reload; a block the user closed stays
-closed until it is opened or the page reloads, also when its rows leave and a block of that section
-and group forms again later (ruled on 2026-11-16, review 2 of follow-up F3). A closed block is open
-while the selected session is ANY of its sessions (its first too since follow-up F9, which hides the
-first session of a closed block like the others), and the page then forgets that it was closed, so
-that it stays open when the selection leaves (ruled): whatever selects a hidden session — a click, a
-slot chord, Ctrl+Shift+J, Ctrl+Tab, a notification's click, a pick in the switcher, the server's own
-selection after a resume (12.9, 12.8), → or Enter on its caption — opens its block, so the selection
-is never on a row hidden in a block. A closed block is open too while any of its sessions — its
-first too — is drawn with a terminal of the window that has not reported a session (7.5: a start not
-yet reported, which may stay so, or a program that ended before it reported, until its terminal is
-closed), so that such a row and its slot are on screen and its slot chord reaches it; the page
-forgets that it was closed, as for a selection, and while such a session holds the block open ← on a
-session of it and a click on its caption do nothing and the key bar says why (ruled on 2026-11-16;
-two lines from follow-up F6): `this block holds a session that is still starting; it stays open`
-while that session's terminal may still come to hold a session (it changes by itself), and `this
-block holds a terminal that ended at its start; close it first` when it can no longer start one (it
-ended, was lost or never started), since waiting never frees the block and the ended bar's Close
-does; when both kinds hold one block, the first. The page's rule is a copy of the server's
-(`build.ts` and `web/list.js` each say so): a terminal's `sessionId` null in `list.terminals` for
-the terminal a session's row is drawn with; and which of the two lines is told by the terminal's
-state, the page's set of the states that may still start, a copy of the server's `MAY_START`
-(`sections.ts` and `web/pane.js` each say so, and a unit test holds them equal). A closed block
-never hides that a session needs you: its caption says how many of its sessions need you (below),
-Ctrl+Shift+J reaches them (`needYou.order` holds them, 8.2.3), and the title bar's counts (12.1) are
-the same whether a block is open or closed. A section's count and time span are all its rows', a
-closed block's included. A view without `closed` closes no block: the page and the server are one
-build (8.2.2), and an open block hides no row.
+head (8.2.3), but in the card no row is special. So the slot numbers of Open can read `1 3 2` when a
+block gathers a later slot under its first row; the first move by hand (12.9, follow-up F37) gives
+Open's slots out again in drawn order, and a move keeps a block together. Follow-up F42: a new row
+of a group is drawn with its block, also a block that was moved, and a block can draw a terminal
+without a slot above slotted ones; the next move hands the slots out again from the top. A row whose
+group no other row of its section has, and a row without a group, are drawn as before; during a
+typed search (a word in the filter, 12.8) no block is formed. Under chips alone (follow-up F35) the
+blocks are formed by this rule over the rows the chips leave: a block of fewer than two of them is
+no block, a closed block stays closed and its caption counts the rows left, and setting or clearing
+a chip opens and closes none by itself. A block closed under a chip while the chip hides the
+selected session, one of the block's group (a click on its caption looks only at the rows drawn), is
+drawn open again when the chip is cleared, since it then holds the selected session, as below, and
+the page forgets that it was closed (ruled). A block is open unless the page's view names its
+section and group in `closed` (8.2.3): the page remembers the blocks the user closed, per window,
+until a reload; a block the user closed stays closed until it is opened or the page reloads, also
+when its rows leave and a block of that section and group forms again later (ruled on 2026-11-16,
+review 2 of follow-up F3). A closed block is open while the selected session is ANY of its sessions
+(its first too since follow-up F9, which hides the first session of a closed block like the others),
+and the page then forgets that it was closed, so that it stays open when the selection leaves
+(ruled): whatever selects a hidden session — a click, a slot chord, Ctrl+Shift+J, Ctrl+Tab, a
+notification's click, a pick in the switcher, the server's own selection after a resume (12.9,
+12.8), → or Enter on its caption — opens its block, so the selection is never on a row hidden in a
+block. A closed block is open too while any of its sessions — its first too — is drawn with a
+terminal of the window that has not reported a session (7.5: a start not yet reported, which may
+stay so, or a program that ended before it reported, until its terminal is closed), so that such a
+row and its slot are on screen and its slot chord reaches it; the page forgets that it was closed,
+as for a selection, and while such a session holds the block open ← on a session of it and a click
+on its caption do nothing and the key bar says why (ruled on 2026-11-16; two lines from follow-up
+F6): `this block holds a session that is still starting; it stays open` while that session's
+terminal may still come to hold a session (it changes by itself), and `this block holds a terminal
+that ended at its start; close it first` when it can no longer start one (it ended, was lost or
+never started), since waiting never frees the block and the ended bar's Close does; when both kinds
+hold one block, the first. The page's rule is a copy of the server's (`build.ts` and `web/list.js`
+each say so): a terminal's `sessionId` null in `list.terminals` for the terminal a session's row is
+drawn with; and which of the two lines is told by the terminal's state, the page's set of the states
+that may still start, a copy of the server's `MAY_START` (`sections.ts` and `web/pane.js` each say
+so, and a unit test holds them equal). A closed block never hides that a session needs you: its
+caption says how many of its sessions need you (below), Ctrl+Shift+J reaches them (`needYou.order`
+holds them, 8.2.3), and the title bar's counts (12.1) are the same whether a block is open or
+closed. A section's count and time span are all its rows', a closed block's included. A view without
+`closed` closes no block: the page and the server are one build (8.2.2), and an open block hides no
+row.
 
 How a block looks (stage E, plan E7 as ruled on 2026-11-16; as a card since follow-up F9,
 2026-11-17). Each block is a card: a box of its own with a 1 px border (`--card-edge`, chosen so
@@ -3377,7 +3407,8 @@ restart. The time is the page's (plan C18): `today at 18:02`, `yesterday at 18:0
 
 The banner is the view model's (4.3: the page decides no rule). It offers design 7.8's default set
 of the latest earlier boot, in its order (from follow-up F37 that of the slots the sessions last
-had in the window in that boot, then list order: design 7.8), each session once, every text sanitised as the list's
+had in the window in that boot, from follow-up F42 the order they last had under Open there, then
+list order: design 7.8), each session once, every text sanitised as the list's
 are; the last activity is that boot's last event (11.1). An earlier boot whose id is not of the
 form of `/proc/sys/kernel/random/boot_id` (a lower-case UUID) gets no offer: "Not now" could not
 name it. "Not now" names the boot the banner offers and is stored only when that is still the one
@@ -3446,9 +3477,9 @@ Enter does.
   (follow-up F35, ruled).
 - Chips: Running, Open PR, Has note, Done; at the end of their row, apart from them, the switch
   Show done (follow-up F35).
-- Ctrl+Shift+P opens the quick switcher over all sessions, ranked: needs you, open (by slot), not
-  running (most recent first), done. Enter switches to a running one and resumes one that is not
-  running (11.3).
+- Ctrl+Shift+P opens the quick switcher over all sessions, ranked: needs you, open (in Open's
+  order, 12.1), not running (most recent first), done. Enter switches to a running one and resumes
+  one that is not running (11.3).
 
 The rules are the server's (4.3: `src/window/view/search/`, stage E, plans E2–E5 and E9); the page
 sends what it wants to see in its `view` and draws the `list` it gets (8.2.3), deciding no rule.
@@ -3505,14 +3536,14 @@ One rule matches for the filter and for the switcher:
   list lists with done ones shown — also those the page's filter, chips, folded Earlier or closed
   blocks leave out, but an empty copy (12.1, follow-up F33) while the list does not show it —
   whose fields match every word of its text (all of them for none), ranked:
-  needs you (in 12.4's order), open (Open's order: slots, then by opening time, then those
-  elsewhere), not running (most recent first), done (not running and done, most recent first). At
-  most 50, with how many more match. Each item carries where the words are in its title (every
-  occurrence, overlapping ones merged, at most 32) and what this page's list would have to change
-  to show it: the filter cleared, done sessions shown, Earlier unfolded (under chips alone a done
-  session they match needs done sessions shown unless Done is set, and one in a folded Earlier
-  Earlier unfolded; follow-up F35). A text whose first
-  character is `>` is a command and lists no session (12.7).
+  needs you (in 12.4's order), open (Open's order, 12.1: slots, then by opening time, then those
+  elsewhere; from follow-up F42 the kept order once a move made it the server's), not running
+  (most recent first), done (not running and done, most recent first). At most 50, with how many
+  more match. Each item carries where the words are in its title (every occurrence, overlapping ones
+  merged, at most 32) and what this page's list would have to change to show it: the filter cleared,
+  done sessions shown, Earlier unfolded (under chips alone a done session they match needs done
+  sessions shown unless Done is set, and one in a folded Earlier Earlier unfolded; follow-up F35). A
+  text whose first character is `>` is a command and lists no session (12.7).
 - **The switcher on the page** (stage E, plan E10, E11). Ctrl+Shift+P, or the title bar's
   `Switch…`, shows a panel over the page with an empty field, the items under the headings
   `Needs you`, `Open`, `Not running` and `Done`, and a footer that names its keys
@@ -3618,34 +3649,56 @@ a Czech layout and would take Claude Code's Ctrl+Shift+-. If the user turns on t
 protocol in a later xterm.js and binds a `ctrl+shift+<x>` in Claude Code, the window shadows that
 binding; the help says so.
 
-**Moving a session of Open** (follow-up F37, 2026-11-21). In the list zone, with a session of Open
-selected, Shift+↑ or Shift+K moves it one place up and Shift+↓ or Shift+J one place down: Shift
-alone with the key that types k/K or j/J (so Shift+k under Caps Lock too); Caps Lock alone (`K`
-without Shift) moves nothing, and `j` `k` ↑ ↓ still move the selection. The page sends `reorder`
-(8.2.3); the server computes the move over Open as it draws it without filter, every block open
-(4.3: the page decides no rule), and gives Open's slots out again so that the numbers read in
-ascending order top to bottom (7.6): Ctrl+Shift+N then goes to the row that shows N. The first move
-after a block made the numbers read out of order (`1 3 2`, 12.2) renumbers all of Open once, rows
-that did not move too. Blocks stay together: inside a block a move trades places with the
-neighbouring row of the block; at the block's edge — also its last slotted row with slotless rows
-below it — the whole block passes the next row or block; a single row moving towards a block passes
-the whole block, open or closed. Nothing moves, the key bar saying why (the lines of 8.2.3's
-`reorder`), for a row without a slot (a tenth terminal, a session in another terminal or in Claude
-Code's background), a row of Recent or Earlier, the first row upward, the last slotted row
-downward, and while a filter, a chip or a typed search is set (`clear the filter first: …`; Show
-done is no filter); with no session selected, `no session selected`. A session of Open that two
-terminals of the window show (a `/resume` inside a terminal) has its row with the terminal of the
-lower slot, so a move of it, or of a row that would pass it, can make that row go to its other
-terminal: the server builds Open again with the new slots before it applies a move, and when that
-does not read as moved with its numbers ascending it refuses the move with
-`a session here is shown by two terminals; close one of them first`. The selection and the keyboard
-stay on the moved session, and the page scrolls its row into view once the new order is drawn. One
-move of a page waits for its answer at a time: a held key moves the session at the round trip's
-pace, and a press meanwhile does nothing. Every window shows the new order (the registry's change
-pushes every page's list), and it survives a page reload and a server restart while the terminals
-run (`window_slots`, 7.6, 10.2); a restore after a reboot opens the sessions in the order of the
-slots they last had (design 7.8). Drag and drop is left out (20); `assignSlots` takes any new order,
-so it would only need to name one.
+**Moving a session of Open** (follow-up F37, 2026-11-21; follow-up F42, 2026-11-23: any row). In
+the list zone, with a session of Open selected, Shift+↑ or Shift+K moves it one place up and
+Shift+↓ or Shift+J one place down: Shift alone with the key that types k/K or j/J (so Shift+k under
+Caps Lock too); Caps Lock alone (`K` without Shift) moves nothing, and `j` `k` ↑ ↓ still move the
+selection. Every row of Open moves (F42): a numbered terminal of the window, a tenth or later one
+without a number, a session running in another terminal and one in Claude Code's background. The
+page sends `reorder` (8.2.3); the server computes the move over Open as that page draws it without
+filter, every block open (4.3: the page decides no rule), and keeps Open's new order (12.1). A move
+is one visible step on the page that made it: a row that page does not draw (an empty copy the list
+hides without Show done) stays with its group, else after the row it followed; a page with Show
+done moves it like any row.
+
+The numbers follow the order (7.6): after a move the slots Open's terminals of the window hold are
+handed out again from the top among the window's terminals, ascending, so the tenth moved above the
+ninth takes 9 and the ninth loses its own; a session that does not run in the window never has a
+number, wherever it sits. Ctrl+Shift+N then goes to the row that shows N. A move hands every number
+out again from the top: when a block draws a terminal without a number above numbered ones (12.2),
+any move — also of another row — gives that terminal a number and takes one from the last numbered
+terminal; the first move after a block made the numbers read out of order (`1 3 2`) renumbers all
+of Open once, rows that did not move too. Nothing is renumbered when a session ends (a gap stays a
+gap), and a new or resumed terminal still takes the lowest free number.
+
+Blocks stay together: inside a block a row trades places with the neighbouring row of the block,
+whatever either's kind; at the block's edge the whole block passes the next row or block; a single
+row moving towards a block passes the whole block, open or closed. Nothing moves, the key bar
+saying why (the lines of 8.2.3's `reorder`), for a row of Recent or Earlier, the first row upward,
+the last row downward (`already at the bottom of Open`), and while a filter, a chip or a typed
+search is set (`clear the filter first: …`; Show done is no filter); with no session selected,
+`no session selected`. A session of Open that two terminals of the window show (a `/resume` inside
+a terminal) has its row with the terminal of the lower slot, so a move of it, or of a row that
+would pass it, can make that row go to its other terminal: the server builds Open again with the
+new order and slots before it applies a move, and when that does not read as moved with its
+numbers ascending, or a row would go to another terminal, it refuses the move with
+`a session here is shown by two terminals; close one of them first`.
+
+After `/clear` or a `/resume` inside a session, the new session takes the old one's place under
+Open, in the window or in another terminal; one that already has a place keeps its own (F42). The
+place is defined by the process: while the process that held the old session runs on and no kept
+row of Open runs in it, the place is held (in the kept order, so across a server restart too), and
+the row of that process's next session that has no place yet takes it — also a fork made in that
+process, never a copy made in another. At most one place is held per process.
+
+The selection and the keyboard stay on the moved session, and the page scrolls its row into view
+with the first list after the answer. One move of a page waits for its answer at a time: a held key
+moves the session at the round trip's pace, and a press meanwhile does nothing. Every window shows
+the new order (the registry's change pushes every page's list), and it survives a page reload and a
+server restart while the sessions run (`window_open_order`, `window_slots`, 7.6, 10.2); a restore
+after a reboot opens the sessions in the order they last had under Open (design 7.8). Drag and drop
+is left out (20); a new order of Open becomes the kept order and the numbers in one call, so it
+would only need to name the new sequence.
 
 Two focus zones; the terminal is the default. Clicking a running row focuses its terminal;
 clicking a row that is not running focuses the list (so Enter resumes). Ctrl+Shift+L toggles; Esc
@@ -3930,7 +3983,8 @@ lead's decisions under the user's go-ahead to proceed.
 7. Seen = selected for 1.5 seconds with the window focused, or typed into.
 8. A session whose window terminal crashed needs you until seen.
 9. Slots 1–9 in opening order; since follow-up F37 reordered by hand (12.9), the numbers following
-   the order.
+   the order; since follow-up F42 any row of Open moves, and the numbers are handed out from the
+   top among the window's terminals.
 
 ### 12.12 The icon
 
@@ -5225,7 +5279,15 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
   `test/window/terminals-slots.test.ts`, the restore order in `test/sessions/restore-order.test.ts`):
   the numbers follow the move on every page, a reload and a stop or a crash of the server keep
   the order, a closed terminal's moved slot does not come back, a resume sent with a move never
-  shares a slot.
+  shares a slot;
+- follow-up F42, moving any row of Open (`test/window/server-reorder.test.ts`; Open's order in
+  `test/window/view/open-sequence.test.ts`, the move in `test/window/view/slot-moves.test.ts`, the
+  kept order in `test/window/open-order.test.ts`, slots gained and lost with real keepers in
+  `test/window/terminals-slots.test.ts`, the restore memory in
+  `test/window/restore-memory.test.ts`): the tenth terminal moved above the ninth takes 9 on every
+  page and after a stop or a crash, a kept order is drawn from the first list, a session closing or
+  opening moves no other row, the new session after `/clear` keeps the old one's place, closing
+  every terminal ends the kept order, a locked store delays the freeze without failing the refresh.
 
 ### 17.4 The page
 
@@ -5271,8 +5333,9 @@ In the browser suite, besides those:
   answers the next loads, and an update check that gets the 404 fails and leaves it registered;
 - follow-up F37 (`test-page/reorder.test.ts`): Shift+↑, Shift+K, Shift+↓ and Shift+J send `reorder`
   for the selected session, a refusal's line shows in the key bar, one act waits at a time, the
-  moved row is scrolled into view, and against a real server the slot chords reach the rows that
-  show their numbers after a move;
+  moved row is scrolled into view (follow-up F42: with the first list after the answer), the last
+  row's refusal shows its line, and against a real server the slot chords reach the rows that show
+  their numbers after a move;
 - follow-up F41 (`test-page/tour.test.ts`): the tour starts by itself after the first list, with
   sessions and on an empty list, and never where it was seen, where the storage throws or refuses a
   write, or without a key; each step's ring lies on its region and its panel beside it with the
@@ -5418,7 +5481,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W38 | A ticket's status on the throwaway session (follow-up F19), asking no real tracker: a stand-in program the owner writes in a throwaway folder (`~/skydeck-try/status`, its three lines given) answers for a `ticketStatus` rule whose `match` is `https://example.com/try/`; the ticket `https://example.com/try/TRY-1` on the throwaway session shows `TRY-1 · In Progress ↗` in blue in the header and `In Progress` in the row's small chip; the answer changed to each category and ↻ pressed in the ticket dialog: `blocked` red, `review` amber, `doing` blue, `done` green, `todo` and `closed` grey; a failure (the program made not executable) keeps the old status and its tooltip says `status not read: …`; `skydeck show` prints `ticket:` with ` · <status>`. Every step checks the header's short id or the dialog's heading first; at the end the ticket is removed, `config.json` is as it was (restored from a copy), and the stand-in is deleted. | F19 | 12.5, 12.2, 12.3, 10.2 |
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
 | W41 | The settings screen's Advanced on the owner's own `config.json`, copied aside first: the title bar's gear opens it, `Advanced (14 more settings)` opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36, F39 | 12.13 |
-| W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last slotted row and under a filter; `skydeck window --restart` keeps the order. The restore order only where W16's drill runs anyway. | F37 | 7.6, 12.9 |
+| W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last row and under a filter; follow-up F42: a fourth session of another terminal moved above a numbered one, the numbers unchanged, `/clear` in it keeps its place; `skydeck window --restart` keeps the order. The restore order only where W16's drill runs anyway. | F37, F42 | 7.6, 12.1, 12.9 |
 | W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Update now` and `Close`; `doctor`'s `update:` line; the group's switch `Check for updates every day` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
 | W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links, The window and (F38) Updates with seven plain labels and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
 | W45 | The tour of the window in the owner's Edge (follow-up F41): it starts by itself at the first opening after the update, over the real list; each step's region stands out and its words read well; Enter, → and ← walk it, a click on the page does nothing, Ctrl+Shift+L says `close the tour first (Esc)`; `Done` gives the keyboard back and a reload shows it no more; the key help's `Take the tour` and the switcher's `> tour` start it again and Esc ends it; an InPrivate window with `--print-url`'s address shows it by itself once, in a tab's words. | F41 | 12.9, 12.14 |
@@ -5519,7 +5582,9 @@ page's own icon (12.12). Checks W30, W31, and W3's icon on the taskbar button.
 - **Turn hooks** (`Stop`, `UserPromptSubmit`, `Notification`): 10.3.
 - **Turn ends while no server runs** (10.3).
 - **A "by ticket" view, more than nine slots.** Since follow-up F37 the user reorders Open by key
-  (12.9); dragging a row with the mouse, sort modes and reordering Recent or Earlier are left out.
+  (12.9), since follow-up F42 every row of it; dragging a row with the mouse, sort modes,
+  reordering Recent or Earlier, and giving a freed number to a terminal that has none are left
+  out.
 - **Stopping a session from the window** (principle 6).
 - **Bells and program notifications** (OSC 9, OSC 777).
 - **Rotating the secret by itself** (`--new-secret` does it on request).

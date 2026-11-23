@@ -831,9 +831,10 @@ boots other than the current one that have a `start` or `observed` event, the on
 event is the latest. A `scripted` event (5.3) counts for neither: a scripted run is not what the
 user had open, so it does not make a boot the latest earlier one or move the last event of its
 boot (which the preselection below measures against). `--all` adds every other session marked `ended-unexpectedly`, from any boot
-including the current one. The set is in the order of the slots its sessions last had in the
-window in their boot (follow-up F37: the window remembers them, design-step-2.md 10.2), then, for
-the sessions with no remembered slot, in list order (as `ls --all` shows it); that order also
+including the current one. The set is in the order its sessions last had under Open in the
+window in their boot (follow-up F37: the order of their slots; follow-up F42: the order of Open,
+numbered or not, in the window or not; the window remembers it, design-step-2.md 10.2), then, for
+the sessions with no remembered place, in list order (as `ls --all` shows it); that order also
 decides which sessions are in the first batches — so which start before a memory stop — and which
 one is handed off `--here`. When the current
 boot id cannot be read, restore refuses (exit 1): every process would look dead, so the sessions
