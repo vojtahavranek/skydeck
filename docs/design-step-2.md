@@ -4013,12 +4013,12 @@ pixels):
   every image of the ICO again from the picture in plain Node (the bolder lines, the reduction) and
   compares, premultiplied, within 3 steps of 255 (the worst on this build is 2; an image resized
   from another size at a ratio that is not whole, as 30 from 32 or 48 from 64, eleven pairs tried,
-  is 59 to 157 steps off, and a 16 or 20 pixel one not made bolder 79 to 127; at a whole ratio, 24
-  from 48 halved, an area average of the area average is the area average, the same drawing, so
-  that each image is drawn from the picture is held by the script, each of whose jobs reduces the
-  picture, not by this bound); and
-  checks the ICO's thirteen entries, the transparency outside the drawing, the line's coverage at 16
-  and 20, and the maskable files' safe zone and background.
+  is 59 to 157 steps off, and a 16 or 20 pixel one not made bolder 79 to 127; at a whole ratio, as
+  24 from 48, 30 from 60 or 32 from 64, an area average of the area average is the area average,
+  the same drawing, so that each image is drawn from the picture is held by the script, each of
+  whose jobs reduces the picture, not by this bound); and checks the ICO's thirteen entries, the
+  transparency outside the drawing, the line's coverage at 16 and 20, and the maskable files' safe
+  zone and background.
 - **Which image a panel takes is not verified.** No test can look at a Windows taskbar, and nobody
   has looked at these files on a Windows taskbar or title bar: they were judged from enlarged sheets
   of them on a dark and a light background. Which image of the ICO (or of the manifest) Edge hands

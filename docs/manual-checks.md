@@ -1833,8 +1833,9 @@ the short id).
    shows). The page's `favicon.ico` holds an image drawn for every size the taskbar and the title
    bar show at a scaling of 100 % to 250 % in steps of 25 % (16, 20, 24, 28, 30, 32, 36, 40, 42, 48,
    54, 60 and 64 pixels), the lines bolder at 16 and 20: at those scalings neither place should need
-   one resized. At another scaling the size is not in the file: there a neighbour is resized, and a
-   soft icon is expected; write it down as such. Expected, by place:
+   one resized. At another scaling (above 250 %, or one between those steps) the size is not in the
+   file: there a neighbour is resized, and a soft icon is expected; write it down as such. Expected,
+   by place:
    - the **taskbar button**, the one that matters most: **the icon is sharp in the taskbar at this
      display's scaling**: the cloud's line, the box and the `>_` have crisp edges, not the soft
      look of an icon stretched from a smaller one, and the drawing is about as large as the icons

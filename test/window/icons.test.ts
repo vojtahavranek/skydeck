@@ -1033,10 +1033,10 @@ describe('the PNG files', () => {
     // the canvas differ: compared premultiplied, alpha and each channel within 3 of 255 (the worst
     // seen is 2.0). An image resized from the one of another size at a ratio that is not whole
     // (30 from 32, 36 from 40, 48 from 64, 20 from 16 and seven more pairs tried) is 59 to 157
-    // steps off, and a 16 or 20 pixel one not made bolder 79 to 127. At a whole ratio (24 from 48
-    // halved) an area average of the area average is the area average: the same drawing, which
-    // this bound cannot tell apart; that every image is drawn from the picture is the script's
-    // (each of its jobs reduces the picture).
+    // steps off, and a 16 or 20 pixel one not made bolder 79 to 127. At a whole ratio (as 24 from
+    // 48, 30 from 60 or 32 from 64) an area average of the area average is the area average: the
+    // same drawing, which this bound cannot tell apart; that every image is drawn from the picture
+    // is the script's (each of its jobs reduces the picture).
     const drawn: Array<{ name: string; png: Png; size: number; maskable: boolean }> = [
       ...PNGS.map(({ file, size }) => ({
         name: file,
