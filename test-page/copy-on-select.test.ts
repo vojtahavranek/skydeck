@@ -204,6 +204,20 @@ async function drag(
   if (options.shift === true) await page.keyboard.up('Shift');
 }
 
+/**
+ * A quick Alt+click that moves from `from` to `to` (one move, no pause): xterm.js takes a release
+ * within 500 ms of its press, with at most one character selected, as moving the cursor, so the
+ * button is held a few tens of milliseconds, not the human pace of `drag`.
+ */
+async function altClick(page: Page, from: Point, to: Point): Promise<void> {
+  await page.mouse.move(from.x, from.y);
+  await page.keyboard.down('Alt');
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y);
+  await page.mouse.up();
+  await page.keyboard.up('Alt');
+}
+
 /** A click with `clickCount` (2: the second of a double click, 3: of a triple one) at `at`. */
 async function clickAt(page: Page, at: Point, clickCount = 1): Promise<void> {
   await page.mouse.move(at.x, at.y);
@@ -338,9 +352,7 @@ test('copy on select (issue #184)', async (t) => {
       await setClipboard(page, 'copied elsewhere');
       const keys = inputOf(l.d.record, S1).length;
       const [a, b] = await endsOf(page, 'h', 'alpha bravo charlie');
-      await page.keyboard.down('Alt');
-      await drag(page, { x: a.x - 1, y: a.y }, { x: b.x + 1, y: b.y });
-      await page.keyboard.up('Alt');
+      await altClick(page, { x: a.x - 1, y: a.y }, { x: b.x + 1, y: b.y });
       await until(
         () =>
           Buffer.from(inputOf(l.d.record, S1).slice(keys), 'hex')
@@ -425,9 +437,7 @@ test('copy on select (issue #184)', async (t) => {
       const keys = inputOf(l.d.record, S1).length;
       const shown = `line ${Number(/^line (\d+)$/m.exec(await screenText(page))?.[1]) + 2}`;
       const [a, b] = await endsOf(page, 'n', shown);
-      await page.keyboard.down('Alt');
-      await drag(page, { x: a.x - 1, y: a.y }, { x: b.x + 1, y: b.y });
-      await page.keyboard.up('Alt');
+      await altClick(page, { x: a.x - 1, y: a.y }, { x: b.x + 1, y: b.y });
       await stillHolds(page, 'copied elsewhere', 'an Alt+click while scrolled up');
       assert.equal(inputOf(l.d.record, S1).slice(keys), '', 'no arrow keys');
       await page.keyboard.press('Control+Shift+C');
