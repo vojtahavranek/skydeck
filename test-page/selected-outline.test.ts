@@ -4,7 +4,7 @@
 // have no fill; and nothing moves between the zones, the line's box and its text's place being the
 // same. Read from the styles the page computes, in the light and the dark scheme. One scripted
 // stand-in server (helpers/shell.ts) sends the list: Recent with a plain row, a block of two rows
-// drawn as a card, and a block drawn closed, as its caption alone.
+// drawn as a card, and a block of three, which the test closes: its caption alone.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -29,18 +29,24 @@ const NOW = 1_794_474_000_000_000_000n;
 const MIN = 60_000_000_000n;
 const ago = (ns: bigint): string => String(NOW - ns);
 
-/** The head of the closed block `web`, which has no row of its own in the list. */
-const WEB_HEAD = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
+/** The sessions of the block `web`. */
+const W1 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
+const W2 = '4f9d7a5c-2b6e-4d0f-9a7b-6c5d4e3f2a1b';
+const W3 = '5a0e8b6d-3c7f-4e1a-8b8c-7d6e5f4a3b2c';
 
-/** A row of Recent (S2 8.2.3), not running; `group` and `stack` make it a row of a card. */
-function row(id: string, minutes: bigint, group: string | null = null): Record<string, unknown> {
+/** A row of Recent (S2 8.2.3), not running; a `block` makes it a row of that block's card. */
+function row(
+  id: string,
+  minutes: bigint,
+  block: { group: string; head: string; size: number } | null = null,
+): Record<string, unknown> {
   return {
     id,
     shortId: id.slice(0, 8),
     title: `session ${id.slice(0, 8)}`,
     titleSource: 'generated',
-    group,
-    groupSource: group === null ? null : 'meta',
+    group: block?.group ?? null,
+    groupSource: block === null ? null : 'meta',
     state: 'not-running',
     stateDetail: null,
     sinceNs: ago(minutes * MIN),
@@ -58,13 +64,30 @@ function row(id: string, minutes: bigint, group: string | null = null): Record<s
     starting: false,
     attention: null,
     stack:
-      group === null ? null : { group, size: 2, role: id === S2 ? 'head' : 'member', head: S2 },
+      block === null
+        ? null
+        : {
+            group: block.group,
+            size: block.size,
+            role: id === block.head ? 'head' : 'member',
+            head: block.head,
+          },
   };
 }
 
-/** Recent: the plain row S1, the card `orb` (S2, S3), and the block `web` closed, after them. */
-function list(): Record<string, unknown> {
-  const rows = [row(S1, 1n), row(S2, 2n, 'orb'), row(S3, 3n, 'orb')];
+/**
+ * Recent: the plain row S1, the card `orb` (S2, S3), and the block `web` (W1 to W3), drawn as a
+ * card or, once `webClosed`, as its caption alone, after the others.
+ */
+function list(webClosed: boolean): Record<string, unknown> {
+  const orb = { group: 'orb', head: S2, size: 2 };
+  const web = { group: 'web', head: W1, size: 3 };
+  const rows = [
+    row(S1, 1n),
+    row(S2, 2n, orb),
+    row(S3, 3n, orb),
+    ...(webClosed ? [] : [row(W1, 4n, web), row(W2, 5n, web), row(W3, 6n, web)]),
+  ];
   return {
     t: 'list',
     nowNs: String(NOW),
@@ -77,7 +100,9 @@ function list(): Record<string, unknown> {
         lastNs: null,
         count: rows.length,
         rows,
-        closedStacks: [{ group: 'web', size: 3, needYou: 0, head: WEB_HEAD, at: rows.length }],
+        closedStacks: webClosed
+          ? [{ group: 'web', size: 3, needYou: 0, head: W1, at: rows.length }]
+          : [],
       },
     ],
     doneHidden: 0,
@@ -88,14 +113,25 @@ function list(): Record<string, unknown> {
   };
 }
 
-/** A page connected to a stand-in server that answers every `view` with `list()`. */
+/** Whether a view names Recent's block `web` closed (`view.closed`). */
+const namesWebClosed = (view: Record<string, unknown>): boolean =>
+  Array.isArray(view['closed']) &&
+  view['closed'].some(
+    (block: { section?: unknown; group?: unknown }) =>
+      block.section === 'week' && block.group === 'web',
+  );
+
+/**
+ * A page connected to a stand-in server that answers every `view` with the list, `web` closed
+ * when the view says so; the block is closed here by a click on its caption, as a user does.
+ */
 async function opened(t: TestContext, chromium: Browser): Promise<Page> {
   const secret = new Uint8Array(32).fill(61);
   const page = await newPage(t, chromium);
   const standin = await standinServer(t, {
     socket: honest(secret, {
       open: (conn, message) => {
-        if (message['t'] === 'view') conn.send(list());
+        if (message['t'] === 'view') conn.send(list(namesWebClosed(message)));
         if (message['t'] === 'attach') {
           conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
         }
@@ -106,7 +142,9 @@ async function opened(t: TestContext, chromium: Browser): Promise<Page> {
   await storeKey(page, secret);
   await page.goto(standin.url);
   await connection(page, 'open');
-  await page.locator(`#list [data-id="${S3}"]`).waitFor({ timeout: PAGE_WAIT_MS });
+  await page.locator(`#list [data-id="${W3}"]`).waitFor({ timeout: PAGE_WAIT_MS });
+  await page.locator('#list .list-block', { hasText: 'web' }).locator('.block-head').click();
+  await page.locator('#list .list-block[data-open="false"]').waitFor({ timeout: PAGE_WAIT_MS });
   return page;
 }
 

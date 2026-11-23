@@ -2755,6 +2755,13 @@ structure and the page suite the computed values. As for the mode, there is no k
   it the first session was the block's head, with `ORB-2107 ×4`, the
   others indented under it, and a closed block was its head and a line `+3 more`.)
 - Slot numbers 1–9 show at the left of Open's rows.
+- **The selected line** — a row, a row inside a block's card, a selected closed caption — has an
+  outline in `--selline` (the 1 px edge every line has, transparent until then) whichever zone has
+  the keyboard (12.9). While the list has it, the line also keeps its `--sel` fill, so that the line
+  itself says that the list's keys act now; while the terminal has it, the outline stands alone, no
+  fill. Nothing moves between the two: the line's box and its text are the same. In every colour
+  scheme and theme the outline is seen against the fill and against the ground around the line
+  (`test/web/selected-outline.test.ts`; what the page draws, `test-page/selected-outline.test.ts`).
 
 The rule of blocks is the server's (4.3; stage E, plan E6 as ruled on 2026-11-16 for follow-up F3,
 and follow-up F9). A block is what the code and the protocol call a stack (`stackRows`, the row's
