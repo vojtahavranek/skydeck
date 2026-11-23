@@ -1567,3 +1567,43 @@ describe("parsePageMessage: F37's reorder (S2 12.9)", () => {
     refused(page({ ...up, sessionId: `${S1}0` }));
   });
 });
+
+describe("parsePageMessage: F40's carry over (design 7.1, S2 12.6)", () => {
+  const carry: PageMessage = {
+    t: 'act',
+    id: 9,
+    kind: 'carry-over',
+    sessionId: S1,
+    rev: '0123456789abcdef',
+    fields: ['label', 'group', 'ticket', 'note', 'prs'],
+    done: true,
+  };
+  const dismiss: PageMessage = { t: 'act', id: 10, kind: 'dismiss-carry-over', sessionId: S1 };
+
+  test('act carry-over and dismiss-carry-over → ok and equal; no field ticked is a form the parser takes', () => {
+    assert.deepEqual(parsePageMessage(JSON.stringify(carry)), { ok: true, value: carry });
+    assert.deepEqual(parsePageMessage(JSON.stringify(dismiss)), { ok: true, value: dismiss });
+    const none = { ...carry, fields: [], done: false };
+    assert.deepEqual(parsePageMessage(JSON.stringify(none)), { ok: true, value: none });
+  });
+
+  test('a rev of 15 digits or in upper case, an unknown field name, a name twice, six names, done a string, a missing and an unknown member → refused', () => {
+    for (const rev of ['0123456789abcde', '0123456789ABCDEF', '0123456789abcdef0', '', 7]) {
+      refused(page({ ...carry, rev }));
+    }
+    refused(page({ ...carry, fields: ['label', 'title'] }));
+    refused(page({ ...carry, fields: ['label', 'label'] }));
+    refused(page({ ...carry, fields: ['label', 'group', 'ticket', 'note', 'prs', 'label'] }));
+    refused(page({ ...carry, fields: 'label' }));
+    refused(page({ ...carry, done: 'yes' }));
+    for (const message of [carry, dismiss]) {
+      for (const field of Object.keys(message)) {
+        const copy: Record<string, unknown> = { ...message };
+        delete copy[field];
+        refused(page(copy));
+      }
+      refused(page({ ...message, extra: 1 }));
+      refused(page({ ...message, sessionId: 'S1' }));
+    }
+  });
+});
