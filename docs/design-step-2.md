@@ -4020,126 +4020,106 @@ lead's decisions under the user's go-ahead to proceed.
 
 The page has an icon of its own, so that the window and its taskbar button need not show Edge's
 default: a picture, and PNG files of 16, 32, 48, 192 and 512 pixels (the 192 and 512 also as
-maskable icons) made from it and committed beside it in `web/icons/` (no build step: the PNGs are
-made once from the picture and committed). `index.html` names the favicon (`<link rel="icon">`) and
-the manifest (`<link rel="manifest">`), whose `name` and `short_name` are `skydeck`, `display`
-`standalone`, and `icons` the PNGs. Whether Edge's app window and its taskbar button show it is
-check W3. Low priority: stage E (19).
+maskable icons) and a `favicon.ico` made from it and committed beside it in `web/icons/` (no build
+step: the files are made once from the picture and committed). `index.html` names the favicon
+(`<link rel="icon">`) and the manifest (`<link rel="manifest">`), whose `name` and `short_name` are
+`skydeck`, `display` `standalone`, and `icons` the PNGs. Whether Edge's app window and its taskbar
+button show it, and whether it is sharp there, is check W3. Low priority: stage E (19).
 
-As built (stage E, plan E14; the picture changed by follow-up F10, 2026-11-17, to the owner's
-picture, drawn at the sizes the window uses, and a second picture for the
-small sizes; the small files redrawn by follow-up F12, 2026-11-18, and the 16 pixel one by
-follow-up F14 the same day):
+As built (stage E, plan E14; the picture changed by follow-ups F10, F12 and F14, 2026-11-17 and
+18; since 2026-11-23 one picture on a transparent background, drawn for every size the taskbar and
+the title bar show at a scaling of 100 % to 250 % in steps of 25 %, its lines bolder below 24
+pixels):
 
-- **The pictures** are the owner's, two of them, 1254 × 1254 pixels, RGBA, transparent outside
-  their dark navy rounded tile, in `scripts/icons/`, not under `web/`: they are not served and not
-  part of the build. Their image data is kept exactly as it was received; the one metadata chunk
-  each came with was removed (follow-up F27, 2026-11-19), so they hold IHDR, IDAT and IEND only,
-  like the drawn files. `skydeck-source.png` (1,670,010 bytes) has
-  a blue-to-violet cloud outline and three stacked terminal windows, the front one with three
-  coloured dots and a prompt (`>_`). `skydeck-source-small.png` (1,349,085 bytes) was made after the
-  first one turned out a blur at 16 pixels: the same tile and cloud outline with ONE terminal window
-  and a bold white `>_`, no stacked windows, no dots. `test/window/icons.test.ts` pins both sha256.
-  Until F10 the source was a drawing of shapes, `web/icons/skydeck.svg` (three cards on the page's
-  accent colour); it is gone.
-- **The files** are `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-192.png` and `icon-512.png`
-  on a transparent background, `icon-192-maskable.png` and `icon-512-maskable.png`, and
-  `favicon.ico` (the 16, 32 and 48 pixel PNGs in one ICO). They were drawn once by
-  `scripts/icons.ts` with the page suite's pinned Chromium, headless and in an environment of its
-  own, and committed; no test and no CI step runs the script. Nothing is fetched from outside, at
-  build time or at run time. **The 16, 32 and 48 pixel files, and so the ICO, are drawn from the
-  small picture; the 192 and 512 pixel files and both maskable files from the first one**: the
-  detailed picture blurs at 48 pixels and below (at 16 it is a ring with a light spot), and the
-  window's taskbar button and title bar show the small sizes.
+- **The picture** is one, `scripts/icons/skydeck-source.png`: 1076 × 903 pixels, RGBA, 749,296
+  bytes, a cloud drawn as a line with a terminal box in front of it and a white `>_` in the box, in
+  a blue-to-violet gradient, on a transparent background. It is not under `web/`: not served and
+  not part of the build. It holds IHDR, IDAT and IEND only, like the drawn files, and it is clean:
+  one solid piece (alpha 32 or more) with its soft edge (fainter pixels within 2 pixels of it) and
+  nothing else, since faint pixels scattered over the transparent parts (alpha 1 to 31) would lay a
+  haze on every file. `test/window/icons.test.ts` pins its sha256 and checks both. Every file is
+  drawn from it. Before: until F10 a drawing of shapes, `web/icons/skydeck.svg` (three cards on the
+  page's accent colour); from F10 to 2026-11-23 two pictures on a dark navy rounded tile, a
+  detailed one for the large files and a simpler one, cropped to its drawing, for the small ones.
+  All three are gone.
+- **The files.** `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-192.png` and `icon-512.png` are
+  the picture on a transparent square: no tile and no crop; the picture centred, its longer side
+  filling the square but for 2 % of the side on each side (the drawing is 0.96 of the icon's width
+  and 0.81 of its height). The corners, and every pixel the picture does not cover, are fully
+  transparent, so that the taskbar's or the title bar's own colour shows around the drawing.
+  **`favicon.ico` holds an image drawn for every size the taskbar and the title bar show at a
+  scaling of 100 % to 250 % in steps of 25 %**, and 64: thirteen images, 16, 20, 24, 28, 30, 32, 36,
+  40, 42, 48, 54, 60 and 64 pixels. Windows' taskbar shows 24 pixels times the scaling (24, 30, 36,
+  42, 48, 54 and 60), a title bar 16 times it (16, 20, 24, 28, 32, 36 and 40). An icon of a size the
+  file does not hold is a neighbour resized, which blurs it (the ICO before held 16, 32 and 48
+  only), as it still is at another scaling. Each image is drawn from the picture for its size, never
+  resized from another; the 16, 32 and 48 pixel ones are the PNG files' bytes. `index.html` names
+  the thirteen in its `sizes`. The files are drawn by `scripts/icons.ts` with the page suite's
+  pinned Chromium, headless and in an environment of its own, and committed; no test and no CI step
+  runs the script, and two runs give the same bytes. Nothing is fetched from outside, at build time
+  or at run time.
 - **How a size is reduced.** Chromium decodes the picture; for each pixel of an icon the script
   averages the picture's pixels under it, weighted by the area they cover, premultiplied and in
   linear light: a box filter at exactly the icon's pixel pitch, so that no pixel of the picture is
   skipped (nothing aliases), nothing rings, and the light of a thin line is kept. Halving on a
   canvas with Chromium's high-quality smoothing was tried first and rejected: it left a grey halo
-  around the tile on a light background and a duller 16 pixel icon. The large files are the whole
-  picture in their box, transparent where the picture is (its rounded corners; the tile itself is
-  at alpha 251 to 254 of 255, the pictures' own).
-- **The small files are not the whole small picture, and not its tile** (follow-up F12, on the
-  owner's report that the icon on the taskbar looked small and blurred and, a day later, still
-  smaller than the others). The taskbar is dark there, where the navy tile is nearly invisible, and
-  the drawing is only 83 % of the tile's width and 70 % of its height (1001 × 844 of the tile's
-  1200 pixels): drawn by its tile, as F10 first did, the icon looked small beside the others. Each
-  small file is a square crop of the picture on the tile's navy (`#01062b`), its corners rounded
-  by a mask of the tile's own relative radius, 273 / 1200 = 0.2275 of the crop's side (a circle
-  fitted to the tile's corner): the corners transparent, and along the straight sides alpha 252 to
-  255 (not always 255: a picture pixel on the crop's edge counts in the mask and again in the area
-  average). The mask is laid on the picture's pixels before the reduction, so its edge is
-  anti-aliased like the rest, and no pixel of the picture under a crop is less than opaque, so the
-  picture's own soft edge and transparent corners are never in a small file.
-  - **One rule for the three: the drawing, at 16, 32 and 48 pixels alike.** The drawing's box
-    (what is more than 40 of 255 from the navy, at least 60 pixels inside the tile) is x 115 to
-    1115 and y 202 to 1045, 1001 × 844 pixels. The crop is centred on it and its side is the width
-    plus 2 % each side, 1041.04 pixels, so the drawing fills the square: at 32 pixels it covers
-    96 % of the icon's width and 81 % of its height, and at every size it reaches the left and the
-    right edge (at 48 to within one pixel), the cloud's outline at its top and the terminal window
-    in front of it.
-  - **Why one rule, and what it costs** (follow-up F14). F12 drew the 16 pixel file from the
-    terminal window alone (its box x 306 to 941 and y 546 to 1045, plus 4 % each side, and what of
-    the cloud's strokes fell in that crop painted the navy), so that the `>_` had more room. The
-    owner asked for their picture there again, the cloud with the window: they want one picture
-    at every size. The cost: in the whole drawing the window is 0.61 of the icon's width (alone it
-    was 0.93), and the `>_` with it, so at 16 pixels the chevron and the bar are 10 white pixels,
-    where the window alone gave 22 (and the picture's whole tile, before F12, 7). A taskbar button
-    that Windows stretches from the 16 pixel file is therefore softer than with F12's file: the
-    cloud and the window still read as shapes, the `>_` as a light mark in the window.
-  - **The numbers are measured from the picture**, and `test/window/icons.test.ts` measures them
-    again from it (the tile's navy, the drawing's box, the tile's corner radius) and holds the
-    script's constants to what it finds; it measures the window's box too, to find the window in
-    the 16 pixel file, whose top frame is its row 7, with 28 pixels of the cloud's blue to violet
-    above it. The test re-derives every file from its picture in plain Node and compares (the
-    three small files within one step of 255 on this build, every file within two); tells the two
-    pictures apart by the white of the `>_` (the small picture's is bold: 3.8 to 3.9 % of a 16, 32
-    or 48 pixel icon is white; the large one's is thin: about 0.5 % of a 192 or 512 pixel one); and
-    pins the six files F14 left as they were byte for byte: the 32 and 48 pixel ones as F12 drew
-    them, and the four large ones (192 and 512 pixels, and the two maskable ones), as they were
-    before F12 too.
-  - **What it looks like.** At 16, 32 and 48 pixels the same picture: on the navy, the cloud's
-    outline in blue to violet with the terminal window in front of it and the `>_` in the window.
-    At 32 and 48 pixels the three read; at 16 the cloud and the window's frame read and the `>_`
-    is a light mark. **Which file the taskbar button takes is not verified. Most likely it is the
-    16 pixel one**, stretched to about 24 pixels: the button shows the cloud with the window, soft
-    (a stretched bitmap is never crisp), the `>_` hardly reading. The evidence is F12's review 2
-    reading a screenshot of the taskbar taken before F12 (2026-11-17), in which the button's 24
-    pixel icon matches the 16 pixel file of that day stretched to 24 far better than the 32 or 48
-    pixel one reduced; not tried in Edge. After F12 the owner reported that the icon they saw was a
-    different icon from their picture; the only small file F12 made different in kind was the 16
-    pixel one, which is consistent with the button showing the 16 pixel file (not a confirmation:
-    the report did not say where they looked). If Windows takes the 32 pixel file instead, the
-    button shows the same picture, sharper. The title bar shows the 16 pixel file at a display
-    scale of 100 %; at 125 or 150 % Edge may draw it from the 32 pixel one. **The taskbar's look
-    was not tried in Edge or on Windows**: it is judged from sheets drawn with the same Chromium (a
-    file resized as a browser does), and W3 asks the owner to write down what they see.
-- **The maskable icons** have a full background of the large picture's tile colour, `#040925` (the
-  average of its opaque pixels between 555 and 585 pixels from its middle), with the picture in the
-  middle at 0.927 of the icon's width: drawn in full within 555 of its 1254 pixels from its middle,
-  faded out to the background over the next 30 and not drawn beyond. The drawing reaches 540.8
-  pixels from the middle, so nothing of it is touched; the tile's own edge (a lighter hairline and a
-  shade, up to 36 steps from its colour, starting 594 pixels from the middle at the nearest, and a
-  tile lighter at its top than at its bottom) is not drawn: left in, it showed as a faint frame
-  inside the background, a tile inside a tile (the first build, a flat `#050925` and the whole
-  picture, had steps of 22 between neighbouring pixels). 0.927 is the largest scale, to three
-  decimals, at which everything of the drawing is inside the safe zone, the circle of 0.4 of the
-  icon's width. The drawing is what differs from the background by more than 40 (of 255) in some
-  channel, composited on it; the farthest of it from the picture's middle is 540.8 pixels, so the
-  scale can be at most 0.4 × 1254 / 540.8 = 0.9275. No pixel of a maskable icon is transparent.
-  In both files, outside the drawing, no step between neighbouring pixels is above 2
-  (`test/window/icons.test.ts` measures it, also along ten lines across the circle where the picture
-  fades out). `scripts/icons.ts` stops if the drawing, scaled, leaves the circle of 0.4 or reaches
-  the fade.
+  on a light background and a duller 16 pixel icon. From 24 pixels up the picture is sharp reduced
+  as it is.
+- **Bolder lines below 24 pixels.** Reduced as it is, at 16 pixels the cloud's line is 1.4 pixels
+  wide and the sign's stroke 1.1: faint and blurred. So the 16 and 20 pixel drawings are made
+  bolder before the reduction: the solid shape (alpha 128 or more) is grown outward, each new pixel
+  opaque in the colour of the nearest solid one (a chamfer distance, 3 a step straight and 4
+  diagonal), on a border around the picture, so that where the drawing touches the picture's edge
+  (the cloud at its top, left and right, the box at its bottom) it grows outward too; the white
+  sign (alpha 224 or more, each channel 190 or more) is grown inside the box; then the reduction;
+  then each pixel's coverage is raised by one fifth (full pixels stay full). The amounts come from
+  two widths measured in the picture, the cloud's line (95 picture pixels: the mean of its width at
+  its top, 93, its left, 93, and its right, 99) and the sign's stroke (76: the underscore's mean
+  height across the middle half of it, 75 to 76), and two targets, the line at least 1.9 pixels
+  and the stroke at least 1.6, each amount to the nearest whole picture pixel: at 16 pixels the
+  shape grows by 19 picture pixels and the sign by 11 (the line 1.90 pixels, the stroke 1.40), at
+  20 by 6 and 7 (1.91 and 1.61). At 24 pixels both are at their targets as drawn (2.03 and 1.63),
+  so nothing grows from 24 up. The sign grows by at most 11: its chevron and its underscore are
+  39.8 picture pixels apart where they come closest, and grown by the 18 each that the stroke's
+  target asks at 16 pixels they would be 3.8 apart, a twentieth of a pixel of the icon: one mark.
+  Down the column through the cloud's top the line covers 2.04 pixels of the 16 and of the 20
+  pixel file (reduced as it is, 1.32 and 1.64).
+- **The maskable icons** are the whole drawing inside the safe zone, the circle of 0.4 of the
+  icon's width, centred, on a full background of `#040925`: the picture's longer side is 0.786 of
+  the icon's width, the largest scale, to three decimals, at which every pixel of the picture that
+  is not transparent lies inside the circle (its farthest corner is 547.2 picture pixels from the
+  picture's middle; 0.4 × 1076 / 547.2 = 0.7865). No fade and no tile: where the picture puts
+  nothing the pixel is the background exactly. No pixel of a maskable icon is transparent.
+  `scripts/icons.ts` stops if the picture at that scale leaves the circle, or if a drawing would
+  lose a part of the picture outside its square.
+- **The tests.** `test/window/icons.test.ts` measures the two widths and the sign's gap again from
+  the picture, derives the amounts and holds the script's numbers to them; draws every PNG and
+  every image of the ICO again from the picture in plain Node (the bolder lines, the reduction) and
+  compares, premultiplied, within 3 steps of 255 (the worst on this build is 2; an image resized
+  from another size at a ratio that is not whole, as 30 from 32 or 48 from 64, eleven pairs tried,
+  is 59 to 157 steps off, and a 16 or 20 pixel one not made bolder 79 to 127; at a whole ratio, as
+  24 from 48, 30 from 60 or 32 from 64, an area average of the area average is the area average,
+  the same drawing, so that each image is drawn from the picture is held by the script, each of
+  whose jobs reduces the picture, not by this bound); and checks the ICO's thirteen entries, the
+  transparency outside the drawing, the line's coverage at 16 and 20, and the maskable files' safe
+  zone and background.
+- **Which image a panel takes is not verified.** No test can look at a Windows taskbar, and nobody
+  has looked at these files on a Windows taskbar or title bar: they were judged from enlarged sheets
+  of them on a dark and a light background. Which image of the ICO (or of the manifest) Edge hands
+  to the taskbar and to the title bar for a window started with `--app` is not known. With an image
+  drawn for each size the two show at a scaling of 100 % to 250 % in steps of 25 %, none should need
+  one resized there; W3 asks whether the icon is sharp in the taskbar at the display's scaling. Edge
+  may keep the old icon until the window is opened anew.
 - **The manifest and the page** are as before: `web/manifest.webmanifest` holds `name`,
   `short_name`, `display` and the seven PNGs, each `src` under the versioned path; it is served at
   `/manifest.webmanifest` with the build put in, and the ICO at `/favicon.ico` (8.2.1). `index.html`
-  names the favicon by its versioned path (`/assets/<build>/web/icons/favicon.ico`,
-  `sizes="16x16 32x32 48x48"`) and the manifest by `/manifest.webmanifest`; the policy's
-  `img-src 'self'` and `manifest-src 'self'` let the page load both. The manifest has no
-  `start_url`, `scope` or `id` (ruled, plan E task 94): the page is not meant to be installed as an
-  app — Chromium counts it as not installable without `start_url`, and an installed app's shortcut
-  would hold no launch token (5.1).
+  names the favicon by its versioned path (`/assets/<build>/web/icons/favicon.ico`, with the
+  thirteen sizes, `sizes="16x16 20x20 24x24 28x28 30x30 32x32 36x36 40x40 42x42 48x48 54x54 60x60
+  64x64"`) and the manifest by
+  `/manifest.webmanifest`; the policy's `img-src 'self'` and `manifest-src 'self'` let the page load
+  both. The manifest has no `start_url`, `scope` or `id` (ruled, plan E task 94): the page is not
+  meant to be installed as an app — Chromium counts it as not installable without `start_url`, and
+  an installed app's shortcut would hold no launch token (5.1).
 
 ### 12.13 Settings
 
@@ -5464,7 +5444,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 |---|---|---|---|
 | W1 | `skydeck window` opens an Edge app window that loads the page and connects. (That Edge reaches a server on `127.0.0.1` in WSL was verified on a Windows PC on 2026-11-13; this checks the command itself: the profile folder, the start, the wait for the page.) Write down how long Edge took from the command to the page's connection, cold and warm: the token and the command's wait last 30 seconds (5.1). | A | 5, 8.2.2 |
 | W2 | The chords of 12.9 that the key test of 2026-11-13 did not press reach the page and the browser does nothing: Ctrl+Shift+P, J, L, F, C, H and 1–9; and Alt+F4 still closes the window once the page is built (12.9). Whether Edge reloads on Shift+F5 and on the BrowserRefresh key (alone, with Shift, with Ctrl) when the page does not cancel them, and whether a cancelled BrowserRefresh still reloads (through `WM_APPCOMMAND`) (12.9, 15.3). In a normal tab (`--print-url`), which chords the browser keeps. | A | 12.9 |
-| W3 | The window has its own taskbar button with skydeck's icon (12.12), the same one after `skydeck window --restart` and after a WSL restart (looked at only when WSL restarts anyway: a restart ends every session; else written down as left out), and the title `(n) skydeck`; a second `skydeck window` opens no second window. Whether Edge's menu offers to install the page as an app (it has a manifest, 12.12): written down, never done. | A, B, E | 5.1, 12.1, 12.12 |
+| W3 | The window has its own taskbar button with skydeck's icon (12.12), sharp in the taskbar at the display's scaling, the same one after `skydeck window --restart` and after a WSL restart (looked at only when WSL restarts anyway: a restart ends every session; else written down as left out), and the title `(n) skydeck`; a second `skydeck window` opens no second window. Whether Edge's menu offers to install the page as an app (it has a manifest, 12.12): written down, never done. | A, B, E | 5.1, 12.1, 12.12 |
 | W4 | **Real claude** in a window terminal: status line, subagent display, spinner, redraw on resize. Then `skydeck window --restart`: the screen is exactly what it was. | A | 7.2, 7.3 |
 | W5 | **Real claude**, the screen side answering alone: does Claude Code use synchronized output; does the OSC 11 answer make its automatic theme right; with an XTVERSION answer `xterm.js(6.0.0)` (a one-line change), any visible effect? | A | 9.3 |
 | W6 | **Real claude**: Shift+Enter inserts a newline; Ctrl+V pastes text; Ctrl+Shift+V pastes a Windows screenshot; Ctrl+Shift+C copies a selection, and a program's OSC 52 write reaches the Windows clipboard. | A | 9.1, 9.5 |
