@@ -3,18 +3,20 @@
 // the list's width with the pointer, live, within web/list-width-text.js's bounds; the release (or
 // the pointer lost: it is captured, so a release outside the window too) ends the drag and keeps
 // the width in the page's own localStorage (LIST_WIDTH_KEY), as the theme's choice is kept
-// (web/theme.js). A double click gives the default width back and removes the stored value. The
-// width is `--list-width` on <html>, which style.css's `.main` reads and holds to the window, and
-// which web/list-width-early.js puts there before the next load's first paint. Another page of
-// the profile follows at once (the `storage` event). Storage that throws or is missing keeps
-// nothing: the width holds for the life of the page.
+// (web/theme.js); a drag released at the x of its press stores nothing and leaves the width as it
+// was before the press. A double click gives the default width back and removes the stored value,
+// unless its second press moved (that one was a drag). The width is `--list-width` on <html>,
+// which style.css's `.main` reads and holds to the window, and which web/list-width-early.js puts
+// there before the next load's first paint. Another page of the profile follows at once (the
+// `storage` event). Storage that throws or is missing keeps nothing: the width holds for the life
+// of the page.
 //
 // The handle takes no keyboard and no key (S2 12.9): it is not focusable, and every mousedown on
 // it is cancelled, so that a press moves the keyboard nowhere, selects no text and starts no
 // middle-button scroll; the list and the terminal see none of its events (the handle lies over
-// the border, outside both zones, and holds the pointer while it drags). While `blocked()` (a
-// dialog, the switcher, the tour) a press and a double click do nothing, and a drag that meets
-// one ends as at a release. The terminal follows the new width by its own refit after a size
+// the list's border and the right side's first px, outside both zones and none of the list, and
+// holds the pointer while it drags). While `blocked()` (a dialog, the switcher, the tour) a press
+// and a double click do nothing, and a drag that meets one ends as at a release. The terminal follows the new width by its own refit after a size
 // change (web/terminal-view.js), as at a window resize. Nothing of it goes to the server.
 
 import { held, HANDLE_TITLE, LIST_WIDTH_KEY, shownWidth, widthOf } from './list-width-text.js';
@@ -74,24 +76,41 @@ export function createListWidth(handle, deps) {
     }
   });
 
-  /** The drag under way: its pointer, where it started, the width now, whether it moved.
-   *  @type {{ pointer: number, x: number, from: number, width: number, moved: boolean } | null} */
+  /** The drag under way: its pointer, the x of its press and the x it is at now, the width
+   *  before the press (`--list-width` on <html>, '' for none), the width it started from and the
+   *  width now, whether it moved.
+   *  @type {{ pointer: number, x: number, at: number, before: string, from: number, width: number, moved: boolean } | null} */
   let drag = null;
+  /** Whether the last press on the handle moved: the second press of a double click that moved
+   *  was a drag, not a double click. */
+  let lastMoved = false;
 
   const end = () => {
     if (drag === null) {
       return;
     }
-    const { pointer, moved, width } = drag;
+    const { pointer, moved, width, x, at, before } = drag;
     drag = null;
+    lastMoved = moved;
     delete handle.dataset['dragging'];
     delete root.dataset['listDrag'];
     if (handle.hasPointerCapture(pointer)) {
       handle.releasePointerCapture(pointer);
     }
-    if (moved) {
-      write(width);
+    if (!moved) {
+      return;
     }
+    if (at === x) {
+      // Back where it was pressed: the width before the press, and nothing stored, so that
+      // nothing stored stays nothing stored and a stored width the window holds is kept.
+      if (before === '') {
+        root.style.removeProperty('--list-width');
+      } else {
+        root.style.setProperty('--list-width', before);
+      }
+      return;
+    }
+    write(width);
   };
 
   // No keyboard, no text selection, no middle-button scroll: for every button.
@@ -101,7 +120,10 @@ export function createListWidth(handle, deps) {
       return;
     }
     const from = Math.round(deps.list.getBoundingClientRect().width);
-    drag = { pointer: event.pointerId, x: event.clientX, from, width: from, moved: false };
+    const before = root.style.getPropertyValue('--list-width');
+    const x = event.clientX;
+    drag = { pointer: event.pointerId, x, at: x, before, from, width: from, moved: false };
+    lastMoved = false;
     handle.setPointerCapture(event.pointerId);
     handle.dataset['dragging'] = '';
     root.dataset['listDrag'] = '';
@@ -118,19 +140,23 @@ export function createListWidth(handle, deps) {
       return;
     }
     drag.moved = true;
+    drag.at = event.clientX;
     drag.width = shownWidth(held(drag.from + event.clientX - drag.x), innerWidth);
     apply(drag.width);
   });
   for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) {
     handle.addEventListener(type, (event) => {
       if (drag !== null && event instanceof PointerEvent && event.pointerId === drag.pointer) {
+        if (type === 'pointerup') {
+          drag.at = event.clientX;
+        }
         end();
       }
     });
   }
   handle.addEventListener('dblclick', (event) => {
     event.preventDefault();
-    if (deps.blocked()) {
+    if (deps.blocked() || lastMoved) {
       return;
     }
     apply(null);

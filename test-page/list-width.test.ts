@@ -45,7 +45,14 @@ import {
   zone,
 } from './helpers/shell.ts';
 import type { Logged, Standin } from './helpers/shell.ts';
-import { promptOf, recordsOf, resumeHere, until, untilScreen } from './helpers/terminal.ts';
+import {
+  promptOf,
+  recordsOf,
+  resumeHere,
+  screenText,
+  until,
+  untilScreen,
+} from './helpers/terminal.ts';
 
 type Message = Record<string, unknown>;
 /** Which rows the list holds (`list`). */
@@ -505,7 +512,7 @@ await test('the list’s width (issue #192)', async (t) => {
   }
 
   await t.test(
-    'the handle: over the border, a few px to each side, with the column-resize cursor, its tooltip, no tab stop and no part of either zone',
+    'the handle: over the border and a few px of the right side, none of the list (whose scroll bar is at its right edge), above the shown terminal’s layers, with the column-resize cursor, its tooltip, no tab stop and no part of either zone',
     async (t) => {
       const { page, problems } = await opened(t, chromium);
       const handle = await readPage(
@@ -514,25 +521,53 @@ await test('the list’s width (issue #192)', async (t) => {
           const element = document.getElementById('list-handle') as HTMLElement;
           const box = element.getBoundingClientRect();
           const zone = document.getElementById('list-zone') as HTMLElement;
+          const edge = zone.getBoundingClientRect().right;
+          const under = (x: number, y: number): Element | null => {
+            element.style.pointerEvents = 'none';
+            const found = document.elementFromPoint(x, y);
+            element.style.pointerEvents = '';
+            return found;
+          };
+          const terminalY =
+            (document.getElementById('terminal') as HTMLElement).getBoundingClientRect().top + 100;
           return {
             left: box.left,
             right: box.right,
-            border: zone.getBoundingClientRect().right,
+            border: edge,
+            borderWidth: parseFloat(getComputedStyle(zone).borderRightWidth),
             cursor: getComputedStyle(element).cursor,
             title: element.title,
             tabIndex: element.tabIndex,
             inZone:
               zone.contains(element) || document.getElementById('right-zone')?.contains(element),
-            // Across the strip, at the header's height, over the rows and over the terminal.
+            // Across the strip, at the header's height, beside the rows and over the terminal.
             hits: [box.left + 0.5, box.left + box.width / 2, box.right - 0.5].flatMap((x) =>
-              [40, 300, 600].map((y) => document.elementFromPoint(x, y)?.id ?? ''),
+              [40, 300, terminalY].map((y) => document.elementFromPoint(x, y)?.id ?? ''),
             ),
+            // At the border, over the shown terminal: xterm.js's own element lies there, and the
+            // handle above it.
+            terminal: {
+              under: under(edge + 0.5, terminalY)?.closest('.xterm') !== null,
+              hit: document.elementFromPoint(edge + 0.5, terminalY)?.id ?? '',
+            },
+            // The list's last px before its border (x = border − 2: the px from there to the
+            // border's own, the hit test taking whole px) is the list's.
+            list: zone.contains(document.elementFromPoint(edge - 2, 300)),
           };
         },
         null,
       );
-      assert.ok(handle.left < handle.border - 2 && handle.right > handle.border + 2, 'astride');
-      assert.ok(handle.right - handle.left <= 8, 'a narrow strip');
+      assert.equal(handle.borderWidth, 1);
+      assert.ok(
+        Math.abs(handle.left - (handle.border - 1)) < 0.01,
+        `it starts at the list's 1 px border, not before (${handle.left}, the border ${handle.border})`,
+      );
+      assert.ok(
+        Math.abs(handle.right - (handle.border + 5)) < 0.01,
+        `and 5 px of the right side (${handle.right})`,
+      );
+      assert.equal(handle.list, true, 'the list keeps its last px');
+      assert.deepEqual(handle.terminal, { under: true, hit: 'list-handle' });
       assert.equal(handle.cursor, 'col-resize');
       assert.equal(handle.title, HANDLE_TITLE);
       assert.equal(handle.tabIndex, -1, 'not a tab stop');
@@ -540,7 +575,7 @@ await test('the list’s width (issue #192)', async (t) => {
       assert.deepEqual(
         new Set(handle.hits),
         new Set(['list-handle']),
-        'all of it takes the pointer, over the list, the header and the terminal’s layers',
+        'all of it takes the pointer, beside the list, the header and the terminal’s layers',
       );
       // The key help lies over it (it is no dialog: the page under it is not inert).
       await page.keyboard.press('Control+Shift+H');
@@ -637,6 +672,159 @@ await test('the list’s width (issue #192)', async (t) => {
       );
       await windowWidth(page, 600);
       assert.equal((await widths(page)).list, 400, 'nothing stored: 400 px in any window');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'a click, then at once a second press that drags (the browser counts it the second of a double click): a drag, stored at its release, not a double click',
+    async (t) => {
+      const { page, problems } = await opened(t, chromium);
+      const at = await handleAt(page);
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down({ clickCount: 1 });
+      await page.mouse.up({ clickCount: 1 });
+      await page.mouse.down({ clickCount: 2 });
+      await page.mouse.move(at.x + 200, at.y, { steps: 8 });
+      assert.equal((await widths(page)).list, 600, 'while held');
+      await page.mouse.up({ clickCount: 2 });
+      await sleep(100);
+      const now = await widths(page);
+      assert.deepEqual({ list: now.list, stored: now.stored }, { list: 600, stored: '600' });
+      // A double click whose presses do not move is still one.
+      const grip = await handleAt(page);
+      await page.mouse.dblclick(grip.x, grip.y);
+      assert.deepEqual(
+        { list: (await widths(page)).list, stored: (await widths(page)).stored },
+        { list: 400, stored: null },
+      );
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'a drag released at the x of its press stores nothing and leaves the width as it was: nothing stored stays nothing stored (no window clamp appears), and a stored width wider than the window shows is kept',
+    async (t) => {
+      const { page, problems } = await opened(t, chromium, { width: 600 });
+      assert.equal((await widths(page)).list, 400, 'nothing stored: 400 px in a 600 px window');
+      await drag(page, [60, 0], (width, index) =>
+        assert.equal(width, [280, 280][index], `move ${index}: held to the window less 320`),
+      );
+      let now = await widths(page);
+      assert.deepEqual(
+        { list: now.list, stored: now.stored, property: now.property },
+        { list: 400, stored: null, property: '' },
+        'back at its press: as before it',
+      );
+      await windowWidth(page, 560);
+      assert.equal((await widths(page)).list, 400, 'still no clamp');
+
+      const stored = await opened(t, chromium, { width: 900, stored: '700' });
+      assert.equal((await widths(stored.page)).list, 580, '700 shown as 580 in 900 px');
+      await drag(stored.page, [-100, 0], (width, index) =>
+        assert.equal(width, [480, 580][index], `move ${index}`),
+      );
+      now = await widths(stored.page);
+      assert.deepEqual(
+        { list: now.list, stored: now.stored, property: now.property },
+        { list: 580, stored: '700', property: '700px' },
+        'the stored 700 is not overwritten by 580',
+      );
+      await windowWidth(stored.page, 1400);
+      assert.equal((await widths(stored.page)).list, 700, 'a wide window shows 700 again');
+      assert.deepEqual([...problems, ...stored.problems], []);
+    },
+  );
+
+  await t.test(
+    'a wheel on the handle (over the terminal’s first margin px) changes neither the width nor the terminal’s scroll; the same wheel over the text scrolls it',
+    async (t) => {
+      const lines = Array.from({ length: 200 }, (_, n) => `line ${n + 1}`).join('\r\n');
+      const { page, problems } = await opened(t, chromium, { snap: lines });
+      await untilScreen(page, /^line 200$/m);
+      const middle = await readPage(
+        page,
+        () => {
+          const box = (document.getElementById('terminal') as HTMLElement).getBoundingClientRect();
+          return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+        },
+        null,
+      );
+      const before = await screenText(page);
+      const at = await handleAt(page);
+      await page.mouse.move(at.x, middle.y);
+      await page.mouse.wheel(0, -300);
+      await sleep(400);
+      assert.equal(await screenText(page), before, 'the terminal did not scroll');
+      const now = await widths(page);
+      assert.deepEqual({ list: now.list, stored: now.stored }, { list: 400, stored: null });
+      // The control: over the text the same wheel scrolls.
+      await page.mouse.move(middle.x, middle.y);
+      await page.mouse.wheel(0, -300);
+      await until(async () => (await screenText(page)) !== before, 'a wheel over the text scrolls');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'a press on the list’s last px before its border is the list’s: it starts no drag',
+    async (t) => {
+      const { page, problems } = await opened(t, chromium);
+      const edge = await readPage(
+        page,
+        () => (document.getElementById('list-zone') as HTMLElement).getBoundingClientRect().right,
+        null,
+      );
+      // On the list's last px before its border (the hit test takes whole px), below the rows,
+      // in the list's empty part, so that the press selects no row either.
+      await page.mouse.move(edge - 2, 800);
+      await page.mouse.down();
+      await page.mouse.move(edge + 150, 800, { steps: 4 });
+      await page.mouse.up();
+      const now = await widths(page);
+      assert.deepEqual({ list: now.list, stored: now.stored }, { list: 400, stored: null });
+      assert.equal(await selectedRow(page), S1, 'no row selected by it');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'a touch drag that is cancelled ends clean: no drag left armed, no cursor left on the page, the width it reached stored; the next mouse drag works',
+    async (t) => {
+      const { page, problems } = await opened(t, chromium);
+      const cdp = await page.context().newCDPSession(page);
+      await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true });
+      const g = await handleAt(page);
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ x: g.x, y: g.y }],
+      });
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x: g.x - 60, y: g.y }],
+      });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] });
+      await sleep(200);
+      const armed = (): Promise<{ root: boolean; handle: boolean }> =>
+        readPage(
+          page,
+          () => ({
+            root: document.documentElement.hasAttribute('data-list-drag'),
+            handle: document.getElementById('list-handle')?.hasAttribute('data-dragging') ?? true,
+          }),
+          null,
+        );
+      assert.deepEqual(await armed(), { root: false, handle: false }, 'nothing left of the drag');
+      const cancelled = await widths(page);
+      assert.deepEqual(
+        { list: cancelled.list, stored: cancelled.stored },
+        { list: 340, stored: '340' },
+      );
+      await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+      await drag(page, [100]);
+      const after = await widths(page);
+      assert.deepEqual({ list: after.list, stored: after.stored }, { list: 440, stored: '440' });
+      assert.deepEqual(await armed(), { root: false, handle: false });
       assert.deepEqual(problems, []);
     },
   );
@@ -745,7 +933,7 @@ await test('the list’s width (issue #192)', async (t) => {
       `the keyboard in the ${where}: a press, a drag over the rows and over the terminal, a double click, a secondary and a middle press leave it there, select no text and no row, and send the terminal’s program nothing (it asked for the mouse); the next key goes where it went before`,
       async (t) => {
         const { page, d, problems } = await opened(t, chromium, {
-          snap: '\x1b[?1002h\x1b[?1006hready',
+          snap: '\x1b[?1003h\x1b[?1006hready',
         });
         await toZone(page, where);
         if (where === 'terminal') {
@@ -807,6 +995,91 @@ await test('the list’s width (issue #192)', async (t) => {
       },
     );
   }
+
+  await t.test(
+    'the keyboard in the list’s filter: a press and a drag on the handle leave it in the filter, and the next key types there',
+    async (t) => {
+      const { page, problems } = await opened(t, chromium);
+      const who = (): Promise<string> =>
+        readPage(
+          page,
+          () => {
+            const element = document.activeElement as HTMLElement | null;
+            return element === null ? 'none' : `${element.tagName}.${element.className}`;
+          },
+          null,
+        );
+      await page.locator('.list-filter').click();
+      await page.keyboard.type('al');
+      const before = await who();
+      assert.match(before, /list-filter/);
+      const at = await handleAt(page);
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down();
+      assert.equal(await who(), before, 'while the handle is held');
+      await page.mouse.move(at.x + 60, at.y, { steps: 3 });
+      await page.mouse.up();
+      await sleep(300);
+      assert.equal(await who(), before, 'after the release');
+      await page.keyboard.type('p');
+      assert.equal(await page.locator('.list-filter').inputValue(), 'alp');
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'the terminal’s program asked for focus reports (mode 1004): a press and a drag on the handle send it none',
+    async (t) => {
+      const { page, d, problems } = await opened(t, chromium, { snap: '\x1b[?1004hready' });
+      await toZone(page, 'terminal');
+      await until(async () => (await active(page)) === 'in #terminal', 'xterm.js has it');
+      await sleep(200);
+      const from = d.sent.length;
+      const at = await handleAt(page);
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down();
+      await sleep(100);
+      assert.equal(await active(page), 'in #terminal', 'while the handle is held');
+      await page.mouse.move(at.x + 60, at.y, { steps: 3 });
+      await page.mouse.up();
+      await sleep(300);
+      assert.equal(await active(page), 'in #terminal');
+      assert.deepEqual(
+        d.sent.slice(from).filter((message) => message['t'] === 'input'),
+        [],
+        'no focus report (\x1b[O, \x1b[I) and nothing else',
+      );
+      assert.deepEqual(problems, []);
+    },
+  );
+
+  await t.test(
+    'another key written by another page of the browser changes nothing here, also during a drag (the width held live is not read back)',
+    async (t) => {
+      const context = await newContext(chromium);
+      t.after(() => context.close());
+      const one = await context.newPage();
+      const two = await context.newPage();
+      const problems = [one, two].map((page) => problemsOf(page));
+      const d = await deck(t);
+      await open(d, one);
+      await open(d, two);
+      const at = await handleAt(one);
+      await one.mouse.move(at.x, at.y);
+      await one.mouse.down();
+      await one.mouse.move(at.x + 150, at.y, { steps: 4 });
+      assert.equal((await widths(one)).list, 550);
+      await two.evaluate(() => localStorage.setItem('skydeck-theme', 'dark'));
+      await until(
+        () => one.evaluate(() => document.documentElement.getAttribute('data-theme') === 'dark'),
+        'the first page saw the other key (its theme follows)',
+      );
+      assert.equal((await widths(one)).list, 550, 'the drag’s width stays');
+      await one.mouse.up();
+      assert.equal((await widths(one)).stored, '550');
+      assert.deepEqual(problems.flat(), []);
+    },
+  );
 
   await t.test(
     'a second page of the same browser takes the width when the first one’s drag ends, and the default at its double click',
