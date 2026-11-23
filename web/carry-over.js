@@ -5,8 +5,9 @@
 // (`list.selected.carryOver`); this module keeps only the ticks while the same offer (`rev`) is
 // drawn, and sends one act per press.
 //
-// - One set of elements, made once and never replaced: a render only sets texts, `checked` and
-//   `hidden`, so a control that has the keyboard keeps it through every list.
+// - One set of elements, made once and never replaced (put into the host at the first offer): a
+//   render only sets texts, `checked` and `hidden`, so a control that has the keyboard keeps it
+//   through every list.
 // - No keyboard on a click: the bar's mousedown is cancelled everywhere but on its three texts
 //   (the heading, the kept line, the message), which stay selectable; a click on a label's text
 //   ticks its box without focusing it. focus() is called only for the list's `c` (`focus()`) and
@@ -211,14 +212,16 @@ export function createCarryOver(host, deps) {
   dismiss.type = 'button';
   dismiss.title = DISMISS_TITLE;
   dismiss.setAttribute('aria-label', DISMISS_TITLE);
-  host.replaceChildren(
+  // The elements are made here, once, and put into the host when the first offer is drawn: until
+  // then the right side holds no control of the bar (an empty, hidden host).
+  const elements = [
     headBox,
     ...FIELDS.map((name) => /** @type {HTMLElement} */ (checks.get(name)?.label)),
     kept,
     done.label,
     apply,
     dismiss,
-  );
+  ];
   host.hidden = true;
 
   /** The pane's session and its offer as last rendered. */
@@ -298,10 +301,13 @@ export function createCarryOver(host, deps) {
     const wanted = new Set(boxesOf(shown));
     // First show what the offer adds, so that the keyboard can be given to it.
     for (const name of all) {
-      const parts = name === 'done' ? done : checks.get(/** @type {CarryField} */ (name));
-      if (parts !== undefined && wanted.has(parts.box)) {
-        setHidden(parts.label, false);
+      const field = name === 'done' ? done : checks.get(/** @type {CarryField} */ (name));
+      if (field !== undefined && wanted.has(field.box)) {
+        setHidden(field.label, false);
       }
+    }
+    if (host.firstChild === null) {
+      host.replaceChildren(...elements);
     }
     setHidden(host, false);
     if (first && hasKeyboard) {
@@ -325,9 +331,9 @@ export function createCarryOver(host, deps) {
       }
     }
     for (const name of all) {
-      const parts = name === 'done' ? done : checks.get(/** @type {CarryField} */ (name));
-      if (parts !== undefined && !wanted.has(parts.box)) {
-        setHidden(parts.label, true);
+      const field = name === 'done' ? done : checks.get(/** @type {CarryField} */ (name));
+      if (field !== undefined && !wanted.has(field.box)) {
+        setHidden(field.label, true);
       }
     }
     setText(heading, carryHeading(shown.from));
