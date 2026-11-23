@@ -3487,7 +3487,7 @@ nothing; `ls` is unchanged.
   empty, its result line saying `the flags it was started with hold a character this field cannot
   show; Resume here passes them on as they are`. The keyboard goes into the field, at its end.
   Pressed (or `f`) before the list has brought the session's payload (`list.selected`, which
-  answers the page's view up to a second later), it opens once that list has come, never empty
+  comes with the list that answers the page's view), it opens once that list has come, never empty
   for flags it does not know yet. Start
   (Enter in the field, on the ★ or on the chips, as in the New form) sends `act resume` with the
   field's text as `flags`; an empty field resumes with no flags at all. A refusal, and a launch
@@ -3518,16 +3518,17 @@ nothing; `ls` is unchanged.
   leaves the plain resume card. The request ends when the session runs again (a terminal of it
   other than the one closed is shown, or it runs elsewhere) or anything but that card shows, so a
   later plain Close never opens the form. It closes nothing unless the form can then be shown
-  (ruled by the plan owner): for a session the list does not show it says `no session selected`
-  on the bar's line (the list keys' words for such a selection; `f` says them in the key bar, as
-  those keys do), for an expired one `its transcript is gone: it cannot be resumed`. A
+  (ruled by the plan owner): for a session the list does not show it says on the bar's line `the
+  list does not show this session; show it there to resume it with other flags` (`f` says the list
+  keys' own `no session selected` in the key bar, as those keys do), for an expired one `its
+  transcript is gone: it cannot be resumed`. A
   selected session the list does not show (a filter, the chips, done sessions hidden, a folded
   Earlier; 12.9) has its row in the list's `selectedRow` (8.2.3, stage E): its terminal of the
   window is shown with its header and, once ended, under this bar with Resume and Close, as for a
-  listed row (issue #188: its `Other flags…` there closes nothing and says `no session selected`
-  on the bar's line, since no resume card would show it). Known limit, narrowed by stage E: a
-  session the view model does not list even with done ones shown (an ended terminal of a session
-  without a transcript) has no `selectedRow`, so
+  listed row (issue #188: its `Other flags…` there closes nothing and says on the bar's line that
+  the list does not show the session, since no resume card would show it). Known limit, narrowed
+  by stage E: a session the view model does not list even with done ones shown (an ended
+  terminal of a session without a transcript) has no `selectedRow`, so
   while the window shows its ended terminal the bar has no Resume, and Close only once the page
   has the terminal's exit — the bar is drawn from the row, not from the terminal (stage A's plan,
   contract 2.9 `endedBar(row, exit)`; accepted by the plan owner, review 2 of plan task 29).

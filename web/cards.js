@@ -70,6 +70,8 @@ const UTF8 = new TextEncoder();
 const CANNOT_SHOW =
   'the flags it was started with hold a character this field cannot show; Resume here passes them on as they are';
 const TOO_LONG = `the flags it was started with are longer than this field takes (at most ${FLAGS_BYTES.toLocaleString('en-US')} bytes of UTF-8): shorten them before Start, or use Resume here`;
+/** Issue #188: why the ended bar's Other flags… closes nothing for a session the list hides. */
+const HIDDEN = 'the list does not show this session; show it there to resume it with other flags';
 /** Issue #188: why Other flags… does nothing for an expired session (the card's words). */
 const EXPIRED = 'its transcript is gone: it cannot be resumed';
 /** Issue #188: the key bar's words for `f` while the right side shows no resume card. */
@@ -1220,13 +1222,9 @@ export function createCards(root, deps) {
       card.dataset['card'] = 'ended';
       const sessionId = row?.id ?? null;
       const term = row?.terminal ?? exit?.term ?? null;
-      // The words of the list keys for a selection the list hides, and the card's for a session
-      // whose transcript is gone.
-      const blocked = !listed
-        ? 'no session selected'
-        : row?.marks.includes('expired') === true
-          ? EXPIRED
-          : null;
+      // Why it closes nothing (ruled): a session the list does not show, one whose transcript is
+      // gone (the card's words).
+      const blocked = !listed ? HIDDEN : row?.marks.includes('expired') === true ? EXPIRED : null;
       showCard(
         `ended:${term}:${sessionId}:${blocked}`,
         () => buildEnded(sessionId, term, blocked),

@@ -263,11 +263,15 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
       assert.equal(await shownText(page, '#cards .header-title'), 'alpha work');
       assert.deepEqual(await listed(page), [S2], 'still hidden');
       // #188: the bar's Other flags… of a session the list does not show closes nothing (no
-      // resume card would show it) and says why on the bar's line, in the words of the list
-      // keys; f says so in the key bar, as the other list keys do. Nothing sent, the terminal kept.
+      // resume card would show it) and says why on the bar's line; f says the list keys' own
+      // words in the key bar, as those keys do. Nothing sent, the terminal kept.
       await mark(page, 'f');
       await page.locator('#cards .card-bar button', { hasText: 'Other flags…' }).click();
-      await showsText(page, '#cards .card-lines', /^no session selected$/);
+      await showsText(
+        page,
+        '#cards .card-lines',
+        /^the list does not show this session; show it there to resume it with other flags$/,
+      );
       await toZone(page, 'list');
       await page.keyboard.press('f');
       await showsText(page, '#key-message', /^no session selected$/);
