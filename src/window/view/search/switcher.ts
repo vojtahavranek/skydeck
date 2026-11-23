@@ -26,10 +26,11 @@ import type { Searchable } from './filter.ts';
 
 export const MAX_ITEMS = 50;
 
-/** The commands of the switcher's command form: stage C's restore offer (E12), and F36's
- *  settings screen. */
+/** The commands of the switcher's command form: stage C's restore offer (E12), F36's settings
+ *  screen and F41's tour of the window. */
 const RESTORE = 'restore';
 const SETTINGS = 'settings';
+const TOUR = 'tour';
 /** What starts the command form (E12, ruled): the text's first character, nothing trimmed
  *  before it. */
 const COMMAND = '>';
@@ -90,9 +91,23 @@ export function restoreOffer(
  * It opens the page's settings screen and starts nothing, so it needs no banner or other state.
  */
 export function settingsCommand(query: string): boolean {
+  return names(query, SETTINGS);
+}
+
+/**
+ * F41 (S2 12.14): the tour command, by settingsCommand's rule over `tour` (`>t`, `> to`,
+ * `>Tour`). It starts the page's tour of the window and nothing else, so it needs no state.
+ */
+export function tourCommand(query: string): boolean {
+  return names(query, TOUR);
+}
+
+/** Whether `query` is in command form and what follows the `>`, trimmed and lower-cased, is a
+ *  start of `command` of at least one letter. */
+function names(query: string, command: string): boolean {
   if (!isCommand(query)) return false;
-  const command = query.slice(COMMAND.length).trim().toLowerCase();
-  return command !== '' && SETTINGS.startsWith(command);
+  const typed = query.slice(COMMAND.length).trim().toLowerCase();
+  return typed !== '' && command.startsWith(typed);
 }
 
 export interface SwitchCandidate {
@@ -152,8 +167,9 @@ function inNeedOrder(
  * `not-running` (not open, not done), `done` (not open, done); inside each rank in the
  * candidates' order. The first MAX_ITEMS; `more` the rest; `restore` null. A text in command
  * form (its first character `>`, E12, ruled) lists no session: `command` true, `items` [] and
- * `more` 0, whatever follows the `>`, and `settings` whether it names the settings command (F36,
- * settingsCommand); any other text gives `command` and `settings` false.
+ * `more` 0, whatever follows the `>`, `settings` whether it names the settings command (F36,
+ * settingsCommand) and `tour` whether it names the tour (F41, tourCommand); any other text gives
+ * `command`, `settings` and `tour` false.
  */
 export function switcherPayload(
   query: string,
@@ -168,6 +184,7 @@ export function switcherPayload(
       more: 0,
       restore: null,
       settings: settingsCommand(query),
+      tour: tourCommand(query),
     };
   }
   const words = searchWords(query);
@@ -211,5 +228,6 @@ export function switcherPayload(
     more: matching - items.length,
     restore: null,
     settings: false,
+    tour: false,
   };
 }

@@ -556,6 +556,10 @@ describe('switcherFooter', () => {
       switcherFooter('open the settings', 0),
       '↑ ↓ move · Enter open the settings · Esc close',
     );
+    assert.equal(
+      switcherFooter('start the tour', 0),
+      '↑ ↓ move · Enter start the tour · Esc close',
+    );
   });
 
   test('each action, with more', () => {
