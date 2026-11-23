@@ -3392,10 +3392,12 @@ nothing; `ls` is unchanged.
   it for an expired session), or the list key `f` (12.9), puts in place of that action line the
   New form's flags line — the same component: the field `Flags for claude`, the ★, the favourite
   chips (all of the favourites' rules above) — then `Start`, the hint `resumes in this window with
-  these flags · Esc goes back` and the form's own result line; "Will run" stays, the plain
-  resume's command. The field opens with the flags a plain resume passes on (`list.selected.
-  resumeFlags`, 8.2.3), written so that the rule above splits them back word for word: a word as it
-  is when it is not empty and holds no white space and no quote, else in `'…'` when it holds no
+  these flags · Esc goes back` and the form's own result line. While it is open "Will run" (the
+  plain resume's command) is not shown, the warnings stay, and Esc brings it back (ruled: no live
+  preview of the command the field would give). The field opens with the flags a plain resume
+  passes on (`list.selected.resumeFlags`, 8.2.3), written so that the rule above splits them back
+  word for word: a word as it is when it is not empty and holds no white space and no quote, else
+  in `'…'` when it holds no
   `'`, else in `"…"` when it holds no `"`, else as touching pieces — its runs without `'` in `'…'`,
   each `'` in `"…"` —, one space between words (`web/favourite-text.js`'s `flagsText`, held to the
   server's split by a test). When a recorded flag holds what the field cannot hold as it is
@@ -3411,7 +3413,10 @@ nothing; `ls` is unchanged.
   another session, the New form), it goes, and the card shown again later is the plain one, whose
   form opens again with the plain resume's flags. The text is held to `act new`'s bounds (1,024
   bytes of UTF-8: a longer one is refused by the page before it is sent, a named limit for a long
-  recorded system prompt). Nothing is saved for the session (design 7.6): its start is recorded,
+  recorded system prompt); a text made from the recorded flags that is longer is said when the form
+  opens, not only at Start (ruled): `the flags it was started with are longer than this field takes
+  (at most 1,024 bytes of UTF-8): shorten them before Start, or use Resume here`, the field holding
+  them. Nothing is saved for the session (design 7.6): its start is recorded,
   and the header shows the new flags once it has started (12.5, follow-up F16).
 - **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close). Until
   the page has the terminal's exit the bar says `claude is not running in this terminal`. A

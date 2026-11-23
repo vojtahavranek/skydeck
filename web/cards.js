@@ -62,6 +62,14 @@ import { groupCardText } from './search-text.js';
  *   while none is open; app.js calls it at once with the favourites it has, then at every list
  */
 
+/** Issue #188: what the flags field takes, in bytes of UTF-8 (S2 8.2.3's text limit, to which
+ *  app.js holds `act resume`'s `flags` before it sends one). */
+const FLAGS_BYTES = 1024;
+const UTF8 = new TextEncoder();
+/** Issue #188: the editor's lines when the recorded flags cannot be written in the field as they are. */
+const CANNOT_SHOW =
+  'the flags it was started with hold a character this field cannot show; Resume here passes them on as they are';
+const TOO_LONG = `the flags it was started with are longer than this field takes (at most ${FLAGS_BYTES.toLocaleString('en-US')} bytes of UTF-8): shorten them before Start, or use Resume here`;
 /** Issue #188: the key bar's words for `f` while the right side shows no resume card. */
 const NO_RESUME_CARD = 'this session is not on a resume card: f resumes one with other flags';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -750,16 +758,17 @@ export function createCards(root, deps) {
       if (editor === null) {
         const recorded = last?.resumeFlags;
         const words = Array.isArray(recorded) ? recorded : null;
-        editor = flagsEditor(
-          sessionId,
-          words === null ? '' : flagsFieldText(words),
-          words === null
-            ? 'the flags it was started with hold a character this field cannot show; Resume here passes them on as they are'
-            : null,
-        );
+        const text = words === null ? '' : flagsFieldText(words);
+        // Ruled (R2): a text over the field's bound is said when the form opens, not at Start.
+        const note =
+          words === null ? CANNOT_SHOW : UTF8.encode(text).length > FLAGS_BYTES ? TOO_LONG : null;
+        editor = flagsEditor(sessionId, text, note);
         host.replaceChildren(editor.form);
         setHidden(actions, true);
         setHidden(lines, true);
+        // Ruled (R1): while the form is open the plain resume's command is not shown; the
+        // warnings stay, and Esc brings it back.
+        setHidden(command.line, true);
         factsNow();
         deps.watchFavourites(editor.update);
       }
@@ -777,6 +786,7 @@ export function createCards(root, deps) {
       host.replaceChildren();
       setHidden(actions, false);
       setHidden(lines, false);
+      setHidden(command.line, last === null || gone);
       factsNow();
       deps.watchFavourites(null);
       if (back) {
@@ -815,7 +825,8 @@ export function createCards(root, deps) {
         // `selected` comes with the list that answers the page's view: until then nothing is said
         // about the command.
         // Nothing will run for an expired session, whatever command the server could build.
-        setHidden(command.line, selected === null || expired);
+        // (R1: not while Other flags… is open.)
+        setHidden(command.line, selected === null || expired || editor !== null);
         setText(
           command.value,
           selected?.command ??

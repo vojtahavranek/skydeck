@@ -6,7 +6,7 @@ import { sanitize } from '../text/sanitize.ts';
 import type { Deck } from './deck.ts';
 import { loadRows } from './load.ts';
 import { refresh } from './refresh.ts';
-import { prepareResume } from './resume.ts';
+import { prepareResume, refuseResumeFlags } from './resume.ts';
 import type { PreparedLaunch } from './resume.ts';
 
 /**
@@ -17,15 +17,20 @@ import type { PreparedLaunch } from './resume.ts';
  * earlier. `sessionId` must be a whole session id: a prefix or a label names nothing here. Throws
  * RefError when the refreshed deck has no such session, and what prepareResume throws.
  *
- * Issue #188: `flags` given (not null) are this resume's flags in place of the recorded ones,
- * handed to prepareResume, which refuses what a resume must not take before the guard (no lock).
- * Without them (the interactive list, restore, a plain resume) nothing changes.
+ * Issue #188: `flags` given (not null) are this resume's flags in place of the recorded ones. What a
+ * resume must not take is refused first (refuseResumeFlags, a UsageError), before the refresh: a
+ * refusal changes nothing, no lock is taken. Then prepareResume builds the command with them (it
+ * checks them as well, for any caller of its own). Without them (the interactive list, restore, a
+ * plain resume) nothing changes.
  */
 export function prepareResumeById(
   deck: Deck,
   sessionId: string,
   flags: readonly string[] | null = null,
 ): PreparedLaunch {
+  if (flags !== null) {
+    refuseResumeFlags(flags);
+  }
   refresh(deck);
   const row = loadRows(deck).find((candidate) => candidate.id === sessionId);
   if (row === undefined) {

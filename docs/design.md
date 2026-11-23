@@ -765,7 +765,8 @@ neither picks nor names a session: `--worktree`/`-w`, `--tmux`, `--bg` (`--backg
 A session that exists already must not start somewhere else or a second time, and the user typed
 the flag: dropping it in silence would mislead. They are found as `new` finds its flags (in a
 cluster of short flags, as `--flag=value`, before an unknown letter), after `new`'s two refusals. A
-refusal is a usage error (exit 2) before the guard: nothing starts and no lock is taken. No
+refusal is a usage error (exit 2) before the guard and its refresh: nothing changes, nothing starts
+and no lock is taken. No
 permission flag is added; one the user gives is kept. The directory, the guard, the lock, `--here`
 / `--tab` / `--window` and every refusal of a plain resume are untouched: the flags change what is
 started, never whether. Nothing is stored for the session: the start is recorded as every start is

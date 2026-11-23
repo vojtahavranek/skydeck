@@ -75,7 +75,7 @@ test('prepareResumeById with given flags: those flags in place of the recorded o
   assert.equal(lockOf(d, S1), `${T0}:${d.deck.store.latestEventIdOfSession(S1)}`);
 });
 
-test('prepareResumeById refuses a flag a resume must not take: a usage error, no lock (#188)', (t) => {
+test('prepareResumeById refuses a flag a resume must not take before its refresh: a usage error, nothing ingested, no lock (#188)', (t) => {
   const d = testDeck(t);
   resumableSession(d);
   assert.throws(
@@ -86,6 +86,8 @@ test('prepareResumeById refuses a flag a resume must not take: a usage error, no
         'cannot pass --tmux to claude on a resume: it says where or how a new session starts',
   );
   assert.equal(lockOf(d, S1), null);
+  // before the refresh: the start event waiting in the spool was not ingested
+  assert.equal(d.deck.store.latestEventIdOfSession(S1), null, 'nothing ingested');
   // the guard after it, with good flags: a session another skydeck resumed meanwhile
   anotherSkydeckResumes(d);
   assert.equal(

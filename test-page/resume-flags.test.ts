@@ -25,6 +25,7 @@ import {
   active,
   clickRow,
   connection,
+  escape,
   honest,
   keyMessage,
   launched,
@@ -44,6 +45,8 @@ type Row = Record<string, unknown>;
 const EDITOR = '#cards .card-flags-form';
 const FIELD = `${EDITOR} input[name="flags"]`;
 const HINT = 'resumes in this window with these flags · Esc goes back';
+const TOO_LONG =
+  'the flags it was started with are longer than this field takes (at most 1,024 bytes of UTF-8): shorten them before Start, or use Resume here';
 const CANNOT_SHOW =
   'the flags it was started with hold a character this field cannot show; Resume here passes them on as they are';
 
@@ -276,9 +279,11 @@ test("the resume card's Other flags… (#188)", async (t) => {
       ]);
       await showsText(w.page, `${EDITOR} .card-hint`, new RegExp(`^${HINT}$`));
       assert.equal(await w.page.locator(`${EDITOR} button[type="submit"]`).textContent(), 'Start');
-      // The action line is gone while the form is open; Will run still says the plain resume.
+      // The action line is gone while the form is open, and (ruled, R1) so is Will run: the plain
+      // resume's command; the card's other facts stay.
       assert.deepEqual(await cardButtons(w.page), ['', '']);
-      await showsText(w.page, '#cards .card-command', /--model opus$/);
+      assert.equal(await w.page.locator('#cards .card-command').isVisible(), false);
+      assert.equal(await w.page.locator('#cards .card-dir').isVisible(), true);
       assert.deepEqual(resumes(w), [], 'opening sends nothing');
     },
   );
@@ -386,6 +391,7 @@ test("the resume card's Other flags… (#188)", async (t) => {
       await w.page.keyboard.press('Escape');
       await w.page.waitForSelector(EDITOR, { state: 'detached' });
       assert.deepEqual(await cardButtons(w.page), ['Resume here', 'Other flags…']);
+      await showsText(w.page, '#cards .card-command', /--model opus$/); // Will run is back (R1)
       assert.equal(
         await w.page.evaluate(() => document.activeElement?.textContent ?? ''),
         'Other flags…',
@@ -465,7 +471,7 @@ test("the resume card's Other flags… (#188)", async (t) => {
   );
 
   await t.test(
-    'an expired session: Other flags… disabled and f says why; flags the field cannot show: the field opens empty, a line says so',
+    'an expired session: Other flags… disabled and f says why; flags the field cannot show: the field opens empty, a line says so; flags longer than the field takes: said when it opens',
     async (t) => {
       const w = await world(t, chromium);
       await cardOfS1(w.page);
@@ -490,6 +496,22 @@ test("the resume card's Other flags… (#188)", async (t) => {
       await w.page.waitForSelector(FIELD);
       assert.equal((await fieldNow(w.page)).value, '');
       await showsText(w.page, `${EDITOR} .card-warning`, new RegExp(`^${CANNOT_SHOW}$`));
+      await w.page.keyboard.press('Escape');
+      await w.page.waitForSelector(EDITOR, { state: 'detached' });
+
+      // Ruled (R2): flags longer than the field takes are said when the form opens.
+      const long = ['--append-system-prompt', `be ${'é'.repeat(520)}`];
+      assert.ok(Buffer.byteLength(flagsText(long)) > 1024);
+      w.setSelected({ resumeFlags: long });
+      await w.page.waitForTimeout(300);
+      await w.page.locator('#cards .card-actions button', { hasText: 'Other flags…' }).click();
+      await w.page.waitForSelector(FIELD);
+      assert.equal((await fieldNow(w.page)).value, flagsText(long), 'the field holds them still');
+      await showsText(w.page, `${EDITOR} .card-warning`, new RegExp(`^${escape(TOO_LONG)}$`));
+      await w.page.keyboard.press('Enter');
+      await showsText(w.page, `${EDITOR} .card-lines`, /^the flags is longer than skydeck takes/);
+      assert.deepEqual(resumes(w), [], 'not sent');
+
       // Expired while open: the form goes, nothing resumes it.
       w.setSelected({ expired: true });
       await w.page.waitForSelector(EDITOR, { state: 'detached' });
