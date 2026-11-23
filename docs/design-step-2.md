@@ -3842,7 +3842,7 @@ keyboard and no click (a transparent layer over the window takes every click out
 the page moves the keyboard nowhere by itself while it is shown, and no list key acts. Enter or →
 goes on (Enter on one of the panel's buttons presses that button), ← goes back, Esc skips the rest,
 Tab and Shift+Tab walk the panel's buttons and stay in it; each acts once per press, a held key
-once. Space (with or without Shift) and Shift+Enter do nothing: the tour takes and cancels them at
+once. Space (with any modifier held) and Shift+Enter do nothing: the tour takes and cancels them at
 their keydown and at their keyup, so that they press no button — a sentence typed as the tour
 pops up moves it one step at most (its Enter) and reaches nothing under it. Every window
 chord, Ctrl+Shift+H too (the help would cover it), says `close the tour first (Esc)` and does
@@ -4299,7 +4299,7 @@ none: no made-up data.
   page, the dialogs' and the toast's too. Its words are in the page's own colours (`--text`,
   `--dim` on `--panel`) in every theme. Every text reaches the DOM as text.
 - **Keys**: 12.9's paragraph "The tour": Enter (the focused button, else `Next`), → and ←, Esc,
-  Tab and Shift+Tab; Space, Shift+Space and Shift+Enter do nothing.
+  Tab and Shift+Tab; Space, with any modifier, and Shift+Enter do nothing.
 - **Tests.** Every browser context of the page suite is made by `newContext`
   (`test-page/helpers/browser.ts`), which marks the tour seen in each page's storage, so that no
   case but the tour's own meets it; those ask for a context without the mark.

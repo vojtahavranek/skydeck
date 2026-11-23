@@ -3061,10 +3061,12 @@ closed; at least one session in the list.
 2. **Walk it.** Press Enter, then →, then ←. Expected: steps 2, 3, 2: the right side, then the key
    bar (`Focus: list` or `Focus: terminal`, Ctrl+Shift+L), then the right side again, each standing
    out with its panel beside it where the window has room (in a narrow window the panel may lie over
-   the region). Press Space, then Shift+Enter: nothing happens, the step stays. Press Ctrl+Shift+L: the key bar says `close the tour
+   the region). Press Space, then Ctrl+Space, then Shift+Enter: nothing happens, the step stays
+   (Space does nothing with any modifier). Press Ctrl+Shift+L: the key bar says `close the tour
    first (Esc)` and the step stays. Click a row of the list: nothing is selected. Press → until
    step 5: `Switch…` stands out and the panel names Ctrl+Shift+P, Ctrl+Shift+1…9, Ctrl+Tab and
-   Ctrl+Shift+N. Step 6: the gear, Ctrl+Shift+H, `Take the tour` and `> tour`, and `Done` in place of `Next`.
+   Ctrl+Shift+N. Step 6: the gear, Ctrl+Shift+H, `Take the tour` and `> tour`, and `Done` in place
+   of `Next`.
 3. **Done.** Write down what the key bar says (`Focus: …`), then press Enter. Expected: the panel
    and the dimming are gone, the key bar says what it said before, a typed key goes where it went
    before (a letter into the terminal with `Focus: terminal`). Press Ctrl+Shift+R: the page

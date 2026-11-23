@@ -465,7 +465,7 @@ test('the tour of the window', async (t) => {
   );
 
   await t.test(
-    'A3: Space, Shift+Space and Shift+Enter do nothing — a sentence typed as the tour pops up moves it one step at most and reaches no terminal —; the page is inert while it shows; Skip the tour in an unseen browser writes the mark and lifts the inertness',
+    'A3: Space with any modifiers and Shift+Enter do nothing — a sentence typed as the tour pops up moves it one step at most and reaches no terminal —; the page is inert while it shows; Skip the tour in an unseen browser writes the mark and lifts the inertness',
     async (t) => {
       const { page, inputs } = await world(t, chromium, WITH_SESSIONS);
       await listed(page, false);
@@ -487,6 +487,20 @@ test('the tour of the window', async (t) => {
           assert.equal((await shownTour(page))?.step, '2', `${key} on ${button}`);
         }
       }
+      // Space with Ctrl, Alt or Meta held presses nothing either; nor does Ctrl let go while Space
+      // is held (the keyup is then the only guard).
+      while ((await holder()) !== 'tour-next') await page.keyboard.press('Tab');
+      for (const key of ['Control+Space', 'Alt+Space', 'Meta+Space', 'Control+Shift+Space']) {
+        await page.keyboard.press(key);
+        await pause(100);
+        assert.equal((await shownTour(page))?.step, '2', `${key} on tour-next`);
+      }
+      await page.keyboard.down('Control');
+      await page.keyboard.down('Space');
+      await page.keyboard.up('Control');
+      await page.keyboard.up('Space');
+      await pause(100);
+      assert.equal((await shownTour(page))?.step, '2', 'Ctrl down, Space down, Ctrl up, Space up');
       assert.equal(await mark(page), null);
       assert.deepEqual(inputs, [], 'nothing reached the terminal');
       assert.equal(await inert(page), true);

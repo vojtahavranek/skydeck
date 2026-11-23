@@ -5,9 +5,9 @@
 // the note on the Claude Code bindings the window shadows, and (follow-up F36) the note on the
 // settings screen, which has no key of its own; (follow-up F41) under its title, `Take the tour`,
 // which starts the tour of the window again (web/tour.js) whether it was seen or not. No key comes
-// in a later stage any more (A11's marking is gone with stage E). Its interface is contract 2.9's. Every key it names is one
-// web/keys.js handles in that zone, and every key keys.js handles is named here
-// (test-page/cards.test.ts reads the help and checks both against keys.js).
+// in a later stage any more (A11's marking is gone with stage E). Its interface is contract 2.9's.
+// Every key it names is one web/keys.js handles in that zone, and every key keys.js handles is
+// named here (test-page/cards.test.ts reads the help and checks both against keys.js).
 
 /**
  * The sections: who has the key, and its lines — the keys (one `kbd` each; "Ctrl+Shift+1…9" is

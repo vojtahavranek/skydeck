@@ -8,7 +8,7 @@
 // key and no click; nothing lies over a region once the tour is gone, and the terminal's own
 // layers are not restyled. Keys come from app.js's capture phase (`key()`): Enter or → goes on
 // (Enter on a button of the panel presses that button), ← goes back, Esc skips, Tab and Shift+Tab
-// walk the panel's buttons and stay in it; each acts once per press. Space (with or without Shift)
+// walk the panel's buttons and stay in it; each acts once per press. Space (with any modifiers)
 // and Shift+Enter do nothing: taken and cancelled at their keydown and their keyup, so that they
 // press no button — a sentence typed as the tour pops up must not walk it and end it. The ring
 // follows its region when the region changes size without a window resize (a ResizeObserver on
@@ -261,11 +261,12 @@ export function createTour(root, deps) {
   skip.addEventListener('click', () => close(true));
   // A click outside the panel does nothing, and leaves the keyboard in the panel.
   scrim.addEventListener('mousedown', (event) => event.preventDefault());
-  // A button pressed by Space is pressed at the keyup: that too is cancelled.
+  // A button pressed by Space is pressed at the keyup: that too is cancelled, whatever modifiers
+  // are held (Ctrl pressed and released while Space is held leaves the keyup the only guard).
   root.addEventListener(
     'keyup',
     (event) => {
-      if (shown && isSpace(event) && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      if (shown && isSpace(event)) {
         event.preventDefault();
       }
     },
@@ -290,17 +291,26 @@ export function createTour(root, deps) {
     },
     /**
      * A keydown while shown, from app.js's capture phase: true when the tour took it (and
-     * cancelled it) — Enter, →, ←, Esc, Tab and Shift+Tab, and Space, Shift+Space and Shift+Enter,
-     * which do nothing.
+     * cancelled it) — Enter, →, ←, Esc, Tab and Shift+Tab, and Space with any modifiers and
+     * Shift+Enter, which do nothing.
      * @param {KeyboardEvent} event
      * @returns {boolean}
      */
     key(event) {
-      if (!shown || event.ctrlKey || event.altKey || event.metaKey) {
+      if (!shown) {
         return false;
       }
       if (event.isComposing || event.keyCode === 229) {
         return false; // a key of an IME composition is the IME's
+      }
+      // Space, whatever modifiers are held, would press the focused button (at its keyup): nothing.
+      // No window chord and no reload key is a Space (web/keys.js).
+      if (isSpace(event)) {
+        event.preventDefault();
+        return true;
+      }
+      if (event.ctrlKey || event.altKey || event.metaKey) {
+        return false;
       }
       if (event.key === 'Tab') {
         event.preventDefault();
@@ -315,8 +325,8 @@ export function createTour(root, deps) {
         controls[to]?.focus();
         return true;
       }
-      // Space and Shift+Enter would press the focused button (Space at its keyup): nothing.
-      if (isSpace(event) || (event.key === 'Enter' && event.shiftKey)) {
+      // Shift+Enter would press the focused button: nothing.
+      if (event.key === 'Enter' && event.shiftKey) {
         event.preventDefault();
         return true;
       }
