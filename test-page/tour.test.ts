@@ -1,11 +1,12 @@
 // The tour of the window (follow-up F41, issue #162; S2 12.14): it starts by itself after the
 // first list in a browser that has not seen this version of it (no mark, or the first version's
-// `seen`) — with sessions and on an empty list —, never in one that has or whose storage cannot keep the mark; each step's region stands out and its panel
-// says the step's words, in the app window's and in a tab's; its keys and the page under it, which
-// takes no key and no click; Done, Skip and Esc mark it seen and give the keyboard back where it
-// was; the key help's `Take the tour` starts it again; a lost connection ends it unmarked. On a
-// scripted stand-in server (helpers/shell.ts), with the real web/; every context but these cases'
-// has the tour marked seen (helpers/browser.ts `newContext`).
+// `seen`) — with sessions and on an empty list —, never in one that has or whose storage cannot
+// keep the mark; each step's region stands out and its panel says the step's words, in the app
+// window's and in a tab's; its keys and the page under it, which takes no key and no
+// click; Done, Skip and Esc mark it seen and give the keyboard back where it was; the key help's
+// `Take the tour` starts it again; a lost connection ends it unmarked. On a scripted stand-in
+// server (helpers/shell.ts), with the real web/; every context but these cases' has the tour
+// marked seen (helpers/browser.ts `newContext`).
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';

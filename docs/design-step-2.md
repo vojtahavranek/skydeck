@@ -4261,8 +4261,9 @@ none: no made-up data.
   back. The constant (`TOUR_SEEN`, web/tour-text.js) is raised by hand, only when the tour changed
   enough that everyone should see it again; an update alone never raises it. It starts by itself
   only where that storage can be read and written: before it starts, the page writes the key and
-  puts back what it found (nothing, or an older mark); storage that throws or refuses the write (a private mode without storage, a full
-  quota) means the tour never starts by itself (the help's control still starts it). A lost
+  puts back what it found (nothing, or an older mark); storage that throws or refuses the write (a
+  private mode without storage, a full quota) means the tour never starts by itself (the help's
+  control still starts it). A lost
   connection or a fatal bar (6.3, 8.2.2) ends a shown tour without marking it, and the page is no
   longer inert; so does an update that runs (F38, 16.5): the page closes the tour as it closes its
   other dialogs, unmarked, before the update's running form locks it.
@@ -4277,7 +4278,8 @@ none: no made-up data.
 - **The steps.** Seven, each pointing at one region, in this order (the words are
   `web/tour-text.js`'s, pure text; `test/web/tour-text.test.ts` holds every key a step names
   against `web/keys.js`, as the help's test does, and every text it says to type against the
-  server's commands (`> tour` and `> restore` the quick switcher's, `skydeck window` the command line's); `test-page/tour.test.ts` every control a step names against the page in each
+  server's commands (`> tour` and `> restore` the quick switcher's, `skydeck window` the command
+  line's); `test-page/tour.test.ts` every control a step names against the page in each
   mode):
 
   | Region | Title | What it says |
@@ -4287,7 +4289,7 @@ none: no made-up data.
   | the key bar | Where the keyboard is | `Focus: list` or `Focus: terminal`; Ctrl+Shift+L moves it; with `Focus: terminal` a letter goes to Claude Code |
   | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done; `/` filter, `a` show done |
   | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+J the next session that needs you; Ctrl+Shift+N a new one |
-| the list | After a restart | a restart of the PC or of WSL ends the running sessions; run `skydeck window` again, and the top of the list offers the ones that were open (the banner, 12.7); `Restore` brings the ticked ones back, and after `Not now` `> restore` in `Switch…` offers it again |
+  | the list | After a restart | a restart of the PC or of WSL ends the running sessions; run `skydeck window` again, and the top of the list offers the ones that were open (the banner, 12.7); `Restore` brings the ticked ones back, and after `Not now` `> restore` in `Switch…` offers it again |
   | the gear | Settings and every key (step 7) | the gear opens Settings; Ctrl+Shift+H shows every key; the tour again: `Take the tour` in the key help, or `> tour` in `Switch…` |
 
   The words name the keys of the mode the page runs in (`<html data-display>`, the rule of the key

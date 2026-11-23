@@ -19,9 +19,9 @@
 // goes to the server. The mark names the tour's version (TOUR_SEEN): `fresh()` tells app.js whether
 // it may start by itself: only while the stored mark is not the current one (absent, or an older
 // version's) and the storage can be read and written (a write, and the mark put back, the probe).
-// A tour that app.js ends (`abort()`: the connection lost, a fatal bar) marks nothing. The words are those
-// of the mode the page shows at its opening (`<html data-display>`, the page's app-only and
-// tab-only rule). Every text reaches the DOM as text.
+// A tour that app.js ends (`abort()`: the connection lost, a fatal bar) marks nothing. The words
+// are those of the mode the page shows at its opening (`<html data-display>`, the page's app-only
+// and tab-only rule). Every text reaches the DOM as text.
 
 /** @import { Part, TourStep } from './tour-text.js' */
 import {
@@ -96,7 +96,8 @@ function isSpace(event) {
 /**
  * Whether the tour may start by itself: the storage does not hold the current mark and can be read
  * and written. The probe leaves the storage as it found it (an older mark stays until the tour is
- * ended).
+ * ended), unless the put-back throws: then `probe` stays, and the next start treats it as an older
+ * mark.
  * @returns {boolean}
  */
 function fresh() {

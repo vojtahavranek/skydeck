@@ -3066,12 +3066,12 @@ too.
    the region). Press Space, then Ctrl+Space, then Shift+Enter: nothing happens, the step stays
    (Space does nothing with any modifier). Press Ctrl+Shift+L: the key bar says `close the tour
    first (Esc)` and the step stays. Click a row of the list: nothing is selected. Press → until
-   step 4: the list again, now with Shift+↑ Shift+↓ (move a session up or down in Open) on its second
-   line. Step 5: `Switch…` stands out and the panel names Ctrl+Shift+P, Ctrl+Shift+1…9, Ctrl+Tab,
-   Ctrl+Shift+J and Ctrl+Shift+N. Step 6, `After a restart`: the list, `skydeck window` and
-   `> restore` (read the three sentences against install.md's "Restore after a restart"; this
-   check does not restart WSL). Step 7: the gear, Ctrl+Shift+H, `Take the tour` and `> tour`, and `Done` in
-   place of `Next`.
+   step 4: the list again, now with Shift+↑ Shift+↓ (move a session up or down in Open) on its
+   second line. Step 5: `Switch…` stands out and the panel names Ctrl+Shift+P, Ctrl+Shift+1…9,
+   Ctrl+Tab, Ctrl+Shift+J and Ctrl+Shift+N. Step 6, `After a restart`: the list, `skydeck window`
+   and `> restore` (read the three sentences against install.md's "Restore after a restart"; this
+   check does not restart WSL). Step 7: the gear, Ctrl+Shift+H, `Take the tour` and `> tour`, and
+   `Done` in place of `Next`.
 3. **Done.** Write down what the key bar says (`Focus: …`), then press Enter. Expected: the panel
    and the dimming are gone, the key bar says what it said before, a typed key goes where it went
    before (a letter into the terminal with `Focus: terminal`). Press Ctrl+Shift+R: the page
