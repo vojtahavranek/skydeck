@@ -645,7 +645,7 @@ test('blocks: a row with an ended terminal of the window and a row that needs yo
     );
   const open = build([]);
   assert.equal(rowIn(open, S1).terminal, termId(1));
-  assert.equal(rowIn(open, S1).slot, 1);
+  assert.equal(rowIn(open, S1).slot, null, 'F43: a row under Recent shows no number');
   assert.equal(rowIn(open, S2).attention?.reason, 'ended');
   assert.deepEqual(ids(open, 'week'), [S1, S2, S3, S4]);
   assert.deepEqual(rowIn(open, S1).stack, orb({ size: 4, head: S1, role: 'head' }));
@@ -686,7 +686,8 @@ test('blocks: a closed block whose member is drawn with a terminal that has not 
   assert.equal(rowIn(message, S2).slot, 2);
   assert.deepEqual(captions(message, 'open'), []);
   assert.deepEqual(ids(message, 'week'), [S3, S4]);
-  assert.equal(rowIn(message, S4).slot, 3);
+  assert.equal(rowIn(message, S4).terminal, termId(3));
+  assert.equal(rowIn(message, S4).slot, null, 'F43: a row under Recent shows no number');
   assert.deepEqual(captions(message, 'week'), []);
   // Reported, the block is closed again, as `closed` says.
   const reported = buildListMessage(
