@@ -410,7 +410,7 @@ describe('registry: starts that fail', () => {
 });
 
 describe('registry: slots and input', () => {
-  test('nextSlot: 1, 2, 3 in order; after the second ends and is closed, 2 again; the tenth gets null', async (t) => {
+  test('nextSlot: 1, 2, 3 in order; once the second ends, 2 again (F43: not only once it is closed); the tenth gets null', async (t) => {
     const box = await registrySandbox(t);
     const r = box.registry();
     const ids: string[] = [];
@@ -429,10 +429,10 @@ describe('registry: slots and input', () => {
     await open();
     r.registry.refuse(second, 'closing it');
     await until(() => info(r.registry, second).state === 'not-started', 'the second ended');
-    assert.equal(r.registry.nextSlot(), 4, 'an ended terminal keeps its slot until it is closed');
-    assert.equal(r.registry.close(second), 'ok');
-    assert.equal(r.registry.nextSlot(), 2);
+    assert.equal(r.registry.nextSlot(), 2, "an ended terminal's slot is free at once");
     await open();
+    assert.equal(r.registry.close(second), 'ok');
+    assert.equal(r.registry.nextSlot(), 4, 'closing it frees nothing more');
     for (let i = 0; i < 6; i++) {
       await open();
     }

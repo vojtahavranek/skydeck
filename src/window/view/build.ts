@@ -277,11 +277,17 @@ function claimOf(
     return null;
   }
   const elsewhere = row.state === 'not-running' ? null : (input.elsewhere.get(row.id) ?? null);
+  const shown = rowPayload(row, { terminal, elsewhere });
+  const open = shown.starting || row.state !== 'not-running';
+  // F43 (S2 7.6, 12.1): a row under Recent or Earlier never shows a number, also while its
+  // terminal still holds one (a lost keeper's program may still run; a session that ended a
+  // moment before its program): a number names a session under Open.
   const payload: RowPayload = {
-    ...rowPayload(row, { terminal, elsewhere }),
+    ...shown,
+    slot: open ? shown.slot : null,
     attention: attentionOf(row, facts),
   };
-  return { terminal, ownNew, payload, open: payload.starting || row.state !== 'not-running' };
+  return { terminal, ownNew, payload, open };
 }
 
 function sameProcess(a: ProcessKey, b: ProcessKey): boolean {

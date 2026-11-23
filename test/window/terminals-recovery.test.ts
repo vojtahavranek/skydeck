@@ -345,13 +345,15 @@ describe('registry: a keeper with a newer protocol', () => {
 
 describe('registry: closing a lost terminal', () => {
   /**
-   * A keeper played by this test: a socket in terms/ that answers C with a protocol-1 hello, and
-   * a pid line naming this test process (alive; killKeepersIn never signals it).
+   * A keeper played by this test: a socket in terms/ that answers C with a protocol-1 hello (its
+   * fields replaced by `over`'s), and a pid line naming this test process (alive; killKeepersIn
+   * never signals it).
    */
   async function fakeKeeper(
     t: TestContext,
     box: RegistryBox,
     id: string,
+    over: Record<string, unknown> = {},
   ): Promise<{ stop(): Promise<void> }> {
     const sockets: Socket[] = [];
     const server: Server = createServer((socket) => {
@@ -386,6 +388,7 @@ describe('registry: closing a lost terminal', () => {
             dir: box.s.home,
           },
           exited: null,
+          ...over,
         };
         socket.write(encodeFrame('H', utf8(JSON.stringify(hello))));
       });
@@ -440,6 +443,217 @@ describe('registry: closing a lost terminal', () => {
       assert.equal(existsSync(box.files.termPid(id)), true, 'the pid line stays');
     });
   }
+
+  // Follow-up F43 (S2 7.5, 7.6): a lost terminal keeps its number while its program may still run
+  // — the program its keeper reported, alive, for less than 60 s after the loss — and frees it
+  // then; one whose program is gone, or that never had one, frees it at once.
+
+  /**
+   * The box's platform with a wall clock `shift()` moves forward (the 60 s without waiting) and
+   * whose /proc cannot read this test process's stat line: the program the fake keeper names (this
+   * process) may still run for design 5.5's rule, and the sandbox's cleanup, which waits for that
+   * program by its process start 1, does not wait for this process. `seconds()` counts the clock's
+   * one-second timers not stopped yet (the lost terminal's watch is one); while `hold(path)` is
+   * armed, a connect to `path` waits until `release()`.
+   */
+  function shifted(box: RegistryBox): {
+    platform: Platform;
+    shift(ns: bigint): void;
+    seconds(): number;
+    hold(path: string): void;
+    held(): number;
+    release(): void;
+  } {
+    const base = box.tp.platform;
+    let by = 0n;
+    const live = new Set<object>();
+    let holding: string | null = null;
+    let waiting: (() => void)[] = [];
+    return {
+      platform: {
+        ...base,
+        clock: {
+          ...base.clock,
+          nowNs: () => base.clock.nowNs() + by,
+          every(ms, callback) {
+            const stop = base.clock.every(ms, callback);
+            if (ms !== 1000) return stop;
+            const token = {};
+            live.add(token);
+            return () => {
+              live.delete(token);
+              stop();
+            };
+          },
+        },
+        proc: {
+          ...base.proc,
+          stat: (pid) => {
+            if (pid === process.pid) {
+              throw Object.assign(new Error('unreadable'), { code: 'EACCES' });
+            }
+            return base.proc.stat(pid);
+          },
+        },
+        net: {
+          ...base.net,
+          async connectUnix(path) {
+            if (path === holding) {
+              await new Promise<void>((resolve) => waiting.push(resolve));
+            }
+            return base.net.connectUnix(path);
+          },
+        },
+      },
+      shift(ns) {
+        by += ns;
+      },
+      seconds: () => live.size,
+      hold(path) {
+        holding = path;
+      },
+      held: () => waiting.length,
+      release() {
+        holding = null;
+        for (const resume of waiting) resume();
+        waiting = [];
+      },
+    };
+  }
+
+  /** The keeper played by `fakeKeeper` found by `r`, then lost: its socket refuses. */
+  async function lost(
+    r: TestRegistry,
+    keeper: { stop(): Promise<void> },
+    box: RegistryBox,
+    id: string,
+  ): Promise<void> {
+    await r.registry.rediscover();
+    assert.equal(info(r.registry, id).slot, 1, 'found with its slot');
+    await keeper.stop();
+    const sock = box.files.termSock(id);
+    if (!existsSync(sock)) writeFileSync(sock, ''); // connecting to a file is refused
+    await until(() => info(r.registry, id).state === 'lost', 'lost', 10_000);
+  }
+
+  test('F43: a lost terminal whose program may still run (its stat line unreadable) keeps its number for the 60 s after the loss, then it is free and announced', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'cccccccccccc';
+    const keeper = await fakeKeeper(t, box, id);
+    const clock = shifted(box);
+    const r = box.registry({ platform: clock.platform });
+    await lost(r, keeper, box, id);
+    assert.equal(info(r.registry, id).slot, 1, 'held while its program may still run');
+    assert.equal(r.registry.nextSlot(), 2);
+    await sleep(2500);
+    assert.equal(info(r.registry, id).slot, 1, 'still held a few seconds later');
+    let changes = 0;
+    r.registry.onChange(() => {
+      changes += 1;
+    });
+    // About 5 s passed since the loss: 50 s more is still within its 60 s; 15 s more is past them.
+    clock.shift(50n * 1_000_000_000n);
+    await sleep(1500);
+    assert.equal(info(r.registry, id).slot, 1, 'held some 56 s after the loss');
+    clock.shift(15n * 1_000_000_000n);
+    await until(() => info(r.registry, id).slot === null, 'free 60 s after the loss', 5000);
+    assert.ok(changes >= 1, 'announced');
+    assert.equal(r.registry.nextSlot(), 1);
+    assert.equal(info(r.registry, id).state, 'lost', 'the lost terminal is still listed');
+  });
+
+  test('F43: forgetting a lost terminal stops its watch at once', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'ffffffffffff';
+    const keeper = await fakeKeeper(t, box, id);
+    const clock = shifted(box);
+    const r = box.registry({ platform: clock.platform });
+    await lost(r, keeper, box, id);
+    assert.equal(info(r.registry, id).slot, 1, 'held: its watch runs');
+    const before = clock.seconds();
+    assert.ok(before >= 1, 'the watch is on the clock');
+    assert.equal(r.registry.close(id), 'ok');
+    assert.equal(clock.seconds(), before - 1, 'the close took the watch off the clock');
+  });
+
+  test("F43: stopAll stops a lost terminal's watch at once", async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'abababababab';
+    const keeper = await fakeKeeper(t, box, id);
+    const clock = shifted(box);
+    const r = box.registry({ platform: clock.platform });
+    await lost(r, keeper, box, id);
+    const before = clock.seconds();
+    assert.ok(before >= 1, 'the watch is on the clock');
+    const stopping = r.registry.stopAll();
+    assert.equal(clock.seconds(), before - 1, 'stopAll took the watch off the clock');
+    await stopping;
+  });
+
+  test('F43: a loss whose work lands after stopAll changes no slot and leaves no watch on the clock', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'cdcdcdcdcdcd';
+    const keeper = await fakeKeeper(t, box, id);
+    const clock = shifted(box);
+    const r = box.registry({ platform: clock.platform });
+    await r.registry.rediscover();
+    assert.equal(info(r.registry, id).slot, 1);
+    // The reconnect's connect waits; meanwhile the registry stops.
+    const sock = box.files.termSock(id);
+    clock.hold(sock);
+    await keeper.stop();
+    if (!existsSync(sock)) writeFileSync(sock, ''); // connecting to a file is refused
+    await until(() => clock.held() > 0, 'a reconnect waits for its connect', 10_000);
+    await r.registry.stopAll();
+    clock.release();
+    await until(() => info(r.registry, id).state === 'lost', 'lost after the stop', 10_000);
+    await sleep(1500);
+    assert.equal(info(r.registry, id).slot, 1, 'once stopped no slot changes');
+    assert.equal(clock.seconds(), 0, 'no watch is left on the clock');
+  });
+
+  for (const program of ['gone', 'never started'] as const) {
+    test(`F43: a lost terminal whose program is ${program} frees its number at once`, async (t) => {
+      const box = await registrySandbox(t);
+      const id = program === 'gone' ? 'dddddddddddd' : 'eeeeeeeeeeee';
+      // 'gone': the hello's process start (1) is not this process's (design 5.5: another process).
+      const keeper = await fakeKeeper(
+        t,
+        box,
+        id,
+        program === 'gone' ? {} : { started: false, pid: null, procStart: null },
+      );
+      const r = box.registry();
+      let slotAtLoss: number | null | undefined;
+      r.registry.onChange(() => {
+        const term = r.registry.list().find((one) => one.id === id);
+        if (term?.state === 'lost' && slotAtLoss === undefined) slotAtLoss = term.slot;
+      });
+      await lost(r, keeper, box, id);
+      assert.equal(slotAtLoss, null, 'no number from the change that made it lost on');
+      assert.equal(r.registry.nextSlot(), 1);
+    });
+  }
+
+  test('F43: a keeper that stops answering (reconnecting) keeps its number and comes back with it', async (t) => {
+    const box = await registrySandbox(t);
+    const r = box.registry();
+    const spec = box.spec({ meta: { ...box.spec().meta, slot: 1 } });
+    await r.registry.spawn(spec);
+    const keeper = box.keeperOf(spec.id);
+    box.signalKeeper(keeper, 'SIGSTOP');
+    try {
+      r.sockets.at(-1)?.destroy();
+      await until(() => info(r.registry, spec.id).state === 'reconnecting', 'reconnecting');
+      await sleep(2000);
+      assert.equal(info(r.registry, spec.id).slot, 1, 'held while reconnecting');
+      assert.equal(r.registry.nextSlot(), 2);
+    } finally {
+      box.signalKeeper(keeper, 'SIGCONT');
+    }
+    await until(() => info(r.registry, spec.id).state === 'starting', 'answering again', 10_000);
+    assert.equal(info(r.registry, spec.id).slot, 1, 'back with its number');
+  });
 });
 
 // ---------------------------------------------------------------------------------------------

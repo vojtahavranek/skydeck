@@ -356,7 +356,7 @@ describe('F37: moving a session of Open', () => {
     assert.ok(shown.every((row) => row.id !== sid(5) || row.stack?.role === 'member'));
   });
 
-  test('the slots: the same set, gaps kept, ascending in drawn order; an ended terminal in Recent keeps its own', () => {
+  test('the slots: the same set, gaps kept, ascending in drawn order; a terminal under Recent is left out of the hand-out', () => {
     const input = world([
       { n: 1, slot: 1 },
       { n: 2, slot: 4 },
