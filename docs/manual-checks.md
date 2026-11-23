@@ -25,8 +25,9 @@ W41 checks the window's settings screen (follow-up F36), at "The settings screen
 a session of Open by hand (follow-up F37), at "Moving a session in Open"; W43 checks the window's
 notice of a newer skydeck (follow-up F38), at "The update notice"; W44 checks the short settings
 screen and its gear (follow-up F39), at "The short settings screen"; W45 checks the tour of the
-window (follow-up F41), at "The tour of the window"; W46 checks the carry over after `/clear`
-(follow-up F40), at "Carry over after /clear".
+window (follow-up F41), at "The tour of the window"; W46 checks copy on select in the window's
+terminal (issue #184), at "Copy on select"; W47 checks the carry over after `/clear` (follow-up
+F40), at "Carry over after /clear".
 
 Setup:
 
@@ -130,7 +131,7 @@ skydeck ls
 Expected: two rows. The old session is `not-running` and has no marks. The new one is `waiting` and has
 the mark `continued`. `skydeck show <new ref>` prints `continues: <old id>` and a line
 `link:      clear <old short id> -> <new short id> at <time>`. The commands copy nothing from the
-old session to the new one; the window offers it on the new session (W46).
+old session to the new one; the window offers it on the new session (W47).
 
 ## 4. Exit
 
@@ -3003,9 +3004,10 @@ with the terminal of a session shown (any running one; no prompt is typed into i
    Expected: a dialog over the page, `Settings`, then `Appearance` (`Mode`, `Colour theme` and
    under it `Light and dark each keep their own.`), `Links` (`Open links in`, `Ticket address` and
    its hint about `{key}`), `The window` (`Keep WSL running`, a switch with `after a restart`
-   beside it; `Typed commands start sessions in` and its hint), `Updates` (follow-up F38: the
-   switch `Check for updates every day`, the line of the last check and `Check now`; W43 tries
-   them), and at the end `Advanced (14 more settings)` and `Close`. No `Save`, no `Default`, no file name. The keyboard
+   beside it; `Typed commands start sessions in` and its hint; from issue #184 `Copy on select`,
+   a switch, and its hint `In a session’s terminal; Ctrl+Shift+C copies either way.`),
+   `Updates` (follow-up F38: the switch `Check for updates every day`, the line of the last check
+   and `Check now`; W43 tries them), and at the end `Advanced (14 more settings)` and `Close`. No `Save`, no `Default`, no file name. The keyboard
    is on `Mode`. Write down what Mode and Colour theme show.
 4. **The theme.** Choose the other of `Light` and `Dark` in Mode (from `Auto`, `Dark`). Expected:
    the whole window behind the dialog changes at once, the terminal too. Choose another `Colour
@@ -3093,16 +3095,62 @@ version; whether a step's words could be shorter or clearer.
 
 Not tried before this check was written: all of it, in Edge.
 
+## Copy on select
+
+The check of copy on select (issue #184; design-step-2.md 9.1, 9.5, 12.13; [install.md](install.md),
+"Using the window", its point "Keys", and "The `window` keys"): W46, in your window, with a real
+session. It switches `Copy on select` (`window.copyOnSelect`) off and on in Settings, which writes
+`config.json` (and the window's copy of it, `config.json.skydeck-backup`): both are copied aside
+first and given back at the end, as in W41. Commands are typed in W, a WSL terminal of your own
+(never a `!` command inside Claude Code). The tests select in headless Chromium and read its own
+clipboard; only here does a selection reach the Windows clipboard through Edge, from a terminal
+with Claude Code in it, for another program to paste.
+
+## W46. A selection copied as the mouse lets go (real claude)
+
+Setup: skydeck updated to a commit that has issue #184 (`skydeck update`, W32); the window open,
+with the terminal of a session shown that has some text on its screen (any running one; no prompt
+is typed into it); Notepad open beside the window.
+
+1. **Copy the files aside.** As W41's step 1, with `w46` for `w41` in the names; write down the
+   value of `grep -n copyOnSelect ~/.config/skydeck/config.json` (no line: not set, which is
+   `true`). Open Settings (the gear): `Copy on select` is a switch in The window. When it is off,
+   click it on (`Saved.` beside it). Close Settings with Esc.
+2. **A drag.** In the terminal, drag over two or three words and let go. Nothing says that it
+   copied. In Notepad, Ctrl+V. Expected: exactly those words. Double click one word in the
+   terminal, Ctrl+V in Notepad: that word.
+3. **A click.** Copy a word in Notepad (select it, Ctrl+C). Click once into the terminal (no drag)
+   and Ctrl+V in Notepad. Expected: the Notepad word, not the terminal's: a click copies nothing.
+4. **Off.** Open Settings, turn `Copy on select` off (`Saved.` beside it), close it with Esc. Copy
+   a word in Notepad, then drag over other words in the terminal and let go, and Ctrl+V in Notepad.
+   Expected: the Notepad word: the clipboard kept the old text. Drag over those words in the
+   terminal again and, at once, without a click, press Ctrl+Shift+C; Ctrl+V in Notepad: the
+   terminal's words (Ctrl+Shift+C still copies).
+5. **On again.** Open Settings, turn `Copy on select` on again (`Saved.`), close it. Drag over a
+   word in the terminal, Ctrl+V in Notepad. Expected: that word, with no reload of the window in
+   between.
+6. **The end.** When step 1 found `Copy on select` off, turn it off again in Settings (`Saved.`),
+   so that the window uses the value the file gets back. The window's copy: as W41's step 6, with
+   `w46` for `w41`. The file: when step 1 found no `config.json`, `rm
+   ~/.config/skydeck/config.json` (the switch made it, holding only `window.copyOnSelect`); else,
+   when you changed nothing else in it since step 1, `cp -p ~/config.json.before-w46
+   ~/.config/skydeck/config.json`, then `rm ~/config.json.before-w46`. Nothing needs a restart.
+
+Write down: for each step whether it went as expected, and the words where they differ; your Edge
+version.
+
+Not tried before this check was written: all of it, in Edge.
+
 ## Carry over after /clear
 
 The check of the carry over after `/clear` (follow-up F40; design.md 7.1; design-step-2.md 12.6,
-12.9; [install.md](install.md), "After `/clear`: carry over"): W46, in your window, with real
+12.9; [install.md](install.md), "After `/clear`: carry over"): W47, in your window, with real
 Claude Code, on throwaway sessions in a scratch folder. It writes labels, groups, tickets and done
 marks of those sessions only. Commands are typed in W, a WSL terminal of your own (never a `!`
 command inside Claude Code). The tests run the bar in headless Chromium against the stand-in
 program; only here does it meet real Claude Code and Edge.
 
-## W46. The bar after /clear
+## W47. The bar after /clear
 
 Setup: skydeck updated to a commit that has follow-up F40 (`skydeck update`, W32), and the window
 opened at least once since (the bar shows only for a `/clear` made after that); a throwaway session

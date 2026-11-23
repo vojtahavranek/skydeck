@@ -54,7 +54,8 @@ export interface SettingRow {
   kind: 'change' | 'show';
   /** What a shown one names; null for a changeable one. */
   names: 'program' | 'folder' | 'port' | null;
-  control: 'number' | 'text' | 'choice';
+  /** `switch`: a key that is true or false (issue #184). */
+  control: 'number' | 'text' | 'choice' | 'switch';
   /** The values a choice takes, exactly those config.json's rules take; [] for the others. */
   choices: readonly string[];
   /** An empty text field means null (config.json's rule takes null and refuses ''). */
@@ -269,6 +270,19 @@ export const SETTINGS: Readonly<Record<SettingKey, SettingRow>> = {
     nullable: false,
     applies: 'now',
   },
+  // Issue #184: the page reads it from each list (listFor puts deck.config.window.copyOnSelect
+  // there), and a change is followed by the next list of every page.
+  'window.copyOnSelect': {
+    group: 'The window',
+    meaning:
+      'true: a selection made with the mouse in the window’s terminal is copied to the clipboard at once, as Ctrl+Shift+C copies it; false: only Ctrl+Shift+C copies.',
+    kind: 'change',
+    names: null,
+    control: 'switch',
+    choices: [],
+    nullable: false,
+    applies: 'now',
+  },
 };
 
 /** Beside config.json: the copy kept before a server's first change. */
@@ -298,7 +312,7 @@ export interface Settings {
   /** The screen, as the file and the running server are now (the file read again). */
   payload(): SettingsPayload;
   /** Sets one changeable key to `value` (G2, G3, G4); a refusal changes nothing. */
-  set(key: string, value: string | number | null): SettingOutcome;
+  set(key: string, value: string | number | boolean | null): SettingOutcome;
   /** Removes one changeable key from the file: back to its default. */
   reset(key: string): SettingOutcome;
 }
@@ -659,8 +673,13 @@ export function createSettings(deps: SettingsDeps): Settings {
     payload,
     set(key, value) {
       return safely(() => {
-        if (value !== null && typeof value !== 'string' && typeof value !== 'number') {
-          return refused("a setting's value cannot be an object, a list, true or false");
+        if (
+          value !== null &&
+          typeof value !== 'string' &&
+          typeof value !== 'number' &&
+          typeof value !== 'boolean'
+        ) {
+          return refused("a setting's value cannot be an object or a list");
         }
         // JSON would write Infinity and NaN as null, which the file's rules take for some keys.
         if (typeof value === 'number' && !Number.isFinite(value)) {

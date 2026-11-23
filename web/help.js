@@ -24,7 +24,10 @@ const SECTIONS = [
       [['Ctrl+Shift+L'], 'the keyboard between the list and the terminal'],
       [['Ctrl+Shift+N'], 'a new session'],
       [['Ctrl+Shift+F'], 'find in the terminal’s scrollback'],
-      [['Ctrl+Shift+C'], 'copy the terminal’s selection'],
+      [
+        ['Ctrl+Shift+C'],
+        'copy the terminal’s selection (one made with the mouse is copied as you let go, unless Copy on select is off in Settings)',
+      ],
       [['Ctrl+Shift+V'], 'send a raw Ctrl+V (Claude Code’s image paste)'],
       [['Ctrl+Shift+H'], 'this help, and away again'],
       [

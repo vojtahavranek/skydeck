@@ -1376,6 +1376,13 @@ describe("parsePageMessage: F36's acts (S2 12.13)", () => {
       key: 'ticketUrl',
       value: null,
     },
+    'act setting-set, false': {
+      t: 'act',
+      id: 6,
+      kind: 'setting-set',
+      key: 'window.copyOnSelect',
+      value: false,
+    },
     'act setting-default': { t: 'act', id: 5, kind: 'setting-default', key: 'window.links' },
   };
   for (const [name, message] of Object.entries(ACTS)) {
@@ -1394,19 +1401,20 @@ describe("parsePageMessage: F36's acts (S2 12.13)", () => {
     }
   }
 
-  test('setting-set: the value is a string, a number or null — never a whole configuration, a list or a boolean', () => {
+  test('setting-set: the value is a string, a number, true, false or null — never a whole configuration or a list', () => {
     const set = { t: 'act', id: 1, kind: 'setting-set', key: 'groupPattern' };
     for (const value of [
       { groupPattern: 'x', [MARKER]: 1 },
       { window: { links: 'edge' } },
+      { window: { copyOnSelect: false } },
       ['x'],
+      [true],
       [],
-      true,
-      false,
     ]) {
       refused(page({ ...set, value }));
     }
-    for (const value of ['', 'x', 0, -1, 1.5, 1e300, null]) {
+    // Issue #184: window.copyOnSelect is true or false; which key takes which is the server's rule.
+    for (const value of ['', 'x', 0, -1, 1.5, 1e300, null, true, false]) {
       assert.equal(page({ ...set, value }).ok, true, JSON.stringify(value));
     }
     // JSON reads 1e999 as Infinity (JSON.stringify would write it as null): not a finite number.

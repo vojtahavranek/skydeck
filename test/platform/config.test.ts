@@ -46,6 +46,7 @@ describe('loadConfig', () => {
       keepAlive: 'wsl',
       links: 'default',
       updateCheck: 'daily',
+      copyOnSelect: true,
     });
   });
 
@@ -65,6 +66,7 @@ describe('loadConfig', () => {
         keepAlive: 'off',
         links: 'edge',
         updateCheck: 'off',
+        copyOnSelect: false,
       },
     });
 
@@ -75,6 +77,7 @@ describe('loadConfig', () => {
       keepAlive: 'off',
       links: 'edge',
       updateCheck: 'off',
+      copyOnSelect: false,
     });
     assert.equal(parseConfig('{"window":{"port":65535}}', 'x').window.port, 65535);
     assert.equal(parseConfig('{"window":{"profileDir":"c:\\\\"}}', 'x').window.profileDir, 'c:\\');
@@ -104,6 +107,27 @@ describe('loadConfig', () => {
           assert.equal(
             error.message,
             '/c/config.json: "window.updateCheck" must be "daily" or "off"',
+            value,
+          );
+          return true;
+        },
+      );
+    }
+  });
+
+  test('window.copyOnSelect is true unless set, and takes true or false only (issue #184, S2 16.4)', () => {
+    assert.equal(parseConfig('{}', 'x').window.copyOnSelect, true);
+    assert.equal(parseConfig('{"window":{"links":"edge"}}', 'x').window.copyOnSelect, true);
+    assert.equal(parseConfig('{"window":{"copyOnSelect":true}}', 'x').window.copyOnSelect, true);
+    assert.equal(parseConfig('{"window":{"copyOnSelect":false}}', 'x').window.copyOnSelect, false);
+    for (const value of ['"true"', '"false"', '"on"', '1', '0', 'null', '[]', '{}', '[true]']) {
+      assert.throws(
+        () => parseConfig(`{"window":{"copyOnSelect":${value}}}`, '/c/config.json'),
+        (error: unknown) => {
+          assert.ok(error instanceof ConfigError, String(error));
+          assert.equal(
+            error.message,
+            '/c/config.json: "window.copyOnSelect" must be true or false',
             value,
           );
           return true;
@@ -253,6 +277,7 @@ describe('parseConfig', () => {
         keepAlive: 'wsl',
         links: 'default',
         updateCheck: 'daily',
+        copyOnSelect: true,
       },
     });
   });

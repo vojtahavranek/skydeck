@@ -303,6 +303,9 @@ const terminalView = createTerminalView(dom.terminal, {
       }
     });
   },
+  // Issue #184: `window.copyOnSelect` as the server's last list says it, read at each release of
+  // the mouse. The default is the server's (S2 4.3): a list without the field copies nothing.
+  copyOnSelect: () => state.list?.copyOnSelect === true,
 });
 /**
  * The view's optional `fits(width, height)` (contract 2.9, task 28): the columns and rows a

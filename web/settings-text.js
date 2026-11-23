@@ -56,7 +56,9 @@ export function restartText(entry, setting) {
   }
   let word;
   if (entry.control === 'switch') {
-    word = running === entry.on ? 'on' : 'off';
+    // A side is the control's text: a key that is true or false has `true` and `false` (#184).
+    word =
+      (typeof running === 'string' ? running : JSON.stringify(running)) === entry.on ? 'on' : 'off';
   } else if (entry.control === 'choice') {
     word = `“${typeof running === 'string' ? (entry.words[running] ?? running) : String(running)}”`;
   } else {
@@ -181,16 +183,20 @@ export function shownOnlyText(setting) {
 
 /**
  * What the request carries for a field's text: a number field's text as a number when it reads as
- * one, else as typed (the server refuses it in config.json's words); an empty field of a setting
+ * one, else as typed (the server refuses it in config.json's words); a switch of a key that is true
+ * or false (issue #184) `true` or `false` themselves for their texts; an empty field of a setting
  * that may be null, null; any other text as typed; a choice its value.
  * @param {SettingPayload} setting
  * @param {string} text
- * @returns {string | number | null}
+ * @returns {string | number | boolean | null}
  */
 export function valueToSend(setting, text) {
   if (setting.control === 'number') {
     const number = Number(text);
     return text.trim() !== '' && Number.isFinite(number) ? number : text;
+  }
+  if (setting.control === 'switch' && (text === 'true' || text === 'false')) {
+    return text === 'true';
   }
   if (setting.nullable && text === '') {
     return null;
@@ -213,7 +219,8 @@ export function faithful(setting) {
 }
 
 /**
- * What a control shows of the setting's value (exact: the server sends it as the file holds it).
+ * What a control shows of the setting's value (exact: the server sends it as the file holds it):
+ * a text as it is, a number, true and false (issue #184) as they are written, null as nothing.
  * @param {SettingPayload} setting
  * @returns {string}
  */
@@ -223,5 +230,9 @@ export function controlText(setting) {
   if (value === null) {
     return '';
   }
-  return typeof value === 'string' ? value : typeof value === 'number' ? String(value) : '';
+  return typeof value === 'string'
+    ? value
+    : typeof value === 'number' || typeof value === 'boolean'
+      ? String(value)
+      : '';
 }

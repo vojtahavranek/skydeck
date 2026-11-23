@@ -1174,10 +1174,13 @@ test('the terminal view', async (t) => {
       assert.equal(inputOf(d.record, S1), before, 'no interrupt reached the program');
 
       // Ctrl+Shift+C: the terminal's own selection (a double click in it selects a word; the
-      // terminal takes the keyboard on the click).
+      // terminal takes the keyboard on the click). The double click copies it already (issue
+      // #184, on by default): another text is put on the clipboard before Ctrl+Shift+C.
       const word = await whereIs(page, 'line 30');
       await page.mouse.dblclick(word.x, word.y);
       await untilTerminalOf(page, S1);
+      await until(async () => /^(line|30)$/.test(await clipboardText(page)), 'copied on select');
+      await page.evaluate(() => navigator.clipboard.writeText('copied elsewhere'));
       await page.keyboard.press('Control+Shift+C');
       await until(async () => /^(line|30)$/.test(await clipboardText(page)), 'the word copied');
 
