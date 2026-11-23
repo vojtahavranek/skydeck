@@ -908,6 +908,15 @@ effect.
   field, so that the new session joins that group. Without the click the field stays empty. The
   Group field also offers the groups of your list as you type.
 - **A session that ended** keeps its last screen, dimmed, under a bar with Resume and Close.
+- **The tour**: the first time a browser shows the window, a tour of six steps starts by itself
+  once the list is drawn: each step makes one part of the window stand out (the list, the right
+  side, the key bar, `Switch…`, the gear) and says in two or three lines what is there, above all
+  where the keyboard is. Enter or → goes on, ← goes back, Esc or `Skip the tour` ends it; while it
+  shows, the window under it takes no key and no click. Once ended it does not come back by itself
+  (the browser keeps that, as it keeps the theme; the app window and a browser tab each show it
+  once): `Take the tour` at the top of the key help (Ctrl+Shift+H), or `> tour` in the quick
+  switcher (Ctrl+Shift+P; `>t` is enough), starts it again. A browser that keeps no storage (some
+  private modes) never starts it by itself.
 - **Keys**: **Ctrl+Shift+H shows every key of the window**. The window takes only Ctrl+Shift
   chords with a letter or a digit, and Ctrl+Tab, besides the list's own keys while the list has the
   keyboard; every other key goes to Claude Code (Alt chords, Ctrl with a letter, function keys, Esc
@@ -1812,8 +1821,10 @@ entry `Restore 3 sessions from yesterday at 18:02` is listed (the time as the ba
 while no restore runs. Enter on it, not a click (a click on it does nothing), restores the
 sessions the banner had preselected, and the run's report shows where the banner's report shows;
 the footer then says `↑ ↓ move · Enter restore · Esc close`. A text
-that starts with `>` lists no session; without the offer it says `No command matches. > restore
-is listed after Not now on the restore banner, until WSL restarts.` Every other text lists
+that starts with `>` lists no session; without the offer it says `No command matches. > settings
+opens the settings; > tour starts the tour of the window; > restore is listed after Not now on the
+restore banner, until WSL restarts.` (`> settings` and `> tour` are the switcher's other two
+commands.) Every other text lists
 sessions only (` >restore`, with a space first, looks for the word `>restore`), so the offer is
 never one Enter away.
 

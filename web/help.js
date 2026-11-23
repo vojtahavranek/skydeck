@@ -3,10 +3,11 @@
 // task 55; stage E's Ctrl+Shift+P with plan E task 98, whose field's keys are named as plain text
 // in its line, not as keys of a zone), a note on stage D's dialogs, the note for a browser tab and
 // the note on the Claude Code bindings the window shadows, and (follow-up F36) the note on the
-// settings screen, which has no key of its own. No key comes in a later stage any more
-// (A11's marking is gone with stage E). Its interface is contract 2.9's. Every key it names is one
-// web/keys.js handles in that zone, and every key keys.js handles is named here
-// (test-page/cards.test.ts reads the help and checks both against keys.js).
+// settings screen, which has no key of its own; (follow-up F41) under its title, `Take the tour`,
+// which starts the tour of the window again (web/tour.js) whether it was seen or not. No key comes
+// in a later stage any more (A11's marking is gone with stage E). Its interface is contract 2.9's.
+// Every key it names is one web/keys.js handles in that zone, and every key keys.js handles is
+// named here (test-page/cards.test.ts reads the help and checks both against keys.js).
 
 /**
  * The sections: who has the key, and its lines — the keys (one `kbd` each; "Ctrl+Shift+1…9" is
@@ -99,12 +100,26 @@ function element(tag, className, text) {
   return made;
 }
 
-/** @param {HTMLElement} root */
-export function createHelp(root) {
+/**
+ * @param {HTMLElement} root
+ * @param {{ tour: () => void }} deps  `tour`: `Take the tour` was pressed (app.js's gate decides)
+ */
+export function createHelp(root, deps) {
   const box = element('div', 'help-box');
   const title = element('div', 'help-title');
   title.append('Keys ', element('span', 'help-close', '· Ctrl+Shift+H closes this'));
   box.append(title);
+  // F41: a click on it moves no keyboard, so that the tour gives it back where it was.
+  const again = element('div', 'help-again');
+  const tour = /** @type {HTMLButtonElement} */ (element('button', 'help-tour', 'Take the tour'));
+  tour.type = 'button';
+  tour.addEventListener('mousedown', (event) => event.preventDefault());
+  tour.addEventListener('click', () => deps.tour());
+  again.append(
+    tour,
+    element('span', 'help-what', 'a minute’s walk round the window, step by step'),
+  );
+  box.append(again);
   for (const section of SECTIONS) {
     const part = element('div', 'help-section');
     part.dataset['zone'] = section.zone;

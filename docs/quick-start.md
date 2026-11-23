@@ -85,6 +85,9 @@ The keyboard is either in the list or in the terminal. The key bar at the bottom
 session at all yet, the list says so and names the two ways to get one: start `claude` in any
 terminal, or press Ctrl+Shift+N in the window.
 
+The first time the window opens, a short tour points at each part of it; take it again with `Take
+the tour` in the key help (Ctrl+Shift+H), or `> tour` in the quick switcher (Ctrl+Shift+P).
+
 ### Read the list
 
 The list has three sections:

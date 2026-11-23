@@ -552,6 +552,9 @@ export interface SwitcherPayload {
   /** F36: the command `> settings` is offered (the text in command form names a start of it).
    *  Absent, as from a server before F36, is false. */
   settings?: boolean;
+  /** F41: the command `> tour` is offered (the same rule over `tour`). Absent, as from a server
+   *  before F41, is false. */
+  tour?: boolean;
 }
 /** One session the banner offers (design 7.8's entry). */
 export interface BannerEntryPayload {
