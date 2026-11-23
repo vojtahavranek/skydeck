@@ -23,7 +23,7 @@ test("the page's icon", async (t) => {
   const chromium = await browser(t);
 
   await t.test(
-    'the icon link names /assets/<build>/web/icons/favicon.ico (16, 32 and 48 pixels), which answers 200 image/x-icon with the committed bytes; the manifest link loads the manifest, Chromium parses it without an error, and each of its icons answers 200; the page reports no problem',
+    'the icon link names /assets/<build>/web/icons/favicon.ico (its nine sizes, 16 to 64 pixels), which answers 200 image/x-icon with the committed bytes and Chromium decodes (its largest image, 64 pixels); the manifest link loads the manifest, Chromium parses it without an error, and each of its icons answers 200; the page reports no problem',
     async (t) => {
       const l = await launched(t, chromium);
       const { page } = l;
@@ -40,7 +40,7 @@ test("the page's icon", async (t) => {
         {
           rel: 'icon',
           href: `/assets/${build}/web/icons/favicon.ico`,
-          sizes: '16x16 32x32 48x48',
+          sizes: '16x16 20x20 24x24 30x30 32x32 36x36 40x40 48x48 64x64',
         },
         { rel: 'manifest', href: '/manifest.webmanifest', sizes: null },
       ]);
@@ -59,6 +59,12 @@ test("the page's icon", async (t) => {
       assert.equal(icon.status, 200);
       assert.equal(icon.type, 'image/x-icon');
       assert.deepEqual(Buffer.from(icon.bytes), ICO);
+      // Chromium reads the nine images' directory: an image of the ICO is decoded.
+      const decoded = await page.evaluate(async (href) => {
+        const bitmap = await createImageBitmap(await (await fetch(href)).blob());
+        return { width: bitmap.width, height: bitmap.height };
+      }, `/assets/${build}/web/icons/favicon.ico`);
+      assert.deepEqual(decoded, { width: 64, height: 64 });
 
       // Chromium's own load of the manifest through the link (its manifest-src): parsed, no error.
       const cdp = await page.context().newCDPSession(page);
