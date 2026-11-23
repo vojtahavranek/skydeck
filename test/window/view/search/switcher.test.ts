@@ -7,6 +7,7 @@ import {
   MAX_ITEMS,
   restoreOffer,
   switcherPayload,
+  tourCommand,
 } from '../../../../src/window/view/search/switcher.ts';
 import type { SwitchCandidate } from '../../../../src/window/view/search/switcher.ts';
 import { rowPayload } from '../../../../src/window/view/sections.ts';
@@ -306,7 +307,15 @@ test('switcherPayload: a text whose first character is `>` lists no session, wha
   ]) {
     assert.deepEqual(
       switcherPayload(text, candidates, ['b']),
-      { query: text, command: true, items: [], more: 0, restore: null, settings: false },
+      {
+        query: text,
+        command: true,
+        items: [],
+        more: 0,
+        restore: null,
+        settings: false,
+        tour: false,
+      },
       JSON.stringify(text),
     );
   }
@@ -488,7 +497,7 @@ test('switcherPayload: `query` is the text as given, not cut and not lower-cased
   assert.equal(payload.restore, null);
 });
 
-test('switcherPayload: nothing gives { query, command: false, items: [], more: 0, restore: null, settings: false }', () => {
+test('switcherPayload: nothing gives { query, command: false, items: [], more: 0, restore: null, settings: false, tour: false }', () => {
   assert.deepEqual(switcherPayload('', [], []), {
     query: '',
     command: false,
@@ -496,6 +505,7 @@ test('switcherPayload: nothing gives { query, command: false, items: [], more: 0
     more: 0,
     restore: null,
     settings: false,
+    tour: false,
   });
   assert.deepEqual(switcherPayload('fix', [], ['n1']), {
     query: 'fix',
@@ -504,6 +514,7 @@ test('switcherPayload: nothing gives { query, command: false, items: [], more: 0
     more: 0,
     restore: null,
     settings: false,
+    tour: false,
   });
   assert.deepEqual(switcherPayload('absent', [candidate({ id: 'a' })], []), {
     query: 'absent',
@@ -512,6 +523,7 @@ test('switcherPayload: nothing gives { query, command: false, items: [], more: 0
     more: 0,
     restore: null,
     settings: false,
+    tour: false,
   });
 });
 
@@ -524,6 +536,7 @@ test('switcherPayload: a payload with items has exactly the contract fields', ()
     'query',
     'restore',
     'settings',
+    'tour',
   ]);
   assert.equal(payload.command, false);
 });
@@ -795,5 +808,34 @@ test('F36: `>` and a start of `settings` (at least one letter, any case, spaces 
     '',
   ]) {
     assert.equal(switcherPayload(text, candidates, []).settings, false, JSON.stringify(text));
+  }
+});
+
+test('F41: `>` and a start of `tour` (at least one letter, any case, spaces trimmed) offers the tour; nothing else does', () => {
+  const candidates = commandLike();
+  for (const text of ['>tour', '>t', '> to', '>Tour', '> TOUR ', '>  tou']) {
+    const payload = switcherPayload(text, candidates, []);
+    assert.deepEqual(
+      [payload.command, payload.tour, payload.settings, payload.items, payload.restore],
+      [true, true, false, [], null],
+      JSON.stringify(text),
+    );
+    assert.equal(tourCommand(text), true, JSON.stringify(text));
+  }
+  for (const text of [
+    '>',
+    '> ',
+    '>settings',
+    '>s',
+    '>r',
+    '> tours',
+    '>tx',
+    'tour',
+    ' >tour',
+    't',
+    '',
+  ]) {
+    assert.equal(switcherPayload(text, candidates, []).tour, false, JSON.stringify(text));
+    assert.equal(tourCommand(text), false, JSON.stringify(text));
   }
 });

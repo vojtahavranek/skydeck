@@ -24,8 +24,9 @@ a copy that Claude Code's background feature makes (follow-up F33), at "A copy m
 W41 checks the window's settings screen (follow-up F36), at "The settings screen"; W42 checks moving
 a session of Open by hand (follow-up F37), at "Moving a session in Open"; W43 checks the window's
 notice of a newer skydeck (follow-up F38), at "The update notice"; W44 checks the short settings
-screen and its gear (follow-up F39), at "The short settings screen"; W46 checks the carry over
-after `/clear` (follow-up F40), at "Carry over after /clear".
+screen and its gear (follow-up F39), at "The short settings screen"; W45 checks the tour of the
+window (follow-up F41), at "The tour of the window"; W46 checks the carry over after `/clear`
+(follow-up F40), at "Carry over after /clear".
 
 Setup:
 
@@ -3038,6 +3039,53 @@ with the terminal of a session shown (any running one; no prompt is typed into i
 
 Write down: for each step whether it went as expected, and the words where they differ; whether
 the gear looked right, and the screen read well in your theme.
+
+Not tried before this check was written: all of it, in Edge.
+
+## The tour of the window
+
+The check of the tour (follow-up F41; design-step-2.md 12.9, 12.14; [install.md](install.md),
+"Using the window", its point "The tour"): W45, in your window. It changes nothing but the mark
+each browser keeps that it has seen the tour. Commands are typed in W, a WSL terminal of your own
+(never a `!` command inside Claude Code). The tests run the tour in headless Chromium; only here
+does it meet Edge, Windows' fonts and your own list.
+
+## W45. The tour, once per browser
+
+Setup: skydeck updated to a commit that has follow-up F41 (`skydeck update`, W32), the window
+closed; at least one session in the list.
+
+1. **It starts by itself.** In W, `skydeck window`. Expected: once the list is drawn, the list
+   stands out in a coloured ring, the rest of the window is dimmed, and a small panel beside it
+   says `The list`, three short lines (Open, Recent and Earlier, the number 1–9), `Step 1 of 6`,
+   `Skip the tour`, `Back` (greyed) and `Next`. Write down whether the ring and the panel read well
+   in your theme.
+2. **Walk it.** Press Enter, then →, then ←. Expected: steps 2, 3, 2: the right side, then the key
+   bar (`Focus: list` or `Focus: terminal`, Ctrl+Shift+L), then the right side again, each standing
+   out with its panel beside it where the window has room (in a narrow window the panel may lie over
+   the region). Press Space, then Ctrl+Space, then Shift+Enter: nothing happens, the step stays
+   (Space does nothing with any modifier). Press Ctrl+Shift+L: the key bar says `close the tour
+   first (Esc)` and the step stays. Click a row of the list: nothing is selected. Press → until
+   step 5: `Switch…` stands out and the panel names Ctrl+Shift+P, Ctrl+Shift+1…9, Ctrl+Tab and
+   Ctrl+Shift+N. Step 6: the gear, Ctrl+Shift+H, `Take the tour` and `> tour`, and `Done` in place
+   of `Next`.
+3. **Done.** Write down what the key bar says (`Focus: …`), then press Enter. Expected: the panel
+   and the dimming are gone, the key bar says what it said before, a typed key goes where it went
+   before (a letter into the terminal with `Focus: terminal`). Press Ctrl+Shift+R: the page
+   reloads, and no tour starts.
+4. **Again from the help and the switcher.** Press Ctrl+Shift+H, click `Take the tour` under the
+   help's title. Expected: the help is gone and the tour shows `Step 1 of 6`. Press Esc: it ends,
+   and the keyboard is back where it was. Press Ctrl+Shift+P and type `>t`: the line `Tour: a
+   minute’s walk round the window, step by step`, the footer `Enter start the tour`. Press Enter:
+   the switcher closes and the tour shows `Step 1 of 6`. Press Esc.
+5. **A browser tab.** In W, `skydeck window --print-url`; open an InPrivate window of Edge
+   (Ctrl+Shift+N in Edge itself) and paste the address into it. Expected: the tour starts by
+   itself there too; at step 5 it names Ctrl+Shift+O (not Ctrl+Tab) and `+ New in the key bar`
+   (not Ctrl+Shift+N). Click `Skip the tour`, then close the InPrivate window (it forgets the
+   mark with everything else).
+
+Write down: for each step whether it went as expected, and the words where they differ; your Edge
+version; whether a step's words could be shorter or clearer.
 
 Not tried before this check was written: all of it, in Edge.
 

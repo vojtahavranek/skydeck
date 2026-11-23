@@ -1,7 +1,8 @@
 // Headless Chromium for the page suite (S2 17.4, 17.5; plan A15): the `playwright` library driven
 // from node:test, not @playwright/test. Every browser context of the suite is made by `newContext`
 // here (plan B17), which gives its pages an inert `Notification`: no test can show a desktop
-// notification or ask for a permission, whatever a server sends.
+// notification or ask for a permission, whatever a server sends. It also marks the tour of the
+// window seen (follow-up F41), so that no case meets it but those that ask for it (`tour`).
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
@@ -10,6 +11,7 @@ import { chromium } from 'playwright';
 import type { Browser, BrowserContext, BrowserContextOptions, Page } from 'playwright';
 
 import { sandbox } from '../../test/helpers/sandbox.ts';
+import { TOUR_KEY, TOUR_SEEN } from '../../web/tour-text.js';
 
 /** What the page suite fails with when the pinned Playwright's Chromium is not installed (S2 17.5). */
 export const NOT_INSTALLED =
@@ -125,24 +127,45 @@ export function inertNotification(marker: string): void {
 }
 
 /**
+ * F41's init script, run in the page: the tour of the window is marked seen in its storage (where
+ * there is one), so that it never starts by itself. Self-contained (Playwright sends its source).
+ */
+export function tourSeen({ key, value }: { key: string; value: string }): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // No storage (about:blank, or a case's own that throws): the tour cannot start by itself.
+  }
+}
+
+/**
  * A fresh browser context (no storage shared with another case) with B17's inert `Notification`
- * in every page it makes. Its time zone is UTC and its language en-US, whatever the machine's
- * (`options` may add to them, or change them), so that times and ages a page shows are the same
- * on every machine. The caller closes it. No other way of making a context stands in the suite
- * (test-page/attention.test.ts holds that).
+ * in every page it makes, and the tour of the window marked seen unless `tour` (F41: only the
+ * tour's own cases ask for it). Its time zone is UTC and its language en-US, whatever the
+ * machine's (`options` may add to them, or change them), so that times and ages a page shows are
+ * the same on every machine. The caller closes it. No other way of making a context stands in the
+ * suite (test-page/attention.test.ts holds that).
  */
 export async function newContext(
   chromium: Browser,
   options: BrowserContextOptions = {},
+  { tour = false }: { tour?: boolean } = {},
 ): Promise<BrowserContext> {
   const context = await chromium.newContext({ timezoneId: 'UTC', locale: 'en-US', ...options });
   await context.addInitScript(inertNotification, NOTIFICATION_DOUBLE);
+  if (!tour) {
+    await context.addInitScript(tourSeen, { key: TOUR_KEY, value: TOUR_SEEN });
+  }
   return context;
 }
 
 /** A page in a context of its own from `newContext`, closed in `t.after`. */
-export async function newPage(t: TestContext, chromium: Browser): Promise<Page> {
-  const context = await newContext(chromium);
+export async function newPage(
+  t: TestContext,
+  chromium: Browser,
+  more: { tour?: boolean } = {},
+): Promise<Page> {
+  const context = await newContext(chromium, {}, more);
   t.after(() => context.close());
   return context.newPage();
 }
