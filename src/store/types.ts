@@ -207,6 +207,13 @@ export type KvKey =
   // written at a move and at every refresh once it exists, with the places held for a process's
   // next session after `/clear`.
   | 'window_open_order'
+  // F40 (S2 10.2): the carry over after `/clear`. The server's clock at its first start with F40,
+  // decimal ns, written once (a `clear` link older than it, less 5 s, makes no offer); the answer
+  // to one new session's offer, `carried` or `dismissed`; the ticks of the last carry over, a
+  // JSON object of booleans.
+  | 'window_carry_over_since'
+  | `window_carry_over:${string}`
+  | 'window_carry_over_ticks'
   // A resume lock (design 7.6, D16): the decimal time in ns it was taken, then `:<id>` of the
   // session's latest event at that moment (0 when it had none; a bare time is a lock an earlier
   // version wrote); one per session id.

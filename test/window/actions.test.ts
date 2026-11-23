@@ -2012,3 +2012,96 @@ describe('reorder (F37, S2 12.9)', () => {
     assert.deepEqual(await busy.act(up), refused(41, "skydeck's database is busy; try again"));
   });
 });
+
+// --- F40: carry over after /clear --------------------------------------------------------------
+
+describe('carry-over and dismiss-carry-over (F40, design 7.1)', () => {
+  const carry: ActMessage = {
+    t: 'act',
+    id: 51,
+    kind: 'carry-over',
+    sessionId: S1,
+    rev: '0123456789abcdef',
+    fields: ['label'],
+    done: true,
+  };
+  const dismiss: ActMessage = { t: 'act', id: 52, kind: 'dismiss-carry-over', sessionId: S1 };
+
+  test("without its dep: 'skydeck cannot do that action', nothing told", async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const h = harness(d);
+    assert.deepEqual(await h.act(carry), refused(51, 'skydeck cannot do that action'));
+    assert.deepEqual(await h.act(dismiss), refused(52, 'skydeck cannot do that action'));
+    assert.deepEqual(h.told, []);
+  });
+
+  /** Actions whose `carryOver` records its calls and answers as given. */
+  function withCarry(
+    d: TestDeck,
+    answers: {
+      carry?: () => { ok: true } | { ok: false; error: string };
+      dismiss?: () => { ok: true; changed: boolean } | { ok: false; error: string };
+    },
+  ) {
+    const h = harness(d);
+    const calls: string[] = [];
+    const actions = createActions({
+      deck: d.deck,
+      hub: h.hub,
+      terminalFor: () => {
+        throw new Error('no terminal is built for a carry over');
+      },
+      openLink: async () => true,
+      log: (line) => h.logs.push(line),
+      changed: () => h.told.push('changed'),
+      prs: { fetch: () => undefined, refresh: () => undefined },
+      carryOver: {
+        carry(act) {
+          calls.push(`carry ${act.sessionId} ${act.rev} ${act.fields.join(',')} ${act.done}`);
+          return answers.carry?.() ?? { ok: true };
+        },
+        dismiss(sessionId) {
+          calls.push(`dismiss ${sessionId}`);
+          return answers.dismiss?.() ?? { ok: true, changed: true };
+        },
+      },
+    });
+    return { act: (action: ActMessage) => actions.act(PAGE, action), calls, told: h.told };
+  }
+
+  test('an unknown session: its refusal, the dep not called', async (t) => {
+    const d = testDeck(t);
+    const h = withCarry(d, {});
+    const unknown = `no session matches '${S1}'`;
+    assert.deepEqual(await h.act(carry), refused(51, unknown));
+    assert.deepEqual(await h.act(dismiss), refused(52, unknown));
+    assert.deepEqual(h.calls, []);
+  });
+
+  test('ok → changed() once; a refusal → never; a dismissal that changed nothing → ok, never', async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const writes = withCarry(d, {});
+    assert.deepEqual(await writes.act(carry), ok(51));
+    assert.deepEqual(await writes.act(dismiss), ok(52));
+    assert.deepEqual(writes.calls, [`carry ${S1} 0123456789abcdef label true`, `dismiss ${S1}`]);
+    assert.deepEqual(writes.told, ['changed', 'changed']);
+    const refusing = withCarry(d, {
+      carry: () => ({ ok: false, error: 'this offer was answered or dismissed already' }),
+      dismiss: () => ({ ok: false, error: 'there is no offer to dismiss for this session' }),
+    });
+    assert.deepEqual(
+      await refusing.act(carry),
+      refused(51, 'this offer was answered or dismissed already'),
+    );
+    assert.deepEqual(
+      await refusing.act(dismiss),
+      refused(52, 'there is no offer to dismiss for this session'),
+    );
+    assert.deepEqual(refusing.told, []);
+    const again = withCarry(d, { dismiss: () => ({ ok: true, changed: false }) });
+    assert.deepEqual(await again.act(dismiss), ok(52));
+    assert.deepEqual(again.told, []);
+  });
+});

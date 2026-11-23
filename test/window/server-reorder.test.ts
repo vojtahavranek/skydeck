@@ -346,9 +346,11 @@ describe("Open's kept order on the server (F42)", () => {
   });
 
   test('/clear typed into a terminal: the new session takes the old one’s place in the kept order', async (t) => {
-    const { d, page } = await startedWithOrder(t, [S3, S1, S2]);
+    const { d, server, page } = await startedWithOrder(t, [S3, S1, S2]);
     const list = await page.list(reads(['S3:3', 'S1:1', 'S2:2']), 'the kept order');
     const term = list.terminals.find((one) => one.sessionId === S1)?.id ?? '';
+    // F40: a label on S1, so that its new session is offered a carry over.
+    d.deck.store.updateMeta(S1, { label: 'the old label' }, d.platform.clock.nowNs());
     page.send({ t: 'input', term, data: '/clear\r' });
     const cleared = await page.list(
       (candidate) =>
@@ -366,6 +368,18 @@ describe("Open's kept order on the server (F42)", () => {
     const name = (row: { id: string }): string => (row.id === next ? 'next' : row.id);
     assert.deepEqual(
       (cleared.sections.find((section) => section.name === 'open')?.rows ?? []).map(name),
+      [S3, 'next', S2],
+    );
+    // F40 meets F42: a page that selects the new session gets its offer, on the row that took
+    // the old one's place.
+    const selecting = await connectTestPage(t, d, server.server, { view: { selected: next } });
+    const offered = await selecting.list(
+      (candidate) => candidate.selected?.carryOver !== undefined,
+      'the offer to carry over',
+    );
+    assert.equal(offered.selected?.carryOver?.from.id, S1);
+    assert.deepEqual(
+      (offered.sections.find((section) => section.name === 'open')?.rows ?? []).map(name),
       [S3, 'next', S2],
     );
   });

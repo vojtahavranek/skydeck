@@ -64,6 +64,8 @@
 import { nextNeeding, windowTitle } from './attention-text.js';
 import { decodeKey, loadKey, takeToken } from './auth.js';
 import { createBanner } from './banner.js';
+import { createCarryOver } from './carry-over.js';
+import { NOTHING_TO_CARRY } from './carry-over-text.js';
 import { createCards } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
@@ -76,7 +78,7 @@ import { createList } from './list.js';
 import { holdsNoSession } from './list-text.js';
 import { newFormDefaults } from './new-form-text.js';
 import { createNotifications } from './notify.js';
-import { blockInfo, paneFor, sessionRow } from './pane.js';
+import { blockInfo, movedMru, movedWith, paneFor, sessionRow } from './pane.js';
 import { cutWords } from './search-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
@@ -426,6 +428,17 @@ const banner = createBanner(dom.banner, {
 // A control of the banner pressed from the keyboard can take itself away (the report's ×): the
 // zone's holder takes the keyboard back once the click is done, as for the notice's ×.
 dom.banner.addEventListener('click', () => setTimeout(keepKeyboard, 0));
+// F40 (S2 12.6): the carry-over bar, between the right side's header and its card (the two
+// children every cards module makes), so above the terminal or the card.
+const carryHost = document.createElement('div');
+carryHost.className = 'carry-over';
+carryHost.hidden = true;
+dom.cards.querySelector('.card-header')?.after(carryHost);
+const carry = createCarryOver(carryHost, {
+  act: (action) => act(action),
+  say: (text) => say(text),
+  back: () => setZone('list'),
+});
 // A click sequence that began on the banner acts on nothing outside it (ruled on review 2 of task
 // 75, N1): its first click can take its control away (Not now, the report's ×), the list then
 // moves up under the pointer, and the later clicks of a double click would select — and its
@@ -807,9 +820,11 @@ function searchText(text, filter) {
 
 /** The acts whose result a dialog starts from: after this page's own `ok`, it waits for the list
  *  that holds it (C1); F18's ticket too. */
-const EDITS = new Set(['label', 'group', 'note', 'ticket']);
+const EDITS = new Set(['label', 'group', 'note', 'ticket', 'carry-over']);
 /** F15's actions (S2 12.6): the list that holds one can come up to a second after its answer. */
 const FAVOURITE_ACTS = new Set(['favourite-add', 'favourite-remove']);
+/** F40's acts (S2 12.6): on `ok` a `view` asks for the list that holds the answer now. */
+const CARRY_ACTS = new Set(['carry-over', 'dismiss-carry-over']);
 /** Each dialog's list key, for D3's sentence. */
 const KEY_OF = { label: 'l', group: 'g', note: 'n', ticket: 't', pr: 'p' };
 
@@ -997,6 +1012,7 @@ function act(action) {
       // C1 (ruled): the list that holds an edit's result is one that came since the act was sent
       // (the real server sends it before the answer), else the next one; until then a dialog of
       // that session would start from the old text.
+      let asked = false;
       if (
         result.ok &&
         EDITS.has(action.kind) &&
@@ -1008,8 +1024,9 @@ function act(action) {
         // shown none would come: a `view` asks for one, which the server answers at once
         // (review 2 of task 37, M2).
         sendView();
+        asked = true;
       }
-      if (result.ok && FAVOURITE_ACTS.has(action.kind)) {
+      if (result.ok && !asked && (FAVOURITE_ACTS.has(action.kind) || CARRY_ACTS.has(action.kind))) {
         // F15: the server sends a page at most one list a second, so the list of a change can
         // come up to a second after its answer; a `view` asks for it now (as for EDITS above).
         sendView();
@@ -1830,8 +1847,18 @@ function welcomed(welcome, change, lostSince) {
 /** @param {ServerMessage} message */
 function received(message) {
   switch (message.t) {
-    case 'list':
+    case 'list': {
+      const before = state.list;
       state.list = message;
+      // F40 (S2 12.9): the selection follows the terminal that showed it to its new session (after
+      // `/clear`), so that the same terminal stays shown under the new session's header.
+      const followed = state.caption === null ? movedWith(before, message, state.selected) : null;
+      if (followed !== null && state.selected !== null) {
+        state.mru = movedMru(state.mru, state.selected, followed);
+        state.selected = followed;
+        sendView();
+        sendFocus();
+      }
       state.listAt = performance.now();
       state.lists++;
       state.unlisted.clear(); // a list after the answer holds the result
@@ -1839,7 +1866,8 @@ function received(message) {
       if (state.selected === null && state.caption === null && state.mru.length === 0) {
         // Nothing selected yet: the first row (Open's first slot when there is one). Only before
         // anything was ever selected (F9: once a selected caption's block opened without a key,
-        // nothing is selected on purpose, and no list selects a session for the user).
+        // nothing is selected on purpose, and no list selects a session for the user — but for
+        // F40's, above: a list moves the selection only with the terminal that showed it).
         const first = rows()[0];
         if (first !== undefined) {
           state.selected = first.id;
@@ -1881,6 +1909,7 @@ function received(message) {
         nextReattach();
       }
       return;
+    }
     case 'snap':
       terminalView.snap(message);
       keepKeyboard();
@@ -2011,14 +2040,17 @@ function render() {
       if (pane.ended) {
         cards.endedBar(pane.row, exit);
       }
+      carry.render(pane.row, selected?.carryOver ?? null);
       break;
     case 'elsewhere':
       cards.header(pane.row, selected, null, listNow);
       cards.elsewhere(pane.row);
+      carry.render(pane.row, selected?.carryOver ?? null);
       break;
     case 'resume':
       cards.header(pane.row, selected, null, listNow);
       cards.resumeCard(pane.row, selected, lines);
+      carry.render(pane.row, selected?.carryOver ?? null);
       break;
     case 'new':
       // The selected session's directory (S2 12.6) and, F28, its group as the Group field's chip:
@@ -2026,14 +2058,17 @@ function render() {
       // since its header was what the user saw (new-form-text.js).
       cards.header(null, null, null, listNow);
       cards.newForm(newFormDefaults(state.list, state.selected));
+      carry.render(null, null);
       break;
     case 'group':
       // F9: a closed caption is selected: the group's card, no header, no terminal.
       cards.header(null, null, null, listNow);
       cards.groupCard(pane);
+      carry.render(null, null);
       break;
     case 'none':
       cards.header(null, null, null, listNow);
+      carry.render(null, null);
       break;
   }
   // S2 11.3: a terminal that comes to be shown in the terminal zone gets the keyboard (after a
@@ -2104,7 +2139,13 @@ function setZone(zone, moveFocus = true) {
     }
     return;
   }
-  if (dom.rightZone.contains(document.activeElement) && document.activeElement !== dom.rightZone) {
+  // A control of the right side keeps the keyboard, but one of the carry-over bar (F40): the
+  // terminal zone is the user's own move there (a zone chord), and the terminal is meant.
+  if (
+    dom.rightZone.contains(document.activeElement) &&
+    document.activeElement !== dom.rightZone &&
+    !carryHost.contains(document.activeElement)
+  ) {
     return;
   }
   giveKeyboard();
@@ -2178,6 +2219,14 @@ function giveKeyboard() {
 document.addEventListener('focusin', (event) => {
   const target = event.target;
   if (!(target instanceof Node)) {
+    return;
+  }
+  // F40 (S2 12.9): while a control of the carry-over bar has the keyboard the page is in the list
+  // zone, where no rule gives the terminal the keyboard.
+  if (carryHost.contains(target)) {
+    if (state.zone !== 'list') {
+      setZone('list', false);
+    }
     return;
   }
   if (dom.listZone.contains(target) && state.zone !== 'list') {
@@ -2443,6 +2492,13 @@ function doListKey(action, event) {
       );
       return true;
     }
+    case 'carry':
+      // F40 (S2 12.9): the keyboard to the carry-over bar whenever the pane shows it, also for a
+      // selection the list does not show (a filter often hides the new session's row).
+      if (!carry.focus()) {
+        say(state.selected === null ? 'no session selected' : NOTHING_TO_CARRY);
+      }
+      return true;
     case 'escape':
       // S2 12.9: Esc clears the filter — the list's, which also clears its field —, then goes
       // back to the terminal; a held Esc does only the first step (Z1, item 6).
@@ -2680,7 +2736,9 @@ function switcherCapture(event) {
  * policy answers without asking —, so that a held Enter there is no list `enter` either. Stage C:
  * the same for Enter pressed on a control of the restore banner, which can go away
  * under it — Restore once a restore runs, Not now once the offer is dismissed, the report's × —;
- * a held Tab there walks on (review 2 of task 75, C4). Stage
+ * a held Tab there walks on (review 2 of task 75, C4); follow-up F40: the same for Enter on a
+ * control of the carry-over bar, which goes away once `Carry over` or `×` is answered, so that
+ * its repeats are no list `enter` (they would resume a session or show its terminal). Stage
  * E: the same for a key pressed while the switcher is shown (`modal()`): the Enter of a pick or the
  * Esc that closes it acts on nothing where the keyboard then goes (E11).
  * @type {Set<string>}
@@ -2701,7 +2759,8 @@ function heldFromDialog(event) {
   if (
     modal() ||
     document.activeElement === dom.notifyOn ||
-    (dom.banner.contains(document.activeElement) && event.key === 'Enter')
+    (dom.banner.contains(document.activeElement) && event.key === 'Enter') ||
+    (carryHost.contains(document.activeElement) && event.key === 'Enter')
   ) {
     if (!event.repeat) {
       pressedInDialog.add(event.code);

@@ -172,7 +172,12 @@ export interface ResizeMessage {
  *
  *  F37 (S2 12.9): `reorder` moves the session's row of Open one place up or down; the server
  *  computes the move over Open as it draws it and gives the slots out again
- *  (src/window/reorder.ts), refusing it while the page's last `view` sets a filter or a chip. */
+ *  (src/window/reorder.ts), refusing it while the page's last `view` sets a filter or a chip.
+ *
+ *  F40 (design 7.1, S2 12.6): `carry-over` answers the offer of `list.selected.carryOver` for the
+ *  new session `sessionId`: `rev` is the offer as drawn, `fields` the ticked fields, `done` the
+ *  tick of `mark the old one done`; the server computes the offer again in one transaction and
+ *  copies or refuses (src/window/carry-over.ts). `dismiss-carry-over` ends that offer for good. */
 export type ActMessage =
   | { t: 'act'; id: number; kind: 'resume'; sessionId: string; cols: number; rows: number }
   | {
@@ -214,7 +219,17 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'setting-default'; key: string }
   | { t: 'act'; id: number; kind: 'update-check' | 'update-look' | 'update-seen' }
   | { t: 'act'; id: number; kind: 'update-apply'; to: string }
-  | { t: 'act'; id: number; kind: 'reorder'; sessionId: string; direction: 'up' | 'down' };
+  | { t: 'act'; id: number; kind: 'reorder'; sessionId: string; direction: 'up' | 'down' }
+  | {
+      t: 'act';
+      id: number;
+      kind: 'carry-over';
+      sessionId: string;
+      rev: string;
+      fields: CarryField[];
+      done: boolean;
+    }
+  | { t: 'act'; id: number; kind: 'dismiss-carry-over'; sessionId: string };
 /** Follow-up F13: the page's colours changed while it is open — Mode or Colour theme was picked in
  *  the settings screen (F39; before it, the title bar's switches) here or in another window of the
  *  profile, or the system's scheme changed while the page follows it. The same colours as
@@ -412,6 +427,28 @@ export interface SelectedPayload {
    *  group's link — when a provider takes its address, null otherwise. Optional for the reader:
    *  absent (a scripted list, a server before F19) is none. */
   ticketStatus?: TicketStatusPayload | null;
+  /** Follow-up F40 (design 7.1, S2 12.6): the offer to carry fields over after `/clear`, present
+   *  exactly when the session has one; absent is none. */
+  carryOver?: CarryOverPayload;
+}
+/** Follow-up F40: the five fields an offer to carry over after `/clear` can list, in its order. */
+export type CarryField = 'label' | 'group' | 'ticket' | 'note' | 'prs';
+/** Follow-up F40 (S2 8.2.3): what the carry-over bar shows. It carries only what the list and the
+ *  header already show: the note's text is not sent. */
+export interface CarryOverPayload {
+  /** The old session: its id, its title as the list shows it, its ticket's short name or null. */
+  from: { id: string; title: string; ticket: string | null };
+  /** The offered fields, in the order label, group, ticket, note, prs. `text`: the label, the
+   *  group, the ticket's short name; null for note and prs. `ticked`: its starting tick. */
+  fields: { name: CarryField; text: string | null; ticked: boolean }[];
+  /** How many pull requests `prs` would attach; 0 when it is not offered. */
+  prs: number;
+  /** The fields the old session has that the new one already has: named, not offered. */
+  kept: CarryField[];
+  /** `mark the old one done`: its starting tick; null when it is not offered. */
+  done: { ticked: boolean } | null;
+  /** What the offer was computed from (16 lower-case hex digits); `carry-over` sends it back. */
+  rev: string;
 }
 /** Follow-up F19: what the header's chip and the ticket dialog show of a ticket's status. */
 export interface TicketStatusPayload {
@@ -1086,6 +1123,17 @@ const ACTS: Readonly<Record<string, Check>> = {
     sessionId: SESSION,
     direction: oneOf('up', 'down'),
   }),
+  // F40 (design 7.1, S2 12.6): the carry-over bar's two buttons; the server computes the offer again.
+  'carry-over': object({
+    t: ANY,
+    id: COUNT,
+    kind: ANY,
+    sessionId: SESSION,
+    rev: matching(/^[0-9a-f]{16}$/),
+    fields: list(oneOf('label', 'group', 'ticket', 'note', 'prs'), false, true, 5),
+    done: BOOLEAN,
+  }),
+  'dismiss-carry-over': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
 };
 
 const INPUT_SHAPE = object({ t: ANY, term: TERM, data: STRING, binary: TRUE }, ['binary']);

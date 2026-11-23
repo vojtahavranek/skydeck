@@ -1207,6 +1207,7 @@ test("src/window/view/ imports values only from text, A8's isListed (and F33's i
     'attention.ts',
     'banner.ts',
     'build.ts',
+    'carry-over.ts',
     'chip.ts',
     'open-sequence.ts',
     'sections.ts',

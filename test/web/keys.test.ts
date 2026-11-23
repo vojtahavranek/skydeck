@@ -688,3 +688,13 @@ describe('switcherKey (E11: the switcher’s field)', () => {
     assert.equal(switcherKey({ ...ev('', ''), key: undefined as unknown as string }), null);
   });
 });
+
+describe('F40: c, the carry-over bar (S2 12.9)', () => {
+  test('c alone is the key; with Ctrl, Alt or Shift it is not', () => {
+    assert.deepEqual(listKey(ev('c', 'KeyC')), { kind: 'carry' });
+    assert.equal(listKey(ev('c', 'KeyC', 'ctrl')), null);
+    assert.equal(listKey(ev('c', 'KeyC', 'alt')), null);
+    assert.equal(listKey(ev('c', 'KeyC', 'meta')), null);
+    assert.equal(listKey(ev('C', 'KeyC', 'shift')), null);
+  });
+});

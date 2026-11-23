@@ -48,7 +48,10 @@ section first.
 5. **Resume by id, with the session's own launch command.** Never by name (names are not unique).
    skydeck never adds a permission flag that the session was not started with.
 6. **Nothing is destroyed or moved automatically.** "Done" only hides. Notes never move from one
-   session to another. skydeck never stops a process by itself; the window ends a session's
+   session to another, but for one copy on the user's word: the window copies a session's label,
+   group, ticket, note and pull requests to the session that `/clear` started out of it only when
+   the user asks for it there, field by field, each time, and the old session keeps all of them
+   (follow-up F40; 7.1; design-step-2.md 12.6). skydeck never stops a process by itself; the window ends a session's
    program only when the user asks for it there, in its dialog, each time (design-step-2.md 2,
    12.5). This is about the user's data (sessions, labels, groups, notes), not skydeck's own
    transient files (5.3). The one exception is the label and group skydeck itself has just stored
@@ -218,7 +221,10 @@ first refresh after `skydeck install`) is dropped too: skydeck does not know the
 
 **Links.** When a `start` event with detail `clear`, `resume` or `fork` is ingested for a process
 whose previously held session (6.1) is a different session, a row old → new is written to
-`links` with kind `clear`, `switch` or `fork`. Nothing is inherited or copied.
+`links` with kind `clear`, `switch` or `fork`. Ingest and every command inherit and copy nothing.
+From follow-up F40 the window offers, on the session a `clear` link leads to, to copy fields from
+the session it leads from (7.1, "Carry over after `/clear`"), and only for a link whose start event
+is not older than the window's first start with F40.
 
 **Copies** (follow-up F33). A process started with `--fork-session` together with `--resume` (or
 `-r`) whose value is a session id, or a path whose last part is `<session id>.jsonl`, holds as its
@@ -369,7 +375,7 @@ Marks are shown next to the state.
 |---|---|
 | `ended-unexpectedly` | Not running, and its latest holding did not end with a deliberate exit: the last process that held it is dead and either still held it at its last event, or stopped holding it with an `end` of detail `other`. A session that a process left through `/clear`, `/resume` or a fork is **not** marked. The latest holding is decided per process, not by the latest event: of the holdings of the processes that held the session, the one that ended last. A holding ends at the process's `end` for the session, or at the process's first event naming another session (it moved on; when that event is an `observed` one, reconcile noticed the move only then, so the holding counts as ended at the process's last event for the session); a process that is gone without either ended when it was last seen — its last event, or the last write of the live-session file it left naming the session, whichever is later. So after two holders, one that exited deliberately does not hide one killed after it — when anything shows the killed one alive after that exit. A live-session file is not rewritten while its session is idle, so a holder killed while idle since before the other holder's exit cannot be told from one that died first: its holding counts as ended when it was last seen, before the exit, and the session gets no mark (a known limit). A scripted run's holding (5.3) is never the latest holding: when it ends or is killed it leaves no mark, and the session keeps what its last interactive holding says, so restore never offers a session because of a scripted run. A holding the user ended in the window (design-step-2.md 12.5) is a deliberate exit: once its program has exited, the window's server stores an `end` of detail `exit` for each of its holders, with no spool file and the raw detail `skydeck-window`, and a process that has one for the session ended its holding by that exit, whatever other `end` Claude Code's own hook sends for it before or after (its hang-up reports `other`, 14). |
 | `was-working` | `ended-unexpectedly`, and a turn was in progress: either a leftover live-session file of that dead process (same pid and process start) says `status` `busy`, or the last `assistant` record or `user` turn (5.6) of its transcript is a `user` record. (Closing a terminal removes the live-session file, so the transcript is what covers that case.) |
-| `continued` | The session is the target of a `clear`, `fork` or `copy` link (5.3). `show` names the session it continues. |
+| `continued` | The session is the target of a `clear`, `fork` or `copy` link (5.3). `show` names the session it continues. The window's offer to carry fields over after `/clear` (follow-up F40, 7.1) reads the `clear` link itself, not this mark, which a fork and a copy give too. |
 | `empty-copy` | Follow-up F33: the session is the target of a `copy` link, has had no turn and no input — no transcript, or one with no `user` turn, no `assistant` record and no `user` input (5.6): a copy that holds only the title it copied —, and no live process of it works or waits for an answer to a question (its holder's live-session file says neither `busy` nor `waiting`, 6.2: idle at its first prompt, or not running), whatever its transcript says yet. It is listed as a done one unless the user kept it (7.2) and never offered by restore (7.8). Its first turn or input, or its process starting to work or to ask, ends the mark by itself; `continued` stays. |
 | `expired` | Its transcript is missing. It cannot be resumed. |
 | `expiring` | Its transcript was last modified more than (retention − 5) days ago, where retention is `cleanupPeriodDays` from the settings file, default 30. |
@@ -423,6 +429,40 @@ Marks are shown next to the state.
 - **First run.** `skydeck install` offers to mark as done every listed session whose last
   activity is older than `firstRunDoneAfterDays` (default 7) and that is not running. It shows
   the count and does nothing unless confirmed.
+- **Carry over after `/clear`** (follow-up F40). Only the window asks, on the new session
+  (design-step-2.md 12.6); the commands, `show` and the interactive list neither ask nor copy.
+  - *Which link.* The new session's latest link of kind `clear` (5.3); `switch`, `fork` and
+    `copy` links never make an offer, and without a link (no process recorded, a lost spool
+    file) there is none.
+  - *Old links make no offer.* The window's server keeps the time of its first start with F40 in
+    `kv` (`window_carry_over_since`, written once and never changed while it is usable). A
+    `clear` link counts only when its time — the `time_ns` of the start event that made it, the
+    hook's clock — is not older than that time less 5 seconds, the grace 7.6 gives a resume lock
+    for the same steps back of the wall clock. A missing or damaged mark means no offer. A clock
+    set back by more than that after the mark was written dates every `/clear` before it, so none
+    is asked about until the clock has passed it again: it errs towards no offer.
+  - *The chain.* From the new session the window steps up its `clear` links to the first session
+    that has a row and a field the user set: a label, a stored group, a ticket, a note, or a pull
+    request attached by hand and not detached. A pull request skydeck attached by itself from a
+    `pr-link` record does not stop the walk. A session passed over is left as it is. The walk
+    ends with no offer at a missing or old link, a session met twice, or after 64 steps. Whether
+    a session on the way was answered or dismissed does not matter.
+  - *The fields* of the session found, each offered when it is set there: the label; the group
+    when it is stored (a group taken from the title is not a field: it follows the title); the
+    ticket; the note when it holds more than white space; the pull requests attached and not
+    detached (also those attached by themselves). A field the new session already has is never
+    overwritten and is not offered: a label, a stored group (one from its title counts as not
+    set, so a carried group replaces it), a ticket, a note; pull requests are offered while one
+    would be added. With nothing left to offer there is no offer.
+  - *`mark the old one done`* is offered while the old session is not running, not done, and no
+    resume of it is under way (its resume lock is not held).
+  - *The answer.* `Carry over` writes, in one transaction, the ticked fields to the new session
+    (pull requests attached as by hand, also one the user had detached from the new session,
+    which is attached to it again; the old session keeps its own) and, when ticked, marks the
+    old one done; the old session keeps all its fields. A refusal writes nothing. `×` dismisses
+    the offer for good. Either answer is kept in `kv` per new session, so every window agrees. The
+    ticks of the last `Carry over` are the starting ticks of the next offer; the first offer ever
+    has label, group, ticket and `mark the old one done` ticked, note and pull requests not.
 
 ### 7.2 Which sessions are listed
 
@@ -1398,6 +1438,8 @@ inspecting local files, unless marked otherwise.
   then decided against there: the live-session file already says when a turn ends, and the input
   of `Stop` carries the assistant's text (design-step-2.md 10.3). Notifications are in step 2.
 - Suggesting pull requests from URLs mentioned in a session.
-- Inheriting labels or groups across `/clear` (Claude Code keeps the session name itself).
+- Inheriting labels or groups across `/clear` by itself (Claude Code keeps the session name
+  itself). From follow-up F40 the window asks, on the new session, whether to carry them over
+  (7.1, "Carry over after `/clear`"); nothing is copied without that answer.
 - Jumping to a terminal tab that is already open (step 2 leaves it out too).
 - macOS (no `/proc`); the process facts sit behind `src/platform/` for that reason.

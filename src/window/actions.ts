@@ -8,7 +8,8 @@
  * read the settings screen and change one setting of config.json (`settings`, `setting-set`,
  * `setting-default`, settings.ts: no path, no program, no key outside its table's changeable ones);
  * since F37 move a session of Open one place up or down (`reorder`, reorder.ts; since F42 any row of
- * Open). Every field of an action is the page's — any page that passed the handshake — so each
+ * Open); since F40 answer the offer to carry fields over after `/clear` (`carry-over`,
+ * `dismiss-carry-over`, carry-over.ts: the offer computed again, one transaction). Every field of an action is the page's — any page that passed the handshake — so each
  * one is checked here again and goes through step 1's own rules: a resume
  * names a session and nothing more (the guard, the lock and the command builder decide the rest,
  * S2 11.1), a new session's directory, label, group and flags are checked as `skydeck new` checks
@@ -38,6 +39,7 @@ import type { Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
 import { isBusy } from './busy.ts';
+import type { CarryOver } from './carry-over.ts';
 import { createEndings } from './end-session.ts';
 import { splitFlags } from './flags.ts';
 import { addFavourite, removeFavourite } from './favourites.ts';
@@ -85,6 +87,9 @@ export interface ActionDeps {
   /** F38: the check for a newer skydeck (updates.ts, one per server). Absent: its kinds answer
    *  "skydeck cannot do that action". */
   updates?: Pick<Updates, 'check' | 'look' | 'apply' | 'seen'>;
+  /** F40 (design 7.1, S2 12.6): the carry over after `/clear` (carry-over.ts, one per server); a
+   *  busy store is thrown. Absent: its kinds answer "skydeck cannot do that action". */
+  carryOver?: Pick<CarryOver, 'carry' | 'dismiss'>;
   /** F37, F42 (S2 12.9): `act reorder` for the page that sent it (reorder.ts): any row of Open,
    *  its new order and numbers written together; a busy store is thrown. Absent: the kind answers
    *  "skydeck cannot do that action". */
@@ -478,6 +483,23 @@ export function createActions(deps: ActionDeps): ActionHandler {
         return deps.reorder === undefined
           ? refusal(NOT_AN_ACTION)
           : answered(deps.reorder(page, action.sessionId, action.direction));
+      case 'carry-over': {
+        // F40: the offer computed again and the copy, in one transaction (carry-over.ts).
+        const carryOver = deps.carryOver;
+        if (carryOver === undefined) return refusal(NOT_AN_ACTION);
+        requireKnown(action.sessionId);
+        const { sessionId, rev, fields, done } = action;
+        const outcome = carryOver.carry({ sessionId, rev, fields, done });
+        return outcome.ok ? wrote(action.kind) : refusal(outcome.error);
+      }
+      case 'dismiss-carry-over': {
+        const carryOver = deps.carryOver;
+        if (carryOver === undefined) return refusal(NOT_AN_ACTION);
+        requireKnown(action.sessionId);
+        const outcome = carryOver.dismiss(action.sessionId);
+        if (!outcome.ok) return refusal(outcome.error);
+        return outcome.changed ? wrote(action.kind) : DONE;
+      }
     }
   }
 
