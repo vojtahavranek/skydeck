@@ -1336,6 +1336,130 @@ test('the carry-over bar after the review (F40)', async (t) => {
     );
   }
 
+  for (const dialog of ['the tour', 'Settings'] as const) {
+    await t.test(
+      `${dialog}: an offer that goes to another rev and back under it restarts the ticks, and the keyboard goes to the first checkbox; Enter sends nothing`,
+      async (t) => {
+        const s = await barWorld(t, chromium, 'terminal');
+        await onBar(s);
+        await s.page.keyboard.press('Space'); // label unticked
+        for (let i = 0; i < 3; i++) await s.page.keyboard.press('Tab');
+        assert.equal(await keyboardAt(s.page), 'bar:done');
+        await s.page.keyboard.press('Space'); // done unticked
+        await s.page.keyboard.press('Tab');
+        assert.equal(await keyboardAt(s.page), 'bar:Carry over');
+        assert.deepEqual(
+          (await barOf(s.page)).fields.map(([, , checked]) => checked),
+          [false, true, true, false],
+        );
+        if (dialog === 'the tour') {
+          await s.page.keyboard.press('Control+Shift+H');
+          await s.page.waitForSelector('#help:not([hidden])');
+          await s.page.locator('#help .help-tour').click();
+          await s.page.waitForSelector('#tour:not([hidden])', {
+            state: 'attached',
+            timeout: PAGE_WAIT_MS,
+          });
+        } else {
+          await s.page.locator('#settings-button').click();
+          await s.page.waitForSelector('#settings:not([hidden])', {
+            state: 'attached',
+            timeout: PAGE_WAIT_MS,
+          });
+        }
+        s.set({ offer: offer({ rev: REV2 }) });
+        await s.page.waitForTimeout(400);
+        s.set({ offer: offer() });
+        await s.page.waitForTimeout(400);
+        await s.page.keyboard.press('Escape');
+        await s.page.waitForSelector(
+          dialog === 'the tour' ? '#tour[hidden]' : '#settings[hidden]',
+          {
+            state: 'attached',
+            timeout: PAGE_WAIT_MS,
+          },
+        );
+        await until(async () => (await keyboardAt(s.page)) === 'bar:label', 'the first checkbox');
+        assert.deepEqual(
+          (await barOf(s.page)).fields.map(([, , checked]) => checked),
+          [true, true, true, true],
+          'the restarted ticks',
+        );
+        await s.page.keyboard.press('Enter');
+        await s.page.waitForTimeout(300);
+        assert.deepEqual(barActs(s.w), [], 'no act');
+        assert.equal(inputs(s.w), 0);
+      },
+    );
+  }
+
+  for (const button of ['right', 'middle'] as const) {
+    for (const from of ['bar', 'list'] as const) {
+      await t.test(
+        `a ${button} press on the heading leaves the keyboard ${from === 'bar' ? 'on the bar' : 'on the list'}; the next Enter reaches no program`,
+        async (t) => {
+          const s = await barWorld(t, chromium, 'list');
+          if (from === 'bar') await onBar(s);
+          const before = await keyboardAt(s.page);
+          const at = await inBar(s.page, '.carry-heading').boundingBox();
+          assert.ok(at !== null);
+          await s.page.mouse.click(at.x + 4, at.y + at.height / 2, { button });
+          await s.page.waitForTimeout(300);
+          assert.equal(await keyboardAt(s.page), before);
+          assert.equal(await zone(s.page), 'Focus: list');
+          await s.page.keyboard.press('Enter');
+          await s.page.waitForTimeout(300);
+          assert.equal(inputs(s.w), 0, 'nothing reached the terminal');
+          assert.deepEqual(barActs(s.w), []);
+        },
+      );
+    }
+  }
+
+  await t.test(
+    'with the New form open over the selection, a terminal that moves to another session sends a focus naming it',
+    async (t) => {
+      const page = await newPage(t, chromium);
+      const w = await editWorld(
+        t,
+        page,
+        scriptedList(
+          [
+            { id: S1, terminal: TERM_A, slot: 1 },
+            { id: S3, terminal: null, slot: null },
+          ],
+          [{ id: TERM_A, slot: 1, sessionId: S1 }],
+        ),
+      );
+      await clickRow(page, S1);
+      await page.keyboard.press('Control+Shift+N');
+      await until(
+        async () =>
+          (await readPage(
+            page,
+            () => document.getElementById('right-zone')?.dataset['pane'],
+            null,
+          )) === 'new',
+        'the New form',
+      );
+      await page.waitForTimeout(500);
+      w.list(
+        scriptedList(
+          [
+            { id: S2, terminal: TERM_A, slot: 1 },
+            { id: S1, terminal: null, slot: null },
+            { id: S3, terminal: null, slot: null },
+          ],
+          [{ id: TERM_A, slot: 1, sessionId: S2 }],
+        ),
+      );
+      await until(
+        () => w.sent.some((one) => one['t'] === 'focus' && one['selected'] === S2),
+        'a focus names S2',
+      );
+    },
+  );
+
   for (const from of ['bar', 'list', 'terminal'] as const) {
     await t.test(
       `a click on the heading that selects nothing leaves the keyboard ${from === 'bar' ? 'on the bar' : from === 'list' ? 'on the list' : 'in the terminal'}`,

@@ -241,9 +241,12 @@ export function createCarryOver(host, deps) {
   /** The last refusal ('' when none), and the (session, rev) it is of: shown on that bar only. */
   let refusal = '';
   let refusalKey = '';
-  /** The offer (session, rev) under which a control of the bar last had the keyboard: a button
-   *  that gets the keyboard under another offer gives it to the first checkbox (rule 3). */
-  let seenKey = '';
+  /** The ticks' generation: it goes up at every restart of the ticks (a new offer, a new `rev`,
+   *  also one that comes back to an earlier `rev`). */
+  let generation = 0;
+  /** The generation under which a control of the bar last had the keyboard: a button that gets
+   *  the keyboard under another one gives it to the first checkbox (rule 3). */
+  let seenGeneration = -1;
   /** What had the keyboard when a press on one of the bar's texts began, until its click ends. */
   /** @type {Element | null} */
   let pressFrom = null;
@@ -383,7 +386,7 @@ export function createCarryOver(host, deps) {
       }
     }
     if (host.contains(document.activeElement)) {
-      seenKey = here; // the keyboard is on the bar while this offer is drawn
+      seenGeneration = generation; // the keyboard is on the bar while these ticks are drawn
     }
   }
 
@@ -400,9 +403,12 @@ export function createCarryOver(host, deps) {
       event.preventDefault();
       return;
     }
-    if (event.button === 0) {
-      pressFrom = document.activeElement;
+    if (event.button !== 0) {
+      // A right or a middle press moves no keyboard; the context menu still opens.
+      event.preventDefault();
+      return;
     }
+    pressFrom = document.activeElement;
   });
   addEventListener('mouseup', () => {
     const from = pressFrom;
@@ -425,14 +431,15 @@ export function createCarryOver(host, deps) {
       }
     }, 0);
   });
-  // Rule 3: a button that gets the keyboard under an offer the bar did not have the keyboard
-  // under (a dialog gives it back after a new `rev` came under it) hands it to the first
-  // checkbox, so that Enter never presses a button for an offer the user has not seen.
+  // Rule 3: a button that gets the keyboard under ticks the bar did not have the keyboard under
+  // (a dialog gives it back after a new `rev` came under it, or one that went away and back)
+  // hands it to the first checkbox, so that Enter never presses a button for an offer, or for
+  // ticks, the user has not seen.
   // The move is made once the code that gave the keyboard is done (a dialog's close checks that
   // what it gave the keyboard to has it), and only while the button still has it.
   for (const button of [apply, dismiss]) {
     button.addEventListener('focus', () => {
-      if (seenKey === keyOf() && drawn()) {
+      if (seenGeneration === generation && drawn()) {
         return;
       }
       queueMicrotask(() => {
@@ -441,7 +448,7 @@ export function createCarryOver(host, deps) {
         }
         if (offer === null || !drawn()) {
           deps.back();
-        } else if (seenKey !== keyOf()) {
+        } else if (seenGeneration !== generation) {
           boxesOf(offer)[0]?.focus();
         }
       });
@@ -449,7 +456,7 @@ export function createCarryOver(host, deps) {
   }
   host.addEventListener('focusin', (event) => {
     if (event.target !== apply && event.target !== dismiss) {
-      seenKey = keyOf(); // a checkbox has the keyboard: the user is on this offer's bar
+      seenGeneration = generation; // a checkbox has the keyboard: the user sees these ticks
     }
   });
   for (const parts of [...checks.values(), done]) {
@@ -597,6 +604,7 @@ export function createCarryOver(host, deps) {
         ticks = new Map(next?.fields.map((field) => [field.name, field.ticked]) ?? []);
         ticks.set('done', next?.done?.ticked === true);
         tickedKey = key;
+        generation++;
         // Rule 3: a new `rev` takes the keyboard off a button to the first checkbox, so that an
         // Enter presses nothing for an offer the user has not seen.
         toFirst = before !== '' && (active === apply || active === dismiss);
