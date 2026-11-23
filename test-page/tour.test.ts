@@ -1,6 +1,6 @@
 // The tour of the window (follow-up F41, issue #162; S2 12.14): it starts by itself after the
-// first list in a browser that has not seen it — with sessions and on an empty list —, never in
-// one that has or whose storage cannot keep the mark; each step's region stands out and its panel
+// first list in a browser that has not seen this version of it (no mark, or the first version's
+// `seen`) — with sessions and on an empty list —, never in one that has or whose storage cannot keep the mark; each step's region stands out and its panel
 // says the step's words, in the app window's and in a tab's; its keys and the page under it, which
 // takes no key and no click; Done, Skip and Esc mark it seen and give the keyboard back where it
 // was; the key help's `Take the tour` starts it again; a lost connection ends it unmarked. On a
@@ -350,6 +350,36 @@ test('the tour of the window', async (t) => {
       await empty.page.keyboard.press('Escape');
       await tourHidden(empty.page);
       assert.equal(await mark(empty.page), TOUR_SEEN);
+    },
+  );
+
+  await t.test(
+    'A2: a browser marked with the first version’s `seen` sees the tour by itself once more, its old mark kept while it shows; Done marks the current version, and a reload shows none',
+    async (t) => {
+      // Marked `seen` at its first load only, so that the reload below keeps what Done wrote.
+      const old = `try { if (localStorage.getItem('${TOUR_KEY}') === null) localStorage.setItem('${TOUR_KEY}', 'seen'); } catch {}`;
+      const { page } = await world(t, chromium, WITH_SESSIONS, { init: old });
+      await listed(page, false);
+      await tourStep(page, 1);
+      assert.equal(await mark(page), 'seen', 'the old mark is not touched while it shows');
+      await walk(page, 'tab');
+      assert.equal(await mark(page), TOUR_SEEN, 'Done writes the current version');
+      assert.notEqual(TOUR_SEEN, 'seen');
+      await page.reload();
+      await connection(page, 'open');
+      await listed(page, false);
+      assert.equal(await shownTour(page), null, 'the current mark: not again');
+    },
+  );
+
+  await t.test(
+    'A2: a browser that holds the current mark sees no tour by itself, however the page starts',
+    async (t) => {
+      const current = `try { localStorage.setItem('${TOUR_KEY}', '${TOUR_SEEN}'); } catch {}`;
+      const { page } = await world(t, chromium, WITH_SESSIONS, { init: current });
+      await listed(page, false);
+      assert.equal(await shownTour(page), null);
+      assert.equal(await mark(page), TOUR_SEEN);
     },
   );
 

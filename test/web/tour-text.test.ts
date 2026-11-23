@@ -243,7 +243,10 @@ test('the panel’s words, and the storage key that marks the tour seen', () => 
   assert.equal(TOUR_TEXTS.closeFirst, 'close the tour first (Esc)');
   assert.deepEqual([TOUR_TEXTS.back, TOUR_TEXTS.next, TOUR_TEXTS.done], ['Back', 'Next', 'Done']);
   assert.equal(TOUR_KEY, 'skydeck-tour');
-  assert.equal(TOUR_SEEN, 'seen');
+  // The mark names the tour's version: not the first version's `seen`, so that a browser holding
+  // that one sees the tour once more.
+  assert.equal(TOUR_SEEN, 'seen-2');
+  assert.notEqual(TOUR_SEEN, 'seen');
 });
 
 test('the panel goes to the right of a region, else its left, else below, else above, inside the viewport', () => {

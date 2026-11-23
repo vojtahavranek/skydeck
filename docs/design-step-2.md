@@ -4253,10 +4253,15 @@ none: no made-up data.
   app window and an ordinary browser tab (`--print-url`) keep their storage apart and are two
   browsers here: each shows it once.
 - **Seen.** Ending it with `Done`, `Skip the tour` or Esc marks it seen for this browser in the
-  page's own `localStorage` (the key `skydeck-tour`, the value `seen`), as the theme's choice is
-  kept (12.1); nothing goes to the server, and no other window is told. It starts by itself only
-  where that storage can be read and written: before it starts, the page writes the key and removes
-  it again; storage that throws or refuses the write (a private mode without storage, a full
+  page's own `localStorage` (the key `skydeck-tour`, the value `seen-2`), as the theme's choice is
+  kept (12.1); nothing goes to the server, and no other window is told. The value names the tour's
+  version: the first version wrote `seen`, the second `seen-2`, and the tour starts by itself
+  whenever the stored mark is not the current one, so a browser marked `seen` shows it once more
+  after the update that brought version 2, and after `Done`, `Skip the tour` or Esc it does not come
+  back. The constant (`TOUR_SEEN`, web/tour-text.js) is raised by hand, only when the tour changed
+  enough that everyone should see it again; an update alone never raises it. It starts by itself
+  only where that storage can be read and written: before it starts, the page writes the key and
+  puts back what it found (nothing, or an older mark); storage that throws or refuses the write (a private mode without storage, a full
   quota) means the tour never starts by itself (the help's control still starts it). A lost
   connection or a fatal bar (6.3, 8.2.2) ends a shown tour without marking it, and the page is no
   longer inert; so does an update that runs (F38, 16.5): the page closes the tour as it closes its
@@ -4303,7 +4308,7 @@ none: no made-up data.
   Tab and Shift+Tab; Space, with any modifier, and Shift+Enter do nothing.
 - **Tests.** Every browser context of the page suite is made by `newContext`
   (`test-page/helpers/browser.ts`), which marks the tour seen in each page's storage, so that no
-  case but the tour's own meets it; those ask for a context without the mark.
+  case but the tour's own meets it; those ask for a context without the mark, or with an older one.
 
 ## 13. Notifications
 

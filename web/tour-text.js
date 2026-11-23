@@ -27,9 +27,15 @@ export const REGIONS = /** @type {const} */ ({
   settings: '#settings-button',
 });
 
-/** The page's own localStorage key (the theme's are web/theme-text.js's) and its one value. */
+/** The page's own localStorage key (the theme's are web/theme-text.js's). */
 export const TOUR_KEY = 'skydeck-tour';
-export const TOUR_SEEN = 'seen';
+/**
+ * The mark a browser keeps once it has ended the tour, and the tour's version: the first version
+ * wrote `seen`, this one `seen-2`. The tour starts by itself whenever the stored mark is not this
+ * one, so a browser marked `seen` sees it once more. Raise it by hand (`seen-3`) only when the tour
+ * changed enough that everyone should see it again; an update alone never raises it.
+ */
+export const TOUR_SEEN = 'seen-2';
 
 export const TOUR_TEXTS = {
   /** The panel's name, for a screen reader. */

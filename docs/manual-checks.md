@@ -3050,8 +3050,10 @@ does it meet Edge, Windows' fonts and your own list.
 
 ## W45. The tour, once per browser
 
-Setup: skydeck updated to a commit that has follow-up F41 (`skydeck update`, W32), the window
-closed; at least one session in the list.
+Setup: skydeck updated to a commit that has follow-up F41's second version (`skydeck update`,
+W32), the window closed; at least one session in the list. If this window saw the first version
+of the tour, it shows it again at step 1 (the version rule); a profile that never saw it shows it
+too.
 
 1. **It starts by itself.** In W, `skydeck window`. Expected: once the list is drawn, the list
    stands out in a coloured ring, the rest of the window is dimmed, and a small panel beside it
@@ -3073,7 +3075,8 @@ closed; at least one session in the list.
 3. **Done.** Write down what the key bar says (`Focus: …`), then press Enter. Expected: the panel
    and the dimming are gone, the key bar says what it said before, a typed key goes where it went
    before (a letter into the terminal with `Focus: terminal`). Press Ctrl+Shift+R: the page
-   reloads, and no tour starts.
+   reloads, and no tour starts. Close the window and run `skydeck window` again: still no tour
+   (it kept the second version's mark).
 4. **Again from the help and the switcher.** Press Ctrl+Shift+H, click `Take the tour` under the
    help's title. Expected: the help is gone and the tour shows `Step 1 of 7`. Press Esc: it ends,
    and the keyboard is back where it was. Press Ctrl+Shift+P and type `>t`: the line `Tour: a
