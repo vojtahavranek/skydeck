@@ -1852,10 +1852,12 @@ holds it. When the list shows the session again (the filter cleared), it is sele
 
 #### The icon (stage E)
 
-The page has an icon of its own: on a dark navy rounded square, a blue-to-violet cloud outline
-with a terminal window in front of it and a white prompt (`>_`) in the window, the same picture at
-each of the small sizes (16, 32 and 48 pixels) that the window's taskbar button and its title bar
-show; manual check W3 says whether Edge shows it there.
+The page has an icon of its own: a blue-to-violet cloud drawn as a line, with a terminal box in
+front of it and a white prompt (`>_`) in the box, on a transparent background (the taskbar's own
+colour shows around it). Its `favicon.ico` holds the picture drawn for every size the window's
+taskbar button and its title bar show at a scaling of 100 % to 250 % in steps of 25 % (16 to 64
+pixels), the lines bolder at the two smallest; manual check W3 says whether Edge shows it there and
+whether it is sharp.
 The page also has a manifest, for the icon: Edge's menu may offer to install the page as an app.
 Do not: the window is opened by `skydeck window`, and the page is built not to be installable (its
 manifest names no start address).
