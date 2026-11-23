@@ -4269,10 +4269,10 @@ none: no made-up data.
   (4.3). The switcher's line for a command that names none names it too: `No command matches. >
   settings opens the settings; > tour starts the tour of the window; > restore is listed after Not
   now on the restore banner, until WSL restarts.`
-- **The steps.** Six, each pointing at one region, in this order (the words are
+- **The steps.** Seven, each pointing at one region, in this order (the words are
   `web/tour-text.js`'s, pure text; `test/web/tour-text.test.ts` holds every key a step names
   against `web/keys.js`, as the help's test does, and every text it says to type against the
-  server's commands; `test-page/tour.test.ts` every control a step names against the page in each
+  server's commands (`> tour` and `> restore` the quick switcher's, `skydeck window` the command line's); `test-page/tour.test.ts` every control a step names against the page in each
   mode):
 
   | Region | Title | What it says |
@@ -4280,9 +4280,10 @@ none: no made-up data.
   | the list | The list | every session, one row each, of this window and of any terminal; Open, Recent (the last 7 days) and Earlier; the number 1–9 is the slot |
   | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it |
   | the key bar | Where the keyboard is | `Focus: list` or `Focus: terminal`; Ctrl+Shift+L moves it; with `Focus: terminal` a letter goes to Claude Code |
-  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done; `/` filter, `a` show done |
-  | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+N a new one |
-  | the gear | Settings and every key | the gear opens Settings; Ctrl+Shift+H shows every key; the tour again: `Take the tour` in the key help, or `> tour` in `Switch…` |
+  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done; `/` filter, `a` show done |
+  | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+J the next session that needs you; Ctrl+Shift+N a new one |
+| the list | After a restart | a restart of the PC or of WSL ends the running sessions; run `skydeck window` again, and the top of the list offers the ones that were open (the banner, 12.7); `Restore` brings the ticked ones back, and after `Not now` `> restore` in `Switch…` offers it again |
+  | the gear | Settings and every key (step 7) | the gear opens Settings; Ctrl+Shift+H shows every key; the tour again: `Take the tour` in the key help, or `> tour` in `Switch…` |
 
   The words name the keys of the mode the page runs in (`<html data-display>`, the rule of the key
   bar's hints): in a browser tab, which keeps Ctrl+Tab and Ctrl+Shift+N, Ctrl+Shift+O and `+ New in
@@ -4293,7 +4294,7 @@ none: no made-up data.
   beside it (to its right, else its left, else below, else above it, inside the window; the middle
   of the window when none fits, so that in a narrow window it may lie over the region; placed
   again, with the ring, when the window is resized and when the region changes size without a
-  resize, as when a bar shows above the zones) holds the title, two or three short lines, `Step n
+  resize, as when a bar shows above the zones) holds the title, two to four short lines, `Step n
   of N`, `Skip the tour`, `Back` (shown disabled on the first step) and `Next` (`Done` on the
   last), with the keyboard on `Next` at each step. It lies over every layer of the
   page, the dialogs' and the toast's too. Its words are in the page's own colours (`--text`,
