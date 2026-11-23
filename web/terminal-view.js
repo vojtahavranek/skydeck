@@ -2,9 +2,9 @@
 // 6.0.0 per attached terminal, with the vendored addons, fed by the snapshot and the stream of
 // S2 8.2.4 and sized by the server only (S2 8.2.6: the view only computes the proposal sent in
 // `attach` and `resize`, by its own rule of what fits — see `fitIn`). The page's terminal answers
-// no query (S2 9.3), maps the keys of S2 9.1, writes the clipboard only for the shown terminal of
-// a focused window (S2 9.5), and (issue #184, S2 9.5) a selection the user ends with the mouse in
-// the shown terminal while the setting `window.copyOnSelect` is on, opens links only on a
+// no query (S2 9.3), maps the keys of S2 9.1, writes the clipboard for a program only for the
+// shown terminal of a focused window (S2 9.5) and, while `window.copyOnSelect` is on, a selection
+// the user ends with the mouse in the shown terminal (issue #184, S2 9.5), opens links only on a
 // Ctrl+click and through the server (S2 9.6), finds in the scrollback (S2 9.7) and ignores the
 // program's window title (S2 15.4).
 //

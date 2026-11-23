@@ -99,7 +99,7 @@ async function spanOf(
       const box = document.querySelector('#terminal .tv-term:not([hidden])');
       const rows = [...(box?.querySelectorAll('.xterm-rows > div') ?? [])];
       for (const line of rows.reverse()) {
-        const whole = (line.textContent ?? '').replaceAll(' ', ' ');
+        const whole = (line.textContent ?? '').replaceAll('\u00a0', ' ');
         if (row !== null ? whole.trimEnd() !== row : !whole.includes(text)) continue;
         const at = whole.lastIndexOf(text);
         if (at === -1) continue;

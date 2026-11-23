@@ -1886,7 +1886,7 @@ function as Ctrl+Shift+C (9.1), once per ended selection, at the release — nev
 at the release that ends the press which began it, wherever the release is (xterm.js follows a drag
 outside the terminal, and scrolls with one past its top or bottom), so every way xterm.js's
 selection takes the mouse counts: a drag, a double click (a word), a triple click (a line), a
-Shift+click that extends, and Alt+drag's column. The press counts when xterm.js's own selection
+Shift+click that extends. The press counts when xterm.js's own selection
 takes it (its `handleMouseDown`'s rule): the primary button, and while the program has turned
 mouse reporting on, only with Shift — a plain drag is then the program's, xterm.js makes no
 selection, and a program's own copy still comes by OSC 52 as above. A release copies only when the
