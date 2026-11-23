@@ -16,11 +16,12 @@
 //
 // Seen (the brief's Behaviour 4): ending the tour with `Done`, `Skip the tour` or Esc marks it seen
 // in the page's own localStorage (TOUR_KEY), as the theme's choice is kept (web/theme.js); nothing
-// goes to the server. `fresh()` tells app.js whether it may start by itself: only while the mark
-// is absent and the storage can be read and written (a write and its removal, the probe). A tour
-// that app.js ends (`abort()`: the connection lost, a fatal bar) marks nothing. The words are those
-// of the mode the page shows at its opening (`<html data-display>`, the page's app-only and
-// tab-only rule). Every text reaches the DOM as text.
+// goes to the server. The mark names the tour's version (TOUR_SEEN): `fresh()` tells app.js whether
+// it may start by itself: only while the stored mark is not the current one (absent, or an older
+// version's) and the storage can be read and written (a write, and the mark put back, the probe).
+// A tour that app.js ends (`abort()`: the connection lost, a fatal bar) marks nothing. The words
+// are those of the mode the page shows at its opening (`<html data-display>`, the page's app-only
+// and tab-only rule). Every text reaches the DOM as text.
 
 /** @import { Part, TourStep } from './tour-text.js' */
 import {
@@ -93,16 +94,24 @@ function isSpace(event) {
 }
 
 /**
- * Whether the tour may start by itself: the storage holds no mark and can be read and written.
+ * Whether the tour may start by itself: the storage does not hold the current mark and can be read
+ * and written. The probe leaves the storage as it found it (an older mark stays until the tour is
+ * ended), unless the put-back throws: then `probe` stays, and the next start treats it as an older
+ * mark.
  * @returns {boolean}
  */
 function fresh() {
   try {
-    if (localStorage.getItem(TOUR_KEY) === TOUR_SEEN) {
+    const stored = localStorage.getItem(TOUR_KEY);
+    if (stored === TOUR_SEEN) {
       return false;
     }
     localStorage.setItem(TOUR_KEY, 'probe');
-    localStorage.removeItem(TOUR_KEY);
+    if (stored === null) {
+      localStorage.removeItem(TOUR_KEY);
+    } else {
+      localStorage.setItem(TOUR_KEY, stored);
+    }
     return true;
   } catch {
     return false; // no storage: it could never be marked seen
