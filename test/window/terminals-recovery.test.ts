@@ -452,15 +452,40 @@ describe('registry: closing a lost terminal', () => {
    * The box's platform with a wall clock `shift()` moves forward (the 60 s without waiting) and
    * whose /proc cannot read this test process's stat line: the program the fake keeper names (this
    * process) may still run for design 5.5's rule, and the sandbox's cleanup, which waits for that
-   * program by its process start 1, does not wait for this process.
+   * program by its process start 1, does not wait for this process. `seconds()` counts the clock's
+   * one-second timers not stopped yet (the lost terminal's watch is one); while `hold(path)` is
+   * armed, a connect to `path` waits until `release()`.
    */
-  function shifted(box: RegistryBox): { platform: Platform; shift(ns: bigint): void } {
+  function shifted(box: RegistryBox): {
+    platform: Platform;
+    shift(ns: bigint): void;
+    seconds(): number;
+    hold(path: string): void;
+    held(): number;
+    release(): void;
+  } {
     const base = box.tp.platform;
     let by = 0n;
+    const live = new Set<object>();
+    let holding: string | null = null;
+    let waiting: (() => void)[] = [];
     return {
       platform: {
         ...base,
-        clock: { ...base.clock, nowNs: () => base.clock.nowNs() + by },
+        clock: {
+          ...base.clock,
+          nowNs: () => base.clock.nowNs() + by,
+          every(ms, callback) {
+            const stop = base.clock.every(ms, callback);
+            if (ms !== 1000) return stop;
+            const token = {};
+            live.add(token);
+            return () => {
+              live.delete(token);
+              stop();
+            };
+          },
+        },
         proc: {
           ...base.proc,
           stat: (pid) => {
@@ -470,9 +495,28 @@ describe('registry: closing a lost terminal', () => {
             return base.proc.stat(pid);
           },
         },
+        net: {
+          ...base.net,
+          async connectUnix(path) {
+            if (path === holding) {
+              await new Promise<void>((resolve) => waiting.push(resolve));
+            }
+            return base.net.connectUnix(path);
+          },
+        },
       },
       shift(ns) {
         by += ns;
+      },
+      seconds: () => live.size,
+      hold(path) {
+        holding = path;
+      },
+      held: () => waiting.length,
+      release() {
+        holding = null;
+        for (const resume of waiting) resume();
+        waiting = [];
       },
     };
   }
@@ -516,6 +560,56 @@ describe('registry: closing a lost terminal', () => {
     assert.ok(changes >= 1, 'announced');
     assert.equal(r.registry.nextSlot(), 1);
     assert.equal(info(r.registry, id).state, 'lost', 'the lost terminal is still listed');
+  });
+
+  test('F43: forgetting a lost terminal stops its watch at once', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'ffffffffffff';
+    const keeper = await fakeKeeper(t, box, id);
+    const clock = shifted(box);
+    const r = box.registry({ platform: clock.platform });
+    await lost(r, keeper, box, id);
+    assert.equal(info(r.registry, id).slot, 1, 'held: its watch runs');
+    const before = clock.seconds();
+    assert.ok(before >= 1, 'the watch is on the clock');
+    assert.equal(r.registry.close(id), 'ok');
+    assert.equal(clock.seconds(), before - 1, 'the close took the watch off the clock');
+  });
+
+  test("F43: stopAll stops a lost terminal's watch at once", async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'abababababab';
+    const keeper = await fakeKeeper(t, box, id);
+    const clock = shifted(box);
+    const r = box.registry({ platform: clock.platform });
+    await lost(r, keeper, box, id);
+    const before = clock.seconds();
+    assert.ok(before >= 1, 'the watch is on the clock');
+    const stopping = r.registry.stopAll();
+    assert.equal(clock.seconds(), before - 1, 'stopAll took the watch off the clock');
+    await stopping;
+  });
+
+  test('F43: a loss whose work lands after stopAll changes no slot and leaves no watch on the clock', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'cdcdcdcdcdcd';
+    const keeper = await fakeKeeper(t, box, id);
+    const clock = shifted(box);
+    const r = box.registry({ platform: clock.platform });
+    await r.registry.rediscover();
+    assert.equal(info(r.registry, id).slot, 1);
+    // The reconnect's connect waits; meanwhile the registry stops.
+    const sock = box.files.termSock(id);
+    clock.hold(sock);
+    await keeper.stop();
+    if (!existsSync(sock)) writeFileSync(sock, ''); // connecting to a file is refused
+    await until(() => clock.held() > 0, 'a reconnect waits for its connect', 10_000);
+    await r.registry.stopAll();
+    clock.release();
+    await until(() => info(r.registry, id).state === 'lost', 'lost after the stop', 10_000);
+    await sleep(1500);
+    assert.equal(info(r.registry, id).slot, 1, 'once stopped no slot changes');
+    assert.equal(clock.seconds(), 0, 'no watch is left on the clock');
   });
 
   for (const program of ['gone', 'never started'] as const) {
