@@ -220,7 +220,7 @@ test('copy on select (issue #184)', async (t) => {
   const chromium = await browser(t);
 
   await t.test(
-    'a drag copies its selection at the release, once, not at each move, and the same text dragged again is copied again (also after a resize cleared it); Ctrl+C then still interrupts the program; a click, output and a resize that clear it leave the clipboard as it was',
+    'a drag copies its selection at the release, once, not at each move, and the same text dragged again is copied again (also after a resize or a key cleared it); Ctrl+C then still interrupts the program; a click, output and a resize that clear it leave the clipboard as it was',
     async (t) => {
       const { l, term } = await withLine(t, chromium);
       const { page, d } = l;
@@ -262,12 +262,24 @@ test('copy on select (issue #184)', async (t) => {
       await page.keyboard.press('Control+C');
       await until(() => inputOf(d.record, S1).slice(before).includes('03'), 'the interrupt');
       await stillHolds(page, 'copied elsewhere', 'Ctrl+C copies nothing');
+
+      // A key clears a selection (xterm.js reports that, but its release compares with its last
+      // report before it): the same drag afterwards is a new selection, and copies.
+      const [key, keyTo] = await endsOf(page, 'bravo', LINE);
+      await drag(page, key, keyTo);
+      await until(async () => (await clipboardText(page)) === 'bravo', 'selected once more');
+      await page.keyboard.press('x');
+      await setClipboard(page, 'copied elsewhere');
+      await page.keyboard.press('Control+Shift+C');
+      await stillHolds(page, 'copied elsewhere', 'the key cleared the selection');
+      await drag(page, key, keyTo);
+      await until(async () => (await clipboardText(page)) === 'bravo', 'the same drag after a key');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
 
   await t.test(
-    'a double click copies the word, a triple click the line, a Shift+click the text from the last click to it',
+    'a double click copies the word, a triple click the line (a fourth click nothing more), a Shift+click the text from the last click to it',
     async (t) => {
       const { l } = await withLine(t, chromium);
       const { page } = l;
@@ -278,6 +290,11 @@ test('copy on select (issue #184)', async (t) => {
       const [bravo] = await endsOf(page, 'bravo', LINE);
       await clickAt(page, bravo, 3);
       await until(async () => (await clipboardText(page)) === LINE, 'the line');
+      // A fourth click of the same sequence changes nothing in xterm.js: nothing is written.
+      await setClipboard(page, 'copied elsewhere');
+      await page.mouse.down({ clickCount: 4 });
+      await page.mouse.up({ clickCount: 4 });
+      await stillHolds(page, 'copied elsewhere', 'a fourth click');
 
       await setClipboard(page, 'before');
       const [start] = await endsOf(page, 'alpha', LINE);
@@ -298,7 +315,7 @@ test('copy on select (issue #184)', async (t) => {
   );
 
   await t.test(
-    'a drag released outside the terminal copies; one that scrolls the scrollback copies every line it reached',
+    'a drag released outside the terminal copies, unless another press or the window losing the focus came before its release; one that scrolls the scrollback copies every line it reached',
     async (t) => {
       const { l, term } = await withLine(t, chromium);
       const { page } = l;
@@ -332,6 +349,14 @@ test('copy on select (issue #184)', async (t) => {
           }),
       });
       await stillHolds(page, 'copied elsewhere', 'the release of another press');
+      // So does the window losing the focus in the middle of a drag (Alt+Tab).
+      await drag(page, from, to, {
+        beforeRelease: () =>
+          page.evaluate(() => {
+            window.dispatchEvent(new FocusEvent('blur'));
+          }),
+      });
+      await stillHolds(page, 'copied elsewhere', 'the release after the window lost the focus');
 
       l.server.hub.input(term, Buffer.from('/lines 300\r'));
       await untilScreen(page, /^line 300$/m);
@@ -358,9 +383,9 @@ test('copy on select (issue #184)', async (t) => {
   );
 
   await t.test(
-    "the search's match is a selection that copies nothing (Ctrl+Shift+C still copies it); a selection whose terminal is no longer shown at the release copies nothing",
+    "the search's match is a selection that copies nothing (Ctrl+Shift+C still copies it), also when the add-on selects it during a press; a selection whose terminal is no longer shown at the release copies nothing",
     async (t) => {
-      const { l } = await withLine(t, chromium, {}, [S2]);
+      const { l, term } = await withLine(t, chromium, {}, [S2]);
       const { page } = l;
       await setClipboard(page, 'before');
       await page.keyboard.press('Control+Shift+F');
@@ -385,6 +410,30 @@ test('copy on select (issue #184)', async (t) => {
       await stillHolds(page, 'before', "the search's match");
       await page.keyboard.press('Control+Shift+C');
       await until(async () => (await clipboardText(page)) === 'bravo', 'it was selected');
+
+      // With the find bar open the add-on finds again by itself after output, and selects its
+      // match: while the button is down, that ends the press (a held click, then a drag).
+      await setClipboard(page, 'before');
+      const [charlie, charlieEnd] = await endsOf(page, 'charlie', LINE);
+      await drag(page, charlie, charlie, {
+        beforeRelease: async () => {
+          l.server.hub.input(term, Buffer.from('/red zulu\r'));
+          await untilScreen(page, /^zulu$/m);
+          await sleep(500);
+        },
+      });
+      await stillHolds(page, 'before', 'the add-on selected its match during a held click');
+      await page.keyboard.press('Control+Shift+C');
+      await until(async () => (await clipboardText(page)) === 'bravo', 'the match was selected');
+      await setClipboard(page, 'before');
+      await drag(page, charlie, charlieEnd, {
+        beforeRelease: async () => {
+          l.server.hub.input(term, Buffer.from('/red yankee\r'));
+          await untilScreen(page, /^yankee$/m);
+          await sleep(500);
+        },
+      });
+      await stillHolds(page, 'before', 'the add-on selected its match during a drag');
       await page.keyboard.press('Escape');
       await untilTerminalOf(page, S1);
 

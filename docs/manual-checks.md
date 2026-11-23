@@ -3093,10 +3093,12 @@ Not tried before this check was written: all of it, in Edge.
 
 The check of copy on select (issue #184; design-step-2.md 9.1, 9.5, 12.13; [install.md](install.md),
 "Using the window", its point "Keys", and "The `window` keys"): W46, in your window, with a real
-session. It changes the setting `Copy on select` (`window.copyOnSelect`) and puts it back. The
-tests select in headless Chromium and read its own clipboard; only here does a selection reach the
-Windows clipboard through Edge, from a terminal with Claude Code in it, for another program to
-paste.
+session. It switches `Copy on select` (`window.copyOnSelect`) off and on in Settings, which writes
+`config.json` (and the window's copy of it, `config.json.skydeck-backup`): both are copied aside
+first and given back at the end, as in W41. Commands are typed in W, a WSL terminal of your own
+(never a `!` command inside Claude Code). The tests select in headless Chromium and read its own
+clipboard; only here does a selection reach the Windows clipboard through Edge, from a terminal
+with Claude Code in it, for another program to paste.
 
 ## W46. A selection copied as the mouse lets go (real claude)
 
@@ -3104,19 +3106,29 @@ Setup: skydeck updated to a commit that has issue #184 (`skydeck update`, W32); 
 with the terminal of a session shown that has some text on its screen (any running one; no prompt
 is typed into it); Notepad open beside the window.
 
-1. **A drag.** Write down whether Settings (the gear) shows `Copy on select` on (the default) and
-   close Settings with Esc. In the terminal, drag over two or three words and let go. Nothing says
-   that it copied. In Notepad, Ctrl+V. Expected: exactly those words. Double click one word in the
+1. **Copy the files aside.** As W41's step 1, with `w46` for `w41` in the names; write down the
+   value of `grep -n copyOnSelect ~/.config/skydeck/config.json` (no line: not set, which is
+   `true`). Open Settings (the gear): `Copy on select` is a switch in The window. When it is off,
+   click it on (`Saved.` beside it). Close Settings with Esc.
+2. **A drag.** In the terminal, drag over two or three words and let go. Nothing says that it
+   copied. In Notepad, Ctrl+V. Expected: exactly those words. Double click one word in the
    terminal, Ctrl+V in Notepad: that word.
-2. **A click.** Copy a word in Notepad (select it, Ctrl+C). Click once into the terminal (no drag)
+3. **A click.** Copy a word in Notepad (select it, Ctrl+C). Click once into the terminal (no drag)
    and Ctrl+V in Notepad. Expected: the Notepad word, not the terminal's: a click copies nothing.
-3. **Off.** Open Settings, turn `Copy on select` off (`Saved.` beside it), close it with Esc. Copy
+4. **Off.** Open Settings, turn `Copy on select` off (`Saved.` beside it), close it with Esc. Copy
    a word in Notepad, then drag over other words in the terminal and let go, and Ctrl+V in Notepad.
-   Expected: the Notepad word: the clipboard kept the old text. Ctrl+Shift+C in the terminal, Ctrl+V
-   in Notepad: the terminal's words (Ctrl+Shift+C still copies).
-4. **On again.** Open Settings, turn `Copy on select` on again (`Saved.`), close it. Drag over a
+   Expected: the Notepad word: the clipboard kept the old text. Drag over those words in the
+   terminal again and, at once, without a click, press Ctrl+Shift+C; Ctrl+V in Notepad: the
+   terminal's words (Ctrl+Shift+C still copies).
+5. **On again.** Open Settings, turn `Copy on select` on again (`Saved.`), close it. Drag over a
    word in the terminal, Ctrl+V in Notepad. Expected: that word, with no reload of the window in
-   between. When step 1 found it off, turn it off again.
+   between.
+6. **The end.** When step 1 found `Copy on select` off, turn it off again in Settings (`Saved.`),
+   so that the window uses the value the file gets back. The window's copy: as W41's step 6, with
+   `w46` for `w41`. The file: when step 1 found no `config.json`, `rm
+   ~/.config/skydeck/config.json` (the switch made it, holding only `window.copyOnSelect`); else,
+   when you changed nothing else in it since step 1, `cp -p ~/config.json.before-w46
+   ~/.config/skydeck/config.json`, then `rm ~/config.json.before-w46`. Nothing needs a restart.
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge
 version.

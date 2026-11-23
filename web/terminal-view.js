@@ -163,8 +163,11 @@ export function createTerminalView(root, deps) {
   // a one-character selection there), and it hears every release xterm.js hears, wherever it is
   // (xterm.js follows a drag outside the terminal and scrolls with it). Every press of the primary
   // button first forgets the last one (a release the page never saw: the window lost the mouse);
-  // the release of any button ends the press, as xterm.js ends its own. A selection made by code
-  // (the search's match, any `select…`) comes with no press.
+  // the release of any button ends the press, as xterm.js ends its own; the window losing the
+  // focus (Alt+Tab in the middle of a drag, whose release it then never hears) forgets it too. A
+  // selection made by code comes with no press, and one made during a press ends it: the search
+  // add-on's (it finds again by itself 200 ms after output or a resize while the find bar is
+  // open, and selects its match) forgets the press (`create`); xterm.js drops its own drag then.
   window.addEventListener(
     'mousedown',
     (event) => {
@@ -174,6 +177,9 @@ export function createTerminalView(root, deps) {
     },
     true,
   );
+  window.addEventListener('blur', () => {
+    pressed = null;
+  });
   window.addEventListener('mouseup', () => {
     const press = pressed;
     pressed = null;
@@ -280,10 +286,19 @@ export function createTerminalView(root, deps) {
       true,
     );
     // After xterm.js's own listeners of the press (on this element, made by `open` before this
-    // one): where it put the selection — cleared, a word, a line, an end moved by Shift.
+    // one): where it put the selection — cleared, a word, a line, an end moved by Shift. The scroll
+    // bar sends none of this: it cancels its `pointerdown`, so the browser makes no mouse event of
+    // that press at all, and its drag copies nothing.
     xterm.element?.addEventListener('mousedown', () => {
       if (pressed?.t === t) {
         pressed.after = selectionPlace(xterm);
+      }
+    });
+    // The search add-on selected its match (a find with decorations, which the find bar always
+    // asks for): the selection is the page's, not the user's — the press ends without a copy.
+    t.search.onDidChangeResults(() => {
+      if (pressed?.t === t) {
+        pressed = null;
       }
     });
     screen.addEventListener('wheel', (event) => wheelInMargin(t, event), {
