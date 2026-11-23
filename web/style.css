@@ -395,10 +395,16 @@ kbd {
   cursor: pointer;
 }
 
+/* The list's width (issue #192): 400 px while none is stored; a stored one (`--list-width` on
+   <html>, put there by web/list-width-early.js) is shown at most the window less 320 px, never
+   under 240 px, so that a narrower window shows less of it and keeps it. With no --list-width,
+   --list-shown is invalid at computed-value time and the 400 px fallback holds.
+   test/web/list-width.test.ts holds these numbers equal to web/list-width-text.js's. */
 .main {
+  --list-shown: max(240px, min(var(--list-width), 100vw - 320px));
   flex: 1;
   display: grid;
-  grid-template-columns: 400px 1fr;
+  grid-template-columns: var(--list-shown, 400px) 1fr;
   min-height: 0;
 }
 .zone {
