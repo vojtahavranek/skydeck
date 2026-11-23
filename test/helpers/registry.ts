@@ -76,8 +76,8 @@ export interface RegistryBox extends KeeperBox {
     slowWriteMs?: number;
     keeperFile?: string;
     /** F37: the registry's `movedSlots` and `persistSlots`. */
-    movedSlots?: ReadonlyMap<string, number>;
-    persistSlots?: (moved: ReadonlyMap<string, number>) => void;
+    movedSlots?: ReadonlyMap<string, number | null>;
+    persistSlots?: (moved: ReadonlyMap<string, number | null>) => void;
   }): TestRegistry;
   /** A spec for the stand-in in this box (argv, env, record), as keeperSandbox makes it. */
   spec(overrides?: Partial<KeeperSpec>): KeeperSpec;
@@ -135,8 +135,8 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
       platform?: Platform;
       slowWriteMs?: number;
       keeperFile?: string;
-      movedSlots?: ReadonlyMap<string, number>;
-      persistSlots?: (moved: ReadonlyMap<string, number>) => void;
+      movedSlots?: ReadonlyMap<string, number | null>;
+      persistSlots?: (moved: ReadonlyMap<string, number | null>) => void;
     } = {},
   ): TestRegistry => {
     const base = options.platform ?? kb.tp.platform;

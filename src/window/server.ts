@@ -79,14 +79,15 @@ import type { Seen } from './seen.ts';
 import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
 import { readMovedSlots, writeMovedSlots } from './moved-slots.ts';
-import { createReorder } from './reorder.ts';
-import { createSlotMemory } from './slot-memory.ts';
+import { createReorder, persistMove } from './reorder.ts';
+import { createOpenOrder } from './open-order.ts';
+import { createRestoreMemory } from './restore-memory.ts';
 import { createRegistry } from './terminals.ts';
 import type { Registry } from './terminals.ts';
 import { createTick } from './tick.ts';
 import { createUpdates } from './updates.ts';
 import type { Tick } from './tick.ts';
-import { buildListMessage } from './view/build.ts';
+import { buildListMessage, keptNow, openRows } from './view/build.ts';
 import { restoreOffer } from './view/search/switcher.ts';
 import { windowTerminal } from './window-terminal.ts';
 import { loadXterm } from './xterm.ts';
@@ -216,6 +217,8 @@ function attentionParts(deps: {
   pages: () => Pick<Pages, 'notify' | 'pushList'>;
   log: (line: string) => void;
   storeNewer: (reason: string) => void;
+  /** F42: Open's kept order (open-order.ts), so that the notifier reads Open as the pages do. */
+  openOrder: () => readonly string[];
 }): AttentionParts {
   const { deck, hub, log } = deps;
   const seen = createSeen(deck.platform.clock);
@@ -238,6 +241,7 @@ function attentionParts(deps: {
       selected: null,
       nowNs: deck.platform.clock.nowNs(),
       attention: attention.facts(),
+      openOrder: deps.openOrder(),
     });
     const rows = new Map(message.sections.flatMap((section) => section.rows).map((r) => [r.id, r]));
     const needing = new Map<string, { title: string; attention: AttentionPayload }>();
@@ -586,15 +590,64 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       restoreRunning: () => restorer.running(),
       stopping: () => stopBegun,
     });
-    // F37 (design 7.8): the slots each session last had in this boot, a restore's order.
-    const slotMemory = createSlotMemory({ store: deck.store, bootId: own.bootId, log: quietLog });
+    // F42 (S2 12.1): Open's kept order, read before the first list; absent until the first move.
+    const openOrder = createOpenOrder({
+      store: deck.store,
+      log: quietLog,
+      stopping: () => stopBegun,
+    });
+    // F37, F42 (design 7.8): the order of Open in this boot, a restore's order.
+    const restoreMemory = createRestoreMemory({
+      store: deck.store,
+      bootId: own.bootId,
+      log: quietLog,
+    });
+    let openFailure: string | null = null;
+    /**
+     * F42 (S2 12.1, design 7.8): after a refresh that worked (`freeze`) or a move: Open as drawn now
+     * (done ones shown) taken by the kept order (only after a refresh, while one exists:
+     * `keptNow`, with the places held for a process's next session, so that a row keeps the place
+     * it was first drawn at) and by the restore memory. Nothing once the stop began, or
+     * while the tick has no rows. Never throws: a throw after a refresh would count as a failed one.
+     */
+    const tookOpen = (freeze: boolean): void => {
+      try {
+        if (stopBegun || tick === null) return;
+        const rows = tick.rows();
+        if (rows.length === 0) return;
+        const input = {
+          rows,
+          terminals: created.list(),
+          elsewhere: tick.elsewhere(),
+          nowNs: clock.nowNs(),
+          openOrder: openOrder.ids(),
+        };
+        const open = openRows(input).map((one) => one.id);
+        if (freeze && openOrder.keeps()) {
+          openOrder.freeze(keptNow(input));
+        }
+        restoreMemory.update(open, rows); // it never throws
+        openFailure = null;
+      } catch (error) {
+        const kind = failureKind(error);
+        if (openFailure !== kind) {
+          openFailure = kind;
+          quietLog(`open order: Open's order was not computed (${kind})`);
+        }
+      }
+    };
     const reorder = createReorder({
       registry: created,
       rows: () => tick?.rows() ?? NO_ROWS,
       elsewhere: () => tick?.elsewhere() ?? new Map(),
       nowNs: () => clock.nowNs(),
+      openOrder,
+      // F42: the moved numbers and Open's new order, both or neither; a busy store throws (busy).
+      persist: (moved, order) => {
+        persistMove(deck.store, moved, order);
+      },
       remember: () => {
-        slotMemory.update(created.list());
+        tookOpen(false);
       },
     });
     const acting = createActions({
@@ -712,6 +765,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         selected,
         nowNs: clock.nowNs(),
         attention: attending.attention.facts(),
+        openOrder: openOrder.ids(),
       });
       // The sections' rows, and a hidden selection whose header the page shows (E13: it has a
       // terminal of the window), whose pull requests that header shows too (review 2, ruled).
@@ -756,6 +810,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       storeNewer: (reason) => {
         storeNewer(reason);
       },
+      openOrder: () => openOrder.ids(),
     });
     const pages = createPages({
       platform,
@@ -819,7 +874,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         pageMark.update(pages.count()); // plan C20; it never throws
         decidePostponed();
         created.flushSlots(); // F37: a write of the moved slots that failed; it never throws
-        slotMemory.update(created.list()); // F37: the restore's order; it never throws
+        tookOpen(true); // F42: the kept order and the restore's order take Open; it never throws
       },
       storeNewer,
       attention: attending.tick,

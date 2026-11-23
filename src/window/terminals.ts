@@ -60,12 +60,13 @@ export interface RegistryDeps {
   keepersLog: string;
   log: (line: string) => void;
   events: RegistryEvents;
-  /** F37 (S2 7.6): the slots moved by hand that the store kept, by terminal id (`window_slots`);
+  /** F37, F42 (S2 7.6): the slots moved by hand that the store kept, by terminal id
+   *  (`window_slots`); null is "no slot although its meta has one", which only a move writes;
    *  absent: none. Applied at each terminal's hello, over the slot of its keeper's meta. */
-  movedSlots?: ReadonlyMap<string, number>;
+  movedSlots?: ReadonlyMap<string, number | null>;
   /** F37: writes the moved slots, the whole map (empty: none); absent, nothing is written. A throw
    *  of it refuses a move (`setSlots`); elsewhere it is logged and tried again (`flushSlots`). */
-  persistSlots?: (moved: ReadonlyMap<string, number>) => void;
+  persistSlots?: (moved: ReadonlyMap<string, number | null>) => void;
 }
 
 export interface Registry extends TerminalHub {
@@ -88,16 +89,21 @@ export interface Registry extends TerminalHub {
   /** The lowest free slot 1–9, or null (S2 7.6): not held by a listed terminal, nor moved to a
    *  keeper still being found (F37: it keeps its place). A slot is held until `close` forgets its
    *  terminal (ruled), also while the terminal is ended. A terminal is opened with it in its
-   *  keeper's meta; a slot moved later (`setSlots`) wins over the meta's. */
+   *  keeper's meta; a slot moved later (`setSlots`), or none, wins over the meta's. */
   nextSlot(): number | null;
   /**
-   * F37 (S2 7.6, 12.9): gives listed terminals other slots, all at once. Refused, nothing changed:
-   * 'changed' when an id is not listed or has no slot, the new slots are not the old ones in
-   * another order, or two terminals would end with one slot; 'stopping' once `stopAll` ran. The
-   * moved slots are written (`persistSlots`) before any is applied: a write that throws is thrown
-   * from here, nothing changed.
+   * F37, F42 (S2 7.6, 12.9): gives listed terminals other slots, all at once; null takes a
+   * terminal's slot away, and a terminal without one can gain one. Refused, nothing changed:
+   * 'changed' when an id is not listed, the values after (none counted) are not the values before
+   * in another order, or two terminals would end with one slot; 'stopping' once `stopAll` ran. The
+   * moved slots are written — by `write` when given (called also when nothing changes: a move
+   * writes Open's order), else by `persistSlots` — before any is applied: a write that throws is
+   * thrown from here, nothing changed.
    */
-  setSlots(changes: ReadonlyMap<string, number>): 'ok' | 'changed' | 'stopping';
+  setSlots(
+    changes: ReadonlyMap<string, number | null>,
+    write?: (moved: ReadonlyMap<string, number | null>) => void,
+  ): 'ok' | 'changed' | 'stopping';
   /** F37: writes the moved slots again when a write outside `setSlots` failed (the server calls it
    *  after every refresh); nothing once stopped. Never throws. */
   flushSlots(): void;
@@ -280,8 +286,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
   const backlogLow = Math.floor(backlogHigh / 4);
   const finding = new Set<string>();
   /** F37: the slots moved by hand, by terminal id: every live terminal whose slot is not its
-   *  meta's, and those the store kept for keepers still being found. */
-  let moved = new Map<string, number>(deps.movedSlots ?? []);
+   *  meta's, and those the store kept for keepers still being found. F42: null is a slot a move
+   *  took away (only a move writes one). */
+  let moved = new Map<string, number | null>(deps.movedSlots ?? []);
   /** A write of `moved` outside `setSlots` failed: `flushSlots` tries again. */
   let movedDirty = false;
   /** The kind of the last failed write, so that a failure that repeats is logged once. */
@@ -293,8 +300,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
 
   /** `next` without the entries of terminals neither listed nor being found, and without those
    *  equal to their terminal's meta slot. */
-  function prunedSlots(next: ReadonlyMap<string, number>): Map<string, number> {
-    const kept = new Map<string, number>();
+  function prunedSlots(next: ReadonlyMap<string, number | null>): Map<string, number | null> {
+    const kept = new Map<string, number | null>();
     for (const [id, slot] of next) {
       const term = terms.get(id);
       if (term !== undefined ? slot !== term.metaSlot : finding.has(id)) {
@@ -334,7 +341,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     }
     for (const id of finding) {
       const slot = moved.get(id);
-      if (id !== exceptId && !terms.has(id) && slot !== undefined) taken.add(slot);
+      if (id !== exceptId && !terms.has(id) && typeof slot === 'number') taken.add(slot);
     }
     return taken;
   }
@@ -347,16 +354,18 @@ export function createRegistry(deps: RegistryDeps): Registry {
   }
 
   /**
-   * F37 (S2 7.6): the slot a terminal takes at its hello — the one moved by hand, else its meta's;
-   * when another terminal holds that one (or it is kept for a keeper being found), the lowest free
-   * slot, null only when all nine are held. A slot that differs from what `moved` said is kept in
-   * `moved` and written. Once stopped the slot is left as it is.
+   * F37 (S2 7.6): the slot a terminal takes at its hello — the one moved by hand (F42: or none,
+   * when a move took it), else its meta's; when another terminal holds that one (or it is kept for
+   * a keeper being found), the lowest free slot, null only when all nine are held. A slot that
+   * differs from what `moved` said is kept in `moved` and written; none, or the meta's, is left out
+   * (so a terminal that found all nine taken gets its meta's back at a later hello). Once stopped
+   * the slot is left as it is.
    */
   function slotAtHello(term: Term, metaSlot: number | null): void {
     term.metaSlot = metaSlot;
     if (stopped) return;
     const id = term.info.id;
-    const wanted = moved.get(id) ?? metaSlot;
+    const wanted = moved.has(id) ? (moved.get(id) ?? null) : metaSlot;
     let slot = wanted;
     if (wanted !== null) {
       const taken = takenSlots(id);
@@ -1563,28 +1572,34 @@ export function createRegistry(deps: RegistryDeps): Registry {
     nextSlot() {
       return lowestFree(takenSlots(null));
     },
-    setSlots(changes) {
+    setSlots(changes, write) {
       if (stopped) return 'stopping';
-      const before: number[] = [];
-      const after: number[] = [];
+      const before: (number | null)[] = [];
+      const after: (number | null)[] = [];
       for (const [id, slot] of changes) {
         const term = terms.get(id);
-        if (term === undefined || term.info.slot === null) return 'changed';
+        if (term === undefined) return 'changed';
         before.push(term.info.slot);
         after.push(slot);
       }
-      const sorted = (slots: number[]): string => [...slots].sort((a, b) => a - b).join(' ');
+      // F42: a slot given to one terminal is taken from another (none counted as a value).
+      const sorted = (slots: (number | null)[]): string =>
+        slots
+          .map((slot) => slot ?? 0)
+          .sort((a, b) => a - b)
+          .join(' ');
       if (sorted(before) !== sorted(after)) return 'changed';
       const ending = [...terms].flatMap(([id, term]) => {
-        const slot = changes.get(id) ?? term.info.slot;
+        // `has`, not `??`: a null change is no slot, not the terminal's old one.
+        const slot = changes.has(id) ? (changes.get(id) ?? null) : term.info.slot;
         return slot === null ? [] : [slot];
       });
       if (new Set(ending).size !== ending.length) return 'changed';
-      if (changes.size === 0) return 'ok';
+      if (changes.size === 0 && write === undefined) return 'ok';
       const next = new Map(moved);
       for (const [id, slot] of changes) next.set(id, slot);
       const pruned = prunedSlots(next); // entries equal to their meta slot are left out there
-      deps.persistSlots?.(pruned); // a throw refuses the move: nothing is applied
+      (write ?? deps.persistSlots)?.(pruned); // a throw refuses the move: nothing is applied
       for (const [id, slot] of changes) {
         const term = terms.get(id);
         if (term !== undefined) term.info.slot = slot;

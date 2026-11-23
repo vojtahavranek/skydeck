@@ -199,9 +199,14 @@ export type KvKey =
   | 'window_update_check' // F38: the last look for a newer skydeck, of one checkout (S2 10.2, 16.5)
   | 'window_update_run' // F38: the one update started from a window, and its outcome (S2 16.5)
   | 'window_slots' // slots moved by hand: a JSON object, terminal id → slot 1–9 (S2 7.6, F37)
-  // The slots the sessions last had in the window, per boot (the newest two): a restore's order
-  // (design 7.8, F37). A JSON array of { bootId, sessions: { <session id>: <slot> } }.
+  // The order of Open the sessions last had in the window, per boot (the newest two): a restore's
+  // order (design 7.8, F37, F42). A JSON array of { bootId, order: [<session id>, …] }; F37 wrote
+  // { bootId, sessions: { <session id>: <slot> } }, still read by slot.
   | 'window_restore_order'
+  // Open's kept order (S2 12.1, F42): a JSON array of session ids, absent until the first move;
+  // written at a move and at every refresh once it exists, with the places held for a process's
+  // next session after `/clear`.
+  | 'window_open_order'
   // F40 (S2 10.2): the carry over after `/clear`. The server's clock at its first start with F40,
   // decimal ns, written once (a `clear` link older than it, less 5 s, makes no offer); the answer
   // to one new session's offer, `carried` or `dismissed`; the ticks of the last carry over, a

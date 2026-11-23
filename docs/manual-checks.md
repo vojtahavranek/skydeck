@@ -22,7 +22,8 @@ chip (follow-up F28), at "Favourite flags"; W37 checks a session's ticket (follo
 session's ticket"; W38 checks a ticket's status (follow-up F19), at "A ticket's status"; W40 checks
 a copy that Claude Code's background feature makes (follow-up F33), at "A copy made in agent view";
 W41 checks the window's settings screen (follow-up F36), at "The settings screen"; W42 checks moving
-a session of Open by hand (follow-up F37), at "Moving a session in Open"; W43 checks the window's
+a session of Open by hand (follow-up F37; any row of Open, follow-up F42), at "Moving a session in
+Open"; W43 checks the window's
 notice of a newer skydeck (follow-up F38), at "The update notice"; W44 checks the short settings
 screen and its gear (follow-up F39), at "The short settings screen"; W45 checks the tour of the
 window (follow-up F41), at "The tour of the window"; W46 checks copy on select in the window's
@@ -2837,15 +2838,16 @@ Not tried before this check was written: all of it, in Edge.
 
 ## Moving a session in Open
 
-The check of moving a session of Open by key (follow-up F37; design-step-2.md 12.9, 7.6;
-[install.md](install.md), "Using the window"): W42, in your window, on three throwaway sessions
-only. The tests move rows in headless Chromium against a test server with the stand-in; only here do
-the keys meet Edge, your layouts and the real Claude Code. The restore order after a reboot (design
-7.8) is looked at only where W16's drill runs anyway.
+The check of moving a session of Open by key (follow-up F37; any row of Open since follow-up F42;
+design-step-2.md 12.9, 12.1, 7.6; [install.md](install.md), "Using the window"): W42, in your
+window, on three throwaway sessions and a fourth in a WSL terminal of your own, only. The tests move
+rows in headless Chromium against a test server with the stand-in; only here do the keys meet Edge,
+your layouts and the real Claude Code. The restore order after a reboot (design 7.8) is looked at
+only where W16's drill runs anyway.
 
 ## W42. Three throwaway sessions moved up and down (real claude)
 
-Setup: skydeck updated to a commit that has follow-up F37 (`skydeck update`, W32), then the window
+Setup: skydeck updated to a commit that has follow-up F42 (`skydeck update`, W32), then the window
 open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Close every other
 terminal of the window first, or read the slots below as the ones after them.
 
@@ -2864,14 +2866,21 @@ terminal of the window first, or read the slots below as the ones after them.
 4. **The Czech layout.** Switch Windows to the Czech layout (W8) and do step 3 again. Expected: the
    same. Switch back.
 5. **What does not move.** On the top row Shift+↑: the key bar says `already at the top of Open`,
-   nothing moves. On the last of the three Shift+↓: `already the last session with a slot under
-   Open`. Press `/`, type `move`, Enter (the filter), then Shift+↑ on a row: `clear the filter first:
-   sessions move only while no filter or chip is set`, nothing moves; Esc clears the filter.
-6. **A restart.** Write down the order and the numbers. In W, a WSL terminal of your own: `skydeck
-   window --restart`. Expected: once the window is back, the same order and the same numbers, and
+   nothing moves. On the last of the three Shift+↓: `already at the bottom of Open`. Press `/`, type
+   `move`, Enter (the filter), then Shift+↑ on a row: `clear the filter first: sessions move only
+   while no filter or chip is set`, nothing moves; Esc clears the filter.
+6. **A session of another terminal (follow-up F42).** In W, a WSL terminal of your own:
+   `cd ~/skydeck-try && claude`, and send it one prompt (`say hi`). Expected: it shows under Open
+   below the three, with no number. Click it, Ctrl+Shift+L (`Focus: list`), Shift+↑ twice: it is
+   now above the third and second rows; the numbers of the three are unchanged and Ctrl+Shift+1…3
+   still show their terminals; it has no number. Then type `/clear` in that `claude`, and send one
+   prompt again. Expected: the new session's row stands at the place the old one had (above the
+   same rows), no number.
+7. **A restart.** Write down the order and the numbers. In W: `skydeck window --restart`. Expected:
+   once the window is back, the same order (the session of W included) and the same numbers, and
    each Ctrl+Shift+1…3 shows the terminal of the row that has that number.
-7. **The end.** For each throwaway session: type `/exit` in its terminal, then `d` in the list to
-   mark it done.
+8. **The end.** For each throwaway session: type `/exit` in its terminal (in W too), then `d` in the
+   list to mark it done.
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge
 version and your two layouts.

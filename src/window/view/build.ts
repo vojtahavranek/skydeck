@@ -8,10 +8,11 @@
  * stacks and the switcher's ranking; design 7.4's `matchesFilter` stays for `ls` and the
  * interactive list.
  */
+import type { ProcessKey } from '../../claude/live.ts';
 import type { Ns } from '../../platform/types.ts';
 import { isListed } from '../../sessions/list.ts';
 import type { ListRow } from '../../sessions/list.ts';
-import type { DerivedSession } from '../../sessions/types.ts';
+import type { DerivedSession, Holder } from '../../sessions/types.ts';
 import { sanitize } from '../../text/sanitize.ts';
 import type { TerminalInfo } from '../hub.ts';
 import type {
@@ -36,6 +37,8 @@ import {
   searchable,
   searchWords,
 } from './search/filter.ts';
+import { frozenOrder, NO_HELD_PLACES, openSequence } from './open-sequence.ts';
+import type { HeldPlaces, SequenceEntry } from './open-sequence.ts';
 import { stackRows } from './search/stacks.ts';
 import { switcherPayload } from './search/switcher.ts';
 import type { SwitchCandidate } from './search/switcher.ts';
@@ -63,6 +66,9 @@ export interface ViewInput {
   nowNs: Ns;
   /** What attention is judged on (S2 12.4, plan B 2.4); absent: NO_ATTENTION, no row needs you. */
   attention?: AttentionFacts;
+  /** F42 (S2 12.1): Open's kept order, session ids (kv `window_open_order`); absent or empty:
+   *  nothing is kept and Open is computed (`compareOpen`). */
+  openOrder?: readonly string[];
 }
 
 /** Design 7.4: the short id is the first 8 characters of the id. */
@@ -226,6 +232,162 @@ function compareRecent(a: Entry, b: Entry): number {
   return compareNs(b.row.lastActivityNs, a.row.lastActivityNs) || compareText(a.row.id, b.row.id);
 }
 
+/** The rows a list is built over: step 1's, and the row of each `new` terminal whose session has
+ *  none yet (A28); and the terminal each session's row is shown with. */
+function candidatesOf(input: Pick<ViewInput, 'rows' | 'terminals'>): {
+  bySession: Map<string, TerminalInfo>;
+  candidates: ListRow[];
+} {
+  const bySession = terminalsBySession(input.terminals);
+  const known = new Set(input.rows.map((row) => row.id));
+  const candidates: ListRow[] = [...input.rows];
+  for (const [sessionId, terminal] of bySession) {
+    if (
+      terminal.kind === 'new' &&
+      sessionId === terminal.expectedSessionId &&
+      !known.has(sessionId)
+    ) {
+      candidates.push(newSessionRow(terminal));
+    }
+  }
+  return { bySession, candidates };
+}
+
+/** A candidate's terminal, payload and whether it is under Open; null when it is not listed even
+ *  with done ones shown. */
+function claimOf(
+  row: ListRow,
+  bySession: ReadonlyMap<string, TerminalInfo>,
+  input: Pick<ViewInput, 'elsewhere'>,
+  facts: AttentionFacts,
+): { terminal: TerminalInfo | null; ownNew: boolean; payload: RowPayload; open: boolean } | null {
+  const claimed = bySession.get(row.id) ?? null;
+  // A terminal whose program is gone stays with a session that is not running (the ended bar,
+  // S2 7.8), not with one that runs again elsewhere: that row shows the card of 7.9 (S2 12.6).
+  const terminal =
+    claimed !== null && (MAY_START.has(claimed.state) || row.state === 'not-running')
+      ? claimed
+      : null;
+  // A `new` terminal keeps its own session's row while it is there (A28, ruled), also a row step
+  // 1 does not list (a session that ended before its first prompt has no transcript); a done one
+  // is hidden as any done row that stopped.
+  const ownNew =
+    terminal !== null && terminal.kind === 'new' && terminal.expectedSessionId === row.id;
+  if (!ownNew && !isListed(row, true)) {
+    return null;
+  }
+  const elsewhere = row.state === 'not-running' ? null : (input.elsewhere.get(row.id) ?? null);
+  const payload: RowPayload = {
+    ...rowPayload(row, { terminal, elsewhere }),
+    attention: attentionOf(row, facts),
+  };
+  return { terminal, ownNew, payload, open: payload.starting || row.state !== 'not-running' };
+}
+
+function sameProcess(a: ProcessKey, b: ProcessKey): boolean {
+  return a.bootId === b.bootId && a.pid === b.pid && a.procStart === b.procStart;
+}
+
+/** The holder of `row`'s session in `process`, if any. */
+function holderIn(row: ListRow, process: ProcessKey): Holder | undefined {
+  return row.session.holders.find((holder) => sameProcess(holder.process, process));
+}
+
+/** How a holding ends that hands its place on: the process went on with another session. */
+const MOVED_ON = new Set(['clear', 'switch', 'moved-on']);
+
+/**
+ * F42 (S2 12.9; the ruling of 2026-11-23, N1): the held places over `today` (the rows under
+ * Open, in `compareOpen`'s order). A kept session A not under Open whose last holding ended with
+ * `clear`, `switch` or `moved-on` in a process P that is alive holds its place, unless a kept row
+ * under Open has a holder in P (P's next session kept its own place); of several such sessions of
+ * one P, the one whose holding ended last (equal: the later in the kept order). Its successor is
+ * the row under Open not kept yet with a holder in P — the one whose holder in P is newest, then
+ * the first in `today` — and takes A's place. Defined by the process alone: a copy made in another
+ * process is no successor.
+ */
+function heldIn(
+  rows: readonly ListRow[],
+  kept: readonly string[],
+  today: readonly Entry[],
+): HeldPlaces {
+  if (kept.length === 0) return NO_HELD_PLACES;
+  const under = new Set(today.map((entry) => entry.row.id));
+  const keptSet = new Set(kept);
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const keptUnder = today.filter((entry) => keptSet.has(entry.row.id));
+  // Per process, the candidate that is held.
+  const chosen: { id: string; at: number; process: ProcessKey; endedAtNs: Ns | null }[] = [];
+  for (const [at, id] of kept.entries()) {
+    if (under.has(id)) continue;
+    const holding = byId.get(id)?.session.lastHolding ?? null;
+    if (holding === null || !holding.alive || !MOVED_ON.has(holding.endDetail ?? '')) continue;
+    const { process } = holding;
+    if (keptUnder.some((entry) => holderIn(entry.row, process) !== undefined)) continue;
+    const rival = chosen.findIndex((one) => sameProcess(one.process, process));
+    const candidate = { id, at, process, endedAtNs: holding.endedAtNs };
+    if (rival === -1) {
+      chosen.push(candidate);
+      continue;
+    }
+    const other = chosen[rival];
+    if (other !== undefined && (other.endedAtNs ?? -1n) <= (holding.endedAtNs ?? -1n)) {
+      chosen[rival] = candidate; // ended later, or equal and later in the kept order
+    }
+  }
+  chosen.sort((a, b) => a.at - b.at);
+  const takes = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const one of chosen) {
+    let best: { id: string; sinceNs: Ns } | null = null;
+    for (const entry of today) {
+      const id = entry.row.id;
+      if (keptSet.has(id) || taken.has(id)) continue;
+      const holder = holderIn(entry.row, one.process);
+      if (holder !== undefined && (best === null || holder.sinceNs > best.sinceNs)) {
+        best = { id, sinceNs: holder.sinceNs };
+      }
+    }
+    if (best !== null) {
+      takes.set(one.id, best.id);
+      taken.add(best.id);
+    }
+  }
+  return { held: chosen.map((one) => one.id), takes };
+}
+
+/** Each row under Open with its place in Open's order (`openSequence` over the kept order). */
+function rankOfOpen(openEntries: readonly Entry[], input: ViewInput): Map<string, number> {
+  const today = [...openEntries].sort(compareOpen);
+  const kept = input.openOrder ?? [];
+  const held = heldIn(input.rows, kept, today);
+  const sequence = openSequence(today.map(sequenceEntry), kept, held.takes);
+  return new Map(sequence.map((id, at) => [id, at]));
+}
+
+function sequenceEntry(entry: Entry): SequenceEntry {
+  return { id: entry.row.id, window: entry.terminal !== null, slot: entry.terminal?.slot ?? null };
+}
+
+/**
+ * F42 (S2 12.9): the held places of `input`'s kept order (`heldIn`): kept sessions not under Open
+ * whose process went on with another session, and the successors that take them. Nothing kept:
+ * none.
+ */
+export function heldPlaces(input: Omit<ViewInput, 'view' | 'selected'>): HeldPlaces {
+  const kept = input.openOrder ?? [];
+  if (kept.length === 0) return NO_HELD_PLACES;
+  const { bySession, candidates } = candidatesOf(input);
+  const today: Entry[] = [];
+  for (const row of candidates) {
+    const claim = claimOf(row, bySession, input, NO_ATTENTION);
+    if (claim !== null && claim.open) {
+      today.push({ row, terminal: claim.terminal, payload: claim.payload });
+    }
+  }
+  return heldIn(input.rows, kept, today.sort(compareOpen));
+}
+
 /** A section of `entries` (in the section's order): `count`, `firstNs` and `lastNs` over all of
  *  them, `rows` the drawn ones and `closedStacks` its closed blocks (none of either while folded). */
 function sectionPayload(
@@ -342,18 +504,7 @@ export function buildListMessage(
 ): Omit<ListMessage, 'terminals'> & { terminals: Omit<TerminalPayload, 'ownsSize'>[] } {
   const { view, nowNs } = input;
   const facts = input.attention ?? NO_ATTENTION;
-  const bySession = terminalsBySession(input.terminals);
-  const known = new Set(input.rows.map((row) => row.id));
-  const candidates: ListRow[] = [...input.rows];
-  for (const [sessionId, terminal] of bySession) {
-    if (
-      terminal.kind === 'new' &&
-      sessionId === terminal.expectedSessionId &&
-      !known.has(sessionId)
-    ) {
-      candidates.push(newSessionRow(terminal));
-    }
-  }
+  const { bySession, candidates } = candidatesOf(input);
 
   const words = searchWords(view.filter);
   const chips = view.chips ?? [];
@@ -382,31 +533,20 @@ export function buildListMessage(
   let doneHidden = 0;
   // E13: the selected session's payload, whether the sections show it or not.
   let selectedRow: RowPayload | null = null;
+  // F42: every row under Open, whatever the view shows: what Open's order is computed over.
+  const openEntries: Entry[] = [];
   for (const row of candidates) {
-    const claimed = bySession.get(row.id) ?? null;
-    // A terminal whose program is gone stays with a session that is not running (the ended bar,
-    // S2 7.8), not with one that runs again elsewhere: that row shows the card of 7.9 (S2 12.6).
-    const terminal =
-      claimed !== null && (MAY_START.has(claimed.state) || row.state === 'not-running')
-        ? claimed
-        : null;
-    // A `new` terminal keeps its own session's row while it is there (A28, ruled), also a row step
-    // 1 does not list (a session that ended before its first prompt has no transcript); a done one
-    // is hidden as any done row that stopped.
-    const ownNew =
-      terminal !== null && terminal.kind === 'new' && terminal.expectedSessionId === row.id;
-    if (!ownNew && !isListed(row, true)) {
+    const claim = claimOf(row, bySession, input, facts);
+    if (claim === null) {
       continue; // not listed even with done ones shown: no row, no count, no switcher item
     }
-    const elsewhere = row.state === 'not-running' ? null : (input.elsewhere.get(row.id) ?? null);
-    const payload: RowPayload = {
-      ...rowPayload(row, { terminal, elsewhere }),
-      attention: attentionOf(row, facts),
-    };
+    const { terminal, ownNew, payload, open } = claim;
     if (row.id === view.selected) {
       selectedRow = payload;
     }
-    const open = payload.starting || row.state !== 'not-running';
+    if (open) {
+      openEntries.push({ row, terminal, payload });
+    }
     // F33: an empty copy the user did not keep that no terminal of the window shows (the row's
     // `hiddenWhileEmpty`, sections.ts) is listed as a done one is, only with done ones shown, open
     // or not; one a terminal of the window shows is never hidden.
@@ -462,10 +602,13 @@ export function buildListMessage(
     }
   }
 
+  const openRank = rankOfOpen(openEntries, input);
+  const byOpenRank = (a: Entry, b: Entry): number =>
+    (openRank.get(a.row.id) ?? 0) - (openRank.get(b.row.id) ?? 0);
   const needing: { id: string; attention: AttentionPayload }[] = [];
   const sections = SECTIONS.map((name) => {
     const entries = shown.get(name) ?? [];
-    entries.sort(name === 'open' ? compareOpen : compareRecent);
+    entries.sort(name === 'open' ? byOpenRank : compareRecent);
     const folded = name === 'earlier' && !searching && earlierFolded;
     if (!folded) {
       // G5: also a row a closed block hides, so that `needYou` does not move with the blocks.
@@ -505,26 +648,32 @@ export function buildListMessage(
     dirs: projectDirs(input.rows),
     filtering,
     searching,
-    switcher: typeof view.switcher === 'string' ? switcher(view.switcher, switchable, facts) : null,
+    switcher:
+      typeof view.switcher === 'string'
+        ? switcher(view.switcher, switchable, facts, byOpenRank)
+        : null,
     selectedRow,
   };
 }
 
 /**
- * F37 (S2 12.9): Open's rows as any page can draw them, the order a move is computed over —
- * `buildListMessage` with a neutral view: no filter, no chip, every block open, nothing selected,
- * done ones shown (so that every row a page draws under Open is in it; what showing done ones adds
- * are empty copies the list otherwise hides, which never have a slot). Each row of a block carries
- * its `stack`.
+ * F37, F42 (S2 12.9): Open's rows as a page draws them without filter, every block open — the order
+ * a move is computed over and the one the freeze keeps — `buildListMessage` with a neutral view: no
+ * filter, no chip, every block open, nothing selected, done ones shown unless `showDone` is false
+ * (with them, every row under Open is in it; what showing done ones adds are empty copies the list
+ * otherwise hides). Each row of a block carries its `stack`.
  */
-export function openRows(input: Omit<ViewInput, 'view' | 'selected'>): RowPayload[] {
+export function openRows(
+  input: Omit<ViewInput, 'view' | 'selected'>,
+  showDone = true,
+): RowPayload[] {
   const message = buildListMessage({
     ...input,
     selected: null,
     view: {
       filter: '',
       unfolded: [],
-      showDone: true,
+      showDone,
       selected: null,
       chips: [],
       closed: [],
@@ -535,7 +684,22 @@ export function openRows(input: Omit<ViewInput, 'view' | 'selected'>): RowPayloa
 }
 
 /**
- * E9's input: every row listed with done ones shown, Open's in Open's order and then the others
+ * F42 (S2 12.1): the order a freeze keeps now — Open as drawn with done ones shown, with each held
+ * place no successor takes put back after the nearest earlier kept id (`frozenOrder` over
+ * `openRows(input, true)` and `heldPlaces(input)`). The server's freeze after a refresh and a
+ * move's plan (reorder.ts) both take it, so that they agree.
+ */
+export function keptNow(input: Omit<ViewInput, 'view' | 'selected'>): string[] {
+  return frozenOrder(
+    input.openOrder ?? [],
+    openRows(input, true).map((row) => row.id),
+    heldPlaces(input),
+  );
+}
+
+/**
+ * E9's input: every row listed with done ones shown, Open's in Open's order (F42: the kept one,
+ * `byOpenRank`) and then the others
  * most recent first, each once with its payload (the list's, without a stack) and what hides it;
  * `needOrder` is B6's order (`attentionOrder`) over those that need you.
  */
@@ -543,9 +707,10 @@ function switcher(
   query: string,
   switchable: readonly SwitchEntry[],
   facts: AttentionFacts,
+  byOpenRank: (a: Entry, b: Entry) => number,
 ): SwitcherPayload {
   const ordered = [
-    ...switchable.filter((one) => one.open).sort((a, b) => compareOpen(a.entry, b.entry)),
+    ...switchable.filter((one) => one.open).sort((a, b) => byOpenRank(a.entry, b.entry)),
     ...switchable.filter((one) => !one.open).sort((a, b) => compareRecent(a.entry, b.entry)),
   ];
   const needing: { id: string; attention: AttentionPayload }[] = [];

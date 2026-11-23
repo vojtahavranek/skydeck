@@ -174,7 +174,8 @@ export interface KeeperMeta {
   sessionId: string;
   kind: 'resume' | 'new';
   /** 1–9 (S2 7.6), null for the tenth and later terminals: the slot at opening. A slot moved by
-   *  hand later (F37, the store's `window_slots`) wins over it; the keeper's meta never changes. */
+   *  hand later, or none (F37, F42, the store's `window_slots`), wins over it; the keeper's meta
+   *  never changes. */
   slot: number | null;
   openedNs: string;
   build: string;

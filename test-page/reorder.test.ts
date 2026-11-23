@@ -1,4 +1,4 @@
-// Follow-up F37 (S2 12.9): moving the selected session of Open by key on the page — Shift+↑ and
+// Follow-up F37, F42 (S2 12.9): moving the selected session of Open by key on the page — Shift+↑ and
 // Shift+K up, Shift+↓ and Shift+J down — sends `act reorder` for the selected session; a refusal's
 // line shows in the key bar; the selection, the zone and the keyboard stay; one act at a time; a
 // `view` after an ok; the moved row scrolled into view. Against a scripted stand-in server
@@ -263,6 +263,22 @@ test('F37: moving a session of Open by key', async (t) => {
     await sleep(200);
     assert.equal(await inView(last), false, 'no second scroll');
   });
+
+  await t.test(
+    'F42: the refusal of the last row downward shows its line in the key bar',
+    async (t) => {
+      const { page, w } = await world(t, chromium);
+      await clickRow(page, S3);
+      await toZone(page, 'list');
+      await page.keyboard.press('Shift+ArrowDown');
+      w.answer(await w.act(1), { ok: false, error: 'already at the bottom of Open' });
+      await until(
+        async () => (await keyMessage(page)) === 'already at the bottom of Open',
+        'the refusal in the key bar',
+      );
+      assert.equal(await selectedRow(page), S3);
+    },
+  );
 
   await t.test(
     'against a real server: after Shift+↑ the slot chords reach the rows that show their numbers',

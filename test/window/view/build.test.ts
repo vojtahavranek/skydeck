@@ -1209,6 +1209,7 @@ test("src/window/view/ imports values only from text, A8's isListed (and F33's i
     'build.ts',
     'carry-over.ts',
     'chip.ts',
+    'open-sequence.ts',
     'sections.ts',
     'slot-moves.ts',
   ]);
@@ -1217,6 +1218,7 @@ test("src/window/view/ imports values only from text, A8's isListed (and F33's i
       const allowed =
         from === './sections.ts' ||
         from === './attention.ts' ||
+        from === './open-sequence.ts' ||
         (from === './chip.ts' && names.every((n) => n === 'windowChip')) ||
         from === '../../text/sanitize.ts' ||
         (from === '../../sessions/list.ts' &&

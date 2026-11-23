@@ -60,7 +60,7 @@ test('read tolerantly: not JSON, not an object, an array, null are none', () => 
   }
 });
 
-test('read tolerantly: entries with a bad id or a slot that is not a whole number 1–9 are left out', () => {
+test('read tolerantly: entries with a bad id or a slot that is not a whole number 1–9 or null are left out', () => {
   const stored = JSON.stringify({
     [A]: 3,
     [B]: 0,
@@ -77,10 +77,31 @@ test('read tolerantly: entries with a bad id or a slot that is not a whole numbe
   });
   assert.deepEqual(
     readMovedSlots(kv({ window_slots: stored })),
-    new Map([
+    new Map<string, number | null>([
       [A, 3],
+      // F42: null is a slot a move took away.
+      ['dddddddddddd', null],
       ['eeeeeeeeeeee', 9],
       ['ffffffffffff', 1],
+    ]),
+  );
+});
+
+test('F42: a slot taken away (null) is written and read back', () => {
+  const store = kv({});
+  writeMovedSlots(
+    store,
+    new Map([
+      [A, 9],
+      [B, null],
+    ]),
+  );
+  assert.deepEqual(JSON.parse(store.values.get('window_slots') ?? ''), { [A]: 9, [B]: null });
+  assert.deepEqual(
+    readMovedSlots(store),
+    new Map([
+      [A, 9],
+      [B, null],
     ]),
   );
 });
