@@ -710,6 +710,9 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         banner: restorer.banner(rows),
         // F15: the new form's favourites, as the store holds them now (one kv read).
         favourites: readFavourites(deck.store),
+        // Issue #184: the value the running server uses (AT ONCE: a change in the settings screen
+        // is put into deck.config, and its `changed()` sends every page its next list).
+        copyOnSelect: deck.config.window.copyOnSelect,
         terminals: message.terminals.map((term) => ({ ...term, ownsSize: false })),
       };
       // Plan E12 (task 98): stage C's offer in the switcher, from the banner just put on the list.

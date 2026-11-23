@@ -110,6 +110,15 @@ test('a field becomes the request: a number field a number when it reads as one,
   const links = setting({ key: 'window.links', control: 'choice', choices: ['default', 'edge'] });
   assert.equal(valueToSend(links, 'edge'), 'edge');
   assert.equal(valueToSend(pattern, 'a\ud800b'), 'a\ufffdb', 'a lone surrogate is no text');
+  // Issue #184: a switch of a key that is true or false sends the value itself, never its text.
+  const copy = setting({ key: 'window.copyOnSelect', control: 'switch', value: true });
+  assert.equal(valueToSend(copy, 'true'), true);
+  assert.equal(valueToSend(copy, 'false'), false);
+  assert.equal(
+    valueToSend(copy, 'yes'),
+    'yes',
+    'no other text is read as either (the server says why)',
+  );
 });
 
 test('a value a one-line field holds as it is, and one it does not (a line break, a control character): shown as text, changed in the file', () => {
@@ -134,8 +143,10 @@ test('the limit of a text in a request: 4,096 bytes of UTF-8, refused before sen
   assert.match(SETTINGS_TEXTS.tooLong, /in the file by hand/);
 });
 
-test('what a control shows of a value: a number as its digits, null as an empty field, a text as it is', () => {
+test('what a control shows of a value: a number as its digits, null as an empty field, a text as it is, true and false as their words', () => {
   assert.equal(controlText(setting({ value: 7 })), '7');
+  assert.equal(controlText(setting({ control: 'switch', value: true })), 'true');
+  assert.equal(controlText(setting({ control: 'switch', value: false })), 'false');
   assert.equal(controlText(setting({ control: 'text', value: null, nullable: true })), '');
   assert.equal(
     controlText(setting({ control: 'text', value: '<b>x</b> \u200f\u05e9\u05dc\u05d5\u05dd' })),
@@ -195,5 +206,22 @@ test('F39: the short screen’s mark: `after a restart`, and while the server us
   assert.equal(
     restartText(ticket, setting({ pending: true, runningText: 'null' })),
     'after a restart: still empty until then',
+  );
+  // Issue #184: a switch of a key that is true or false (a hand edit the server does not use yet).
+  const copy = {
+    key: 'window.copyOnSelect',
+    label: 'Copy on select',
+    hint: null,
+    control: 'switch',
+    on: 'true',
+    off: 'false',
+  } as const;
+  assert.equal(
+    restartText(copy, setting({ pending: true, runningText: 'true' })),
+    'after a restart: still on until then',
+  );
+  assert.equal(
+    restartText(copy, setting({ pending: true, runningText: 'false' })),
+    'after a restart: still off until then',
   );
 });

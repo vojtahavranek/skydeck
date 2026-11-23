@@ -1,8 +1,9 @@
 // Follow-up F39's short settings screen (web/settings-short.js), held against the server's table
-// (src/window/settings.ts): its four groups and seven controls in order (the fourth group,
-// Updates, is F38's), under plain labels; every
+// (src/window/settings.ts): its four groups and eight controls in order (the fourth group,
+// Updates, is F38's; issue #184's Copy on select in The window), under plain labels; every
 // key it names is a changeable one of the server's table, a choice's words name exactly the values
-// the server takes and a switch's two sides the two it takes, so the page decides no rule (S2 4.3);
+// the server takes and a switch's two sides the two it takes (of a key that is true or false, the
+// texts of the two), so the page decides no rule (S2 4.3);
 // the screen's Advanced holds every other key, and its button counts them.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -14,13 +15,13 @@ import { advancedText } from '../../web/settings-text.js';
 
 const isKey = (key: string): key is SettingKey => Object.hasOwn(SETTINGS, key);
 
-test('four groups, seven controls, in this order, under plain labels', () => {
+test('four groups, eight controls, in this order, under plain labels', () => {
   assert.deepEqual(
     SHORT.map((group) => [group.title, group.entries.map((entry) => entry.label)]),
     [
       ['Appearance', ['Mode', 'Colour theme']],
       ['Links', ['Open links in', 'Ticket address']],
-      ['The window', ['Keep WSL running', 'Typed commands start sessions in']],
+      ['The window', ['Keep WSL running', 'Typed commands start sessions in', 'Copy on select']],
       ['Updates', ['Check for updates every day']],
     ],
   );
@@ -35,6 +36,7 @@ test('four groups, seven controls, in this order, under plain labels', () => {
       'ticketUrl',
       'window.keepAlive',
       'terminal',
+      'window.copyOnSelect',
       'window.updateCheck',
     ],
   );
@@ -60,7 +62,8 @@ test('no label is a key name, and a hint is one short line', () => {
     SHORT.flatMap((group) => group.entries.filter((entry) => entry.hint !== null)).map(
       (entry) => entry.label,
     ),
-    ['Colour theme', 'Ticket address', 'Typed commands start sessions in'],
+    // Copy on select: its group is the window's, whose list and header text it does not copy.
+    ['Colour theme', 'Ticket address', 'Typed commands start sessions in', 'Copy on select'],
   );
 });
 
@@ -85,6 +88,10 @@ test('every key is a changeable one of the server’s table, named once, its con
         `${entry.key}: every value, in order`,
       );
       for (const word of Object.values(entry.words)) assert.notEqual(word, '');
+    } else if (entry.control === 'switch' && row.control === 'switch') {
+      // A key that is true or false: the sides are the texts of the two, which the page sends as
+      // the values themselves (settings-text.js valueToSend).
+      assert.deepEqual([entry.on, entry.off], ['true', 'false'], entry.key);
     } else if (entry.control === 'switch') {
       assert.equal(row.control, 'choice', entry.key);
       assert.deepEqual(
@@ -103,6 +110,7 @@ test('every key is a changeable one of the server’s table, named once, its con
       ['ticketUrl', 'text'],
       ['window.keepAlive', 'switch'],
       ['terminal', 'choice'],
+      ['window.copyOnSelect', 'switch'],
       ['window.updateCheck', 'switch'],
     ],
   );
@@ -112,6 +120,10 @@ test('every key is a changeable one of the server’s table, named once, its con
   const updateCheck = keys.find((entry) => entry.key === 'window.updateCheck');
   assert.ok(updateCheck?.control === 'switch');
   assert.deepEqual([updateCheck.on, updateCheck.off], ['daily', 'off'], 'on checks every day');
+  const copyOnSelect = keys.find((entry) => entry.key === 'window.copyOnSelect');
+  assert.ok(copyOnSelect?.control === 'switch');
+  assert.deepEqual([copyOnSelect.on, copyOnSelect.off], ['true', 'false'], 'on copies');
+  assert.equal(SETTINGS['window.copyOnSelect'].control, 'switch');
 });
 
 test('Advanced holds every other key of the server’s table: 14 today, counted on its button', () => {
