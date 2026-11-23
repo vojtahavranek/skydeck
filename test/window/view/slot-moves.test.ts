@@ -55,6 +55,9 @@ interface Spec {
   left?: number;
   /** F42: the pid of the process a session running elsewhere runs in (default 9000 + n). */
   pid?: number;
+  /** A group from the title (`<titleGroup> …`), not from meta: an empty copy so grouped stays one
+   *  the list hides (a group set by hand keeps it). */
+  titleGroup?: string;
 }
 
 function holder(sessionId: string, pid: number, background = false): Holder {
@@ -111,7 +114,12 @@ function world(specs: readonly Spec[]): Omit<ViewInput, 'view' | 'selected'> {
               marks: ['continued', 'empty-copy'] as Mark[],
               continuedFrom: sid(99),
               copyOf: sid(99),
-              transcript: { aiTitle: 'made-up title', lastUserNs: null, lastTurnRole: null },
+              transcript: {
+                aiTitle:
+                  spec.titleGroup === undefined ? 'made-up title' : `${spec.titleGroup} copy`,
+                lastUserNs: null,
+                lastTurnRole: null,
+              },
             }
           : {};
       sessions.push(
@@ -124,7 +132,16 @@ function world(specs: readonly Spec[]): Omit<ViewInput, 'view' | 'selected'> {
       );
       elsewhere.set(id, { pid, tty: null });
     } else {
-      sessions.push(ds({ id, state: 'working', holders: [holder(id, 4000 + spec.n)] }));
+      sessions.push(
+        ds({
+          id,
+          state: 'working',
+          holders: [holder(id, 4000 + spec.n)],
+          ...(spec.titleGroup === undefined
+            ? {}
+            : { transcript: { aiTitle: `${spec.titleGroup} work` } }),
+        }),
+      );
     }
     if (spec.twin !== undefined) {
       terminals.push({
@@ -631,6 +648,25 @@ describe('F42: any row of Open moves, and the numbers follow the order', () => {
     assert.deepEqual(movedTo(kept, 3, 'up', true), ['3:-', '1:1', '2:2']);
   });
 
+  test('a hidden empty copy grouped by its title: a move on a page without Show done keeps it with its group', () => {
+    // Kept C T1 T2, C a copy only Show done lists, in T1's group by its title; its block sits at
+    // C's place on a Show done page.
+    const input = {
+      ...world([
+        { n: 1, slot: 1, group: 'ABC-1' },
+        { n: 3, elsewhere: 'other', emptyCopy: true, titleGroup: 'ABC-1' },
+        { n: 2, slot: 2 },
+      ]),
+      openOrder: [sid(3), sid(1), sid(2)],
+    };
+    assert.deepEqual(drawn(input), ['3:-', '1:1', '2:2']);
+    assert.deepEqual(
+      openRows(input, false).map((row) => nOf(row)),
+      [1, 2],
+    );
+    assert.deepEqual(movedTo(input, 1, 'down', false), ['2:1', '1:2', '3:-']);
+  });
+
   test('a hidden empty copy whose predecessor closed: after the nearest earlier row still there; first when none is left', () => {
     const specs: Spec[] = [
       { n: 1, slot: 1 },
@@ -714,7 +750,9 @@ test('F37, F42, a property over generated Opens: after a move (also after earlie
     const specs: Spec[] = [];
     const count = 1 + Math.floor(random() * 14);
     for (let n = 1; n <= count; n += 1) {
-      const group = pick(['', '', 'G', 'H', 'K']);
+      // Group texts a title can carry too: the copies below are grouped by their title, so that
+      // they stay copies the list hides (review of F42).
+      const group = pick(['', '', 'G-1', 'H-1', 'K-1']);
       const kind = pick([
         'slot',
         'slot',
@@ -745,7 +783,12 @@ test('F37, F42, a property over generated Opens: after a move (also after earlie
       } else if (kind === 'twin') {
         specs.push({ ...base, slot: null });
       } else if (kind === 'copy') {
-        specs.push({ ...base, elsewhere: 'other', emptyCopy: true });
+        specs.push({
+          n,
+          ...(group === '' ? {} : { titleGroup: group }),
+          elsewhere: 'other',
+          emptyCopy: true,
+        });
       } else if (free.length > 0) {
         const [slot] = free.splice(0, 1);
         specs.push({ ...base, slot: slot ?? null, ended: 'week' });
