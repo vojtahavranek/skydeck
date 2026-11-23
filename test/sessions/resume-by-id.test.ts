@@ -97,6 +97,27 @@ test('prepareResumeById refuses a flag a resume must not take before its refresh
   assert.equal(lockOf(d, S1), null);
 });
 
+test('a lock already there stays as it is through every refused resume with flags: a refused flag, the lock itself, the guard (#188)', (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  prepareResumeById(d.deck, S1, ['--model', 'example']); // the first resume's lock
+  const first = lockOf(d, S1);
+  assert.notEqual(first, null);
+  assert.throws(() => prepareResumeById(d.deck, S1, ['--worktree']), UsageError);
+  assert.equal(lockOf(d, S1), first, 'a refused flag');
+  assert.match(
+    refusal(() => prepareResumeById(d.deck, S1, ['--model', 'x'])),
+    /^0b5f3c1e is being resumed/,
+  );
+  assert.equal(lockOf(d, S1), first, 'refused by the lock');
+  d.proc.setProcess(4242, { stat: statLine(4242, 51234567), cmdline: ['claude'] });
+  assert.equal(
+    refusal(() => prepareResumeById(d.deck, S1, ['--model', 'x'])),
+    '0b5f3c1e is running (pid 4242)',
+  );
+  assert.equal(lockOf(d, S1), first, 'refused by the guard');
+});
+
 test('prepareResumeById refreshes first: a start event still in the spool is seen, and the session refused', (t) => {
   const d = testDeck(t);
   resumableSession(d);

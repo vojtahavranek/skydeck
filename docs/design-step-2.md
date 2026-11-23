@@ -3411,8 +3411,8 @@ nothing; `ls` is unchanged.
   here" resumes (11.3). Refusals and launch failures show their lines on the card.
   **Other flags…** (issue #188, part 1; design 7.6 "Other flags"): a second button beside "Resume
   here" on the card's action line (title `Resume it with other flags for claude (f)`; disabled with
-  it for an expired session), or the list key `f` (12.9), or the ended bar's `Other flags…` (R3,
-  below), puts in place of that action line the
+  it for an expired session), or the list key `f` (12.9), or the ended bar's `Other flags…`
+  (below), puts in place of that action line the
   New form's flags line — the same component: the field `Flags for claude`, the ★, the favourite
   chips (all of the favourites' rules above) — then `Start`, the hint `resumes in this window with
   these flags · Esc goes back` and the form's own result line. While it is open "Will run" (the
@@ -3426,10 +3426,15 @@ nothing; `ls` is unchanged.
   server's split by a test). When a recorded flag holds what the field cannot hold as it is
   (`resumeFlags` null: a line break, another control character, a bidirectional control) it opens
   empty, its result line saying `the flags it was started with hold a character this field cannot
-  show; Resume here passes them on as they are`. The keyboard goes into the field, at its end. Start
+  show; Resume here passes them on as they are`. The keyboard goes into the field, at its end.
+  Pressed (or `f`) before the list has brought the session's payload (`list.selected`, which
+  answers the page's view up to a second later), it opens once that list has come, never empty
+  for flags it does not know yet. Start
   (Enter in the field, on the ★ or on the chips, as in the New form) sends `act resume` with the
   field's text as `flags`; an empty field resumes with no flags at all. A refusal, and a launch
-  that failed, show on the form's result line, where the New form shows its own, and the form keeps
+  that failed, show on the form's result line, where the New form shows its own — so does the
+  refusal of a plain resume made while the form is open (Enter in the list, a double click; ruled
+  by the plan owner) —, and the form keeps
   its text and the keyboard; a resume that started gives its terminal the keyboard, as "Resume here"
   does. Esc returns to the card, nothing sent, the keyboard on `Other flags…`. The form belongs to
   the card it was opened on: when the right side shows anything else (the session's terminal,
@@ -3444,18 +3449,26 @@ nothing; `ls` is unchanged.
 - **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close), without a
   number (follow-up F43, 7.6). Until
   the page has the terminal's exit the bar says `claude is not running in this terminal`. Issue
-  #188, R3 (ruled: the owner's own case is the session just exited): with both, the bar has
+  #188 (ruled by the plan owner: the usual case is a session just exited in the window): with
+  both, the bar has
   `Other flags…` between them (title `Close this terminal and resume the session with other flags
   for claude (f)`; the list key `f` does the same there). It does what Close does (`close-terminal`;
   a refusal shows on the bar's line, as Close's), and once the list no longer holds that terminal
   the right side shows the session's resume card with its `Other flags…` already open — the field
   filled as below, the keyboard in it —, whatever came first, the list or the answer. Esc there
-  leaves the plain resume card. Showing another session or another card before that drops it. A
+  leaves the plain resume card. The request ends when the session runs again (a terminal of it
+  other than the one closed is shown, or it runs elsewhere) or anything but that card shows, so a
+  later plain Close never opens the form. It closes nothing unless the form can then be shown
+  (ruled by the plan owner): for a session the list does not show it says `no session selected`
+  on the bar's line (the list keys' words for such a selection; `f` says them in the key bar, as
+  those keys do), for an expired one `its transcript is gone: it cannot be resumed`. A
   selected session the list does not show (a filter, the chips, done sessions hidden, a folded
   Earlier; 12.9) has its row in the list's `selectedRow` (8.2.3, stage E): its terminal of the
   window is shown with its header and, once ended, under this bar with Resume and Close, as for a
-  listed row. Known limit, narrowed by stage E: a session the view model does not list even with
-  done ones shown (an ended terminal of a session without a transcript) has no `selectedRow`, so
+  listed row (issue #188: its `Other flags…` there closes nothing and says `no session selected`
+  on the bar's line, since no resume card would show it). Known limit, narrowed by stage E: a
+  session the view model does not list even with done ones shown (an ended terminal of a session
+  without a transcript) has no `selectedRow`, so
   while the window shows its ended terminal the bar has no Resume, and Close only once the page
   has the terminal's exit — the bar is drawn from the row, not from the terminal (stage A's plan,
   contract 2.9 `endedBar(row, exit)`; accepted by the plan owner, review 2 of plan task 29).
@@ -3925,7 +3938,7 @@ filters, `l` label, `g` group, `n` note, `t` ticket (follow-up F18, 12.5), `p` a
 request, `d` done, `a` show done; new in the window, `c` (carry over after `/clear`, follow-up
 F40: the keyboard to the bar of 12.6), `f` (issue #188: the selected session's resume card's
 `Other flags…`, opened with the keyboard in its field, the zone the terminal's; on its ended bar
-what that bar's `Other flags…` does (R3, 12.6); a held `f` acts once and types nothing into the
+what that bar's `Other flags…` does (12.6); a held `f` acts once and types nothing into the
 field; with nothing selected it says `no session selected`, while the right side shows neither
 `f resumes with other flags only a session shown on its resume card or its ended bar`, for an
 expired session `its transcript is gone: it cannot be resumed`), Home, End, PgUp,
@@ -3993,7 +4006,8 @@ session at all) —, Enter does nothing, and ↑ ↓ start from the
 first row shown (ruled by the plan owner, plan task 27); when the list shows the row again, it is
 selected again. From stage E the right side takes such a session's row from the list's
 `selectedRow` (8.2.3): its terminal is shown with its header (stage D's, so that the header's
-controls and their dialogs edit that session) and its ended bar with Resume and Close (12.6); a
+controls and their dialogs edit that session) and its ended bar with Resume and Close (12.6; and
+`Other flags…`, which closes nothing for such a session); a
 session without a terminal of the window shows nothing (but 12.1's line while the list holds no
 session at all), never its card. The header's Done on such
 a session takes its toast from the row, since it is in no section: `Marked done. Stays under Open

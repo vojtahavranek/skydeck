@@ -618,6 +618,24 @@ describe('resume <ref> -- <claude flags> (issue #188)', () => {
     );
   });
 
+  test('a lock already there stays as it is through each refused resume with flags: a refused flag, the lock, the guard', async (t) => {
+    const d = deck(t, { config: { terminal: 'wezterm' } });
+    session(d, { argv: RECORDED });
+    assert.equal(await main(['resume', '0b5f', '--tab', '--', '--model', 'example'], d.ctx), 0);
+    const first = d.deck.store.getKv(lockKey(S1));
+    assert.equal(first, takenAtT0(d));
+    d.clock.setNs(T0 + 5n * SEC);
+    assert.equal(await main(['resume', '0b5f', '--', '--worktree'], d.ctx), 2);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), first, 'a refused flag');
+    assert.equal(await main(['resume', '0b5f', '--', '--model', 'x'], d.ctx), 4);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), first, 'refused by the lock');
+    d.proc.setProcess(4242, { stat: statLine(4242, 51234567), cmdline: ['claude'] });
+    assert.equal(await main(['resume', '0b5f', '--', '--model', 'x'], d.ctx), 4);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), first, 'refused by the guard');
+    assert.ok(d.stderr().includes('skydeck: 0b5f3c1e is running (pid 4242)\n'), d.stderr());
+    assert.equal(d.runner.calls.length, 1, 'one tab opened, by the first resume');
+  });
+
   test('the guard still refuses a running session with flags given: exit 4, no handoff, no lock', async (t) => {
     const d = deck(t);
     session(d, { argv: RECORDED, running: true });

@@ -2041,7 +2041,8 @@ function render() {
     case 'terminal':
       cards.header(pane.row, selected, term, listNow);
       if (pane.ended) {
-        cards.endedBar(pane.row, exit);
+        // #188: the bar's Other flags… closes nothing for a row the list hides (E13: no card).
+        cards.endedBar(pane.row, exit, pane.row !== null && rowOf(pane.row.id) !== undefined);
       }
       carry.render(pane.row, selected?.carryOver ?? null);
       break;
@@ -2507,7 +2508,8 @@ function doListKey(action, event) {
       if (event.repeat) {
         return true;
       }
-      if (state.selected === null) {
+      // As every list key that acts: on the selected row the list shows (E13).
+      if (selectedRow() === undefined) {
         say('no session selected');
         return true;
       }

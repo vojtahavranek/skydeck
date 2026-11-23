@@ -14,6 +14,7 @@ import { buildNewCommand, buildResumeCommand } from '../../src/claude/launch.ts'
 import { main } from '../../src/cli/main.ts';
 import { NS_PER_MS, NS_PER_SECOND } from '../../src/platform/time.ts';
 import type { Platform } from '../../src/platform/types.ts';
+import { setLabel } from '../../src/sessions/meta.ts';
 import { readLock } from '../../src/sessions/resume.ts';
 import type { LaunchAnswer, ListMessage } from '../../src/window/protocol.ts';
 import { testContextOn } from '../helpers/context.ts';
@@ -137,6 +138,57 @@ describe('POST /resume (S2 8.3, plan C2)', () => {
       sessionId: null,
     });
     assert.equal(test.server.hub.list().length, 1, 'only the first resume opened a terminal');
+  });
+
+  test("POST /resume with flags (#188): the stand-in runs with the label and then those flags after the id, as given and in their order; `flags: []` with none; a refused flag answers code 2 with the command's line, nothing started, no lock", async (t) => {
+    const r = restoreSandbox(t);
+    const { d } = r;
+    const [X, Y, Z] = [earlierId(1), earlierId(2), earlierId(3)];
+    r.earlierBoot([{ sessionId: X }, { sessionId: Y }, { sessionId: Z }]);
+    r.open(X);
+    r.open(Y);
+    r.open(Z);
+    setLabel(d.deck, X, 'fix it');
+    const test = await d.start();
+
+    assert.deepEqual(
+      await launch(d, '/resume', { sessionId: Z, flags: ['--model', 'x', '--worktree'] }),
+      {
+        code: 2,
+        lines: [
+          'skydeck: cannot pass --worktree to claude on a resume: it says where or how a new session starts',
+        ],
+        sessionId: null,
+      },
+    );
+    assert.equal(readLock(d.deck, Z), null, 'no lock');
+    assert.deepEqual(test.server.hub.list(), [], 'nothing started');
+
+    const flags = ['--model', 'example', 'go on, please'];
+    assert.deepEqual(await launch(d, '/resume', { sessionId: X, flags }), {
+      code: 0,
+      lines: [],
+      sessionId: X,
+    });
+    const start = await startOf(d, X);
+    assert.deepEqual(
+      start.argv,
+      buildResumeCommand({
+        claudeCommand: r.command,
+        launch: ['claude'],
+        sessionId: X,
+        label: 'fix it',
+        flags,
+      }).argv.slice(1),
+    );
+    assert.deepEqual(start.argv, ['--resume', X, '-n', 'fix it', ...flags]);
+
+    assert.deepEqual(await launch(d, '/resume', { sessionId: Y, flags: [] }), {
+      code: 0,
+      lines: [],
+      sessionId: Y,
+    });
+    assert.deepEqual((await startOf(d, Y)).argv, ['--resume', Y]);
   });
 
   test('two POST /resume of one session at once start one keeper (one code 0, the other code 4)', async (t) => {

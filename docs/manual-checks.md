@@ -3218,30 +3218,39 @@ model; only here does Claude Code take the flags, record its start with them and
 ## W48. A throwaway session resumed with another model
 
 Setup: skydeck updated to a commit that has issue #188's part 1 (`skydeck update`, W32); the window
-open; a throwaway session started from the New form in a scratch folder with the field `Flags for
-claude` empty, a label (`l`), and one short prompt answered. Then `/exit` in its terminal and
-`Close` on its bar: the right side shows its resume card.
+open. Start a throwaway session from the New form (`+ New`, or Ctrl+Shift+N) in a scratch folder:
+the field `Flags for claude` empty, the field `Label` holding `flags check`, then `Start`. Once its
+terminal shows Claude Code's prompt and the key bar says `Focus: terminal` (else press
+Ctrl+Shift+L until it does), type `Reply with the single word ok, in this chat, with no tool and no
+file.` and Enter, and wait for the answer. Throughout: type a word only where the step says the
+keyboard is (the key bar names the zone; a field shows its caret). In the list a letter is a key:
+`d` marks the session done, `l`, `n` and `t` open a dialog on it.
 
-1. **The card.** Expected: `Resume here` and `Other flags…` side by side; "Will run" ends in
-   `--resume <its id> -n <its label>`, no other flag; the header shows no flags.
+1. **The card.** Type `/exit` and Enter in its terminal, then press `Close` on the bar under it.
+   Expected: its resume card, with `Resume here` and `Other flags…` side by side; "Will run" ends
+   in `--resume <its id> -n 'flags check'`, no other flag; the header shows no flags.
 2. **Other flags….** Click `Other flags…`. Expected: in place of the two buttons the field `Flags
-   for claude`, empty (the session was started with none) and with the keyboard in it, your
-   favourite chips under it, `Start` and `resumes in this window with these flags · Esc goes back`.
-   Press Esc: the two buttons are back, nothing started. Press Ctrl+Shift+L (`Focus: list`) and
-   `f`: the field again, the keyboard in it.
-3. **Another model.** Type `--model` and a model you can use other than the one the session ran
-   with (`sonnet`, say), and Enter. Expected: the session runs in a terminal of the window with the
-   keyboard in it; once Claude Code has started, the header's second line ends in `--model sonnet`;
-   `/model` in it names that model. In W, `skydeck show <its short id>` prints a launch command
-   with `--model sonnet`.
-4. **A plain resume keeps it.** `/exit`. Expected: the bar reads `Resume`, `Other flags…`,
-   `Close`. Press its `Other flags…`. Expected: the terminal goes and the card shows with the field
-   open, holding `--model sonnet`, the keyboard in it; press Esc: the plain card, whose "Will run"
-   ends in `-n <its label> --model sonnet`. Press `Resume here`. Expected: it runs again, `/model`
-   names the same model, the header still ends in `--model sonnet`.
-5. **The end.** `/exit` in its terminal, `Close`, and mark it done (`d`).
+   for claude`, empty (the session was started with none) and with its caret blinking in it, your
+   favourite chips under it, `Start` and `resumes in this window with these flags · Esc goes back`;
+   "Will run" is not shown while it is open. Press Esc: the two buttons and "Will run" are back,
+   nothing started. Press Ctrl+Shift+L until the key bar says `Focus: list`, then `f`: the field
+   again, its caret in it.
+3. **Another model.** Only while the caret is in the field: type `--model` and a model you can use
+   other than the one the session ran with (`sonnet`, say), and Enter. Expected: the session runs in
+   a terminal of the window, the key bar says `Focus: terminal`; once Claude Code has started, the
+   header's second line ends in `--model sonnet`. Type `/model` and Enter: Claude Code's model
+   picker marks that model. Read it and leave with Esc (choosing one there changes the model, and
+   it may be kept). In W, `skydeck show <its short id>` prints a launch command with `--model
+   sonnet`.
+4. **A plain resume keeps it.** Type `/exit` and Enter in its terminal. Expected: the bar reads
+   `Resume`, `Other flags…`, `Close`. Press its `Other flags…`. Expected: the terminal goes and the
+   card shows with the field open, holding `--model sonnet`, its caret in it; press Esc: the plain
+   card, whose "Will run" ends in `-n 'flags check' --model sonnet`. Press `Resume here`. Expected:
+   it runs again; `/model` and Enter mark the same model (leave with Esc); the header still ends in
+   `--model sonnet`.
+5. **The end.** Type `/exit` and Enter in its terminal, press `Close`, then `Done` in the header.
 
 Write down: for each step whether it went as expected, and the words where they differ; the model
-`/model` named in steps 3 and 4.
+the picker marked in steps 3 and 4.
 
 Not tried before this check was written: all of it, in Edge and with real Claude Code.

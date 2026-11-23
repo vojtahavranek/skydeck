@@ -70,6 +70,8 @@ const UTF8 = new TextEncoder();
 const CANNOT_SHOW =
   'the flags it was started with hold a character this field cannot show; Resume here passes them on as they are';
 const TOO_LONG = `the flags it was started with are longer than this field takes (at most ${FLAGS_BYTES.toLocaleString('en-US')} bytes of UTF-8): shorten them before Start, or use Resume here`;
+/** Issue #188: why Other flags… does nothing for an expired session (the card's words). */
+const EXPIRED = 'its transcript is gone: it cannot be resumed';
 /** Issue #188: the key bar's words for `f` while the right side shows no resume card. */
 const NO_RESUME_CARD =
   'f resumes with other flags only a session shown on its resume card or its ended bar';
@@ -569,14 +571,16 @@ export function createCards(root, deps) {
    */
   let flagsCard = null;
   /**
-   * Issue #188, R3: the shown ended bar's `Other flags…` (what `f` does there), null while none is
-   * shown; and the session whose resume card opens "Other flags…" by itself once it is shown —
-   * set when that ended bar asks to close its terminal, dropped when the right side shows
-   * another session or another card (`header`, `elsewhere`, `resumeCard`), and once used.
-   * @type {(() => void) | null}
+   * Issue #188: the shown ended bar's `Other flags…` (what `f` does there), null while none is
+   * shown; and the session whose resume card opens "Other flags…" by itself once it is shown with
+   * the list's payload of it — asked for by that ended bar as it closes its terminal `term`, or by
+   * the card's own `Other flags…` pressed before that payload came (`term` null) —, dropped when
+   * the right side shows another session, a terminal of it other than `term` (it runs again) or
+   * another card (`header`, `elsewhere`, `resumeCard`), and once used.
+   * @type {(() => string | null) | null}
    */
   let endedFlags = null;
-  /** @type {string | null} */
+  /** @type {{ sessionId: string, term: string | null } | null} */
   let flagsNext = null;
   /** How many times the right side was drawn anew (`hide()`), and at which of them the resume
    *  card was shown last: a draw without it between two drops its "Other flags…" (#188). */
@@ -664,7 +668,7 @@ export function createCards(root, deps) {
    * Issue #188: the resume card's "Other flags…" — a form of its own in place of the card's
    * action line: F15's flags line (the New form's component: the field, the ★, the chips), Start,
    * the hint and its own result line. The field starts with `text`; `note`, when not null, is what
-   * the result line says at once (ruled, R2: why the recorded flags cannot be taken as they are). Start (Enter in the field, on the ★ or the chips, a click) sends `act resume`
+   * the result line says at once (ruled: why the recorded flags cannot be taken as they are). Start (Enter in the field, on the ★ or the chips, a click) sends `act resume`
    * with the field's text as `flags`; a refusal stays in the form's result line, with the field's
    * text and the keyboard. Esc is app.js's (`closeFlags`).
    * @param {string} sessionId
@@ -718,7 +722,7 @@ export function createCards(root, deps) {
           pending = false;
         });
     });
-    return { form, flags, update: favourites.update };
+    return { form, flags, lines, update: favourites.update };
   }
 
   /** @param {string} sessionId */
@@ -756,6 +760,10 @@ export function createCards(root, deps) {
     let last = null;
     /** The last fill found the session expired: nothing resumes it. */
     let gone = false;
+    /** The card's result lines of the last fill, and those the open form has seen: a plain
+     *  resume's refusal that comes while the form is open shows on the form's line (ruled). */
+    let resultNow = '';
+    let resultSeen = '';
     /** The editor's toggle is no change of the card's facts: the keyboard stays where it went. */
     const factsNow = () => {
       if (shown !== null) {
@@ -765,20 +773,27 @@ export function createCards(root, deps) {
     /** Opens the editor, the keyboard in its field at the end; why not, when it cannot. */
     const openEditor = () => {
       if (gone) {
-        return 'its transcript is gone: it cannot be resumed';
+        return EXPIRED;
+      }
+      if (editor === null && last === null) {
+        // Before the list's payload of the session (what a plain resume passes on): opened once
+        // it comes (`resumeCard`), never empty for flags it would not know.
+        flagsNext = { sessionId, term: null };
+        return null;
       }
       if (editor === null) {
         const recorded = last?.resumeFlags;
         const words = Array.isArray(recorded) ? recorded : null;
         const text = words === null ? '' : flagsFieldText(words);
-        // Ruled (R2): a text over the field's bound is said when the form opens, not at Start.
+        // Ruled: a text over the field's bound is said when the form opens, not only at Start.
         const note =
           words === null ? CANNOT_SHOW : UTF8.encode(text).length > FLAGS_BYTES ? TOO_LONG : null;
         editor = flagsEditor(sessionId, text, note);
+        resultSeen = resultNow;
         host.replaceChildren(editor.form);
         setHidden(actions, true);
         setHidden(lines, true);
-        // Ruled (R1): while the form is open the plain resume's command is not shown; the
+        // Ruled: while the form is open the plain resume's command is not shown; the
         // warnings stay, and Esc brings it back.
         setHidden(command.line, true);
         factsNow();
@@ -837,7 +852,7 @@ export function createCards(root, deps) {
         // `selected` comes with the list that answers the page's view: until then nothing is said
         // about the command.
         // Nothing will run for an expired session, whatever command the server could build.
-        // (R1: not while Other flags… is open.)
+        // (Not while Other flags… is open: it is not what Start would run.)
         setHidden(command.line, selected === null || expired || editor !== null);
         setText(
           command.value,
@@ -868,6 +883,11 @@ export function createCards(root, deps) {
         setHidden(hint, expired);
         if (!pending) {
           setText(lines, resultLines.join('\n'));
+        }
+        resultNow = resultLines.join('\n');
+        if (editor !== null && resultNow !== resultSeen) {
+          resultSeen = resultNow;
+          editor.lines.textContent = resultNow;
         }
         last = selected;
         gone = expired;
@@ -953,8 +973,10 @@ export function createCards(root, deps) {
   /**
    * @param {string | null} sessionId
    * @param {string | null} term
+   * @param {string | null} blocked why its Other flags… must close nothing (a session the list
+   *   does not show, one whose transcript is gone), null when it may
    */
-  function buildEnded(sessionId, term) {
+  function buildEnded(sessionId, term, blocked) {
     const text = element('span', 'card-ended');
     text.dataset['fact'] = '';
     const lines = element('div', 'card-lines');
@@ -968,29 +990,44 @@ export function createCards(root, deps) {
       bar.append(actionButton('Resume', 'primary', () => run({ kind: 'resume', sessionId })));
     }
     if (sessionId !== null && term !== null) {
-      // Issue #188, R3: what Close does, then the session's resume card with "Other flags…" open.
+      // Issue #188: what Close does, then the session's resume card with "Other flags…" open. It
+      // closes nothing unless that card can then be shown (ruled by the plan owner): for a session
+      // the list does not show (no resume card would show it) or whose transcript is gone, it
+      // says why on the bar's line.
       let closing = false;
       const closeForFlags = async () => {
+        if (blocked !== null) {
+          setText(lines, blocked);
+          return blocked;
+        }
         if (closing) {
-          return;
+          return null;
         }
         closing = true;
         // Before the answer: the list without the terminal can come first.
-        flagsNext = sessionId;
+        const asked = { sessionId, term };
+        flagsNext = asked;
         const result = await deps.act({ kind: 'close-terminal', term });
         closing = false;
         if (!result.ok) {
-          if (flagsNext === sessionId) {
+          if (flagsNext === asked) {
             flagsNext = null;
           }
           showResult(lines, result);
         }
+        return null;
       };
-      const other = actionButton('Other flags…', '', closeForFlags);
+      const other = actionButton('Other flags…', '', async () => {
+        await closeForFlags();
+      });
       other.title = 'Close this terminal and resume the session with other flags for claude (f)';
       bar.append(other);
       endedFlags = () => {
+        if (blocked !== null) {
+          return blocked;
+        }
         void closeForFlags();
+        return null;
       };
     }
     if (term !== null) {
@@ -1015,8 +1052,11 @@ export function createCards(root, deps) {
      * @param {() => string} now
      */
     header(row, selected, term, now) {
-      if (flagsNext !== null && row?.id !== flagsNext) {
-        flagsNext = null; // R3: another session (or none) is shown
+      if (
+        flagsNext !== null &&
+        (row?.id !== flagsNext.sessionId || (term !== null && term.id !== flagsNext.term))
+      ) {
+        flagsNext = null; // another session (or none), or another terminal of it, is shown
       }
       if (row === null) {
         setHidden(head, true);
@@ -1149,19 +1189,19 @@ export function createCards(root, deps) {
       }
       resumeDrawn = draws;
       showCard(`resume:${row.id}`, () => buildResume(row.id), [row, selected, resultLines]);
-      // R3: the ended bar's Other flags… closed this session's terminal: open it now, once the
+      // The ended bar's Other flags… closed this session's terminal: open it now, once the
       // list carries what a plain resume passes on.
-      if (flagsNext === row.id && selected !== null) {
+      if (flagsNext?.sessionId === row.id && selected !== null) {
         flagsNext = null;
         flagsCard?.open();
-      } else if (flagsNext !== null && flagsNext !== row.id) {
+      } else if (flagsNext !== null && flagsNext.sessionId !== row.id) {
         flagsNext = null;
       }
     },
     /** @param {RowPayload} row */
     elsewhere(row) {
       card.dataset['card'] = 'elsewhere';
-      flagsNext = null; // R3: it runs again: nothing to open
+      flagsNext = null; // it runs again: nothing to open
       // F34: built again when the session is said to run in Claude Code's background, or no longer.
       const background = row.elsewhere?.background === true;
       showCard(
@@ -1173,12 +1213,25 @@ export function createCards(root, deps) {
     /**
      * @param {RowPayload | null} row
      * @param {ExitMessage | null} exit
+     * @param {boolean} [listed] whether the list shows the row (#188: else the bar's Other flags…
+     *   closes nothing)
      */
-    endedBar(row, exit) {
+    endedBar(row, exit, listed = true) {
       card.dataset['card'] = 'ended';
       const sessionId = row?.id ?? null;
       const term = row?.terminal ?? exit?.term ?? null;
-      showCard(`ended:${term}:${sessionId}`, () => buildEnded(sessionId, term), [exit]);
+      // The words of the list keys for a selection the list hides, and the card's for a session
+      // whose transcript is gone.
+      const blocked = !listed
+        ? 'no session selected'
+        : row?.marks.includes('expired') === true
+          ? EXPIRED
+          : null;
+      showCard(
+        `ended:${term}:${sessionId}:${blocked}`,
+        () => buildEnded(sessionId, term, blocked),
+        [exit],
+      );
     },
     /**
      * F9: the card of the group whose closed caption is selected.
@@ -1199,7 +1252,7 @@ export function createCards(root, deps) {
     },
     /**
      * Issue #188: opens "Other flags…" on the shown resume card, the keyboard in its field (as its
-     * button does; the list key `f`); on a shown ended bar (R3) does what its `Other flags…` does.
+     * button does; the list key `f`); on a shown ended bar does what its `Other flags…` does.
      * Null when it is open or asked for; else why not, for the key bar.
      * @returns {string | null}
      */
@@ -1211,8 +1264,7 @@ export function createCards(root, deps) {
         return flagsCard.open();
       }
       if (endedFlags !== null) {
-        endedFlags(); // R3: the ended bar's Other flags…; the card opens it once it is shown
-        return null;
+        return endedFlags(); // the ended bar's Other flags…; the card opens it once it is shown
       }
       return NO_RESUME_CARD;
     },

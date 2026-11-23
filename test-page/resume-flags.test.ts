@@ -22,6 +22,7 @@ import {
   PAGE_WAIT_MS,
   RECORDER,
   TERM_A,
+  TERM_B,
   active,
   clickRow,
   connection,
@@ -89,6 +90,8 @@ interface World {
   setSelected(more: Row): void;
   /** How `act resume` is answered: refused with these words, else ok (S1 starts in TERM_A). */
   answer: { refuse: string | null };
+  /** How late each `view` is answered, in ms (0: at once): a busy server. */
+  late: { ms: number };
   conn(): StandinConnection;
 }
 
@@ -109,6 +112,7 @@ async function world(t: TestContext, chromium: Browser, favourites: string[] = [
   let started = false;
   let more: Row = {};
   const answer: World['answer'] = { refuse: null };
+  const late: World['late'] = { ms: 0 };
   const listNow = (): Row => {
     const rows = started
       ? [{ id: S1, terminal: TERM_A, slot: 1 }]
@@ -128,7 +132,8 @@ async function world(t: TestContext, chromium: Browser, favourites: string[] = [
       open: (conn, message) => {
         if (message['t'] === 'view') {
           selected = (message['selected'] as string | null) ?? null;
-          conn.send(listNow());
+          if (late.ms === 0) conn.send(listNow());
+          else setTimeout(() => conn.send(listNow()), late.ms);
         } else if (message['t'] === 'attach') {
           conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
         } else if (message['t'] === 'act') {
@@ -181,7 +186,79 @@ async function world(t: TestContext, chromium: Browser, favourites: string[] = [
       conn().send(listNow());
     },
     answer,
+    late,
     conn,
+  };
+}
+
+/**
+ * A page on a stand-in whose lists the test gives whole: `serve(make)` sends `make(selected)` now
+ * and as the answer to every later `view` (`selected`: the session the page's view names). Every
+ * `act` is recorded and answered ok; an `attach` gets an empty snap.
+ */
+async function servedWorld(
+  t: TestContext,
+  chromium: Browser,
+): Promise<{ page: Page; acts: Row[]; serve(make: (selected: string | null) => Row): void }> {
+  const secret = new Uint8Array(32).fill(seed++);
+  const page = await newPage(t, chromium);
+  const acts: Row[] = [];
+  let selected: string | null = null;
+  let make = (_selected: string | null): Row => scriptedList([], []);
+  const standin = await standinServer(t, {
+    socket: honest(secret, {
+      open: (conn, message) => {
+        if (message['t'] === 'view') {
+          selected = (message['selected'] as string | null) ?? null;
+          conn.send(make(selected));
+        } else if (message['t'] === 'attach') {
+          conn.send({ t: 'snap', term: message['term'], ch: 1, cols: 80, rows: 24, data: '' });
+        } else if (message['t'] === 'act') {
+          acts.push(message);
+          conn.send({
+            t: 'result',
+            id: message['id'],
+            ok: true,
+            lines: [],
+            error: null,
+            sessionId: null,
+          });
+        }
+      },
+    }),
+  });
+  await page.goto(standin.url);
+  await storeKey(page, secret);
+  await page.goto(standin.url);
+  await connection(page, 'open');
+  return {
+    page,
+    acts,
+    serve(next) {
+      make = next;
+      standin.connections.at(-1)?.send(make(selected));
+    },
+  };
+}
+
+/** A list of S1 in the terminal `term` (state `state`), or with none; its payload while selected. */
+function s1In(
+  term: string | null,
+  state: string,
+  marks: string[] = [],
+): (selected: string | null) => Row {
+  return (selected) => {
+    const list = scriptedList(
+      [{ id: S1, terminal: term, slot: null }],
+      term === null ? [] : [{ id: term, slot: null, sessionId: S1 }],
+      selected === S1 ? selectedOf() : null,
+    ) as Row & { sections: { rows: Row[] }[]; terminals: Row[] };
+    for (const row of list.sections[0]?.rows ?? []) {
+      row['state'] = state === 'running' ? 'running' : 'not-running';
+      row['marks'] = marks;
+    }
+    list.terminals = list.terminals.map((one) => ({ ...one, state }));
+    return list;
   };
 }
 
@@ -244,7 +321,7 @@ test("the resume card's Other flags… (#188)", async (t) => {
   const chromium = await browser(t);
 
   await t.test(
-    "Other flags… beside Resume here; it opens the New form's flags field in place of the action line, filled with the plain resume's flags written so that they parse back word for word (spaces, both quotes), the keyboard at its end; Will run stays",
+    "Other flags… beside Resume here; it opens the New form's flags field in place of the action line, filled with the plain resume's flags written so that they parse back word for word (spaces, both quotes), the keyboard at its end; Will run hidden while it is open",
     async (t) => {
       const w = await world(t, chromium, ['--verbose', '--model opus']);
       await cardOfS1(w.page);
@@ -279,7 +356,7 @@ test("the resume card's Other flags… (#188)", async (t) => {
       ]);
       await showsText(w.page, `${EDITOR} .card-hint`, new RegExp(`^${HINT}$`));
       assert.equal(await w.page.locator(`${EDITOR} button[type="submit"]`).textContent(), 'Start');
-      // The action line is gone while the form is open, and (ruled, R1) so is Will run: the plain
+      // The action line is gone while the form is open, and (ruled) so is Will run: the plain
       // resume's command; the card's other facts stay.
       assert.deepEqual(await cardButtons(w.page), ['', '']);
       assert.equal(await w.page.locator('#cards .card-command').isVisible(), false);
@@ -391,7 +468,7 @@ test("the resume card's Other flags… (#188)", async (t) => {
       await w.page.keyboard.press('Escape');
       await w.page.waitForSelector(EDITOR, { state: 'detached' });
       assert.deepEqual(await cardButtons(w.page), ['Resume here', 'Other flags…']);
-      await showsText(w.page, '#cards .card-command', /--model opus$/); // Will run is back (R1)
+      await showsText(w.page, '#cards .card-command', /--model opus$/); // Will run is back
       assert.equal(
         await w.page.evaluate(() => document.activeElement?.textContent ?? ''),
         'Other flags…',
@@ -468,6 +545,39 @@ test("the resume card's Other flags… (#188)", async (t) => {
   );
 
   await t.test(
+    'Other flags… or f before the list that answers the selection (a busy server): the form opens once that list has come, filled with what a plain resume passes on, never empty and never with the line that says it cannot show them',
+    async (t) => {
+      const w = await world(t, chromium);
+      await until(async () => (await selectedRow(w.page)) === S2, 'S2 selected');
+      w.late.ms = 1500;
+      await toZone(w.page, 'list');
+      await w.page.keyboard.press('ArrowDown'); // S1: its card at once, its payload 1.5 s later
+      await w.page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await w.page.keyboard.press('f');
+      assert.equal(await w.page.locator(EDITOR).count(), 0, 'not before the payload');
+      assert.equal(await keyMessage(w.page), '', 'nothing to say: it opens once it can');
+      await w.page.waitForSelector(FIELD);
+      const now = await fieldNow(w.page);
+      assert.equal(now.value, flagsText(RECORDED));
+      assert.equal(now.focused, true, 'the keyboard in the field');
+      assert.equal(await w.page.locator(`${EDITOR} .card-lines`).textContent(), '');
+
+      // The same by a click: S2 (once its late list has come, the page holds no payload of S1),
+      // then S1 again, the button pressed before S1's late payload.
+      await w.page.keyboard.press('Escape');
+      await clickRow(w.page, S2);
+      await w.page.waitForTimeout(2000);
+      await clickRow(w.page, S1);
+      await w.page.locator('#cards .card-actions button', { hasText: 'Other flags…' }).click();
+      assert.equal(await w.page.locator(EDITOR).count(), 0, 'not before the payload');
+      await w.page.waitForSelector(FIELD);
+      assert.equal((await fieldNow(w.page)).value, flagsText(RECORDED));
+      assert.equal(await w.page.locator(`${EDITOR} .card-lines`).textContent(), '');
+      assert.deepEqual(resumes(w), []);
+    },
+  );
+
+  await t.test(
     'an expired session: Other flags… disabled and f says why; flags the field cannot show: the field opens empty, a line says so; flags longer than the field takes: said when it opens',
     async (t) => {
       const w = await world(t, chromium);
@@ -496,7 +606,7 @@ test("the resume card's Other flags… (#188)", async (t) => {
       await w.page.keyboard.press('Escape');
       await w.page.waitForSelector(EDITOR, { state: 'detached' });
 
-      // Ruled (R2): flags longer than the field takes are said when the form opens.
+      // Ruled: flags longer than the field takes are said when the form opens.
       const long = ['--append-system-prompt', `be ${'é'.repeat(520)}`];
       assert.ok(Buffer.byteLength(flagsText(long)) > 1024);
       w.setSelected({ resumeFlags: long });
@@ -513,6 +623,85 @@ test("the resume card's Other flags… (#188)", async (t) => {
       w.setSelected({ expired: true });
       await w.page.waitForSelector(EDITOR, { state: 'detached' });
       assert.deepEqual(resumes(w), []);
+    },
+  );
+
+  await t.test(
+    "a plain resume refused while the form is open (Enter in the list): its refusal shows on the form's result line",
+    async (t) => {
+      const w = await world(t, chromium);
+      await cardOfS1(w.page);
+      await w.page.locator('#cards .card-actions button', { hasText: 'Other flags…' }).click();
+      await w.page.waitForSelector(FIELD);
+      w.answer.refuse = 'no, not now';
+      await toZone(w.page, 'list');
+      await w.page.keyboard.press('Enter');
+      await until(() => resumes(w).length === 1, 'the plain resume sent');
+      assert.equal(resumes(w)[0]?.['flags'], undefined, 'a plain resume');
+      await showsText(w.page, `${EDITOR} .card-lines`, /^no, not now$/);
+    },
+  );
+
+  await t.test(
+    "the ended bar's Other flags… of an expired session closes nothing and says why, on the bar's line and, for f, in the key bar",
+    async (t) => {
+      const w = await servedWorld(t, chromium);
+      w.serve(s1In(TERM_A, 'ended', ['expired']));
+      await clickRow(w.page, S1);
+      await w.page.locator('#cards .card-bar button', { hasText: 'Other flags…' }).click();
+      await showsText(
+        w.page,
+        '#cards .card-lines',
+        /^its transcript is gone: it cannot be resumed$/,
+      );
+      await toZone(w.page, 'list');
+      await w.page.keyboard.press('f');
+      await until(async () => (await keyMessage(w.page)) !== '', 'the key bar says why');
+      assert.equal(await keyMessage(w.page), 'its transcript is gone: it cannot be resumed');
+      await w.page.waitForTimeout(300);
+      assert.deepEqual(w.acts, [], 'nothing closed');
+      assert.equal(await w.page.locator(`#right-zone[data-pane-term="${TERM_A}"]`).count(), 1);
+    },
+  );
+
+  await t.test(
+    "the ended bar's request does not outlive the session running again: after its terminal there, another one ends and its plain Close shows the plain card, the keyboard in no field",
+    async (t) => {
+      const w = await servedWorld(t, chromium);
+      w.serve(s1In(TERM_A, 'ended'));
+      await clickRow(w.page, S1);
+      await w.page.locator('#cards .card-bar button', { hasText: 'Other flags…' }).waitFor();
+      await w.page.locator('#cards .card-bar button', { hasText: 'Other flags…' }).click();
+      await until(() => w.acts.length === 1, 'close-terminal sent');
+      assert.deepEqual(
+        w.acts.map((act) => [act['kind'], act['term']]),
+        [['close-terminal', TERM_A]],
+      );
+      // Before the list without TERM_A, the session runs again in another terminal (another
+      // window's Resume, a command), which this page shows; then that one ends.
+      w.serve(s1In(TERM_B, 'running'));
+      await w.page.waitForSelector(`#right-zone[data-pane-term="${TERM_B}"]`, {
+        state: 'attached',
+      });
+      w.serve(s1In(TERM_B, 'ended'));
+      await w.page.locator('#cards .card-bar button', { hasText: 'Close' }).waitFor();
+      await w.page.locator('#cards .card-bar button', { hasText: 'Close' }).click();
+      await until(() => w.acts.length === 2, 'the plain Close sent');
+      w.serve(s1In(null, 'not-running'));
+      await w.page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await w.page.waitForTimeout(300);
+      assert.equal(await w.page.locator(EDITOR).count(), 0, 'the plain card');
+      assert.deepEqual(await cardButtons(w.page), ['Resume here', 'Other flags…']);
+      assert.equal(
+        await w.page.evaluate(() => document.activeElement instanceof HTMLInputElement),
+        false,
+        'the keyboard in no text field',
+      );
+      assert.deepEqual(
+        w.acts.map((act) => act['kind']),
+        ['close-terminal', 'close-terminal'],
+        'nothing resumed',
+      );
     },
   );
 
@@ -617,7 +806,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
   );
 
   await t.test(
-    "a real server, R3: the ended bar's Other flags… (a click, then f from the list) closes the terminal as Close does and shows the resume card with the form open, filled and holding the keyboard; Start resumes with the field's flags; Esc leaves the plain card",
+    "a real server: the ended bar's Other flags… (a click, then f from the list) closes the terminal as Close does and shows the resume card with the form open, filled and holding the keyboard; Start resumes with the field's flags; Esc leaves the plain card",
     async (t) => {
       const l = await launched(t, chromium);
       l.d.resumable(S1);
