@@ -5,9 +5,9 @@
 // where the panel goes beside its region (`placeNear`). A line is made of parts: text, a key
 // (`key`, named as the key help names it, with the zone keys.js classifies it in), the words of a
 // control of the page (`ui`, with the element that carries them) and a text to type (`typed`: the
-// quick switcher's `> tour`). test/web/tour-text.test.ts holds every key against web/keys.js and
-// every typed text against the server's commands; test-page/tour.test.ts every control against the
-// page.
+// quick switcher's `> tour` and `> restore`, and the command `skydeck window`).
+// test/web/tour-text.test.ts holds every key against web/keys.js and every typed text against the
+// server's commands; test-page/tour.test.ts every control against the page.
 
 /** @typedef {'app' | 'tab'} Mode */
 /** @typedef {'list' | 'right' | 'keybar' | 'switch' | 'settings'} Region */
@@ -27,9 +27,15 @@ export const REGIONS = /** @type {const} */ ({
   settings: '#settings-button',
 });
 
-/** The page's own localStorage key (the theme's are web/theme-text.js's) and its one value. */
+/** The page's own localStorage key (the theme's are web/theme-text.js's). */
 export const TOUR_KEY = 'skydeck-tour';
-export const TOUR_SEEN = 'seen';
+/**
+ * The mark a browser keeps once it has ended the tour, and the tour's version: the first version
+ * wrote `seen`, this one `seen-2`. The tour starts by itself whenever the stored mark is not this
+ * one, so a browser marked `seen` sees it once more. Raise it by hand (`seen-3`) only when the tour
+ * changed enough that everyone should see it again; an update alone never raises it.
+ */
+export const TOUR_SEEN = 'seen-2';
 
 export const TOUR_TEXTS = {
   /** The panel's name, for a screen reader. */
@@ -43,7 +49,7 @@ export const TOUR_TEXTS = {
 };
 
 /**
- * `Step 2 of 6`.
+ * `Step 2 of 7`.
  * @param {number} at  1 for the first step
  * @param {number} of
  * @returns {string}
@@ -108,6 +114,7 @@ export function tourSteps(mode) {
           listKey('Enter'),
           ' shows or resumes the session.',
         ],
+        [listKey('Shift+↑'), ' ', listKey('Shift+↓'), ' move a session up or down in Open.'],
         [
           listKey('l'),
           ' label · ',
@@ -136,9 +143,29 @@ export function tourSteps(mode) {
           windowKey(mode === 'tab' ? 'Ctrl+Shift+O' : 'Ctrl+Tab'),
           ' back to the previous session.',
         ],
+        [windowKey('Ctrl+Shift+J'), ' goes to the next session that needs you.'],
         mode === 'tab'
           ? [{ ui: '+ New', at: '#new-button' }, ' in the key bar starts a new session.']
           : [windowKey('Ctrl+Shift+N'), ' starts a new session.'],
+      ],
+    },
+    {
+      region: 'list',
+      title: 'After a restart',
+      lines: [
+        ['A restart of the PC or of WSL ends the running sessions.'],
+        [
+          'Run ',
+          { typed: 'skydeck window' },
+          ' again: the top of the list offers the ones that were open.',
+        ],
+        [
+          'Restore brings the ticked ones back; after Not now, ',
+          { typed: '> restore' },
+          ' in ',
+          SWITCH,
+          ' offers it again.',
+        ],
       ],
     },
     {
