@@ -875,7 +875,15 @@ effect.
   right side then says `The selected session shows here.`
 - **A session that is not running**: one click selects it and shows its resume card, with the
   exact command it will run. Enter in the list, a double click or `Resume here` resumes it into the
-  window.
+  window. **Other flags…** beside it (or `f` in the list) resumes it with other flags for `claude`
+  instead, such as another `--model` or one more `--mcp-config`: the New form's `Flags for claude`
+  field, with your favourite flags under it, opens filled with the flags it was started with, and
+  Start resumes it with exactly the flags in the field (an empty field: none). The rules are the
+  New form's (no flag that picks or names a session), and a flag that only says where a new
+  session starts (`--worktree`, `--tmux`, `--bg`, the cloud flags) is refused too: the session
+  exists already. A refusal shows under Start; Esc goes back to the card. Nothing is saved for the
+  session: its start is recorded as every start is, so the header shows the new flags, and every
+  later Resume uses them. A start that fails before the session reports keeps the old ones.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
   terminal shows a card instead: it cannot be shown in the window. Once you `/exit` it there, it
   can be resumed here. A session in Claude Code's background has no terminal at all. For one sent
@@ -1606,7 +1614,8 @@ a WSL terminal of your own, run `skydeck window`:
 #### Starting sessions in the window from a terminal (stage C)
 
 `skydeck resume <ref> --window` and `skydeck new --window` (with `--label`, `--group` and `--
-<claude flags>` as always) ask the window's server to start the session in the window, as the
+<claude flags>` as always; `resume` takes `-- <claude flags>` too, its flags in place of the ones
+it was started with) ask the window's server to start the session in the window, as the
 window's own Resume and New do: through the same checks, with the same refusals and exit codes
 (`skydeck: <short id> is running (pid <n>)` or `skydeck: this session is already open in the
 window`: exit 4; what `skydeck new` refuses: exit 2). The command prints on stderr the lines

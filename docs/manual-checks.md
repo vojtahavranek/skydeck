@@ -3196,3 +3196,42 @@ Write down: for each step whether it went as expected, and the words where they 
 the bar read well in your theme and changed the terminal's size only when it came and went.
 
 Not tried before this check was written: all of it, in Edge and with real Claude Code.
+
+## Resuming with other flags
+
+The check of resuming a session with other flags (issue #188, part 1; design.md 7.6 "Other flags";
+design-step-2.md 12.6, 12.9; [install.md](install.md), "Using the window", its point "A session
+that is not running"): W48, in your window, with real Claude Code, on one throwaway session in a
+scratch folder. Commands are typed in W, a WSL terminal of your own (never a `!` command inside
+Claude Code). The tests run it against the stand-in program, which takes any flag and shows no
+model; only here does Claude Code take the flags, record its start with them and run with them.
+
+## W48. A throwaway session resumed with another model
+
+Setup: skydeck updated to a commit that has issue #188's part 1 (`skydeck update`, W32); the window
+open; a throwaway session started from the New form in a scratch folder with the field `Flags for
+claude` empty, a label (`l`), and one short prompt answered. Then `/exit` in its terminal and
+`Close` on its bar: the right side shows its resume card.
+
+1. **The card.** Expected: `Resume here` and `Other flags…` side by side; "Will run" ends in
+   `--resume <its id> -n <its label>`, no other flag; the header shows no flags.
+2. **Other flags….** Click `Other flags…`. Expected: in place of the two buttons the field `Flags
+   for claude`, empty (the session was started with none) and with the keyboard in it, your
+   favourite chips under it, `Start` and `resumes in this window with these flags · Esc goes back`.
+   Press Esc: the two buttons are back, nothing started. Press Ctrl+Shift+L (`Focus: list`) and
+   `f`: the field again, the keyboard in it.
+3. **Another model.** Type `--model` and a model you can use other than the one the session ran
+   with (`sonnet`, say), and Enter. Expected: the session runs in a terminal of the window with the
+   keyboard in it; once Claude Code has started, the header's second line ends in `--model sonnet`;
+   `/model` in it names that model. In W, `skydeck show <its short id>` prints a launch command
+   with `--model sonnet`.
+4. **A plain resume keeps it.** `/exit` and `Close`. Expected: on the card "Will run" ends in
+   `-n <its label> --model sonnet`, and `Other flags…` opens with `--model sonnet` in the field;
+   press Esc. Press `Resume here`. Expected: it runs again, `/model` names the same model, the
+   header still ends in `--model sonnet`.
+5. **The end.** `/exit` in its terminal, `Close`, and mark it done (`d`).
+
+Write down: for each step whether it went as expected, and the words where they differ; the model
+`/model` named in steps 3 and 4.
+
+Not tried before this check was written: all of it, in Edge and with real Claude Code.

@@ -645,7 +645,7 @@ The interactive list is built as two pure functions — `reduce(model, key)` and
 | `skydeck done <ref>` / `undone <ref>` | Hide / show. |
 | `skydeck pr add <ref> <url>` / `pr rm <ref> <url>` / `pr refresh` | Attach, detach, fetch status. |
 | `skydeck new [--label <text>] [--group <text>] [--here \| --tab \| --window] [-- <claude flags>]` | Start a new session in the current directory (7.7); `--window` in the skydeck window (design-step-2.md 11.4). |
-| `skydeck resume <ref> [--here \| --tab \| --window]` | Resume one session (7.6); `--window` in the skydeck window (design-step-2.md 11.4). |
+| `skydeck resume <ref> [--here \| --tab \| --window] [-- <claude flags>]` | Resume one session (7.6); with `--`, with the flags after it in place of the recorded ones (7.6 "Other flags"); `--window` in the skydeck window (design-step-2.md 11.4). |
 | `skydeck restore [--all] [--dry-run] [--yes]` | Bring back what was open (7.8). |
 | `skydeck install` / `uninstall [--purge]` / `doctor` | Section 8. |
 
@@ -750,6 +750,30 @@ For a session without a recorded launch command the result is `claude --resume <
 skydeck says that the original flags are unknown. Environment variables that an alias or wrapper
 set are not part of a launch command and are not restored.
 
+**Other flags** (issue #188, part 1). `skydeck resume <ref> [--here | --tab | --window] -- <claude
+flags>`, and the window's `Other flags…` on the resume card (design-step-2.md 12.6), resume the
+session with the given flags in place of the recorded ones: `<claudeCommand> --resume <id> [-n
+<label>] <the given flags, as given, in their order>`. `--` with nothing after it resumes with no
+flags at all; without `--` nothing changes. The given flags are checked as `new` checks its flags
+(7.7), with the same table and in the same words (a flag that picks a session, `--name`/`-n`), and
+what `new` passes on is passed on (a flag the table does not know; a prompt, which is never stored,
+principle 4). A resume refuses in addition, naming it (`cannot pass <flag> to claude on a resume:
+it says where or how a new session starts`), every flag it removes from a recorded command that
+neither picks nor names a session: `--worktree`/`-w`, `--tmux`, `--bg` (`--background`),
+`--desktop`, `--init`, `--init-only`, `--maintenance` and the cloud flags (`--cloud`/`--remote`,
+`--environment`/`--pool`, `--ref`, `--on-branch`, `--correlation-id`, `--forward-home-settings`).
+A session that exists already must not start somewhere else or a second time, and the user typed
+the flag: dropping it in silence would mislead. They are found as `new` finds its flags (in a
+cluster of short flags, as `--flag=value`, before an unknown letter), after `new`'s two refusals. A
+refusal is a usage error (exit 2) before the guard: nothing starts and no lock is taken. No
+permission flag is added; one the user gives is kept. The directory, the guard, the lock, `--here`
+/ `--tab` / `--window` and every refusal of a plain resume are untouched: the flags change what is
+started, never whether. Nothing is stored for the session: the start is recorded as every start is
+(5.3), so `show`, the window's header and every later plain resume and restore take the new flags
+(they use the latest start that has a launch command); a start that fails before the session
+reports records nothing, and the old flags stay the ones a plain resume passes on. The warnings
+about the recorded flags (unknown, not passed on) are not said: those flags are not this resume's.
+
 **The directory** is the session's project directory. If it no longer exists, resume is refused.
 A session without a transcript cannot be resumed.
 
@@ -853,7 +877,8 @@ The other flags that resume removes (7.6) only say where or how a new session st
 passed on: `--worktree`/`-w`, `--tmux`, `--bg`, `--init`, `--init-only`, `--maintenance`,
 `--desktop`, and the cloud flags (`--cloud`/`--remote`, `--environment`/`--pool`, `--ref`,
 `--on-branch`, `--correlation-id`, `--forward-home-settings`); a resume drops them because a
-session that already exists must not start in a new worktree or in the cloud a second time. A
+session that already exists must not start in a new worktree or in the cloud a second time, and
+refuses them when they are given for it (7.6 "Other flags"). A
 prompt after `--` is passed on; it is the user's own and is never stored.
 When opening its tab times out, `new` prints no command but the new session's id, and says that
 running `skydeck` shows whether it started: a session that never started has nothing to resume.
