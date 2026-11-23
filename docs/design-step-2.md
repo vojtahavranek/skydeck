@@ -3841,7 +3841,10 @@ form is open closes the switcher only. Ctrl+Shift+P, and a click on the title ba
 keyboard and no click (a transparent layer over the window takes every click outside its panel),
 the page moves the keyboard nowhere by itself while it is shown, and no list key acts. Enter or →
 goes on (Enter on one of the panel's buttons presses that button), ← goes back, Esc skips the rest,
-Tab and Shift+Tab walk the panel's buttons and stay in it; each acts once per press. Every window
+Tab and Shift+Tab walk the panel's buttons and stay in it; each acts once per press, a held key
+once. Space (with or without Shift) and Shift+Enter do nothing: the tour takes and cancels them at
+their keydown and at their keyup, so that they press no button — a sentence typed as the tour
+pops up moves it one step at most (its Enter) and reaches nothing under it. Every window
 chord, Ctrl+Shift+H too (the help would cover it), says `close the tour first (Esc)` and does
 nothing else (while F38's running form shows, `skydeck is being updated` comes first, but the form
 closes the tour); the reload keys reload as usual, since nothing of the tour is worth keeping. Opening
@@ -4288,12 +4291,15 @@ none: no made-up data.
   edges too), whose shadow dims the rest of the page; nothing that takes a click lies on the
   region once the tour is gone, and the terminal's own layers are not restyled. A small panel
   beside it (to its right, else its left, else below, else above it, inside the window; the middle
-  of the window when none fits; placed again when the window is resized) holds the title, two or
-  three short lines, `Step n of N`, `Skip the tour`, `Back` (not on the first step) and `Next`
-  (`Done` on the last), with the keyboard on `Next` at each step. It lies over every layer of the
+  of the window when none fits, so that in a narrow window it may lie over the region; placed
+  again, with the ring, when the window is resized and when the region changes size without a
+  resize, as when a bar shows above the zones) holds the title, two or three short lines, `Step n
+  of N`, `Skip the tour`, `Back` (shown disabled on the first step) and `Next` (`Done` on the
+  last), with the keyboard on `Next` at each step. It lies over every layer of the
   page, the dialogs' and the toast's too. Its words are in the page's own colours (`--text`,
   `--dim` on `--panel`) in every theme. Every text reaches the DOM as text.
-- **Keys**: 12.9's paragraph "The tour".
+- **Keys**: 12.9's paragraph "The tour": Enter (the focused button, else `Next`), → and ←, Esc,
+  Tab and Shift+Tab; Space, Shift+Space and Shift+Enter do nothing.
 - **Tests.** Every browser context of the page suite is made by `newContext`
   (`test-page/helpers/browser.ts`), which marks the tour seen in each page's storage, so that no
   case but the tour's own meets it; those ask for a context without the mark.

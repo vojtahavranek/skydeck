@@ -1140,8 +1140,9 @@ function showUpdateResult(result) {
 
 /**
  * Milestone 2: an update runs. Every other dialog is closed (Settings, "Mark done", the
- * switcher, the editor with what was typed in it; F41's tour, not marked seen), then the dialog's running form stands over the
- * inert page; the keyboard is given back where it was once it is lifted.
+ * switcher, the editor with what was typed in it; F41's tour, not marked seen), then the dialog's
+ * running form stands over the inert page; the keyboard is given back where it was once it is
+ * lifted.
  * @param {{ to: string; sinceNs: string }} applying
  */
 function applyingShown(applying) {

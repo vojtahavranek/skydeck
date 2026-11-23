@@ -3060,7 +3060,8 @@ closed; at least one session in the list.
    in your theme.
 2. **Walk it.** Press Enter, then →, then ←. Expected: steps 2, 3, 2: the right side, then the key
    bar (`Focus: list` or `Focus: terminal`, Ctrl+Shift+L), then the right side again, each standing
-   out with its panel beside it, never over it. Press Ctrl+Shift+L: the key bar says `close the tour
+   out with its panel beside it where the window has room (in a narrow window the panel may lie over
+   the region). Press Space, then Shift+Enter: nothing happens, the step stays. Press Ctrl+Shift+L: the key bar says `close the tour
    first (Esc)` and the step stays. Click a row of the list: nothing is selected. Press → until
    step 5: `Switch…` stands out and the panel names Ctrl+Shift+P, Ctrl+Shift+1…9, Ctrl+Tab and
    Ctrl+Shift+N. Step 6: the gear, Ctrl+Shift+H, `Take the tour` and `> tour`, and `Done` in place of `Next`.

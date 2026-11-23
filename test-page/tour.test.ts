@@ -84,8 +84,10 @@ async function world(
   chromium: Browser,
   list: Record<string, unknown>,
   options: { tour?: boolean; init?: string; update?: Record<string, unknown> } = {},
-): Promise<{ page: Page; standin: Standin }> {
+): Promise<{ page: Page; standin: Standin; inputs: string[] }> {
   const page = await newPage(t, chromium, { tour: options.tour ?? true });
+  /** What the page sent to a terminal (`input`), in order. */
+  const inputs: string[] = [];
   if (options.init !== undefined) await page.addInitScript(options.init);
   const secret = new Uint8Array(32).fill(seed++);
   const told = new Set<unknown>();
@@ -102,6 +104,8 @@ async function world(
         } else if (message['t'] === 'attach') {
           const { term, cols, rows } = message as { term: string; cols: number; rows: number };
           conn.send({ t: 'snap', term, ch: 1, cols, rows, data: '' });
+        } else if (message['t'] === 'input') {
+          inputs.push(String(message['data']));
         }
       },
     }),
@@ -110,7 +114,7 @@ async function world(
   await storeKey(page, secret);
   await page.goto(standin.url);
   await connection(page, 'open');
-  return { page, standin };
+  return { page, standin, inputs };
 }
 
 interface Box {
@@ -187,6 +191,13 @@ async function tourStep(page: Page, step: number): Promise<TourShown> {
   }, `the tour shows step ${step}`);
   return shown as unknown as TourShown;
 }
+
+/** Whether `.app`, the page under the tour, is inert. */
+async function inert(page: Page): Promise<boolean> {
+  return readPage(page, () => (document.querySelector('.app') as HTMLElement).inert, null);
+}
+
+const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function tourHidden(page: Page): Promise<void> {
   await page.waitForSelector('#tour[hidden]', { state: 'attached' });
@@ -450,6 +461,88 @@ test('the tour of the window', async (t) => {
       // Nothing lies over the page any more: a click on a row selects it.
       await page.mouse.click(row.x + row.width / 2, row.y + row.height / 2);
       await until(async () => (await selectedRow(page)) === S2, 'the row is selected');
+    },
+  );
+
+  await t.test(
+    'A3: Space, Shift+Space and Shift+Enter do nothing — a sentence typed as the tour pops up moves it one step at most and reaches no terminal —; the page is inert while it shows; Skip the tour in an unseen browser writes the mark and lifts the inertness',
+    async (t) => {
+      const { page, inputs } = await world(t, chromium, WITH_SESSIONS);
+      await listed(page, false);
+      await tourStep(page, 1);
+      assert.equal(await inert(page), true, 'the page under the tour is inert');
+      await page.keyboard.type('please run the tests and fix what fails now');
+      await page.keyboard.press('Enter');
+      await pause(300);
+      assert.equal((await tourStep(page, 2)).step, '2', 'one step forward, no more');
+      assert.equal(await mark(page), null, 'not marked seen');
+      // On each button: Space, Shift+Space and Shift+Enter press none of them.
+      const holder = (): Promise<string> =>
+        readPage(page, () => document.activeElement?.className ?? '', null);
+      for (const button of ['tour-next', 'tour-skip', 'tour-back']) {
+        while ((await holder()) !== button) await page.keyboard.press('Tab');
+        for (const key of ['Space', 'Shift+Space', 'Shift+Enter']) {
+          await page.keyboard.press(key);
+          await pause(100);
+          assert.equal((await shownTour(page))?.step, '2', `${key} on ${button}`);
+        }
+      }
+      assert.equal(await mark(page), null);
+      assert.deepEqual(inputs, [], 'nothing reached the terminal');
+      assert.equal(await inert(page), true);
+
+      await page.locator('#tour .tour-skip').click();
+      await tourHidden(page);
+      assert.equal(await mark(page), TOUR_SEEN, 'Skip the tour marks it seen');
+      assert.equal(await inert(page), false, 'the page is no longer inert');
+      // The keyboard is back in the terminal: a key reaches the program again.
+      await until(async () => (await active(page)) === 'in #terminal', 'the terminal has it');
+      await page.keyboard.press('z');
+      await until(() => inputs.length > 0, 'z reaches the terminal');
+    },
+  );
+
+  await t.test(
+    'A3: a held Enter moves one step; a reload key during the tour reloads the page, and the tour, not marked, shows again; the ring follows its region when the region changes size without a resize of the window',
+    async (t) => {
+      const { page } = await world(t, chromium, WITH_SESSIONS);
+      await listed(page, false);
+      await tourStep(page, 1);
+      await page.keyboard.down('Enter');
+      await page.keyboard.down('Enter'); // auto-repeats (Playwright sends them with `repeat`)
+      await page.keyboard.down('Enter');
+      await page.keyboard.up('Enter');
+      await pause(200);
+      assert.equal((await tourStep(page, 2)).step, '2', 'one step for one press');
+
+      // The ring on the list, then a bar above the zones makes the list shorter.
+      await page.keyboard.press('ArrowLeft');
+      await tourStep(page, 1);
+      await page.evaluate(() => {
+        const info = document.getElementById('info') as HTMLElement;
+        (document.getElementById('info-text') as HTMLElement).textContent = 'a bar over the zones';
+        info.hidden = false;
+      });
+      await until(async () => {
+        const shown = await shownTour(page);
+        return (
+          shown !== null &&
+          Math.abs(shown.spot.top - shown.target.top) < 1 &&
+          Math.abs(shown.spot.height - shown.target.height) < 1
+        );
+      }, 'the ring follows the list');
+
+      await page.evaluate(() => Reflect.set(globalThis, 'beforeReload', true));
+      await page.keyboard.press('Control+Shift+R');
+      await until(
+        async () =>
+          (await readPage(page, () => Reflect.get(globalThis, 'beforeReload') === true, null)) ===
+          false,
+        'the page reloaded',
+      );
+      await connection(page, 'open');
+      await tourStep(page, 1);
+      assert.equal(await mark(page), null);
     },
   );
 

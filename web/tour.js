@@ -8,7 +8,11 @@
 // key and no click; nothing lies over a region once the tour is gone, and the terminal's own
 // layers are not restyled. Keys come from app.js's capture phase (`key()`): Enter or → goes on
 // (Enter on a button of the panel presses that button), ← goes back, Esc skips, Tab and Shift+Tab
-// walk the panel's buttons and stay in it; each acts once per press.
+// walk the panel's buttons and stay in it; each acts once per press. Space (with or without Shift)
+// and Shift+Enter do nothing: taken and cancelled at their keydown and their keyup, so that they
+// press no button — a sentence typed as the tour pops up must not walk it and end it. The ring
+// follows its region when the region changes size without a window resize (a ResizeObserver on
+// the region, dropped when the step changes and at the close).
 //
 // Seen (the brief's Behaviour 4): ending the tour with `Done`, `Skip the tour` or Esc marks it seen
 // in the page's own localStorage (TOUR_KEY), as the theme's choice is kept (web/theme.js); nothing
@@ -80,6 +84,15 @@ function partNode(part) {
 }
 
 /**
+ * Space, with or without Shift.
+ * @param {KeyboardEvent} event
+ * @returns {boolean}
+ */
+function isSpace(event) {
+  return event.key === ' ' || event.code === 'Space';
+}
+
+/**
  * Whether the tour may start by itself: the storage holds no mark and can be read and written.
  * @returns {boolean}
  */
@@ -134,6 +147,21 @@ export function createTour(root, deps) {
   let at = 0;
   /** @type {TourStep[]} */
   let steps = [];
+  /** The region the ring is on: the observer places the ring again when its size changes. */
+  /** @type {Element | null} */
+  let watched = null;
+  const follow = new ResizeObserver(() => place());
+  /** @param {Element | null} target */
+  const watch = (target) => {
+    if (target === watched) {
+      return;
+    }
+    follow.disconnect();
+    watched = target;
+    if (target !== null) {
+      follow.observe(target);
+    }
+  };
 
   /** The ring over the step's region, and the panel beside it, as the page is laid out now. */
   const place = () => {
@@ -142,6 +170,7 @@ export function createTour(root, deps) {
       return;
     }
     const target = document.querySelector(REGIONS[step.region]);
+    watch(target);
     const box = target?.getBoundingClientRect();
     const viewport = { width: innerWidth, height: innerHeight };
     const size = panel.getBoundingClientRect();
@@ -205,6 +234,7 @@ export function createTour(root, deps) {
     if (holder instanceof HTMLElement && root.contains(holder)) {
       holder.blur();
     }
+    watch(null);
     root.hidden = true;
     delete root.dataset['region'];
     delete root.dataset['step'];
@@ -231,6 +261,16 @@ export function createTour(root, deps) {
   skip.addEventListener('click', () => close(true));
   // A click outside the panel does nothing, and leaves the keyboard in the panel.
   scrim.addEventListener('mousedown', (event) => event.preventDefault());
+  // A button pressed by Space is pressed at the keyup: that too is cancelled.
+  root.addEventListener(
+    'keyup',
+    (event) => {
+      if (shown && isSpace(event) && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+      }
+    },
+    true,
+  );
 
   return {
     /** Shows the first step, in the words of the mode the page shows; the keyboard on `Next`. */
@@ -250,7 +290,8 @@ export function createTour(root, deps) {
     },
     /**
      * A keydown while shown, from app.js's capture phase: true when the tour took it (and
-     * cancelled it) — Enter, →, ←, Esc, Tab and Shift+Tab.
+     * cancelled it) — Enter, →, ←, Esc, Tab and Shift+Tab, and Space, Shift+Space and Shift+Enter,
+     * which do nothing.
      * @param {KeyboardEvent} event
      * @returns {boolean}
      */
@@ -272,6 +313,11 @@ export function createTour(root, deps) {
               : 0
             : (from + (event.shiftKey ? -1 : 1) + controls.length) % controls.length;
         controls[to]?.focus();
+        return true;
+      }
+      // Space and Shift+Enter would press the focused button (Space at its keyup): nothing.
+      if (isSpace(event) || (event.key === 'Enter' && event.shiftKey)) {
+        event.preventDefault();
         return true;
       }
       if (event.shiftKey) {
