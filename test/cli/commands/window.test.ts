@@ -570,22 +570,29 @@ async function noPageRecorded(h: Harness): Promise<void> {
 const SUCCESS = /^skydeck window: http:\/\/127\.0\.0\.1:([0-9]+)\/ \(server pid ([0-9]+)\)\n$/;
 const ALREADY_OPEN = 'skydeck window: a window is already open\n';
 
-/** A command's own GET /ping answers (a net over the harness's recorder): the pids that answered. */
-interface Pinged {
+/**
+ * What a command was answered on its own requests (a net over the harness's recorder): the pids
+ * that answered its GET /ping, and the `pages` of its GET /status answers, in order.
+ */
+interface OwnAnswers {
   net: (net: Net) => Net;
   pids: number[];
+  pages: number[];
 }
 
-function pinged(): Pinged {
+function ownAnswers(): OwnAnswers {
   const pids: number[] = [];
+  const pages: number[] = [];
   return {
     pids,
+    pages,
     net: (net) => ({
       ...net,
       async requestUnix(path, request) {
         const answer = await net.requestUnix(path, request);
-        const pid = (answer.body as { pid?: unknown } | null)?.pid;
-        if (request.path === '/ping' && typeof pid === 'number') pids.push(pid);
+        const body = answer.body as { pid?: unknown; pages?: unknown } | null;
+        if (request.path === '/ping' && typeof body?.pid === 'number') pids.push(body.pid);
+        if (request.path === '/status' && typeof body?.pages === 'number') pages.push(body.pages);
         return answer;
       },
     }),
@@ -596,11 +603,11 @@ function pinged(): Pinged {
  * Two `skydeck window` started together end on the one server `pid` (S2 5.1): both exit 0, every
  * ping of each answered by that server, and each says its address naming it — the one that
  * started Edge, and one that waited at window_launching for that one's page — or "a window is
- * already open": the other's page had connected before it looked (step 2), which a fake Edge's
- * page, quicker than a real one, can do within a ping's retry. One says its address: the one that
- * started Edge.
+ * already open", only when its own last GET /status showed a page: the other's page had
+ * connected before it looked (step 2), which a fake Edge's page, quicker than a real one, can do
+ * within a ping's retry. One of them says its address.
  */
-function assertOneServer(commands: [Result, Pinged][], pid: number): void {
+function assertOneServer(commands: [Result, OwnAnswers][], pid: number): void {
   const said = commands
     .map(([r], i) => `command ${i + 1}: code ${r.code}, stdout ${r.stdout}, stderr ${r.stderr}`)
     .join('; ');
@@ -610,6 +617,12 @@ function assertOneServer(commands: [Result, Pinged][], pid: number): void {
       SUCCESS.exec(r.stdout)?.[2] === String(pid) || r.stdout === ALREADY_OPEN,
       `each its address naming server ${pid}, or "already open": ${said}`,
     );
+    if (r.stdout === ALREADY_OPEN) {
+      assert.ok(
+        (own.pages.at(-1) ?? 0) > 0,
+        `"already open" only after it saw a page (pages ${own.pages.join(', ')}): ${said}`,
+      );
+    }
     assert.ok(
       own.pids.length > 0 && own.pids.every((answered) => answered === pid),
       `each answered by server ${pid} only (${own.pids.join(', ')}): ${said}`,
@@ -889,7 +902,7 @@ describe('skydeck window: a server running (S2 5.1, 14)', () => {
 
   test('two skydeck window at once: one server, one Edge start, both exit 0', async (t) => {
     const h = windowHarness(t);
-    const [ownA, ownB] = [pinged(), pinged()];
+    const [ownA, ownB] = [ownAnswers(), ownAnswers()];
 
     const [a, b] = await Promise.all([
       h.run([], { env: { FAKE_EDGE_PAGE: 'once' }, net: ownA.net }),
@@ -1769,7 +1782,7 @@ function ended(line: { pid: number; procStart: number }): boolean {
 describe('a server that is starting is found by every command (ruled, server-findable)', () => {
   test('skydeck window while a server starts: it waits for that server and uses it — no second serve, one Edge, both exit 0', async (t) => {
     const h = windowHarness(t);
-    const [ownFirst, ownSecond] = [pinged(), pinged()];
+    const [ownFirst, ownSecond] = [ownAnswers(), ownAnswers()];
     const first = await startingServer(
       h,
       2000,
