@@ -10,7 +10,15 @@ import type {
   TerminalPayload,
 } from '../../src/window/protocol.ts';
 import { MAY_START as SERVER_MAY_START } from '../../src/window/view/sections.ts';
-import { blockInfo, isEnded, MAY_START, paneFor, sessionRow } from '../../web/pane.js';
+import {
+  blockInfo,
+  isEnded,
+  MAY_START,
+  movedMru,
+  movedWith,
+  paneFor,
+  sessionRow,
+} from '../../web/pane.js';
 import { S1, S2, S3 } from '../helpers/platform.ts';
 
 function row(id: string, more: Partial<RowPayload> = {}): RowPayload {
@@ -342,4 +350,73 @@ test("blockInfo (F9): a closed caption's size and needYou; an open card's size a
   assert.equal(blockInfo(null, 'open', 'G'), null);
   // A section with no closed block and no row of the group: none.
   assert.equal(blockInfo(listWith([{ name: 'week' }]), 'week', 'G'), null);
+});
+
+// --- F40: the selection follows its terminal (S2 12.9) ------------------------------------------
+
+/** A list of `rows` (in Open) and `terminals`, and `selectedRow` when given. */
+function moving(
+  rows: RowPayload[],
+  terminals: TerminalPayload[],
+  selectedRow: RowPayload | null = null,
+): ListMessage {
+  return {
+    sections: [
+      {
+        name: 'open',
+        folded: false,
+        firstNs: null,
+        lastNs: null,
+        count: 0,
+        rows,
+        closedStacks: [],
+      },
+    ],
+    terminals,
+    selectedRow,
+  } as unknown as ListMessage;
+}
+
+test('movedWith (F40): the terminal of the selected session shows another session → that session', () => {
+  const before = moving([row(S1, { terminal: T1 })], [term(T1, 'running', S1)]);
+  const after = moving([row(S1), row(S2, { terminal: T1 })], [term(T1, 'running', S2)]);
+  assert.equal(movedWith(before, after, S1), S2);
+});
+
+test('movedWith (F40): nothing selected, no list before, the terminal gone or ended, still on the selected row, a null session, a row without a terminal → null', () => {
+  const before = moving([row(S1, { terminal: T1 })], [term(T1, 'running', S1)]);
+  const moved = moving([row(S1), row(S2, { terminal: T1 })], [term(T1, 'running', S2)]);
+  assert.equal(movedWith(before, moved, null), null, 'nothing selected');
+  assert.equal(movedWith(null, moved, S1), null, 'no list before');
+  assert.equal(movedWith(before, moving([row(S1)], []), S1), null, 'the terminal gone');
+  for (const state of ['ended', 'lost', 'not-started']) {
+    const ended = moving([row(S1), row(S2, { terminal: T1 })], [term(T1, state, S2)]);
+    assert.equal(movedWith(before, ended, S1), null, state);
+  }
+  const still = moving([row(S1, { terminal: T1 }), row(S2)], [term(T1, 'running', S2)]);
+  assert.equal(movedWith(before, still, S1), null, 'still on the selected row');
+  const nullAfter = moving([row(S1)], [term(T1, 'running', null)]);
+  assert.equal(movedWith(before, nullAfter, S1), null, 'its session null after');
+  const nullBefore = moving([row(S1, { terminal: T1 })], [term(T1, 'running', null)]);
+  assert.equal(movedWith(nullBefore, moved, S1), null, 'its session null before');
+  const noTerminal = moving([row(S1)], [term(T1, 'running', S1)]);
+  assert.equal(movedWith(noTerminal, moved, S1), null, 'the row had no terminal');
+  const same = moving([row(S1, { terminal: T1 })], [term(T1, 'running', S1)]);
+  assert.equal(movedWith(before, same, S1), null, 'the same session');
+});
+
+test('movedWith (F40): a hidden selection (no row, a terminal that showed it) follows', () => {
+  const before = moving([], [term(T1, 'running', S1)]);
+  const after = moving([], [term(T1, 'running', S2)]);
+  assert.equal(movedWith(before, after, S1), S2);
+  const hiddenRow = moving([], [term(T1, 'running', S1)], row(S1, { terminal: T1 }));
+  assert.equal(movedWith(hiddenRow, after, S1), S2, "the list's selectedRow");
+});
+
+test("movedMru (F40): the new session takes the old one's place", () => {
+  assert.deepEqual(movedMru([S1, S2, S3], S1, T2), [T2, S2, S3]);
+  assert.deepEqual(movedMru([S2, S1, S3], S1, T2), [S2, T2, S3]);
+  assert.deepEqual(movedMru([S1, S2, T2], S1, T2), [T2, S2]);
+  assert.deepEqual(movedMru([S2], S1, T2), [T2, S2]);
+  assert.deepEqual(movedMru([S1, S2], S1, S1), [S1, S2]);
 });

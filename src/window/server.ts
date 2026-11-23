@@ -32,6 +32,7 @@ import type { Attention } from './attention.ts';
 import { httpHandler, loadAssets } from './assets.ts';
 import { createTokens, ensureSecret, failureKind, raiseAlarm } from './auth.ts';
 import { isBusy } from './busy.ts';
+import { createCarryOver } from './carry-over.ts';
 import { controlHandler } from './control.ts';
 import { openLink } from './edge.ts';
 import { serverEnvironment } from './env.ts';
@@ -566,6 +567,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     });
     // F36 (S2 12.13): the settings screen; one per server, whose first change keeps the copy.
     const settings = createSettings({ deck, log });
+    // F40 (design 7.1): the carry over after `/clear`. The mark of the first start is tried here,
+    // before the first tick, so that a `/clear` typed while the server starts is from after it; a
+    // try that fails is made again by the tick.
+    const carryOver = createCarryOver({ deck, log });
+    carryOver.tick();
     // F38 (S2 16.5): the check for a newer skydeck; its state to every page on each change.
     const updates = createUpdates({
       deck,
@@ -613,6 +619,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       updates,
       // F37 (S2 12.9): a session of Open moved by hand, for the page's last view.
       reorder: (page, sessionId, direction) => reorder.reorder(page.view, sessionId, direction),
+      carryOver,
     });
     // Plan C7, S2 8.2.6: what a terminal the server opens for a command or a restore starts at —
     // the area the page that had focus last reported, read when the terminal is opened.
@@ -689,12 +696,20 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       const rows = tick?.rows() ?? NO_ROWS;
       const { view } = page;
       const row = view.selected === null ? undefined : rows.find((r) => r.id === view.selected);
+      // F40: the selected session's offer to carry over after `/clear`; `offer` never throws.
+      const offer = row === undefined ? null : carryOver.offer(rows, row.id);
+      const selected =
+        row === undefined
+          ? null
+          : offer === null
+            ? selectedPayload(deck, row)
+            : { ...selectedPayload(deck, row), carryOver: offer };
       const message = buildListMessage({
         rows,
         terminals: created.list(),
         elsewhere: tick?.elsewhere() ?? new Map(),
         view,
-        selected: row === undefined ? null : selectedPayload(deck, row),
+        selected,
         nowNs: clock.nowNs(),
         attention: attending.attention.facts(),
       });
@@ -810,6 +825,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       attention: attending.tick,
       tickets: ticketFetches,
       updates,
+      carryOver,
     });
     tick = startedTick;
 
@@ -999,6 +1015,12 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     };
 
     await startedTick.start();
+    // F40: the answers of sessions that can no longer be shown go (S2 10.2).
+    try {
+      carryOver.sweep(startedTick.rows());
+    } catch (error) {
+      log(`carry-over: the answers were not swept (${failureKind(error)})`);
+    }
     log(`server: ${serverId} listening on 127.0.0.1:${boundPort} (build ${build})`);
     startDoneNs = clock.monotonicNs();
     ready = true;

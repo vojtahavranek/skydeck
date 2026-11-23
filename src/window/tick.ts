@@ -67,6 +67,9 @@ export interface TickDeps {
   /** F38: the check for a newer skydeck, offered every second (updates.ts). The call starts a
    *  check in the background, which the checker catches itself; `attempt` covers the call alone. */
   updates?: { tick(): void };
+  /** F40: the later tries of the carry over's mark of the first start (carry-over.ts), offered
+   *  every second; it does nothing once the mark is stored and never throws. */
+  carryOver?: { tick(): void };
 }
 
 export interface Tick {
@@ -423,6 +426,12 @@ export function createTick(deps: TickDeps): Tick {
     if (updates !== undefined) {
       await attempt('the update check', () => {
         updates.tick();
+      });
+    }
+    const carryOver = deps.carryOver;
+    if (carryOver !== undefined) {
+      await attempt('the carry over', () => {
+        carryOver.tick();
       });
     }
     if (now % 2 === 0 && !stopped) {

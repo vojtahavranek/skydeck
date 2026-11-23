@@ -10,6 +10,7 @@ import { ingestSpool } from '../../src/sessions/ingest.ts';
 import { loadRows } from '../../src/sessions/load.ts';
 import {
   attachManualPr,
+  carryFields,
   detachSessionPr,
   discardKeptNote,
   keptNotePath,
@@ -332,5 +333,62 @@ describe('attachManualPr, detachSessionPr', () => {
     assert.throws(() => detachSessionPr(d.deck, S1, PR), SkydeckError);
 
     assert.equal(prsOf(d, S2)[0]?.detachedAtNs, null);
+  });
+});
+
+describe('carryFields (follow-up F40)', () => {
+  const PR2 = 'https://github.com/o/r/pull/6';
+
+  test('writes exactly the given fields in one update, and attaches each pull request as manual', (t) => {
+    const d = known(t);
+    d.deck.store.ensurePr({ url: PR, owner: 'o', repo: 'r', number: 5 });
+    d.deck.store.ensurePr({ url: PR2, owner: 'o', repo: 'r', number: 6 });
+    d.deck.store.updateMeta(S2, { label: 'old', note: 'old note' }, T0);
+    d.deck.store.attachPr(S2, PR, 'auto', T0);
+    const before = d.deck.store.meta(S2);
+    const otherPrs = prsOf(d, S2);
+    d.clock.setNs(T0 + 5n * SEC);
+
+    carryFields(d.deck, S1, {
+      label: 'work',
+      ticket: 'https://example.com/browse/TRY-1',
+      prs: [PR, PR2],
+    });
+
+    const row = d.deck.store.meta(S1);
+    assert.equal(row?.label, 'work');
+    assert.equal(row?.ticket, 'https://example.com/browse/TRY-1');
+    assert.equal(row?.group, null);
+    assert.equal(row?.note, null);
+    assert.equal(row?.updatedNs, T0 + 5n * SEC);
+    assert.deepEqual(
+      prsOf(d, S1).map((pr) => [pr.url, pr.origin, pr.detachedAtNs]),
+      [
+        [PR, 'manual', null],
+        [PR2, 'manual', null],
+      ],
+    );
+    assert.deepEqual(d.deck.store.meta(S2), before);
+    assert.deepEqual(prsOf(d, S2), otherPrs);
+  });
+
+  test('a pull request detached from the session is attached again', (t) => {
+    const d = known(t);
+    attachManualPr(d.deck, S1, PR);
+    detachSessionPr(d.deck, S1, PR);
+
+    carryFields(d.deck, S1, { prs: [PR] });
+
+    assert.equal(prsOf(d, S1)[0]?.detachedAtNs, null);
+    assert.equal(d.deck.store.meta(S1), null);
+  });
+
+  test('no field given: nothing is written', (t) => {
+    const d = known(t);
+
+    carryFields(d.deck, S1, {});
+
+    assert.equal(d.deck.store.meta(S1), null);
+    assert.deepEqual(d.deck.store.sessionPrs(), []);
   });
 });

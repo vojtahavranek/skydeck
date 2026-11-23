@@ -1694,3 +1694,33 @@ describe("F38: the update checker's tick", () => {
     ]);
   });
 });
+
+describe("F40: the carry over's tick", () => {
+  test('carryOver.tick is called at each run; one that throws does not end the tick', async (t) => {
+    const f = fixture(t);
+    let calls = 0;
+    let throws = false;
+    const tick = createTick({
+      ...f.deps,
+      carryOver: {
+        tick() {
+          calls++;
+          if (throws) throw new TypeError('marker-secret');
+        },
+      },
+    });
+    t.after(() => tick.stop());
+
+    await tick.run();
+    await tick.run();
+    assert.equal(calls, 2);
+    throws = true;
+    await tick.run();
+    await tick.run();
+    assert.equal(calls, 4);
+    assert.deepEqual(f.logs, [
+      'tick: the carry over failed (TypeError)',
+      'tick: the carry over failed (TypeError)',
+    ]);
+  });
+});
