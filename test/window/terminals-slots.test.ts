@@ -18,18 +18,18 @@ function busyError(): Error {
 }
 
 /** A `persistSlots` that records each write, or throws `failWith` while it is set. */
-function store(initial: ReadonlyMap<string, number> = new Map()): {
-  writes: Map<string, number>[];
-  latest(): Map<string, number>;
+function store(initial: ReadonlyMap<string, number | null> = new Map()): {
+  writes: Map<string, number | null>[];
+  latest(): Map<string, number | null>;
   failWith: unknown;
-  persist(moved: ReadonlyMap<string, number>): void;
+  persist(moved: ReadonlyMap<string, number | null>): void;
 } {
   let latest = new Map(initial);
   const kept = {
-    writes: [] as Map<string, number>[],
+    writes: [] as Map<string, number | null>[],
     latest: () => latest,
     failWith: null as unknown,
-    persist(moved: ReadonlyMap<string, number>): void {
+    persist(moved: ReadonlyMap<string, number | null>): void {
       if (kept.failWith !== null) throw kept.failWith;
       latest = new Map(moved);
       kept.writes.push(latest);
@@ -433,5 +433,259 @@ describe('the moved slots in the store (F37)', () => {
     await found;
     await until(() => r2.registry.list().length === 1, 'a found', 15_000);
     assert.equal(slotOf(r2, a), 1);
+  });
+});
+
+// Follow-up F42 (S2 7.6): numbers follow Open's order, so a move can give a terminal without a slot
+// one and take one from another; null in the moved map is "no slot although its meta has one".
+describe('registry: a slot gained and a slot lost (F42)', () => {
+  test('one call gives a slotless terminal a slot and takes it from another; written (meta ones left out), announced once', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const r = box.registry({ persistSlots: kept.persist });
+    const a = await open(box, r, null);
+    const b = await open(box, r, 2);
+    const c = await open(box, r, 1);
+    let changes = 0;
+    r.registry.onChange(() => {
+      changes += 1;
+    });
+    const before = changes;
+    assert.equal(
+      r.registry.setSlots(
+        new Map([
+          [a, 2],
+          [b, null],
+        ]),
+      ),
+      'ok',
+    );
+    assert.equal(changes - before, 1);
+    assert.deepEqual([slotOf(r, a), slotOf(r, b), slotOf(r, c)], [2, null, 1]);
+    assert.deepEqual(
+      kept.latest(),
+      new Map([
+        [a, 2],
+        [b, null],
+      ]),
+    );
+    assert.equal(r.registry.nextSlot(), 3);
+    // Back as their metas have them: nothing is kept.
+    assert.equal(
+      r.registry.setSlots(
+        new Map([
+          [a, null],
+          [b, 2],
+        ]),
+      ),
+      'ok',
+    );
+    assert.deepEqual(kept.latest(), new Map());
+  });
+
+  test('refused: a slot gained that none loses, one lost that none gains, an id not listed; nothing written', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const r = box.registry({ persistSlots: kept.persist });
+    const a = await open(box, r, null);
+    const b = await open(box, r, 2);
+    assert.equal(r.registry.setSlots(new Map([[a, 9]])), 'changed');
+    assert.equal(r.registry.setSlots(new Map([[b, null]])), 'changed');
+    assert.equal(
+      r.registry.setSlots(
+        new Map([
+          [a, 2],
+          ['0123456789ab', null],
+        ]),
+      ),
+      'changed',
+    );
+    assert.deepEqual([slotOf(r, a), slotOf(r, b)], [null, 2]);
+    assert.deepEqual(kept.writes, []);
+  });
+
+  test('`write` given: it writes instead of persistSlots, also with no change; a throw refuses, nothing applied', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const r = box.registry({ persistSlots: kept.persist });
+    const a = await open(box, r, null);
+    const b = await open(box, r, 2);
+    const written: Map<string, number | null>[] = [];
+    let changes = 0;
+    r.registry.onChange(() => {
+      changes += 1;
+    });
+    assert.equal(
+      r.registry.setSlots(new Map(), (moved) => {
+        written.push(new Map(moved));
+      }),
+      'ok',
+    );
+    assert.deepEqual(written, [new Map()]);
+    assert.ok(changes >= 1, 'announced: the order it wrote changes the lists');
+    assert.equal(
+      r.registry.setSlots(
+        new Map([
+          [a, 2],
+          [b, null],
+        ]),
+        (moved) => {
+          written.push(new Map(moved));
+        },
+      ),
+      'ok',
+    );
+    assert.deepEqual(
+      written[1],
+      new Map<string, number | null>([
+        [a, 2],
+        [b, null],
+      ]),
+    );
+    assert.deepEqual(kept.writes, [], 'persistSlots is not called when `write` is given');
+    assert.throws(
+      () =>
+        r.registry.setSlots(
+          new Map([
+            [a, null],
+            [b, 2],
+          ]),
+          () => {
+            throw busyError();
+          },
+        ),
+      /locked/,
+    );
+    assert.deepEqual([slotOf(r, a), slotOf(r, b)], [2, null]);
+  });
+
+  test('a reconnect keeps the slot gained and the slot lost', async (t) => {
+    const box = await registrySandbox(t);
+    const r = box.registry({ persistSlots: store().persist });
+    const a = await open(box, r, null);
+    const b = await open(box, r, 2);
+    r.registry.setSlots(
+      new Map([
+        [a, 2],
+        [b, null],
+      ]),
+    );
+    const hellos = r.events.hello.length;
+    for (const socket of r.sockets) socket.destroy();
+    await until(() => r.events.hello.length >= hellos + 2, 'the reconnect hellos', 10_000);
+    await until(() => r.registry.list().every((term) => term.state === 'starting'), 'claimed');
+    assert.deepEqual([slotOf(r, a), slotOf(r, b)], [2, null]);
+  });
+
+  for (const late of ['gained', 'lost'] as const) {
+    test(`a new registry given a slot gained and one lost keeps both, the one that ${late} its slot found last; nextSlot meanwhile`, async (t) => {
+      const box = await registrySandbox(t);
+      const kept = store();
+      const r1 = box.registry({ persistSlots: kept.persist });
+      const a = await open(box, r1, null);
+      const b = await open(box, r1, 2);
+      r1.registry.setSlots(
+        new Map([
+          [a, 2],
+          [b, null],
+        ]),
+      );
+      r1.drop();
+      const keeper = box.keeperOf(late === 'gained' ? a : b);
+      box.signalKeeper(keeper, 'SIGSTOP');
+      const r2 = box.registry({ movedSlots: kept.latest(), persistSlots: kept.persist });
+      let found: Promise<unknown> = Promise.resolve();
+      try {
+        found = r2.registry.rediscover();
+        await until(() => r2.registry.list().length === 1, 'the other found', 10_000);
+        if (late === 'gained') {
+          assert.equal(slotOf(r2, b), null);
+          assert.equal(r2.registry.nextSlot(), 1, 'slot 2 is kept for a, still being found');
+        } else {
+          assert.equal(slotOf(r2, a), 2);
+          assert.equal(r2.registry.nextSlot(), 1);
+        }
+      } finally {
+        box.signalKeeper(keeper, 'SIGCONT');
+      }
+      await found;
+      await until(() => r2.registry.list().length === 2, 'both found', 15_000);
+      assert.deepEqual([slotOf(r2, a), slotOf(r2, b)], [2, null]);
+      assert.equal(
+        r2.log.some((line) => line.includes('is another terminal')),
+        false,
+      );
+    });
+  }
+
+  test('nextSlot gives the meta slot of a keeper being found whose slot a move took away', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const r1 = box.registry({ persistSlots: kept.persist });
+    const c = await open(box, r1, 1);
+    const b = await open(box, r1, 2);
+    const a = await open(box, r1, null);
+    r1.registry.setSlots(
+      new Map([
+        [a, 2],
+        [b, null],
+      ]),
+    );
+    await ended(r1, a);
+    assert.equal(r1.registry.close(a), 'ok');
+    assert.deepEqual(kept.latest(), new Map([[b, null]]));
+    r1.drop();
+    const keeper = box.keeperOf(b);
+    box.signalKeeper(keeper, 'SIGSTOP');
+    const r2 = box.registry({ movedSlots: kept.latest(), persistSlots: kept.persist });
+    let found: Promise<unknown> = Promise.resolve();
+    try {
+      found = r2.registry.rediscover();
+      await until(() => r2.registry.list().length === 1, 'c found', 10_000);
+      assert.equal(slotOf(r2, c), 1);
+      assert.equal(r2.registry.nextSlot(), 2, "b takes no slot: its meta's is free");
+    } finally {
+      box.signalKeeper(keeper, 'SIGCONT');
+    }
+    await found;
+    await until(() => r2.registry.list().length === 2, 'b found', 15_000);
+    assert.equal(slotOf(r2, b), null);
+  });
+
+  test('a gained slot another terminal holds at the hello: the lowest free one, logged, written', async (t) => {
+    const box = await registrySandbox(t);
+    const r1 = box.registry();
+    const a = await open(box, r1, null);
+    r1.drop();
+    const kept = store(new Map([[a, 2]]));
+    const r2 = box.registry({ movedSlots: kept.latest(), persistSlots: kept.persist });
+    const d = await open(box, r2, 1);
+    const e = await open(box, r2, 2);
+    await r2.registry.rediscover();
+    assert.deepEqual([slotOf(r2, d), slotOf(r2, e), slotOf(r2, a)], [1, 2, 3]);
+    assert.ok(r2.log.includes(`terminal ${a}: slot 2 is another terminal's; it takes slot 3`));
+    assert.deepEqual(kept.latest(), new Map([[a, 3]]));
+  });
+
+  test('a keeper never moved that finds all nine taken gets none and NO null entry; later, its meta slot free, it takes it back', async (t) => {
+    const box = await registrySandbox(t);
+    const r1 = box.registry();
+    const late = await open(box, r1, 1);
+    r1.drop();
+    const kept = store();
+    const r2 = box.registry({ persistSlots: kept.persist });
+    const first = await open(box, r2, 1);
+    for (let slot = 2; slot <= 9; slot += 1) {
+      await open(box, r2, slot);
+    }
+    await r2.registry.rediscover();
+    assert.equal(slotOf(r2, late), null);
+    assert.equal(kept.latest().has(late), false);
+    await ended(r2, first);
+    assert.equal(r2.registry.close(first), 'ok');
+    r2.drop();
+    const r3 = box.registry({ movedSlots: kept.latest(), persistSlots: kept.persist });
+    await r3.registry.rediscover();
+    assert.equal(slotOf(r3, late), 1);
   });
 });

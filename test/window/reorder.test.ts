@@ -51,10 +51,10 @@ function running(id: string, pid: number) {
  *  counts the calls of `remember`. */
 function glue(answer: () => 'ok' | 'changed' | 'stopping' = () => 'ok'): {
   reorder: ReturnType<typeof createReorder>;
-  calls: Map<string, number>[];
+  calls: Map<string, number | null>[];
   remembered: () => number;
 } {
-  const calls: Map<string, number>[] = [];
+  const calls: Map<string, number | null>[] = [];
   let remembered = 0;
   const deps: ReorderDeps = {
     registry: {
@@ -151,7 +151,7 @@ test('a session two terminals of the window show: a move of it, or of a row that
   // S1 in slot 1 and, after a `/resume` inside a terminal, in slot 2 too; S2 and S3 a block in 3, 4.
   // Moved past the block S1 would get 4: its row would go to the terminal in slot 2, and the numbers
   // would read 1 3 2.
-  const calls: Map<string, number>[] = [];
+  const calls: Map<string, number | null>[] = [];
   let remembered = 0;
   const twin = { ...terminal(5, S1), slot: 2 };
   const reorder = createReorder({
