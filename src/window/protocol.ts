@@ -405,6 +405,28 @@ export interface SelectedPayload {
    *  group's link — when a provider takes its address, null otherwise. Optional for the reader:
    *  absent (a scripted list, a server before F19) is none. */
   ticketStatus?: TicketStatusPayload | null;
+  /** Follow-up F40 (design 7.1, S2 12.6): the offer to carry fields over after `/clear`, present
+   *  exactly when the session has one; absent is none. */
+  carryOver?: CarryOverPayload;
+}
+/** Follow-up F40: the five fields an offer to carry over after `/clear` can list, in its order. */
+export type CarryField = 'label' | 'group' | 'ticket' | 'note' | 'prs';
+/** Follow-up F40 (S2 8.2.3): what the carry-over bar shows. It carries only what the list and the
+ *  header already show: the note's text is not sent. */
+export interface CarryOverPayload {
+  /** The old session: its id, its title as the list shows it, its ticket's short name or null. */
+  from: { id: string; title: string; ticket: string | null };
+  /** The offered fields, in the order label, group, ticket, note, prs. `text`: the label, the
+   *  group, the ticket's short name; null for note and prs. `ticked`: its starting tick. */
+  fields: { name: CarryField; text: string | null; ticked: boolean }[];
+  /** How many pull requests `prs` would attach; 0 when it is not offered. */
+  prs: number;
+  /** The fields the old session has that the new one already has: named, not offered. */
+  kept: CarryField[];
+  /** `mark the old one done`: its starting tick; null when it is not offered. */
+  done: { ticked: boolean } | null;
+  /** What the offer was computed from (16 lower-case hex digits); `carry-over` sends it back. */
+  rev: string;
 }
 /** Follow-up F19: what the header's chip and the ticket dialog show of a ticket's status. */
 export interface TicketStatusPayload {
