@@ -259,7 +259,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
       const p = await connectTestPage(t, l.d, l.server, { focused: false, view: null });
       p.send({ t: 'input', term: first, data: '/exit\r' });
       await showsText(page, '#cards .card-ended', /^claude exited \(status 0\) at \d\d:\d\d:\d\d/);
-      assert.deepEqual(await barButtons(page), ['Resume', 'Close']);
+      assert.deepEqual(await barButtons(page), ['Resume', 'Other flags…', 'Close']);
       assert.equal(await shownText(page, '#cards .header-title'), 'alpha work');
       assert.deepEqual(await listed(page), [S2], 'still hidden');
 
@@ -274,7 +274,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
       // /exit again, then Close: the terminal is forgotten, the right side shows nothing.
       p.send({ t: 'input', term: second, data: '/exit\r' });
       await showsText(page, '#cards .card-ended', /^claude exited \(status 0\)/);
-      assert.deepEqual(await barButtons(page), ['Resume', 'Close']);
+      assert.deepEqual(await barButtons(page), ['Resume', 'Other flags…', 'Close']);
       await page.locator('#cards .card-bar button', { hasText: 'Close' }).click();
       await page.waitForSelector('#right-zone[data-pane="none"]', {
         state: 'attached',
@@ -549,7 +549,7 @@ test('the selected session the list does not show', async (t) => {
       });
       s.serve(ended({ ...row, state: 'not-running' }));
       await showsText(s.page, '#cards .card-ended', /^claude is not running in this terminal$/);
-      assert.deepEqual(await barButtons(s.page), ['Resume', 'Close']);
+      assert.deepEqual(await barButtons(s.page), ['Resume', 'Other flags…', 'Close']);
       assert.equal(await shownText(s.page, '#cards .header-title'), 'alpha work');
       assert.equal(await selectedRow(s.page), null);
 

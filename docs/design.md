@@ -751,7 +751,8 @@ skydeck says that the original flags are unknown. Environment variables that an 
 set are not part of a launch command and are not restored.
 
 **Other flags** (issue #188, part 1). `skydeck resume <ref> [--here | --tab | --window] -- <claude
-flags>`, and the window's `Other flags…` on the resume card (design-step-2.md 12.6), resume the
+flags>`, and the window's `Other flags…` on the resume card and on the ended bar (design-step-2.md
+12.6), resume the
 session with the given flags in place of the recorded ones: `<claudeCommand> --resume <id> [-n
 <label>] <the given flags, as given, in their order>`. `--` with nothing after it resumes with no
 flags at all; without `--` nothing changes. The given flags are checked as `new` checks its flags

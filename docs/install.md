@@ -875,7 +875,8 @@ effect.
   right side then says `The selected session shows here.`
 - **A session that is not running**: one click selects it and shows its resume card, with the
   exact command it will run. Enter in the list, a double click or `Resume here` resumes it into the
-  window. **Other flags…** beside it (or `f` in the list) resumes it with other flags for `claude`
+  window. **Other flags…** beside it (or `f` in the list; on a session that just ended, the ended
+  bar's own Other flags…) resumes it with other flags for `claude`
   instead, such as another `--model` or one more `--mcp-config`: the New form's `Flags for claude`
   field, with your favourite flags under it, opens filled with the flags it was started with, and
   Start resumes it with exactly the flags in the field (an empty field: none). The rules are the
@@ -917,7 +918,9 @@ effect.
   right after the Group field: a click on it (or Tab to it, then Enter) puts the name into the
   field, so that the new session joins that group. Without the click the field stays empty. The
   Group field also offers the groups of your list as you type.
-- **A session that ended** keeps its last screen, dimmed, under a bar with Resume and Close.
+- **A session that ended** keeps its last screen, dimmed, under a bar with Resume and Close, and
+  between them **Other flags…** (or `f` in the list): it closes the terminal, as Close does, and
+  shows the session's resume card with its Other flags… already open, the keyboard in the field.
 - **The tour**: the first time a browser shows the window, a tour of seven steps starts by itself
   once the list is drawn: each step makes one part of the window stand out (the list, the right
   side, the key bar, `Switch…`, the gear) and says in two to four lines what is there, above all

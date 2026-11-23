@@ -71,7 +71,8 @@ const CANNOT_SHOW =
   'the flags it was started with hold a character this field cannot show; Resume here passes them on as they are';
 const TOO_LONG = `the flags it was started with are longer than this field takes (at most ${FLAGS_BYTES.toLocaleString('en-US')} bytes of UTF-8): shorten them before Start, or use Resume here`;
 /** Issue #188: the key bar's words for `f` while the right side shows no resume card. */
-const NO_RESUME_CARD = 'this session is not on a resume card: f resumes one with other flags';
+const NO_RESUME_CARD =
+  'f resumes with other flags only a session shown on its resume card or its ended bar';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const COPIED_MS = 2000;
 /** How often the header's ages are drawn again (A18, as the list's). */
@@ -567,6 +568,16 @@ export function createCards(root, deps) {
    * @type {{ open: () => string | null, close: (back: boolean) => boolean, shown: () => boolean } | null}
    */
   let flagsCard = null;
+  /**
+   * Issue #188, R3: the shown ended bar's `Other flags…` (what `f` does there), null while none is
+   * shown; and the session whose resume card opens "Other flags…" by itself once it is shown —
+   * set when that ended bar asks to close its terminal, dropped when the right side shows
+   * another session or another card (`header`, `elsewhere`, `resumeCard`), and once used.
+   * @type {(() => void) | null}
+   */
+  let endedFlags = null;
+  /** @type {string | null} */
+  let flagsNext = null;
   /** How many times the right side was drawn anew (`hide()`), and at which of them the resume
    *  card was shown last: a draw without it between two drops its "Other flags…" (#188). */
   let draws = 0;
@@ -584,6 +595,7 @@ export function createCards(root, deps) {
   function showCard(key, build, args) {
     if (shown === null || shown.key !== key) {
       flagsCard = null; // a resume card's `build` sets its own
+      endedFlags = null; // and an ended bar's its own
       const made = build();
       card.replaceChildren(...made.parts);
       shown = { key, fill: made.fill, facts: '' };
@@ -955,6 +967,32 @@ export function createCards(root, deps) {
     if (sessionId !== null) {
       bar.append(actionButton('Resume', 'primary', () => run({ kind: 'resume', sessionId })));
     }
+    if (sessionId !== null && term !== null) {
+      // Issue #188, R3: what Close does, then the session's resume card with "Other flags…" open.
+      let closing = false;
+      const closeForFlags = async () => {
+        if (closing) {
+          return;
+        }
+        closing = true;
+        // Before the answer: the list without the terminal can come first.
+        flagsNext = sessionId;
+        const result = await deps.act({ kind: 'close-terminal', term });
+        closing = false;
+        if (!result.ok) {
+          if (flagsNext === sessionId) {
+            flagsNext = null;
+          }
+          showResult(lines, result);
+        }
+      };
+      const other = actionButton('Other flags…', '', closeForFlags);
+      other.title = 'Close this terminal and resume the session with other flags for claude (f)';
+      bar.append(other);
+      endedFlags = () => {
+        void closeForFlags();
+      };
+    }
     if (term !== null) {
       bar.append(actionButton('Close', '', () => run({ kind: 'close-terminal', term })));
     }
@@ -977,6 +1015,9 @@ export function createCards(root, deps) {
      * @param {() => string} now
      */
     header(row, selected, term, now) {
+      if (flagsNext !== null && row?.id !== flagsNext) {
+        flagsNext = null; // R3: another session (or none) is shown
+      }
       if (row === null) {
         setHidden(head, true);
         shownHead = null;
@@ -1108,10 +1149,19 @@ export function createCards(root, deps) {
       }
       resumeDrawn = draws;
       showCard(`resume:${row.id}`, () => buildResume(row.id), [row, selected, resultLines]);
+      // R3: the ended bar's Other flags… closed this session's terminal: open it now, once the
+      // list carries what a plain resume passes on.
+      if (flagsNext === row.id && selected !== null) {
+        flagsNext = null;
+        flagsCard?.open();
+      } else if (flagsNext !== null && flagsNext !== row.id) {
+        flagsNext = null;
+      }
     },
     /** @param {RowPayload} row */
     elsewhere(row) {
       card.dataset['card'] = 'elsewhere';
+      flagsNext = null; // R3: it runs again: nothing to open
       // F34: built again when the session is said to run in Claude Code's background, or no longer.
       const background = row.elsewhere?.background === true;
       showCard(
@@ -1143,16 +1193,28 @@ export function createCards(root, deps) {
       card.dataset['card'] = 'new';
       shown = null; // a form opened again starts from its defaults
       flagsCard = null;
+      endedFlags = null;
       card.replaceChildren(newFormOf(defaults, deps));
       setHidden(card, false);
     },
     /**
      * Issue #188: opens "Other flags…" on the shown resume card, the keyboard in its field (as its
-     * button does; the list key `f`). Null when it is open; else why not, for the key bar.
+     * button does; the list key `f`); on a shown ended bar (R3) does what its `Other flags…` does.
+     * Null when it is open or asked for; else why not, for the key bar.
      * @returns {string | null}
      */
     openFlags() {
-      return flagsCard === null || card.hidden ? NO_RESUME_CARD : flagsCard.open();
+      if (card.hidden) {
+        return NO_RESUME_CARD;
+      }
+      if (flagsCard !== null) {
+        return flagsCard.open();
+      }
+      if (endedFlags !== null) {
+        endedFlags(); // R3: the ended bar's Other flags…; the card opens it once it is shown
+        return null;
+      }
+      return NO_RESUME_CARD;
     },
     /**
      * Issue #188: Esc in "Other flags…": the card's action line again, nothing sent, the keyboard

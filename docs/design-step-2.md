@@ -1198,7 +1198,8 @@ started, and the server gives back the resume's lock and a new session's label a
 The server, on `exit`:
 
 - keeps the terminal's last screen in memory and shows it in the terminal pane dimmed, under a bar
-  `claude exited (status <n>) at <time> · Resume · Close` (12.6), until the user closes it,
+  `claude exited (status <n>) at <time> · Resume · Close` (12.6; from issue #188 with `Other
+  flags…` between them), until the user closes it,
   resumes the session, or the server restarts. When its session runs again the ended terminal is
   dropped — forgotten as `close-terminal` forgets it, its slot freed, its keeper allowed to end
   (ruled by the plan owner, review of plan task 13): a resume from the window closes the
@@ -3389,7 +3390,8 @@ nothing; `ls` is unchanged.
   here" resumes (11.3). Refusals and launch failures show their lines on the card.
   **Other flags…** (issue #188, part 1; design 7.6 "Other flags"): a second button beside "Resume
   here" on the card's action line (title `Resume it with other flags for claude (f)`; disabled with
-  it for an expired session), or the list key `f` (12.9), puts in place of that action line the
+  it for an expired session), or the list key `f` (12.9), or the ended bar's `Other flags…` (R3,
+  below), puts in place of that action line the
   New form's flags line — the same component: the field `Flags for claude`, the ★, the favourite
   chips (all of the favourites' rules above) — then `Start`, the hint `resumes in this window with
   these flags · Esc goes back` and the form's own result line. While it is open "Will run" (the
@@ -3419,7 +3421,14 @@ nothing; `ls` is unchanged.
   here`, the field holding them. Nothing is saved for the session (design 7.6): its start is
   recorded, and the header shows the new flags once it has started (12.5, follow-up F16).
 - **An ended terminal**: its last screen, dimmed, under the bar of 7.8 (Resume, Close). Until
-  the page has the terminal's exit the bar says `claude is not running in this terminal`. A
+  the page has the terminal's exit the bar says `claude is not running in this terminal`. Issue
+  #188, R3 (ruled: the owner's own case is the session just exited): with both, the bar has
+  `Other flags…` between them (title `Close this terminal and resume the session with other flags
+  for claude (f)`; the list key `f` does the same there). It does what Close does (`close-terminal`;
+  a refusal shows on the bar's line, as Close's), and once the list no longer holds that terminal
+  the right side shows the session's resume card with its `Other flags…` already open — the field
+  filled as below, the keyboard in it —, whatever came first, the list or the answer. Esc there
+  leaves the plain resume card. Showing another session or another card before that drops it. A
   selected session the list does not show (a filter, the chips, done sessions hidden, a folded
   Earlier; 12.9) has its row in the list's `selectedRow` (8.2.3, stage E): its terminal of the
   window is shown with its header and, once ended, under this bar with Resume and Close, as for a
@@ -3888,10 +3897,11 @@ the form (12.6), and Esc in a resume card's `Other flags…` goes back to the ca
 filters, `l` label, `g` group, `n` note, `t` ticket (follow-up F18, 12.5), `p` attach a pull
 request, `d` done, `a` show done; new in the window, `c` (carry over after `/clear`, follow-up
 F40: the keyboard to the bar of 12.6), `f` (issue #188: the selected session's resume card's
-`Other flags…`, opened with the keyboard in its field, the zone the terminal's; a held `f` acts
-once and types nothing into the field; with nothing selected it says `no session selected`, while
-the right side shows no resume card `this session is not on a resume card: f resumes one with other
-flags`, for an expired session `its transcript is gone: it cannot be resumed`), Home, End, PgUp,
+`Other flags…`, opened with the keyboard in its field, the zone the terminal's; on its ended bar
+what that bar's `Other flags…` does (R3, 12.6); a held `f` acts once and types nothing into the
+field; with nothing selected it says `no session selected`, while the right side shows neither
+`f resumes with other flags only a session shown on its resume card or its ended bar`, for an
+expired session `its transcript is gone: it cannot be resumed`), Home, End, PgUp,
 PgDn, ← → (fold, unfold), F2
 (label) and Esc (clear the filter, then back to the terminal). `/` gives the keyboard to the filter's field, where every key but Enter and
 Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also

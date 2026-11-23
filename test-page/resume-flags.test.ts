@@ -422,13 +422,10 @@ test("the resume card's Other flags… (#188)", async (t) => {
       await until(async () => (await selectedRow(w.page)) === S2, 'S2 selected');
       await toZone(w.page, 'list');
       await w.page.keyboard.press('f');
-      await until(
-        async () => (await keyMessage(w.page)).startsWith('this session is not on a resume card'),
-        'the key bar says why',
-      );
+      await until(async () => (await keyMessage(w.page)) !== '', 'the key bar says why');
       assert.equal(
         await keyMessage(w.page),
-        'this session is not on a resume card: f resumes one with other flags',
+        'f resumes with other flags only a session shown on its resume card or its ended bar',
       );
       await toZone(w.page, 'list');
       await w.page.keyboard.press('ArrowDown');
@@ -615,6 +612,67 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
         '--append-system-prompt',
         'be brief',
       ]);
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    "a real server, R3: the ended bar's Other flags… (a click, then f from the list) closes the terminal as Close does and shows the resume card with the form open, filled and holding the keyboard; Start resumes with the field's flags; Esc leaves the plain card",
+    async (t) => {
+      const l = await launched(t, chromium);
+      l.d.resumable(S1);
+      await cardOfS1(l.page);
+      await l.page.locator('#cards .card-actions button', { hasText: 'Other flags…' }).click();
+      await l.page.waitForSelector(FIELD);
+      await l.page.keyboard.type('--model example');
+      await l.page.keyboard.press('Enter');
+      const first = await untilTerminalOf(l.page, S1);
+      await untilScreen(l.page, promptOf(S1));
+      await untilStartedWith(l.page, '--model example');
+      const p = await connectTestPage(t, l.d, l.server, { focused: false, view: null });
+      p.send({ t: 'input', term: first, data: '/exit\r' });
+      await showsText(l.page, '#cards .card-ended', /^claude exited \(status 0\)/);
+      assert.deepEqual(await l.page.locator('#cards .card-bar button').allTextContents(), [
+        'Resume',
+        'Other flags…',
+        'Close',
+      ]);
+
+      // A click: the terminal is closed (forgotten, as Close forgets it), the card shows with the
+      // form open, filled with what a plain resume passes on, the keyboard at the field's end.
+      await l.page.locator('#cards .card-bar button', { hasText: 'Other flags…' }).click();
+      await l.page.waitForSelector('#right-zone[data-pane="resume"]', { state: 'attached' });
+      await l.page.waitForSelector(FIELD);
+      await until(async () => (await fieldNow(l.page)).focused, 'the field has the keyboard');
+      assert.equal((await fieldNow(l.page)).value, '--model example');
+      assert.deepEqual(
+        l.server.hub.list().filter((term) => term.id === first),
+        [],
+        'the ended terminal is forgotten',
+      );
+      await l.page.keyboard.type(' --verbose');
+      await l.page.keyboard.press('Enter');
+      const second = await untilTerminalOf(l.page, S1);
+      await untilScreen(l.page, promptOf(S1));
+      assert.deepEqual(startsOf(l).at(-1), ['--resume', S1, '--model', 'example', '--verbose']);
+
+      // f from the list on the ended bar does the same; Esc then leaves the plain card.
+      p.send({ t: 'input', term: second, data: '/exit\r' });
+      await showsText(l.page, '#cards .card-ended', /^claude exited \(status 0\)/);
+      await toZone(l.page, 'list');
+      await l.page.keyboard.press('f');
+      await l.page.waitForSelector(FIELD);
+      await until(async () => (await fieldNow(l.page)).focused, 'the field has the keyboard');
+      assert.equal((await fieldNow(l.page)).value, '--model example --verbose');
+      assert.deepEqual(
+        l.server.hub.list().filter((term) => term.id === second),
+        [],
+        'closed as Close closes it',
+      );
+      await l.page.keyboard.press('Escape');
+      await l.page.waitForSelector(EDITOR, { state: 'detached' });
+      assert.deepEqual(await cardButtons(l.page), ['Resume here', 'Other flags…']);
+      assert.equal(startsOf(l).length, 2, 'nothing started by f or Esc');
       assert.deepEqual(l.problems, []);
     },
   );

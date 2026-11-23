@@ -77,7 +77,10 @@ const SECTIONS = [
       [['p'], 'pull requests: attach one'],
       [['d'], 'done, or undone for a done session (an Undo follows a done)'],
       [['c'], 'carry over after /clear: to the offer of the selected session'],
-      [['f'], 'other flags: resume a session that is not running with flags you choose'],
+      [
+        ['f'],
+        'other flags: resume a session that is not running with flags you choose, from its card or its ended bar',
+      ],
     ],
   },
 ];

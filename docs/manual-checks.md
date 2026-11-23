@@ -3225,10 +3225,11 @@ claude` empty, a label (`l`), and one short prompt answered. Then `/exit` in its
    keyboard in it; once Claude Code has started, the header's second line ends in `--model sonnet`;
    `/model` in it names that model. In W, `skydeck show <its short id>` prints a launch command
    with `--model sonnet`.
-4. **A plain resume keeps it.** `/exit` and `Close`. Expected: on the card "Will run" ends in
-   `-n <its label> --model sonnet`, and `Other flags…` opens with `--model sonnet` in the field;
-   press Esc. Press `Resume here`. Expected: it runs again, `/model` names the same model, the
-   header still ends in `--model sonnet`.
+4. **A plain resume keeps it.** `/exit`. Expected: the bar reads `Resume`, `Other flags…`,
+   `Close`. Press its `Other flags…`. Expected: the terminal goes and the card shows with the field
+   open, holding `--model sonnet`, the keyboard in it; press Esc: the plain card, whose "Will run"
+   ends in `-n <its label> --model sonnet`. Press `Resume here`. Expected: it runs again, `/model`
+   names the same model, the header still ends in `--model sonnet`.
 5. **The end.** `/exit` in its terminal, `Close`, and mark it done (`d`).
 
 Write down: for each step whether it went as expected, and the words where they differ; the model
