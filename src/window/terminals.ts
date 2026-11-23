@@ -98,7 +98,8 @@ export interface Registry extends TerminalHub {
    * F37, F42 (S2 7.6, 12.9): gives listed terminals other slots, all at once; null takes a
    * terminal's slot away, and a terminal without one can gain one. Refused, nothing changed:
    * 'changed' when an id is not listed, the values after (none counted) are not the values before
-   * in another order, or two terminals would end with one slot; 'stopping' once `stopAll` ran. The
+   * in another order, two terminals would end with one slot, or (F43) a slot would go to a terminal
+   * whose program is over; 'stopping' once `stopAll` ran. The
    * moved slots are written — by `write` when given (called also when nothing changes: a move
    * writes Open's order), else by `persistSlots` — before any is applied: a write that throws is
    * thrown from here, nothing changed.
@@ -238,7 +239,7 @@ interface Term {
   /** The slot of the keeper's meta (the one it was opened with); `info.slot` differs from it once
    *  moved by hand (F37). */
   metaSlot: number | null;
-  /** F43: its program is over and its slot was freed: it never takes one again. */
+  /** F43: its program is over and its slot was freed: `setSlots` never gives it one again. */
   slotFreed: boolean;
   /** F43: stops the watch that frees a lost terminal's slot once its program may no longer run. */
   lostHold: (() => void) | null;
@@ -366,13 +367,13 @@ export function createRegistry(deps: RegistryDeps): Registry {
    * a keeper being found), the lowest free slot, null only when all nine are held. A slot that
    * differs from what `moved` said is kept in `moved` and written; none, or the meta's, is left out
    * (so a terminal that found all nine taken gets its meta's back at a later hello). F43: a
-   * terminal whose slot was freed, or whose hello says its program exited (`over`), takes none
-   * (`freeSlot`). Once stopped the slot is left as it is.
+   * terminal whose hello says its program exited (`over`) takes none (`freeSlot`); no hello comes
+   * after an applied exit or a loss (no reconnect then). Once stopped the slot is left as it is.
    */
   function slotAtHello(term: Term, metaSlot: number | null, over: boolean): void {
     term.metaSlot = metaSlot;
     if (stopped) return;
-    if (over || term.slotFreed) {
+    if (over) {
       freeSlot(term);
       return;
     }
@@ -1640,6 +1641,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
       for (const [id, slot] of changes) {
         const term = terms.get(id);
         if (term === undefined) return 'changed';
+        // F43: a terminal whose program is over never gains a slot again (one whose hello said its
+        // program exited is still drawn under Open until its exit frame is applied).
+        if (term.slotFreed && slot !== null) return 'changed';
         before.push(term.info.slot);
         after.push(slot);
       }

@@ -744,6 +744,31 @@ describe('registry: the number of a terminal whose program is over (F43)', () =>
     assert.equal(kept.writes.length, writes, 'the close has nothing left to write');
   });
 
+  test('setSlots gives no number to a terminal whose number was freed: refused, nothing changed, nothing written', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const r = box.registry({ persistSlots: kept.persist });
+    const a = await open(box, r, 1);
+    const b = await open(box, r, 2);
+    await ended(r, b);
+    assert.equal(slotOf(r, b), null);
+    const writes = kept.writes.length;
+    assert.equal(
+      r.registry.setSlots(
+        new Map([
+          [a, null],
+          [b, 1],
+        ]),
+      ),
+      'changed',
+    );
+    assert.deepEqual([slotOf(r, a), slotOf(r, b)], [1, null]);
+    assert.equal(kept.writes.length, writes, 'nothing written');
+    // Taking it away again is no gain: allowed (nothing to change for it).
+    assert.equal(r.registry.setSlots(new Map([[b, null]])), 'ok');
+    assert.equal(slotOf(r, b), null);
+  });
+
   test('a restart over a keeper whose program ended while no server ran: its hello says so, it takes no number and its stored entry goes', async (t) => {
     const box = await registrySandbox(t);
     const kept = store();
