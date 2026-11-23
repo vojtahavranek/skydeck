@@ -158,6 +158,27 @@ async function terminalBox(page: Page): Promise<{ left: number; top: number; bot
   );
 }
 
+/** The shown terminal's screen row `index` (0 is the top): its text, its edges, its middle. */
+async function rowOf(
+  page: Page,
+  index: number,
+): Promise<{ text: string; left: number; y: number }> {
+  return readPage(
+    page,
+    (at) => {
+      const rows = document.querySelectorAll('#terminal .tv-term:not([hidden]) .xterm-rows > div');
+      const row = rows[at];
+      const box = row?.getBoundingClientRect();
+      return {
+        text: (row?.textContent ?? '').trim(),
+        left: box?.left ?? 0,
+        y: (box?.top ?? 0) + (box?.height ?? 0) / 2,
+      };
+    },
+    index,
+  );
+}
+
 /**
  * A drag with the primary button at a person's pace: pressed at `from`, moved in steps to `to`,
  * held there `hold` ms, released there; Shift held throughout when `shift`. `beforeRelease` runs
@@ -333,7 +354,7 @@ test('copy on select (issue #184)', async (t) => {
   );
 
   await t.test(
-    'a drag released outside the terminal copies, unless another press or the window losing the focus came before its release; one that scrolls the scrollback copies every line it reached; an Alt+click that moves the cursor copies nothing, also scrolled up',
+    'a drag released outside the terminal copies, unless another press or the window losing the focus came before its release; one that scrolls the scrollback copies every line it reached; an Alt+click that moves the cursor copies nothing, also scrolled up; a release a listener of the page stops on its way copies too',
     async (t) => {
       const { l, term } = await withLine(t, chromium);
       const { page } = l;
@@ -411,6 +432,17 @@ test('copy on select (issue #184)', async (t) => {
       assert.equal(inputOf(l.d.record, S1).slice(keys), '', 'no arrow keys');
       await page.keyboard.press('Control+Shift+C');
       await until(async () => (await clipboardText(page)) === 'n', 'the one character stood');
+
+      // A listener of the page that stops the release on its way hides it from no copy (last:
+      // xterm.js's own listener on the document no longer hears a release after this).
+      await page.evaluate(() => {
+        document.body.addEventListener('mouseup', (event) => event.stopPropagation(), true);
+      });
+      await setClipboard(page, 'copied elsewhere');
+      const row = `line ${Number(/^line (\d+)$/m.exec(await screenText(page))?.[1]) + 3}`;
+      const [held, heldTo] = await endsOf(page, row, row);
+      await drag(page, held, heldTo);
+      await until(async () => (await clipboardText(page)) === row, 'a release stopped on its way');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
@@ -611,6 +643,53 @@ test('copy on select (issue #184)', async (t) => {
       // The selection stood, moved with the trim: Ctrl+Shift+C copies it.
       await page.keyboard.press('Control+Shift+C');
       await until(async () => (await clipboardText(page)) === 'line 5190', 'the selection stood');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    'a selection of blank cells copies nothing — a drag, a double click, a click with a little movement, a triple click on an empty row, a drag over empty rows —; one of text and blanks copies the text; Ctrl+Shift+C copies a blank selection as before',
+    async (t) => {
+      const { l } = await withLine(t, chromium);
+      const { page } = l;
+      const writes = await countWrites(page);
+      const span = await spanOf(page, 'charlie', LINE);
+      const cell = (span.right - span.left) / 'charlie'.length;
+      const blank = (cells: number): Point => ({ x: span.right + cells * cell, y: span.y });
+      const first = await rowOf(page, 6);
+      const second = await rowOf(page, 7);
+      assert.deepEqual([first.text, second.text], ['', ''], 'two empty rows under the prompt');
+      const nothing = async (why: string): Promise<void> => {
+        await stillHolds(page, 'copied elsewhere', why);
+      };
+
+      await setClipboard(page, 'copied elsewhere');
+      await drag(page, blank(3), blank(12));
+      await nothing('a drag over the blank end of a line');
+      await clickAt(page, blank(6), 2);
+      await nothing('a double click there');
+      await page.mouse.move(blank(6).x, blank(6).y);
+      await page.mouse.down();
+      await page.mouse.move(blank(6).x + 5, blank(6).y + 1, { steps: 3 });
+      await page.mouse.up();
+      await nothing('a click with a little movement there');
+      await clickAt(page, { x: first.left + 40, y: first.y }, 3);
+      await nothing('a triple click on an empty row');
+      await drag(page, { x: first.left + 30, y: first.y }, { x: first.left + 200, y: second.y });
+      await nothing('a drag over two empty rows');
+      assert.deepEqual(await writes(), [], 'nothing was written');
+
+      // Text and blanks: the text (xterm.js leaves the blank end of a line out).
+      const [start] = await endsOf(page, 'charlie', LINE);
+      await drag(page, start, blank(10));
+      await until(async () => (await clipboardText(page)) === 'charlie', 'the text of it');
+
+      // Ctrl+Shift+C is as it was before copy on select: it copies what is selected, blanks too
+      // (and so empties the clipboard; a known behaviour beside this change).
+      await drag(page, blank(3), blank(12));
+      await setClipboard(page, 'copied elsewhere');
+      await page.keyboard.press('Control+Shift+C');
+      await until(async () => (await clipboardText(page)) === '', 'Ctrl+Shift+C copies the blanks');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );

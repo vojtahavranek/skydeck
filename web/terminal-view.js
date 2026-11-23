@@ -159,21 +159,19 @@ export function createTerminalView(root, deps) {
   // a drag over the text just copied is a new one (the press cleared it). The places are
   // compared, not xterm.js's `onSelectionChange`: a press clears the selection without reporting
   // it, and a release reports nothing when it ends where xterm.js's last report was — also after
-  // a resize or a key cleared it. The release listener is on the window, in the bubble phase, so
-  // that it reads the selection AFTER xterm.js's own release listener on the document: that one can
-  // still change it (a quick Alt+click is a cursor move there, whose arrow keys clear the character
-  // it selected; scrolled up, xterm.js sends nothing and leaves it, but ends no selection either:
-  // `movesCursor` skips that release in both cases). It misses no release xterm.js hears, wherever
-  // it is (xterm.js follows a drag outside the terminal and scrolls with it): the only listeners of
-  // the page that stop a mouseup (app.js's and switcher.js's guards of a click sequence) do so in
-  // the capture phase on the window, which keeps it from xterm.js's listener too. Every press of
-  // the primary button first forgets the last
-  // one (a release the page never saw: the window lost the mouse); the release of any button ends
-  // the press, as xterm.js ends its own; the window losing the focus (Alt+Tab in the middle of a
-  // drag, whose release it then never hears) forgets it too. A selection made by code comes with
-  // no press, and one made during a press ends it: the search add-on's (it finds again by itself
-  // 200 ms after output or a resize while the find bar is open, and selects its match) forgets the
-  // press (`create`); xterm.js drops its own drag then.
+  // a resize or a key cleared it. A selection of blank cells — nothing but spaces, tabs or line
+  // breaks as text — is not copied: written, it would empty the user's clipboard (Ctrl+Shift+C
+  // still copies whatever is selected). The release listener is on the window, in the capture
+  // phase, so that no listener of the page on the way can hide a release, wherever it is (xterm.js
+  // follows a drag outside the terminal and scrolls with it). It runs before xterm.js's own on the
+  // document, which changes no selection but in one case: a quick Alt+click it takes as moving the
+  // cursor, which ends no selection (`movesCursor`). Every press of the primary button first
+  // forgets the last one (a release the page never saw: the window lost the mouse); the release
+  // of any button ends the press, as xterm.js ends its own; the window losing the focus (Alt+Tab
+  // in the middle of a drag, whose release it then never hears) forgets it too. A selection made
+  // by code comes with no press, and one made during a press ends it: the search add-on's (it
+  // finds again by itself 200 ms after output or a resize while the find bar is open, and selects
+  // its match) forgets the press (`create`); xterm.js drops its own drag then.
   window.addEventListener(
     'mousedown',
     (event) => {
@@ -198,11 +196,12 @@ export function createTerminalView(root, deps) {
         return;
       }
       const now = selectionPlace(press.t.xterm);
-      if (now !== '' && (press.after !== press.before || now !== press.after)) {
+      const changed = press.after !== press.before || now !== press.after;
+      if (now !== '' && changed && press.t.xterm.getSelection().trim() !== '') {
         copySelection(press.t);
       }
     },
-    false,
+    true,
   );
 
   // --- the terminals ----------------------------------------------------------------------------

@@ -932,7 +932,8 @@ effect.
   pastes text). **Text you select with the mouse in the terminal is copied as you let go of the
   button**: a drag (also one that goes past the terminal's edge, which scrolls), a double click (a
   word), a triple click (a line), Shift+click to extend; while the program takes the mouse
-  itself, hold Shift as you drag. A click that only clears a selection copies nothing. Ctrl+Shift+C
+  itself, hold Shift as you drag. A click that only clears a selection copies nothing, and a
+  selection of blank cells is not copied. Ctrl+Shift+C
   still copies the selection, and `Copy on select` in Settings (`window.copyOnSelect`) turns the
   copy at the release off. The key bar at the bottom says where the keyboard is (`Focus: list`,
   `Focus: terminal`). In the list, **Shift+↑ or Shift+K moves the selected session of Open one
