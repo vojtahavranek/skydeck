@@ -1,12 +1,15 @@
 /**
- * F37 (S2 12.9, 7.6): moving a session of Open one place up or down by hand. Pure.
+ * F37, F42 (S2 12.9, 7.6): moving a session of Open one place up or down by hand. Pure.
  *
- * The move is computed over Open as it is drawn without filter, every block open (`openRows` in
- * `build.ts`): a unit is a block (consecutive rows with the same `stack.head`) or a single row.
- * Inside a block a row trades places with its neighbour of the block; at the block's edge the whole
- * block passes the next unit; a single row passes a whole block. Then `assignSlots` gives the
- * slots of Open's slotted rows, sorted, to those rows in the new order, so that the numbers ascend
- * top to bottom and the set of slots in use does not change (a gap stays a gap).
+ * The move is computed over Open as the page that sent it draws it without filter, every block open
+ * (`openRows` in `build.ts`): a unit is a block (consecutive rows with the same `stack.head`) or a
+ * single row. Inside a block a row trades places with its neighbour of the block; at the block's
+ * edge the whole block passes the next unit; a single row passes a whole block. Any row of Open
+ * moves (F42): also a terminal of the window without a number, a session running in another
+ * terminal and one in Claude Code's background. Then `assignSlots` hands the numbers Open's window
+ * terminals hold out again from the top of the new order, ascending, among the window's terminals
+ * only, so that the set of numbers in use does not change (a gap stays a gap): a terminal can gain
+ * a number and another lose its own.
  *
  * `assignSlots` takes any new order, so that another way of reordering (drag and drop) only needs
  * to say what the new order is.
@@ -21,11 +24,8 @@ export type ReorderDirection = 'up' | 'down';
 export const REORDER_REFUSALS = {
   filter: 'clear the filter first: sessions move only while no filter or chip is set',
   notOpen: 'only a session under Open moves',
-  noSlot: 'this terminal has no slot (only nine have one), so it does not move',
-  elsewhere: 'a session running in another terminal has no slot, so it does not move',
-  background: "a session in Claude Code's background has no slot, so it does not move",
   top: 'already at the top of Open',
-  last: 'already the last session with a slot under Open',
+  last: 'already at the bottom of Open',
   changed: 'the list changed meanwhile; try again',
   /** Two terminals of the window show a session of Open (a `/resume` inside a terminal), and the
    *  move — of that session, or of a row that would pass it — would not read as intended: see
@@ -33,8 +33,13 @@ export const REORDER_REFUSALS = {
   twins: 'a session here is shown by two terminals; close one of them first',
 } as const;
 
-/** A move's outcome: the slots that change, by terminal id, or the line saying why nothing does. */
-export type ReorderPlan = { ok: true; slots: Map<string, number> } | { ok: false; error: string };
+/** The numbers that change, by terminal id: a number, or null for a terminal that loses its own. */
+export type SlotChanges = Map<string, number | null>;
+
+/** A move's outcome over one sequence: Open's new drawn order and the numbers that change, or the
+ *  line saying why nothing does. */
+export type ReorderPlan =
+  { ok: true; rows: RowPayload[]; slots: SlotChanges } | { ok: false; error: string };
 
 /** Open's rows cut into units: [first index, end index) of each block or single row. */
 function unitsOf(open: readonly RowPayload[]): { start: number; end: number }[] {
@@ -51,17 +56,6 @@ function unitsOf(open: readonly RowPayload[]): { start: number; end: number }[] 
   return units;
 }
 
-/** The refusal for a row of Open without a slot. */
-function slotlessRefusal(row: RowPayload): string {
-  if (row.elsewhere?.background === true) {
-    return REORDER_REFUSALS.background;
-  }
-  if (row.elsewhere !== null) {
-    return REORDER_REFUSALS.elsewhere;
-  }
-  return REORDER_REFUSALS.noSlot;
-}
-
 /**
  * The new drawn order of Open once `sessionId`'s row moved one place in `direction`, or why it
  * cannot move. `open` is Open's rows as drawn without filter, every block open (`openRows`).
@@ -76,9 +70,6 @@ export function reorderedRows(
   if (row === undefined) {
     return { ok: false, error: REORDER_REFUSALS.notOpen };
   }
-  if (row.slot === null) {
-    return { ok: false, error: slotlessRefusal(row) };
-  }
   const rows = [...open];
   const units = unitsOf(open);
   const u = units.findIndex((unit) => unit.start <= at && at < unit.end);
@@ -86,15 +77,9 @@ export function reorderedRows(
   if (unit === undefined) {
     return { ok: false, error: REORDER_REFUSALS.notOpen }; // cannot happen: every row is in a unit
   }
-  // Inside a block: trade places with the neighbouring row of the block (slotted rows of a block
-  // come first, so the row before is slotted; a slotless one after is the block's edge).
+  // Inside a block: trade places with the neighbouring row of the block, whatever either's kind.
   const neighbour = direction === 'up' ? at - 1 : at + 1;
-  if (
-    unit.end - unit.start > 1 &&
-    neighbour >= unit.start &&
-    neighbour < unit.end &&
-    open[neighbour]?.slot !== null
-  ) {
+  if (unit.end - unit.start > 1 && neighbour >= unit.start && neighbour < unit.end) {
     const other = open[neighbour];
     if (other !== undefined) {
       rows[neighbour] = row;
@@ -119,8 +104,7 @@ export function reorderedRows(
     };
   }
   const after = units[u + 1];
-  // Units whose first row has a slot are a prefix of Open: a slotless next one ends them.
-  if (after === undefined || open[after.start]?.slot === null) {
+  if (after === undefined) {
     return { ok: false, error: REORDER_REFUSALS.last };
   }
   return {
@@ -135,20 +119,22 @@ export function reorderedRows(
 }
 
 /**
- * The slots of every slotted row of `sequence`, sorted, given to those rows in `sequence`'s order:
- * only the changed ones, by terminal id. The set of slots stays the same; a row without a slot (or
- * without a terminal) keeps none.
+ * F42 (S2 12.9, 7.6): the numbers Open's rows of terminals of the window hold, sorted, handed out
+ * again from the top of `sequence`: the first of those rows take them in order, every later one
+ * none. A row not in the window never has one. Only the changed ones, by terminal id (null: the
+ * terminal loses its number). The set of numbers in use stays the same.
  */
-export function assignSlots(sequence: readonly RowPayload[]): Map<string, number> {
-  const slotted = sequence.filter(
-    (row): row is RowPayload & { slot: number; terminal: string } =>
-      row.slot !== null && row.terminal !== null,
+export function assignSlots(sequence: readonly RowPayload[]): SlotChanges {
+  const windowRows = sequence.filter(
+    (row): row is RowPayload & { terminal: string } => row.terminal !== null,
   );
-  const sorted = slotted.map((row) => row.slot).sort((a, b) => a - b);
-  const changes = new Map<string, number>();
-  for (const [index, row] of slotted.entries()) {
-    const slot = sorted[index];
-    if (slot !== undefined && slot !== row.slot) {
+  const sorted = windowRows
+    .flatMap((row) => (row.slot === null ? [] : [row.slot]))
+    .sort((a, b) => a - b);
+  const changes: SlotChanges = new Map();
+  for (const [index, row] of windowRows.entries()) {
+    const slot = sorted[index] ?? null;
+    if (slot !== row.slot) {
       changes.set(row.terminal, slot);
     }
   }
@@ -156,10 +142,47 @@ export function assignSlots(sequence: readonly RowPayload[]): Map<string, number
 }
 
 /**
- * F37's move of `sessionId`'s row of Open one place in `direction`: the slots that change, by
- * terminal id, so that Open drawn again reads the new order with its numbers ascending; or the
- * refusal (`REORDER_REFUSALS`). `open` is `openRows`'s: Open drawn without filter, every block open.
- * The filter's refusal is the caller's: it knows the page's view.
+ * F42 (S2 12.9): a move is one visible step on the page that made it. `moved` is the page's
+ * visible Open after the move; `full` the whole kept order a freeze would keep now (Open with done
+ * ones shown, `all`, and the held places). Each id of `full` that `moved` does not have goes right
+ * after the last row of its group in the new sequence when that group has a row there, else right
+ * after the nearest earlier id of `full` that is in the new list, first when there is none. Ids.
+ */
+export function withLeftOut(
+  full: readonly string[],
+  all: readonly RowPayload[],
+  moved: readonly RowPayload[],
+): string[] {
+  const groupOf = new Map(all.map((row) => [row.id, row.group]));
+  const result = moved.map((row) => row.id);
+  const visible = new Set(result);
+  for (const [index, id] of full.entries()) {
+    if (visible.has(id) || result.includes(id)) continue;
+    const group = groupOf.get(id) ?? null;
+    let at = -1;
+    if (group !== null) {
+      at = result.findLastIndex((one) => groupOf.get(one) === group);
+    }
+    if (at === -1) {
+      for (let earlier = index - 1; earlier >= 0; earlier -= 1) {
+        const found = result.indexOf(full[earlier] ?? '');
+        if (found !== -1) {
+          at = found;
+          break;
+        }
+      }
+    }
+    result.splice(at + 1, 0, id);
+  }
+  return result;
+}
+
+/**
+ * The move of `sessionId`'s row of Open one place in `direction` over one sequence: Open's new
+ * drawn order and the numbers that change, so that Open drawn again reads the new order with its
+ * numbers ascending from the top; or the refusal (`REORDER_REFUSALS`). `open` is `openRows`'s:
+ * Open drawn without filter, every block open. The filter's refusal is the caller's: it knows the
+ * page's view. The server's move (reorder.ts's `planMove`) adds the kept order and its check.
  */
 export function planReorder(
   open: readonly RowPayload[],
@@ -170,5 +193,5 @@ export function planReorder(
   if (!moved.ok) {
     return moved;
   }
-  return { ok: true, slots: assignSlots(moved.rows) };
+  return { ok: true, rows: moved.rows, slots: assignSlots(moved.rows) };
 }

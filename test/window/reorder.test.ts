@@ -1,6 +1,8 @@
 // Follow-up F37 (S2 12.9): `act reorder`'s glue on the server, with fakes — the page's view refuses
 // a move while a filter or a chip is set; else the rule's plan goes to the registry's setSlots, and
 // what the registry refuses is answered with its line; a store that cannot be written throws.
+// F42: the plan's order is written with the moved slots (`persist`) inside setSlots' write, and
+// adopted as Open's kept order last.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
@@ -47,31 +49,65 @@ function running(id: string, pid: number) {
   });
 }
 
-/** S1 in slot 1, S2 in slot 2; setSlots records its calls and answers `answer`; `remembered`
- *  counts the calls of `remember`. */
+/** S1 in slot 1, S2 in slot 2; setSlots records its calls, runs the move's write (F42) and
+ *  answers `answer`; `remembered` counts the calls of `remember`; `events` what happened, in order. */
 function glue(answer: () => 'ok' | 'changed' | 'stopping' = () => 'ok'): {
   reorder: ReturnType<typeof createReorder>;
   calls: Map<string, number | null>[];
   remembered: () => number;
+  events: string[];
+  persisted: { moved: Map<string, number | null>; order: string[] }[];
+  kept: () => readonly string[];
+  failPersist: (error: unknown) => void;
 } {
   const calls: Map<string, number | null>[] = [];
+  const events: string[] = [];
+  const persisted: { moved: Map<string, number | null>; order: string[] }[] = [];
+  let kept: readonly string[] = [];
+  let failWith: unknown = null;
   let remembered = 0;
   const deps: ReorderDeps = {
     registry: {
       list: () => [terminal(1, S1), terminal(2, S2)],
-      setSlots(changes) {
+      setSlots(changes, write) {
         calls.push(new Map(changes));
-        return answer();
+        const outcome = answer();
+        if (outcome !== 'ok') return outcome;
+        write?.(new Map(changes));
+        events.push('changed');
+        return outcome;
       },
     },
     rows: () => rows([running(S1, 4001), running(S2, 4002)]),
     elsewhere: () => new Map(),
     nowNs: () => T0,
+    openOrder: {
+      ids: () => kept,
+      adopt: (ids) => {
+        events.push('adopt');
+        kept = ids;
+      },
+    },
+    persist: (moved, order) => {
+      if (failWith !== null) throw failWith;
+      events.push('persist');
+      persisted.push({ moved: new Map(moved), order: [...order] });
+    },
     remember: () => {
       remembered += 1;
     },
   };
-  return { reorder: createReorder(deps), calls, remembered: () => remembered };
+  return {
+    reorder: createReorder(deps),
+    calls,
+    remembered: () => remembered,
+    events,
+    persisted,
+    kept: () => kept,
+    failPersist: (error) => {
+      failWith = error;
+    },
+  };
 }
 
 function view(over: Partial<ViewMessage> = {}): ViewMessage {
@@ -135,6 +171,35 @@ describe('the reorder act on the server (F37)', () => {
     });
   });
 
+  test('F42: the plan’s order goes to persist with the moved slots; it is adopted last, before the registry announces the change', () => {
+    const { reorder, events, persisted, kept } = glue();
+    assert.deepEqual(reorder.reorder(view(), S2, 'up'), { ok: true });
+    assert.deepEqual(events, ['persist', 'adopt', 'changed']);
+    assert.deepEqual(persisted, [
+      {
+        moved: new Map([
+          ['000000000002', 1],
+          ['000000000001', 2],
+        ]),
+        order: [S2, S1],
+      },
+    ]);
+    assert.deepEqual(kept(), [S2, S1]);
+    // The next move reads the kept order: S1 up again.
+    assert.deepEqual(reorder.reorder(view(), S1, 'up'), { ok: true });
+    assert.deepEqual(kept(), [S1, S2]);
+  });
+
+  test('F42: a persist that throws: thrown, nothing adopted, no slot applied', () => {
+    const { reorder, events, kept, failPersist } = glue();
+    failPersist(
+      Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR', errcode: 5 }),
+    );
+    assert.throws(() => reorder.reorder(view(), S2, 'up'), /locked/);
+    assert.deepEqual(events, []);
+    assert.deepEqual(kept(), []);
+  });
+
   test('a store that cannot be written: thrown, for the act to answer busy', () => {
     const busy = Object.assign(new Error('database is locked'), {
       code: 'ERR_SQLITE_ERROR',
@@ -168,6 +233,8 @@ test('a session two terminals of the window show: a move of it, or of a row that
       }),
     elsewhere: () => new Map(),
     nowNs: () => T0,
+    openOrder: { ids: () => [], adopt: () => {} },
+    persist: () => {},
     remember: () => {
       remembered += 1;
     },

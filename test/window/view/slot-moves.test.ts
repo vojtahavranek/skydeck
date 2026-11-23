@@ -1,6 +1,8 @@
 // Follow-up F37 (S2 12.9, 7.6): a session of Open moves one place up or down; blocks stay together,
 // and the slots of Open's terminals are given out again so that the numbers ascend top to bottom.
-// The rows are built through `buildListMessage`'s inputs, so the blocks are the real ones.
+// F42: any row of Open moves, and the numbers are handed out again from the top among the window's
+// terminals (a terminal can gain one, another lose its own). The rows are built through
+// `buildListMessage`'s inputs, so the blocks are the real ones.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
@@ -48,6 +50,11 @@ interface Spec {
   /** A second terminal of the window showing the session too (a `/resume` inside a terminal),
    *  with this slot. */
   twin?: number;
+  /** F42: not running; the process with this pid held it last and went on with another session
+   *  (`/clear`), and still runs. */
+  left?: number;
+  /** F42: the pid of the process a session running elsewhere runs in (default 9000 + n). */
+  pid?: number;
 }
 
 function holder(sessionId: string, pid: number, background = false): Holder {
@@ -85,11 +92,19 @@ function world(specs: readonly Spec[]): Omit<ViewInput, 'view' | 'selected'> {
     if (spec.group !== undefined) {
       metas.push(meta(id, { group: spec.group }));
     }
-    if (spec.ended !== undefined) {
+    if (spec.left !== undefined) {
+      const lastHolding = {
+        process: { bootId: BOOT_A, pid: spec.left, procStart: 500 + spec.left },
+        alive: true,
+        endedAtNs: T0 - SEC,
+        endDetail: 'clear' as const,
+      };
+      sessions.push(ds({ id, lastActivityNs: T0 - SEC, lastHolding }));
+    } else if (spec.ended !== undefined) {
       const age = spec.ended === 'week' ? DAY : 30n * DAY;
       sessions.push(ds({ id, lastActivityNs: T0 - age - BigInt(spec.n) * SEC }));
     } else if (spec.elsewhere !== undefined) {
-      const pid = 9000 + spec.n;
+      const pid = spec.pid ?? 9000 + spec.n;
       const copy =
         spec.emptyCopy === true
           ? {
@@ -154,16 +169,16 @@ function world(specs: readonly Spec[]): Omit<ViewInput, 'view' | 'selected'> {
   return { rows: rows(sessions, { metas }), terminals, elsewhere, nowNs: T0 };
 }
 
-/** `input` with the slots of `changes` (by terminal id) applied. */
+/** `input` with the slots of `changes` (by terminal id; null: none) applied. */
 function applied(
   input: Omit<ViewInput, 'view' | 'selected'>,
-  changes: ReadonlyMap<string, number>,
+  changes: ReadonlyMap<string, number | null>,
 ): Omit<ViewInput, 'view' | 'selected'> {
   return {
     ...input,
     terminals: input.terminals.map((terminal) => ({
       ...terminal,
-      slot: changes.get(terminal.id) ?? terminal.slot,
+      slot: changes.has(terminal.id) ? (changes.get(terminal.id) ?? null) : terminal.slot,
     })),
   };
 }
@@ -177,7 +192,8 @@ function nOf(row: RowPayload): number {
   return Number.parseInt(row.id.slice(-12), 16);
 }
 
-/** Move session `n` and return Open as drawn afterwards (or the refusal). */
+/** Move session `n` and return Open as drawn afterwards (or the refusal): the plan's order kept
+ *  (F42) and its slots applied. */
 function move(
   input: Omit<ViewInput, 'view' | 'selected'>,
   n: number,
@@ -187,7 +203,7 @@ function move(
   if (!plan.ok) {
     return plan.error;
   }
-  return drawn(applied(input, plan.slots));
+  return drawn(applied({ ...input, openOrder: plan.rows.map((row) => row.id) }, plan.slots));
 }
 
 describe('F37: moving a session of Open', () => {
@@ -310,14 +326,15 @@ describe('F37: moving a session of Open', () => {
     );
   });
 
-  test("a block's last slotted row with slotless rows below it is the block's edge: Shift+↓ carries the whole block", () => {
+  test('F42: inside a block a slotted row trades places with a slotless one below it (F37 carried the whole block)', () => {
     const input = world([
       { n: 1, slot: 1, group: 'G' },
       { n: 5, elsewhere: 'other', group: 'G' },
       { n: 3, slot: 2 },
     ]);
     assert.deepEqual(drawn(input), ['1:1', '5:-', '3:2']);
-    assert.deepEqual(move(input, 1, 'down'), ['3:1', '1:2', '5:-']);
+    assert.deepEqual(move(input, 1, 'down'), ['5:-', '1:1', '3:2']);
+    assert.deepEqual(move(input, 5, 'down'), ['3:1', '1:2', '5:-']);
     const shown = openRows(applied(input, assignSlots(openRows(input))));
     assert.ok(shown.every((row) => row.id !== sid(5) || row.stack?.role === 'member'));
   });
@@ -359,7 +376,7 @@ describe('F37: what does not move', () => {
     assert.equal(move(input, 3, 'down'), REORDER_REFUSALS.notOpen);
   });
 
-  test('a terminal of the window without a slot (a tenth)', () => {
+  test('F42 (was refused): a terminal of the window without a slot (a tenth) moves, and the numbers follow', () => {
     const specs: Spec[] = [];
     for (let n = 1; n <= 9; n += 1) {
       specs.push({ n, slot: n });
@@ -367,21 +384,22 @@ describe('F37: what does not move', () => {
     specs.push({ n: 10, slot: null });
     const input = world(specs);
     assert.equal(drawn(input).at(-1), '10:-');
-    assert.equal(move(input, 10, 'up'), REORDER_REFUSALS.noSlot);
-    assert.equal(move(input, 9, 'down'), REORDER_REFUSALS.last);
+    const moved = ['1:1', '2:2', '3:3', '4:4', '5:5', '6:6', '7:7', '8:8', '10:9', '9:-'];
+    assert.deepEqual(move(input, 10, 'up'), moved);
+    assert.deepEqual(move(input, 9, 'down'), moved);
   });
 
-  test('a session running in another terminal, or in the background', () => {
+  test('F42 (was refused): a session running in another terminal, or in the background, moves', () => {
     const input = world([
       { n: 1, slot: 1 },
       { n: 2, elsewhere: 'other' },
       { n: 3, elsewhere: 'background' },
     ]);
-    assert.equal(move(input, 2, 'up'), REORDER_REFUSALS.elsewhere);
-    assert.equal(move(input, 3, 'up'), REORDER_REFUSALS.background);
+    assert.deepEqual(move(input, 2, 'up'), ['2:-', '1:1', '3:-']);
+    assert.deepEqual(move(input, 3, 'up'), ['1:1', '3:-', '2:-']);
   });
 
-  test('an empty copy running elsewhere that only Show done lists: the elsewhere line, not "only under Open"', () => {
+  test('F42 (was refused): an empty copy running elsewhere that only Show done lists moves on a Show done page', () => {
     const input = world([
       { n: 1, slot: 1 },
       { n: 2, elsewhere: 'other', emptyCopy: true },
@@ -395,20 +413,22 @@ describe('F37: what does not move', () => {
       hidden.sections.find((section) => section.name === 'open')?.rows.map((row) => row.id),
       [sid(1)],
     );
-    assert.equal(move(input, 2, 'up'), REORDER_REFUSALS.elsewhere);
+    assert.deepEqual(move(input, 2, 'up'), ['2:-', '1:1']);
   });
 
-  test('the first row upward, the last slotted row downward', () => {
+  test('the first row upward, the last row downward (F42: the last row, not the last slotted one)', () => {
     const input = world([
       { n: 1, slot: 1 },
       { n: 2, slot: 2 },
       { n: 3, elsewhere: 'other' },
     ]);
     assert.equal(move(input, 1, 'up'), REORDER_REFUSALS.top);
-    assert.equal(move(input, 2, 'down'), REORDER_REFUSALS.last);
+    assert.deepEqual(move(input, 2, 'down'), ['1:1', '3:-', '2:2']);
+    assert.equal(move(input, 3, 'down'), REORDER_REFUSALS.last);
+    assert.equal(REORDER_REFUSALS.last, 'already at the bottom of Open');
   });
 
-  test('the last slotted row of a block with a slotless tail and nothing slotted after it', () => {
+  test('the last slotted row of a block with a slotless tail: F42, it trades with the row below it in the block', () => {
     const input = world([
       { n: 1, slot: 1 },
       { n: 2, slot: 2, group: 'G' },
@@ -416,7 +436,8 @@ describe('F37: what does not move', () => {
       { n: 6, elsewhere: 'other' },
     ]);
     assert.deepEqual(drawn(input), ['1:1', '2:2', '5:-', '6:-']);
-    assert.equal(move(input, 2, 'down'), REORDER_REFUSALS.last);
+    assert.deepEqual(move(input, 2, 'down'), ['1:1', '5:-', '2:2', '6:-']);
+    assert.equal(move(input, 6, 'down'), REORDER_REFUSALS.last);
     assert.deepEqual(move(input, 2, 'up'), ['2:1', '5:-', '1:2', '6:-']);
   });
 
@@ -426,6 +447,243 @@ describe('F37: what does not move', () => {
       ok: false,
       error: REORDER_REFUSALS.notOpen,
     });
+  });
+});
+
+type Input = Omit<ViewInput, 'view' | 'selected'>;
+
+/** The server's move (`planMove`) of session `n`, applied as the server applies it: Open's new kept
+ *  order and the slots. The new input, or the refusal. */
+function moveOn(
+  input: Input,
+  n: number,
+  direction: ReorderDirection,
+  showDone = true,
+): Input | string {
+  const plan = planMove(input, showDone, sid(n), direction);
+  if (!plan.ok) return plan.error;
+  return applied({ ...input, openOrder: plan.order }, plan.slots);
+}
+
+/** `moveOn`, then Open as drawn (done ones shown). */
+function movedTo(input: Input, n: number, direction: ReorderDirection, showDone = true): string[] {
+  const after = moveOn(input, n, direction, showDone);
+  assert.ok(typeof after !== 'string', String(after));
+  return drawn(after);
+}
+
+/** Nine numbered terminals, 5 and 6 a block, and `last` below them. */
+function nineWith(last: Spec): Input {
+  const specs: Spec[] = [];
+  for (let n = 1; n <= 9; n += 1) {
+    specs.push(n === 5 || n === 6 ? { n, slot: n, group: 'G' } : { n, slot: n });
+  }
+  return world([...specs, last]);
+}
+
+describe('F42: any row of Open moves, and the numbers follow the order', () => {
+  test('a tenth terminal: up alone, across a numbered row (it takes 9, the ninth none), across a block; and down again', () => {
+    let input = nineWith({ n: 10, slot: null });
+    assert.deepEqual(drawn(input).slice(-3), ['8:8', '9:9', '10:-']);
+    const up = moveOn(input, 10, 'up');
+    assert.ok(typeof up !== 'string');
+    input = up;
+    assert.deepEqual(drawn(input).slice(-3), ['8:8', '10:9', '9:-']);
+    for (let step = 0; step < 3; step += 1) {
+      const next = moveOn(input, 10, 'up');
+      assert.ok(typeof next !== 'string');
+      input = next;
+    }
+    // Past 8, 7 and then the block 5 + 6 as one unit.
+    assert.deepEqual(drawn(input), [
+      '1:1',
+      '2:2',
+      '3:3',
+      '4:4',
+      '10:5',
+      '5:6',
+      '6:7',
+      '7:8',
+      '8:9',
+      '9:-',
+    ]);
+    // Down across the block, then across the numbered 7.
+    assert.deepEqual(movedTo(input, 10, 'down'), [
+      '1:1',
+      '2:2',
+      '3:3',
+      '4:4',
+      '5:5',
+      '6:6',
+      '10:7',
+      '7:8',
+      '8:9',
+      '9:-',
+    ]);
+  });
+
+  for (const kind of ['other', 'background'] as const) {
+    test(`a session ${kind === 'other' ? 'in another terminal' : "in Claude Code's background"}: up alone, across a numbered row, across a block, and down; it never has a number and no number changes`, () => {
+      let input = nineWith({ n: 10, elsewhere: kind });
+      const plan = planMove(input, true, sid(10), 'up');
+      assert.ok(plan.ok);
+      assert.equal(plan.slots.size, 0, 'no number changes');
+      for (let step = 0; step < 4; step += 1) {
+        const next = moveOn(input, 10, 'up');
+        assert.ok(typeof next !== 'string');
+        input = next;
+      }
+      assert.deepEqual(drawn(input), [
+        '1:1',
+        '2:2',
+        '3:3',
+        '4:4',
+        '10:-',
+        '5:5',
+        '6:6',
+        '7:7',
+        '8:8',
+        '9:9',
+      ]);
+      assert.deepEqual(movedTo(input, 10, 'down'), [
+        '1:1',
+        '2:2',
+        '3:3',
+        '4:4',
+        '5:5',
+        '6:6',
+        '10:-',
+        '7:7',
+        '8:8',
+        '9:9',
+      ]);
+    });
+  }
+
+  test('a block that draws a terminal without a number above numbered ones: a move of an unrelated row hands every number out again', () => {
+    // G = T2 + T10 (no number), drawn at T2's place; E another terminal's row at the bottom.
+    const specs: Spec[] = [];
+    for (let n = 1; n <= 9; n += 1)
+      specs.push(n === 2 ? { n, slot: n, group: 'G' } : { n, slot: n });
+    const input = world([
+      ...specs,
+      { n: 10, slot: null, group: 'G' },
+      { n: 20, elsewhere: 'other' },
+    ]);
+    assert.deepEqual(drawn(input).slice(0, 4), ['1:1', '2:2', '10:-', '3:3']);
+    assert.deepEqual(movedTo(input, 20, 'up'), [
+      '1:1',
+      '2:2',
+      '10:3',
+      '3:4',
+      '4:5',
+      '5:6',
+      '6:7',
+      '7:8',
+      '8:9',
+      '20:-',
+      '9:-',
+    ]);
+  });
+
+  test('inside a block rows of any kind trade places; at its edge the whole block passes; the last row downward is refused', () => {
+    const input = world([
+      { n: 1, slot: 1 },
+      { n: 2, slot: null, group: 'G' },
+      { n: 3, elsewhere: 'other', group: 'G' },
+      { n: 4, elsewhere: 'background', group: 'G' },
+      { n: 5, slot: 2 },
+    ]);
+    // The block G sits at T2's place: after the numbered terminals.
+    assert.deepEqual(drawn(input), ['1:1', '5:2', '2:-', '3:-', '4:-']);
+    assert.deepEqual(movedTo(input, 4, 'up'), ['1:1', '5:2', '2:-', '4:-', '3:-']);
+    assert.deepEqual(movedTo(input, 3, 'down'), ['1:1', '5:2', '2:-', '4:-', '3:-']);
+    assert.deepEqual(movedTo(input, 2, 'down'), ['1:1', '5:2', '3:-', '2:-', '4:-']);
+    // At the block's top edge the whole block passes T5: T2 takes 2, T5 loses it.
+    assert.deepEqual(movedTo(input, 2, 'up'), ['1:1', '2:2', '3:-', '4:-', '5:-']);
+    assert.deepEqual(movedTo(input, 5, 'down'), ['1:1', '2:2', '3:-', '4:-', '5:-']);
+    assert.equal(moveOn(input, 4, 'down'), REORDER_REFUSALS.last);
+  });
+
+  test('a page without Show done: a move past a hidden empty copy is one visible step; the copy stays with its group, or after the row it followed', () => {
+    // After the row it followed: kept T1 C T2, C an empty copy only Show done lists.
+    const after = world([
+      { n: 1, slot: 1 },
+      { n: 3, elsewhere: 'other', emptyCopy: true },
+      { n: 2, slot: 2 },
+    ]);
+    const kept = { ...after, openOrder: [sid(1), sid(3), sid(2)] };
+    assert.deepEqual(drawn(kept), ['1:1', '3:-', '2:2']);
+    assert.deepEqual(
+      openRows(kept, false).map((row) => nOf(row)),
+      [1, 2],
+    );
+    assert.deepEqual(movedTo(kept, 2, 'up', false), ['2:1', '1:2', '3:-']);
+    // With its group: C in G with T2.
+    const grouped = world([
+      { n: 1, slot: 1 },
+      { n: 2, slot: 2, group: 'G' },
+      { n: 3, elsewhere: 'other', emptyCopy: true, group: 'G' },
+    ]);
+    assert.deepEqual(drawn(grouped), ['1:1', '2:2', '3:-']);
+    assert.deepEqual(movedTo(grouped, 2, 'up', false), ['2:1', '3:-', '1:2']);
+    // A Show done page moves the copy like any row.
+    assert.deepEqual(movedTo(kept, 3, 'up', true), ['3:-', '1:1', '2:2']);
+  });
+
+  test('a hidden empty copy whose predecessor closed: after the nearest earlier row still there; first when none is left', () => {
+    const specs: Spec[] = [
+      { n: 1, slot: 1 },
+      { n: 3, elsewhere: 'other', emptyCopy: true },
+      { n: 2, slot: 2 },
+    ];
+    // Kept T1 X C T2, X (session 7) closed.
+    const closed = { ...world(specs), openOrder: [sid(1), sid(7), sid(3), sid(2)] };
+    assert.deepEqual(movedTo(closed, 2, 'up', false), ['2:1', '1:2', '3:-']);
+    // Kept X C T1 T2: nothing earlier is left.
+    const first = { ...world(specs), openOrder: [sid(7), sid(3), sid(1), sid(2)] };
+    assert.deepEqual(drawn(first), ['3:-', '1:1', '2:2']);
+    assert.deepEqual(movedTo(first, 2, 'up', false), ['3:-', '2:1', '1:2']);
+  });
+
+  test("a held place survives a move: kept T1 A E T2 with A held, E up: the order keeps A after T1; then A's successor takes it", () => {
+    const specs: Spec[] = [
+      { n: 1, slot: 1 },
+      { n: 5, left: 9005 },
+      { n: 3, elsewhere: 'other' },
+      { n: 2, slot: 2 },
+    ];
+    const input = { ...world(specs), openOrder: [sid(1), sid(5), sid(3), sid(2)] };
+    assert.deepEqual(drawn(input), ['1:1', '3:-', '2:2']);
+    const plan = planMove(input, true, sid(3), 'up');
+    assert.ok(plan.ok);
+    assert.deepEqual(
+      plan.order.map((id) => nOf({ id } as RowPayload)),
+      [3, 1, 5, 2],
+    );
+    // The successor (session 6, held by the same process) shows, and is drawn at A's place.
+    const shown = {
+      ...world([...specs, { n: 6, elsewhere: 'other', pid: 9005 }]),
+      openOrder: plan.order,
+    };
+    assert.deepEqual(drawn(shown), ['3:-', '1:1', '6:-', '2:2']);
+  });
+
+  test('a successor that showed before the next refresh and is made kept by a move takes the place in that move: the two are never both kept', () => {
+    const specs: Spec[] = [
+      { n: 1, slot: 1 },
+      { n: 5, left: 9005 },
+      { n: 3, elsewhere: 'other' },
+      { n: 6, elsewhere: 'other', pid: 9005 },
+    ];
+    const input = { ...world(specs), openOrder: [sid(1), sid(5), sid(3)] };
+    assert.deepEqual(drawn(input), ['1:1', '6:-', '3:-']);
+    const plan = planMove(input, true, sid(3), 'up');
+    assert.ok(plan.ok);
+    assert.deepEqual(
+      plan.order.map((id) => nOf({ id } as RowPayload)),
+      [1, 3, 6],
+    );
   });
 });
 
@@ -441,9 +699,10 @@ function generator(seed: number): () => number {
   };
 }
 
-test('F37, a property over generated Opens: after a move the order is the one intended, the numbers ascend and the set of slots stays; with a session two terminals show, the move is refused instead when it would not be', () => {
+test('F37, F42, a property over generated Opens: after a move (also after earlier ones, a kept order) the visible order is the one intended, the numbers are handed out from the top among the window terminals and the set of slots stays; with a session two terminals show, the move is refused instead when it would not be', () => {
   let moved = 0;
   let twinsRefused = 0;
+  let slotlessMoved = 0;
   for (let seed = 1; seed <= 1000; seed += 1) {
     const random = generator(seed);
     const pick = <T>(items: readonly T[]): T => {
@@ -453,10 +712,11 @@ test('F37, a property over generated Opens: after a move the order is the one in
     };
     const free = [1, 2, 3, 4, 5, 6, 7, 8, 9];
     const specs: Spec[] = [];
-    const count = 1 + Math.floor(random() * 12);
+    const count = 1 + Math.floor(random() * 14);
     for (let n = 1; n <= count; n += 1) {
       const group = pick(['', '', 'G', 'H', 'K']);
       const kind = pick([
+        'slot',
         'slot',
         'slot',
         'slot',
@@ -491,13 +751,22 @@ test('F37, a property over generated Opens: after a move the order is the one in
         specs.push({ ...base, slot: slot ?? null, ended: 'week' });
       }
     }
-    const input = world(specs);
-    const before = openRows(input);
+    let input = world(specs);
+    // Earlier moves, each applied as the server applies it: a kept order and new slots.
+    const earlier = Math.floor(random() * 4);
+    for (let step = 0; step < earlier; step += 1) {
+      const one = pick(specs);
+      const plan = planMove(input, pick([true, false]), sid(one.n), pick(['up', 'down']));
+      if (plan.ok) input = applied({ ...input, openOrder: plan.order }, plan.slots);
+    }
+    const showDone = pick([true, false]);
+    const before = openRows(input, showDone);
+    const beforeAll = openRows(input, true);
     const chosen = pick(specs);
     const direction = pick<ReorderDirection>(['up', 'down']);
     const intended = reorderedRows(before, sid(chosen.n), direction);
-    const plan = planMove(input, sid(chosen.n), direction);
-    const label = `seed ${seed}: ${JSON.stringify(specs)} move ${chosen.n} ${direction}`;
+    const plan = planMove(input, showDone, sid(chosen.n), direction);
+    const label = `seed ${seed}: ${JSON.stringify(specs)} after ${earlier} moves, move ${chosen.n} ${direction}, showDone ${showDone}`;
     if (!plan.ok && plan.error === REORDER_REFUSALS.twins) {
       // Refused, nothing changed: only where a session has two terminals of the window.
       assert.ok(intended.ok, label);
@@ -513,33 +782,47 @@ test('F37, a property over generated Opens: after a move the order is the one in
       continue;
     }
     moved += 1;
-    const after = openRows(applied(input, plan.slots));
+    const after = applied({ ...input, openOrder: plan.order }, plan.slots);
+    const shown = openRows(after, showDone);
     assert.deepEqual(
-      after.map((row) => row.id),
+      shown.map((row) => row.id),
       intended.rows.map((row) => row.id),
       label,
     );
-    const slots = after.flatMap((row) => (row.slot === null ? [] : [row.slot]));
+    // The numbers of Open's window terminals before, handed out from the top of the new Open.
+    const numbers = (rows: readonly RowPayload[]): number[] =>
+      rows.flatMap((row) => (row.terminal === null || row.slot === null ? [] : [row.slot]));
+    const kept = [...numbers(beforeAll)].sort((a, b) => a - b);
+    const windowRows = openRows(after, true).filter((row) => row.terminal !== null);
     assert.deepEqual(
-      slots,
-      [...slots].sort((a, b) => a - b),
+      windowRows.map((row) => row.slot),
+      windowRows.map((_, at) => kept[at] ?? null),
+      label,
+    );
+    // No number on a row that does not run in the window.
+    assert.ok(
+      openRows(after, true).every((row) => row.terminal !== null || row.slot === null),
       label,
     );
     // Every terminal of the window: the same slots as before, none twice.
     const all = (terminals: readonly { slot: number | null }[]): number[] =>
       terminals.flatMap((term) => (term.slot === null ? [] : [term.slot])).sort((a, b) => a - b);
-    const afterAll = all(applied(input, plan.slots).terminals);
+    const afterAll = all(after.terminals);
     assert.deepEqual(afterAll, all(input.terminals), label);
     assert.equal(new Set(afterAll).size, afterAll.length, label);
     const was = before.findIndex((row) => row.id === sid(chosen.n));
-    const now = after.findIndex((row) => row.id === sid(chosen.n));
+    const now = shown.findIndex((row) => row.id === sid(chosen.n));
     assert.ok(direction === 'up' ? now < was : now > was, label);
     // Every terminal outside Open keeps its slot.
-    const inOpen = new Set(before.flatMap((row) => (row.terminal === null ? [] : [row.terminal])));
+    const inOpen = new Set(
+      beforeAll.flatMap((row) => (row.terminal === null ? [] : [row.terminal])),
+    );
     for (const id of plan.slots.keys()) {
       assert.ok(inOpen.has(id), label);
     }
+    if (before[was]?.slot === null) slotlessMoved += 1;
   }
-  assert.ok(moved > 150, `only ${moved} of the generated moves were made`);
+  assert.ok(moved > 300, `only ${moved} of the generated moves were made`);
+  assert.ok(slotlessMoved > 100, `only ${slotlessMoved} moves of a row without a number`);
   assert.ok(twinsRefused > 0, 'the generator met a move that two terminals of a session refuse');
 });

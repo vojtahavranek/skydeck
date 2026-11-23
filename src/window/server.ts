@@ -79,7 +79,7 @@ import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
 import { readMovedSlots, writeMovedSlots } from './moved-slots.ts';
 import { createReorder } from './reorder.ts';
-import { createOpenOrder } from './open-order.ts';
+import { createOpenOrder, writeOpenOrder } from './open-order.ts';
 import { createSlotMemory } from './slot-memory.ts';
 import { createRegistry } from './terminals.ts';
 import type { Registry } from './terminals.ts';
@@ -598,6 +598,14 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       rows: () => tick?.rows() ?? NO_ROWS,
       elsewhere: () => tick?.elsewhere() ?? new Map(),
       nowNs: () => clock.nowNs(),
+      openOrder,
+      // F42: the moved numbers and Open's new order, both or neither; a busy store throws (busy).
+      persist: (moved, order) => {
+        deck.store.transaction(() => {
+          writeMovedSlots(deck.store, moved);
+          writeOpenOrder(deck.store, order);
+        });
+      },
       remember: () => {
         slotMemory.update(created.list());
       },

@@ -409,3 +409,101 @@ describe("Open's kept order on the server (F42)", () => {
     );
   });
 });
+
+/** Session `n` of the ten-session test. */
+function tenth(n: number): string {
+  return `00000000-0000-4000-8000-${n.toString(16).padStart(12, '0')}`;
+}
+
+/** Open as drawn in the ten-session test: "<n>:<slot>". */
+function openTen(list: ListMessage): string[] {
+  return (list.sections.find((section) => section.name === 'open')?.rows ?? []).map(
+    (row) => `${Number.parseInt(row.id.slice(-12), 16)}:${row.slot ?? '-'}`,
+  );
+}
+
+const readsTen = (order: string[]) => (list: ListMessage) =>
+  JSON.stringify(openTen(list)) === JSON.stringify(order);
+
+describe('moving any session of Open (F42)', () => {
+  test('ten terminals: Shift+↑ on the tenth gives it 9 and the ninth none, on every page, a page connected later, after a stop and after a crash', async (t) => {
+    const d = serverSandbox(t);
+    const ids = Array.from({ length: 10 }, (_, at) => tenth(at + 1));
+    for (const id of ids) d.resumable(id);
+    const first = await d.start();
+    const page = await connectTestPage(t, d, first.server);
+    for (const sessionId of ids) {
+      const result = await page.act({ kind: 'resume', sessionId, cols: 80, rows: 24 });
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
+    const start = ['1:1', '2:2', '3:3', '4:4', '5:5', '6:6', '7:7', '8:8', '9:9', '10:-'];
+    await page.list(readsTen(start), 'ten terminals, the tenth without a number');
+    const other = await connectTestPage(t, d, first.server);
+    const moved = await page.act({ kind: 'reorder', sessionId: tenth(10), direction: 'up' });
+    assert.equal(moved.ok, true, JSON.stringify(moved));
+    const order = ['1:1', '2:2', '3:3', '4:4', '5:5', '6:6', '7:7', '8:8', '10:9', '9:-'];
+    assertSlotsMatchRows(await page.list(readsTen(order), 'the tenth above the ninth'));
+    await other.list(readsTen(order), 'the other page');
+    const later = await connectTestPage(t, d, first.server);
+    await later.list(readsTen(order), 'a page connected later');
+    assert.deepEqual(readOpenOrder(d.deck.store), [...ids.slice(0, 8), tenth(10), tenth(9)]);
+
+    await first.server.stop('the test restarts it');
+    const second = await d.start();
+    const again = await connectTestPage(t, d, second.server);
+    assertSlotsMatchRows(await again.list(readsTen(order), 'the order after a stop'));
+    await second.drop();
+    const third = await d.start();
+    const after = await connectTestPage(t, d, third.server);
+    const list = await after.list(readsTen(order), 'the order after a crash');
+    assertSlotsMatchRows(list);
+    const slots = list.terminals.flatMap((term) => (term.slot === null ? [] : [term.slot]));
+    assert.equal(new Set(slots).size, slots.length, 'no two terminals share a number');
+  });
+
+  test('a terminal ended after a move leaves a gap, the others keep their numbers and places; a new terminal takes the lowest free number at its place', async (t) => {
+    const { d, page } = await threeOpen(t);
+    const moved = await page.act({ kind: 'reorder', sessionId: S3, direction: 'up' });
+    assert.equal(moved.ok, true, JSON.stringify(moved));
+    let list = await page.list(reads(['S1:1', 'S3:2', 'S2:3']), 'moved');
+    list = await endSession(page, list, S1);
+    assert.deepEqual(open(list), ['S3:2', 'S2:3']);
+    await until(
+      () => JSON.stringify(keptOrder(d)) === JSON.stringify(['S3', 'S2']),
+      () => `S1 left the kept order: ${JSON.stringify(keptOrder(d))}`,
+      10_000,
+    );
+    const resumedS4 = await page.act({ kind: 'resume', sessionId: S4, cols: 80, rows: 24 });
+    assert.equal(resumedS4.ok, true, JSON.stringify(resumedS4));
+    assertSlotsMatchRows(
+      await page.list(reads(['S4:1', 'S3:2', 'S2:3']), 'S4 with 1, at its place'),
+    );
+  });
+
+  test('each refusal leaves the numbers and the kept order as they are', async (t) => {
+    const { d, page } = await threeOpen(t);
+    const moved = await page.act({ kind: 'reorder', sessionId: S2, direction: 'up' });
+    assert.equal(moved.ok, true, JSON.stringify(moved));
+    const list = await page.list(reads(['S2:1', 'S1:2', 'S3:3']), 'moved');
+    const kept = d.deck.store.getKv('window_open_order');
+    const slots = d.deck.store.getKv('window_slots');
+    for (const [action, line] of [
+      [{ kind: 'reorder', sessionId: S2, direction: 'up' }, REORDER_REFUSALS.top],
+      [{ kind: 'reorder', sessionId: S3, direction: 'down' }, REORDER_REFUSALS.last],
+      [{ kind: 'reorder', sessionId: S4, direction: 'up' }, REORDER_REFUSALS.notOpen],
+    ] as const) {
+      const result = await page.act(action);
+      assert.deepEqual([result.ok, result.error], [false, line]);
+    }
+    page.view({ filter: 'demo' });
+    const filtered = await page.act({ kind: 'reorder', sessionId: S1, direction: 'up' });
+    assert.deepEqual([filtered.ok, filtered.error], [false, REORDER_REFUSALS.filter]);
+    page.view({});
+    assert.equal(d.deck.store.getKv('window_open_order'), kept);
+    assert.equal(d.deck.store.getKv('window_slots'), slots);
+    assert.deepEqual(
+      slotsOf(list),
+      slotsOf(await page.list(reads(['S2:1', 'S1:2', 'S3:3']), 'a list after')),
+    );
+  });
+});
