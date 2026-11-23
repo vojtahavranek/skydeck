@@ -488,7 +488,7 @@ test('the tour of the window', async (t) => {
         }
       }
       // Space with Ctrl, Alt or Meta held presses nothing either; nor does Ctrl let go while Space
-      // is held (the keyup is then the only guard).
+      // is held.
       while ((await holder()) !== 'tour-next') await page.keyboard.press('Tab');
       for (const key of ['Control+Space', 'Alt+Space', 'Meta+Space', 'Control+Shift+Space']) {
         await page.keyboard.press(key);

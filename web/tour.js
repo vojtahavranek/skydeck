@@ -262,7 +262,7 @@ export function createTour(root, deps) {
   // A click outside the panel does nothing, and leaves the keyboard in the panel.
   scrim.addEventListener('mousedown', (event) => event.preventDefault());
   // A button pressed by Space is pressed at the keyup: that too is cancelled, whatever modifiers
-  // are held (Ctrl pressed and released while Space is held leaves the keyup the only guard).
+  // are held (a second guard behind the cancel at the keydown).
   root.addEventListener(
     'keyup',
     (event) => {
