@@ -568,6 +568,71 @@ async function noPageRecorded(h: Harness): Promise<void> {
 }
 
 const SUCCESS = /^skydeck window: http:\/\/127\.0\.0\.1:([0-9]+)\/ \(server pid ([0-9]+)\)\n$/;
+const ALREADY_OPEN = 'skydeck window: a window is already open\n';
+
+/**
+ * What a command was answered on its own requests (a net over the harness's recorder): the pids
+ * that answered its GET /ping, and the `pages` of its GET /status answers, in order.
+ */
+interface OwnAnswers {
+  net: (net: Net) => Net;
+  pids: number[];
+  pages: number[];
+}
+
+function ownAnswers(): OwnAnswers {
+  const pids: number[] = [];
+  const pages: number[] = [];
+  return {
+    pids,
+    pages,
+    net: (net) => ({
+      ...net,
+      async requestUnix(path, request) {
+        const answer = await net.requestUnix(path, request);
+        const body = answer.body as { pid?: unknown; pages?: unknown } | null;
+        if (request.path === '/ping' && typeof body?.pid === 'number') pids.push(body.pid);
+        if (request.path === '/status' && typeof body?.pages === 'number') pages.push(body.pages);
+        return answer;
+      },
+    }),
+  };
+}
+
+/**
+ * Two `skydeck window` started together end on the one server `pid` (S2 5.1): both exit 0, every
+ * ping of each answered by that server, and each says its address naming it — the one that
+ * started Edge, and one that waited at window_launching for that one's page — or "a window is
+ * already open", only when its own last GET /status showed a page: the other's page had
+ * connected before it looked (step 2), which a fake Edge's page, quicker than a real one, can do
+ * within a ping's retry. One of them says its address.
+ */
+function assertOneServer(commands: [Result, OwnAnswers][], pid: number): void {
+  const said = commands
+    .map(([r], i) => `command ${i + 1}: code ${r.code}, stdout ${r.stdout}, stderr ${r.stderr}`)
+    .join('; ');
+  for (const [r, own] of commands) {
+    assert.equal(r.code, 0, said);
+    assert.ok(
+      SUCCESS.exec(r.stdout)?.[2] === String(pid) || r.stdout === ALREADY_OPEN,
+      `each its address naming server ${pid}, or "already open": ${said}`,
+    );
+    if (r.stdout === ALREADY_OPEN) {
+      assert.ok(
+        (own.pages.at(-1) ?? 0) > 0,
+        `"already open" only after it saw a page (pages ${own.pages.join(', ')}): ${said}`,
+      );
+    }
+    assert.ok(
+      own.pids.length > 0 && own.pids.every((answered) => answered === pid),
+      `each answered by server ${pid} only (${own.pids.join(', ')}): ${said}`,
+    );
+  }
+  assert.ok(
+    commands.some(([r]) => SUCCESS.test(r.stdout)),
+    `one says its address: ${said}`,
+  );
+}
 
 // ---------------------------------------------------------------------------------------------
 // Without options (S2 5.1)
@@ -837,20 +902,23 @@ describe('skydeck window: a server running (S2 5.1, 14)', () => {
 
   test('two skydeck window at once: one server, one Edge start, both exit 0', async (t) => {
     const h = windowHarness(t);
+    const [ownA, ownB] = [ownAnswers(), ownAnswers()];
 
     const [a, b] = await Promise.all([
-      h.run([], { env: { FAKE_EDGE_PAGE: 'once' } }),
-      h.run([], { env: { FAKE_EDGE_PAGE: 'once' } }),
+      h.run([], { env: { FAKE_EDGE_PAGE: 'once' }, net: ownA.net }),
+      h.run([], { env: { FAKE_EDGE_PAGE: 'once' }, net: ownB.net }),
     ]);
 
-    assert.equal(a.code, 0, a.stderr);
-    assert.equal(b.code, 0, b.stderr);
-    assert.equal(h.edgeRuns().length, 1, 'one Edge start');
     const json = h.server();
     assert.ok(json !== null);
-    for (const r of [a, b]) {
-      assert.equal(SUCCESS.exec(r.stdout)?.[2], String(json.pid), 'both use the one server');
-    }
+    assertOneServer(
+      [
+        [a, ownA],
+        [b, ownB],
+      ],
+      json.pid,
+    );
+    assert.equal(h.edgeRuns().length, 1, 'one Edge start');
     assert.equal(h.d.deck.store.getKv('window_launching'), null);
   });
 
@@ -1714,18 +1782,31 @@ function ended(line: { pid: number; procStart: number }): boolean {
 describe('a server that is starting is found by every command (ruled, server-findable)', () => {
   test('skydeck window while a server starts: it waits for that server and uses it — no second serve, one Edge, both exit 0', async (t) => {
     const h = windowHarness(t);
-    const first = await startingServer(h, 2000, [], { FAKE_EDGE_PAGE: 'once' });
+    const [ownFirst, ownSecond] = [ownAnswers(), ownAnswers()];
+    const first = await startingServer(
+      h,
+      2000,
+      [],
+      { FAKE_EDGE_PAGE: 'once' },
+      { net: ownFirst.net },
+    );
 
-    const second = await h.run([], { env: { FAKE_EDGE_PAGE: 'once' }, times: { pingMs: 20_000 } });
+    const second = await h.run([], {
+      env: { FAKE_EDGE_PAGE: 'once' },
+      times: { pingMs: 20_000 },
+      net: ownSecond.net,
+    });
     const a = await first.done;
 
-    assert.equal(a.code, 0, a.stderr);
-    assert.equal(second.code, 0, second.stderr);
+    assertOneServer(
+      [
+        [a, ownFirst],
+        [second, ownSecond],
+      ],
+      first.pid,
+    );
     assert.equal(h.started.filter(isServe).length, 1, 'one serve started, by the first');
     assert.equal(h.edgeRuns().length, 1, 'one Edge start');
-    for (const r of [a, second]) {
-      assert.equal(SUCCESS.exec(r.stdout)?.[2], String(first.pid), 'both use the one server');
-    }
   });
 
   test('skydeck window while a server starts and has not recorded itself within pingMs: the line saying so, exit 1, nothing started or signalled', async (t) => {
@@ -2263,7 +2344,6 @@ describe('a server that answers but has not finished its start (ruled, server-fi
 
 const WAITING =
   'skydeck: waiting up to 7 s for the open window to come back; --new-window opens one now\n';
-const ALREADY_OPEN = 'skydeck window: a window is already open\n';
 const NOT_CONNECTED = /^skydeck: Edge was started, but no window connected within /m;
 /** The command runs from the fake serve's checkout: the server it finds is of its checkout and build. */
 const OURS: RunOptions = { appRoot: FAKE_ROOT, times: { pageMs: 300 } };
