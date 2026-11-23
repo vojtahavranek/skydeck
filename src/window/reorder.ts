@@ -15,9 +15,8 @@ import type { ListRow } from '../sessions/list.ts';
 import type { OpenOrder } from './open-order.ts';
 import type { ViewMessage } from './protocol.ts';
 import type { Registry } from './terminals.ts';
-import { heldPlaces, openRows } from './view/build.ts';
+import { keptNow, openRows } from './view/build.ts';
 import type { ViewInput } from './view/build.ts';
-import { frozenOrder } from './view/open-sequence.ts';
 import { isFiltering, searchWords } from './view/search/filter.ts';
 import { assignSlots, REORDER_REFUSALS, reorderedRows, withLeftOut } from './view/slot-moves.ts';
 import type { ReorderDirection, SlotChanges } from './view/slot-moves.ts';
@@ -74,7 +73,7 @@ export type MovePlan =
  *    pass, and that session's row would go to its other terminal with its own number — the move is
  *    refused with `REORDER_REFUSALS.twins`; trying again would not help. The claim of a row by a
  *    terminal (`build.ts`) is not changed for it.
- * `order` is the list the next freeze computes: `frozenOrder` over the new Open.
+ * `order` is the list the next freeze computes: `keptNow` over the new Open.
  */
 export function planMove(
   input: Omit<ViewInput, 'view' | 'selected'>,
@@ -86,11 +85,7 @@ export function planMove(
   const intended = reorderedRows(visible, sessionId, direction);
   if (!intended.ok) return intended;
   const all = openRows(input, true);
-  const full = frozenOrder(
-    input.openOrder ?? [],
-    all.map((row) => row.id),
-    heldPlaces(input),
-  );
+  const full = keptNow(input);
   const sequence = withLeftOut(full, all, intended.rows);
   const byId = new Map(all.map((row) => [row.id, row]));
   const slots = assignSlots(sequence.flatMap((id) => byId.get(id) ?? []));
@@ -115,11 +110,7 @@ export function planMove(
   return {
     ok: true,
     slots,
-    order: frozenOrder(
-      sequence,
-      drawn.map((row) => row.id),
-      heldPlaces(after),
-    ),
+    order: keptNow(after),
   };
 }
 

@@ -37,7 +37,7 @@ import {
   searchable,
   searchWords,
 } from './search/filter.ts';
-import { openSequence } from './open-sequence.ts';
+import { frozenOrder, openSequence } from './open-sequence.ts';
 import type { HeldPlaces, SequenceEntry } from './open-sequence.ts';
 import { stackRows } from './search/stacks.ts';
 import { switcherPayload } from './search/switcher.ts';
@@ -681,6 +681,20 @@ export function openRows(
     },
   });
   return message.sections.find((section) => section.name === 'open')?.rows ?? [];
+}
+
+/**
+ * F42 (S2 12.1): the order a freeze keeps now — Open as drawn with done ones shown, with each held
+ * place no successor takes put back after the nearest earlier kept id (`frozenOrder` over
+ * `openRows(input, true)` and `heldPlaces(input)`). The server's freeze after a refresh and a
+ * move's plan (reorder.ts) both take it, so that they agree.
+ */
+export function keptNow(input: Omit<ViewInput, 'view' | 'selected'>): string[] {
+  return frozenOrder(
+    input.openOrder ?? [],
+    openRows(input, true).map((row) => row.id),
+    heldPlaces(input),
+  );
 }
 
 /**

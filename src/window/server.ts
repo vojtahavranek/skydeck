@@ -87,8 +87,7 @@ import type { Registry } from './terminals.ts';
 import { createTick } from './tick.ts';
 import { createUpdates } from './updates.ts';
 import type { Tick } from './tick.ts';
-import { buildListMessage, heldPlaces, openRows } from './view/build.ts';
-import { frozenOrder } from './view/open-sequence.ts';
+import { buildListMessage, keptNow, openRows } from './view/build.ts';
 import { restoreOffer } from './view/search/switcher.ts';
 import { windowTerminal } from './window-terminal.ts';
 import { loadXterm } from './xterm.ts';
@@ -606,9 +605,9 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     let openFailure: string | null = null;
     /**
      * F42 (S2 12.1, design 7.8): after a refresh that worked (`freeze`) or a move: Open as drawn now
-     * (done ones shown) — computed once — taken by the kept order (only after a refresh, while one
-     * exists: `frozenOrder` with the places held for a process's next session, so that a row keeps
-     * the place it was first drawn at) and by the restore memory. Nothing once the stop began, or
+     * (done ones shown) taken by the kept order (only after a refresh, while one exists:
+     * `keptNow`, with the places held for a process's next session, so that a row keeps the place
+     * it was first drawn at) and by the restore memory. Nothing once the stop began, or
      * while the tick has no rows. Never throws: a throw after a refresh would count as a failed one.
      */
     const tookOpen = (freeze: boolean): void => {
@@ -625,7 +624,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         };
         const open = openRows(input).map((one) => one.id);
         if (freeze && openOrder.keeps()) {
-          openOrder.freeze(frozenOrder(input.openOrder, open, heldPlaces(input)));
+          openOrder.freeze(keptNow(input));
         }
         restoreMemory.update(open, rows); // it never throws
         openFailure = null;

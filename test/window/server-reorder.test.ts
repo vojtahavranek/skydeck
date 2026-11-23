@@ -5,6 +5,8 @@
 // while the keepers run; a closed terminal's moved slot does not come back; a terminal opened
 // around a move never shares a slot. In the test process (A19) on realTestPlatform.
 import assert from 'node:assert/strict';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -13,8 +15,10 @@ import { parseRememberedOrder } from '../../src/sessions/restore-order.ts';
 import { readOpenOrder, writeOpenOrder } from '../../src/window/open-order.ts';
 import type { ListMessage } from '../../src/window/protocol.ts';
 import { REORDER_REFUSALS } from '../../src/window/view/slot-moves.ts';
-import { S1, S2, S3 } from '../helpers/platform.ts';
-import { until } from '../helpers/keeper.ts';
+import { isoFromNs } from '../../src/platform/time.ts';
+import { BOOT_A, S1, S2, S3 } from '../helpers/platform.ts';
+import { procStartOf, sleep, until } from '../helpers/keeper.ts';
+import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
 import { connectTestPage, serverSandbox } from '../helpers/window.ts';
 import type { ServerSandbox, TestPage, TestServer } from '../helpers/window.ts';
 
@@ -382,6 +386,48 @@ describe("Open's kept order on the server (F42)", () => {
       (offered.sections.find((section) => section.name === 'open')?.rows ?? []).map(name),
       [S3, 'next', S2],
     );
+  });
+
+  test('a place held across refreshes: the process went on with a session not listed yet, and the kept order keeps the old one', async (t) => {
+    // The process is this test's own (alive, on BOOT_A as the servers' /proc says): it held S1,
+    // then went on with S4 after `/clear`. S4's transcript is not of the command line, so it is
+    // not listed: no row takes S1's place, which is held.
+    const d = serverSandbox(t, { bootId: BOOT_A });
+    d.resumable(S1);
+    const folder = join(d.s.claudeHome, 'projects', 'project');
+    mkdirSync(folder, { recursive: true });
+    const now = d.platform.clock.nowNs();
+    const line = {
+      type: 'user',
+      sessionId: S4,
+      timestamp: isoFromNs(now - 5_000_000_000n),
+      cwd: join(d.s.home, 'project'),
+      entrypoint: 'sdk-ts',
+    };
+    writeFileSync(join(folder, `${S4}.jsonl`), `${JSON.stringify(line)}\n`);
+    const pid = process.pid;
+    const procStart = procStartOf(pid);
+    assert.ok(procStart !== null);
+    const events = [
+      { session: S1, source: 'startup', atNs: now - 10_000_000_000n },
+      { session: S4, source: 'clear', atNs: now - 5_000_000_000n },
+    ];
+    for (const [at, one] of events.entries()) {
+      const fields = {
+        event: 'SessionStart' as const,
+        timeNs: one.atNs,
+        pid,
+        procStart,
+        input: hookInput('SessionStart', one.session, { source: one.source }),
+      };
+      writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, at + 1)), spoolText(fields));
+    }
+    writeOpenOrder(d.deck.store, [S1]);
+    await d.start();
+    await until(() => d.deck.store.linksTo(S4).length > 0, 'the clear link ingested', 10_000);
+    // Several refreshes (one every two seconds): S1 keeps its place in the kept order.
+    await sleep(6_000);
+    assert.deepEqual(readOpenOrder(d.deck.store), [S1]);
   });
 
   test('a store locked during a refresh: the freeze is logged once, the refresh does not fail, the next one writes', async (t) => {

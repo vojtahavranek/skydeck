@@ -9,7 +9,7 @@ import type { DerivedSession, Holder, LastHolding, Mark } from '../../../src/ses
 import type { EndDetail, SessionMeta } from '../../../src/store/types.ts';
 import type { TerminalInfo } from '../../../src/window/hub.ts';
 import type { RowPayload } from '../../../src/window/protocol.ts';
-import { buildListMessage, heldPlaces, openRows } from '../../../src/window/view/build.ts';
+import { buildListMessage, heldPlaces, keptNow, openRows } from '../../../src/window/view/build.ts';
 import type { ViewInput } from '../../../src/window/view/build.ts';
 import { frozenOrder, openSequence, withPutBack } from '../../../src/window/view/open-sequence.ts';
 import type { SequenceEntry } from '../../../src/window/view/open-sequence.ts';
@@ -170,12 +170,7 @@ function drawn(input: Input): number[] {
 
 /** What the server's freeze keeps for `input` (its `openOrder` the kept order): numbers. */
 function frozen(input: Input): number[] {
-  const kept = input.openOrder ?? [];
-  return frozenOrder(
-    kept,
-    openRows(input).map((row) => row.id),
-    heldPlaces(input),
-  ).map(nOf);
+  return keptNow(input).map(nOf);
 }
 
 function nineAnd(extra: readonly Spec[]): Spec[] {
@@ -452,6 +447,28 @@ describe('F42: the freeze — a row keeps the place it was first drawn at', () =
     assert.deepEqual(drawn(opened), [...keptBefore, 11]);
     const kept = frozen(opened);
     assert.deepEqual(drawn(world(nineAnd([e, t11]), kept)), [1, 2, 3, 4, 5, 6, 7, 8, 9, 20, 11]);
+  });
+
+  test('keptNow is frozenOrder over Open drawn with done ones shown and the held places', () => {
+    const input = world(
+      [
+        { n: 1, slot: 1 },
+        { n: 2, left: { pid: 9002, detail: 'clear' } },
+        { n: 3, elsewhere: 'other', emptyCopy: true },
+        { n: 4, slot: 2 },
+      ],
+      [1, 2, 3, 4],
+    );
+    assert.deepEqual(
+      keptNow(input),
+      frozenOrder(
+        input.openOrder ?? [],
+        openRows(input, true).map((row) => row.id),
+        heldPlaces(input),
+      ),
+    );
+    // The held session 2 is put back after 1; the copy only Show done draws is kept too.
+    assert.deepEqual(keptNow(input).map(nOf), [1, 2, 3, 4]);
   });
 
   test('the kept order ends: Open empty and nothing held → []; Open empty and a place held → [it]', () => {
