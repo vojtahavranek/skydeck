@@ -37,7 +37,7 @@ import {
   searchable,
   searchWords,
 } from './search/filter.ts';
-import { frozenOrder, openSequence } from './open-sequence.ts';
+import { frozenOrder, NO_HELD_PLACES, openSequence } from './open-sequence.ts';
 import type { HeldPlaces, SequenceEntry } from './open-sequence.ts';
 import { stackRows } from './search/stacks.ts';
 import { switcherPayload } from './search/switcher.ts';
@@ -311,7 +311,7 @@ function heldIn(
   kept: readonly string[],
   today: readonly Entry[],
 ): HeldPlaces {
-  if (kept.length === 0) return { held: [], takes: new Map() };
+  if (kept.length === 0) return NO_HELD_PLACES;
   const under = new Set(today.map((entry) => entry.row.id));
   const keptSet = new Set(kept);
   const byId = new Map(rows.map((row) => [row.id, row]));
@@ -376,7 +376,7 @@ function sequenceEntry(entry: Entry): SequenceEntry {
  */
 export function heldPlaces(input: Omit<ViewInput, 'view' | 'selected'>): HeldPlaces {
   const kept = input.openOrder ?? [];
-  if (kept.length === 0) return { held: [], takes: new Map() };
+  if (kept.length === 0) return NO_HELD_PLACES;
   const { bySession, candidates } = candidatesOf(input);
   const today: Entry[] = [];
   for (const row of candidates) {

@@ -139,16 +139,17 @@ describe('createOpenOrder', () => {
     assert.equal(store.writes, 1);
   });
 
-  test('an empty order whose removal failed is removed at the next freeze', () => {
+  test('an empty order whose removal failed: only the removal is written at the next freeze, also when a session opened meanwhile', () => {
     const store = kv({ window_open_order: JSON.stringify([S1]) });
     const order = createOpenOrder({ store, log: () => {}, stopping: () => false });
     store.failWith = busyError();
     order.freeze([]);
     assert.equal(order.keeps(), true);
     store.failWith = null;
-    order.freeze([]);
+    order.freeze([S2]);
     assert.equal(store.values.has(OPEN_ORDER_KEY), false);
     assert.equal(order.keeps(), false);
+    assert.deepEqual(order.ids(), []);
   });
 
   test('nothing once the stop began', () => {

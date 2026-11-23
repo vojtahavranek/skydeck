@@ -70,7 +70,8 @@ export interface OpenOrder {
    * The freeze after a refresh that worked: holds `next` and writes it when it differs from the
    * held order (an empty one removes the entry: the kept order ends). A write that fails is logged
    * once by kind, the memory keeps `next`, and the write is tried again at the next freeze, also an
-   * unchanged one. Nothing while nothing is kept, or once `stopping()`. Never throws.
+   * unchanged one. Nothing while nothing is kept (but the removal of the entry, when that write
+   * failed), or once `stopping()`. Never throws.
    */
   freeze(next: readonly string[]): void;
 }
@@ -95,8 +96,16 @@ export function createOpenOrder(deps: {
     },
     freeze(next) {
       try {
-        // An empty order whose write failed is still to be written (the entry removed).
-        if (deps.stopping() || (held.length === 0 && !dirty)) return;
+        if (deps.stopping()) return;
+        if (held.length === 0) {
+          // The kept order ended: only its removal, when that write failed, is written again; no
+          // order is kept until a move adopts one.
+          if (!dirty) return;
+          writeOpenOrder(deps.store, []);
+          dirty = false;
+          failure = null;
+          return;
+        }
         if (same(held, next) && !dirty) return;
         held = [...next];
         dirty = true;
