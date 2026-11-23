@@ -13,15 +13,17 @@
 //
 // The files. icon-16, icon-32, icon-48, icon-192 and icon-512 (SIZES) are the picture on a
 // transparent square: no tile, no crop, the picture centred, its longer side filling the square
-// but for MARGIN of the side on each side. favicon.ico holds an image for every size a panel shows
-// the icon at (IN_ICO): Windows' taskbar shows 24, 30 and 36 pixels at a display scale of 100, 125
-// and 150 %, the title bar 16, 20 and 24, and an icon of a size the file does not hold is a
-// neighbour resized, which blurs it. Each image is drawn from the picture for its size (the 16, 32
-// and 48 pixel ones are the PNG files' bytes), never resized from another. The two maskable ones
-// (MASKABLE) are the picture inside the safe zone, a circle of 0.4 of the side, on a full
-// background of BACKGROUND; MASKABLE_SCALE is the largest scale, to three decimals, at which every
-// pixel of the picture that is not transparent lies inside the circle (checked below). No fade:
-// the picture has no tile to hide.
+// but for MARGIN of the side on each side. favicon.ico holds an image for each size the taskbar
+// and a title bar show at most display scales (IN_ICO): Windows' taskbar shows 24 pixels times the
+// scale (24, 30, 36 and 48 at 100, 125, 150 and 200 %), a title bar 16 times it (16, 20, 24, 32,
+// 36 and 40 at 100, 125, 150, 200, 225 and 250 %). An icon of a size the file does not hold is a
+// neighbour resized, which blurs it: so it still is at 175 % (the taskbar's 42, the title bar's
+// 28) and on the taskbar from 225 % up (54, 60). Each image is drawn from the picture for its size
+// (the 16, 32 and 48 pixel ones are the PNG files' bytes), never resized from another. The two
+// maskable ones (MASKABLE) are the picture inside the safe zone, a circle of 0.4 of the side, on a
+// full background of BACKGROUND; MASKABLE_SCALE is the largest scale, to three decimals, at which
+// every pixel of the picture that is not transparent lies inside the circle (checked below). No
+// fade: the picture has no tile to hide.
 //
 // Bolder lines below 24 pixels. Reduced as it is, the cloud's line (LINE, 95 picture pixels) is
 // 1.4 pixels wide at 16 and the sign's stroke (STROKE, 76) 1.1: faint and blurred. So for a size
@@ -63,7 +65,8 @@ import type { Browser, Page } from 'playwright';
 export const SOURCE = 'scripts/icons/skydeck-source.png';
 /** The sizes drawn on a transparent background, as PNG files. */
 export const SIZES = [16, 32, 48, 192, 512];
-/** The sizes of favicon.ico's images: every size a panel shows the icon at. */
+/** The sizes of favicon.ico's images: those the taskbar and a title bar show at most display
+ *  scales (above), and 64. */
 export const IN_ICO = [16, 20, 24, 30, 32, 36, 40, 48, 64];
 /** The maskable ones: the picture inside the safe zone, on the full background. */
 export const MASKABLE = [192, 512];

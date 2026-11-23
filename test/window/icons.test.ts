@@ -44,9 +44,9 @@ const ICONS = 'web/icons';
 const TRANSPARENT = [16, 32, 48, 192, 512].map((size) => ({ file: `icon-${size}.png`, size }));
 const MASKABLE = [192, 512].map((size) => ({ file: `icon-${size}-maskable.png`, size }));
 const PNGS = [...TRANSPARENT, ...MASKABLE];
-/** The images of favicon.ico: one for every size a panel of Windows or Edge shows the icon at
- *  (the taskbar at a display scale of 100, 125 and 150 % shows 24, 30 and 36 pixels; the title
- *  bar 16, 20 and 24), each drawn for its size. */
+/** The images of favicon.ico, each drawn for its size: the sizes the taskbar shows at a display
+ *  scale of 100, 125, 150 and 200 % (24, 30, 36 and 48 pixels) and a title bar from 100 to 250 %
+ *  but 175 % (16, 20, 24, 32, 36 and 40), and 64. */
 const IN_ICO = [16, 20, 24, 30, 32, 36, 40, 48, 64];
 
 /** The picture: where it lives, its size in bytes and its sha256. Every file is drawn from it. */
@@ -692,6 +692,7 @@ function icoImages(): Array<{
   planes: number;
   bits: number;
   offset: number;
+  length: number;
   png: Buffer;
 }> {
   const ico = read(`${ICONS}/favicon.ico`);
@@ -708,6 +709,7 @@ function icoImages(): Array<{
       planes: entry.readUInt16LE(4),
       bits: entry.readUInt16LE(6),
       offset,
+      length,
       png: ico.subarray(offset, offset + length),
     };
   });
@@ -945,9 +947,16 @@ describe('the PNG files', () => {
     }
   });
 
-  test('the five are the picture on a transparent square: no tile; the corners, and every pixel the picture does not cover, fully transparent', () => {
-    for (const { file, size } of TRANSPARENT) {
-      const png = decodePng(read(`${ICONS}/${file}`));
+  test('the five, and the nine images of favicon.ico, are the picture on a transparent square: no tile; the corners, and every pixel the picture does not cover, fully transparent', () => {
+    const transparent = [
+      ...TRANSPARENT.map(({ file, size }) => ({
+        file,
+        size,
+        png: decodePng(read(`${ICONS}/${file}`)),
+      })),
+      ...IN_ICO.map((size) => ({ file: `favicon.ico, ${size} pixels`, size, png: frame(size) })),
+    ];
+    for (const { file, size, png } of transparent) {
       const { covered } = drawingOf(size, false);
       assert.deepEqual(corners(png), [0, 0, 0, 0], file);
       let outside = 0;
@@ -1022,8 +1031,12 @@ describe('the PNG files', () => {
   test('every PNG and every image of favicon.ico is the picture drawn for its size: the same pixels as a drawing written again here (bolder at 16 and 20)', () => {
     // The script draws in Chromium, `drawingOf` in Node. Only rounding and the premultiplying of
     // the canvas differ: compared premultiplied, alpha and each channel within 3 of 255 (the worst
-    // seen is 2.0). An image resized from the one of another size is 59 to 157 steps off, and a
-    // 16 or 20 pixel one not made bolder 79 to 127.
+    // seen is 2.0). An image resized from the one of another size at a ratio that is not whole
+    // (30 from 32, 36 from 40, 48 from 64, 20 from 16 and seven more pairs tried) is 59 to 157
+    // steps off, and a 16 or 20 pixel one not made bolder 79 to 127. At a whole ratio (24 from 48
+    // halved) an area average of the area average is the area average: the same drawing, which
+    // this bound cannot tell apart; that every image is drawn from the picture is the script's
+    // (each of its jobs reduces the picture).
     const drawn: Array<{ name: string; png: Png; size: number; maskable: boolean }> = [
       ...PNGS.map(({ file, size }) => ({
         name: file,
@@ -1071,7 +1084,7 @@ test('favicon.ico: a directory of nine images, 16, 20, 24, 30, 32, 36, 40, 48 an
   IN_ICO.forEach((size, i) => {
     const image = images[i] ?? assert.fail(`image ${i}`);
     assert.deepEqual(
-      { ...image, png: null, offset: null },
+      { ...image, png: null, offset: null, length: null },
       {
         width: size,
         height: size,
@@ -1081,10 +1094,13 @@ test('favicon.ico: a directory of nine images, 16, 20, 24, 30, 32, 36, 40, 48 an
         bits: 32,
         png: null,
         offset: null,
+        length: null,
       },
       `the entry of ${size} pixels`,
     );
     assert.equal(image.offset, end, `image ${size} follows the one before`);
+    assert.ok(image.offset + image.length <= ico.length, `image ${size} ends inside the file`);
+    assert.equal(image.png.length, image.length, `image ${size}: the length its entry gives`);
     const png = decodePng(image.png);
     assert.equal(png.width, size, `image ${size}: its width`);
     assert.equal(png.height, size, `image ${size}: its height`);
@@ -1092,7 +1108,7 @@ test('favicon.ico: a directory of nine images, 16, 20, 24, 30, 32, 36, 40, 48 an
     if (TRANSPARENT.some((t) => t.size === size)) {
       assert.deepEqual(image.png, read(`${ICONS}/icon-${size}.png`), `image ${size} is the file`);
     }
-    end = image.offset + image.png.length;
+    end = image.offset + image.length;
   });
   assert.equal(ico.length, end, 'nothing after the last image');
 });
