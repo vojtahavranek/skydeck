@@ -739,6 +739,7 @@ test('F37, F42, a property over generated Opens: after a move (also after earlie
   let moved = 0;
   let twinsRefused = 0;
   let slotlessMoved = 0;
+  let groupedHidden = 0;
   for (let seed = 1; seed <= 1000; seed += 1) {
     const random = generator(seed);
     const pick = <T>(items: readonly T[]): T => {
@@ -750,9 +751,10 @@ test('F37, F42, a property over generated Opens: after a move (also after earlie
     const specs: Spec[] = [];
     const count = 1 + Math.floor(random() * 14);
     for (let n = 1; n <= count; n += 1) {
-      // Group texts a title can carry too: the copies below are grouped by their title, so that
-      // they stay copies the list hides (review of F42).
-      const group = pick(['', '', 'G-1', 'H-1', 'K-1']);
+      // Group texts a title can carry too (the default group pattern: two characters or more,
+      // a dash, digits): the copies below are grouped by their title, so that they stay copies
+      // the list hides (review of F42).
+      const group = pick(['', '', 'GG-1', 'HH-1', 'KK-1']);
       const kind = pick([
         'slot',
         'slot',
@@ -805,6 +807,9 @@ test('F37, F42, a property over generated Opens: after a move (also after earlie
     const showDone = pick([true, false]);
     const before = openRows(input, showDone);
     const beforeAll = openRows(input, true);
+    // A copy the list hides without Show done, in a block with another row: the group rule's case.
+    const visibleIds = new Set(openRows(input, false).map((row) => row.id));
+    if (beforeAll.some((row) => !visibleIds.has(row.id) && row.stack !== null)) groupedHidden += 1;
     const chosen = pick(specs);
     const direction = pick<ReorderDirection>(['up', 'down']);
     const intended = reorderedRows(before, sid(chosen.n), direction);
@@ -867,5 +872,6 @@ test('F37, F42, a property over generated Opens: after a move (also after earlie
   }
   assert.ok(moved > 300, `only ${moved} of the generated moves were made`);
   assert.ok(slotlessMoved > 100, `only ${slotlessMoved} moves of a row without a number`);
+  assert.ok(groupedHidden > 50, `only ${groupedHidden} worlds with a hidden copy in a block`);
   assert.ok(twinsRefused > 0, 'the generator met a move that two terminals of a session refuse');
 });
