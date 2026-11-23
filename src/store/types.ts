@@ -202,6 +202,10 @@ export type KvKey =
   // The slots the sessions last had in the window, per boot (the newest two): a restore's order
   // (design 7.8, F37). A JSON array of { bootId, sessions: { <session id>: <slot> } }.
   | 'window_restore_order'
+  // Open's kept order (S2 12.1, F42): a JSON array of session ids, absent until the first move;
+  // written at a move and at every refresh once it exists, with the places held for a process's
+  // next session after `/clear`.
+  | 'window_open_order'
   // A resume lock (design 7.6, D16): the decimal time in ns it was taken, then `:<id>` of the
   // session's latest event at that moment (0 when it had none; a bare time is a lock an earlier
   // version wrote); one per session id.

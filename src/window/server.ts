@@ -79,13 +79,15 @@ import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
 import { readMovedSlots, writeMovedSlots } from './moved-slots.ts';
 import { createReorder } from './reorder.ts';
+import { createOpenOrder } from './open-order.ts';
 import { createSlotMemory } from './slot-memory.ts';
 import { createRegistry } from './terminals.ts';
 import type { Registry } from './terminals.ts';
 import { createTick } from './tick.ts';
 import { createUpdates } from './updates.ts';
 import type { Tick } from './tick.ts';
-import { buildListMessage } from './view/build.ts';
+import { buildListMessage, heldPlaces, openRows } from './view/build.ts';
+import { frozenOrder } from './view/open-sequence.ts';
 import { restoreOffer } from './view/search/switcher.ts';
 import { windowTerminal } from './window-terminal.ts';
 import { loadXterm } from './xterm.ts';
@@ -215,6 +217,8 @@ function attentionParts(deps: {
   pages: () => Pick<Pages, 'notify' | 'pushList'>;
   log: (line: string) => void;
   storeNewer: (reason: string) => void;
+  /** F42: Open's kept order (open-order.ts), so that the notifier reads Open as the pages do. */
+  openOrder: () => readonly string[];
 }): AttentionParts {
   const { deck, hub, log } = deps;
   const seen = createSeen(deck.platform.clock);
@@ -237,6 +241,7 @@ function attentionParts(deps: {
       selected: null,
       nowNs: deck.platform.clock.nowNs(),
       attention: attention.facts(),
+      openOrder: deps.openOrder(),
     });
     const rows = new Map(message.sections.flatMap((section) => section.rows).map((r) => [r.id, r]));
     const needing = new Map<string, { title: string; attention: AttentionPayload }>();
@@ -580,6 +585,12 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       restoreRunning: () => restorer.running(),
       stopping: () => stopBegun,
     });
+    // F42 (S2 12.1): Open's kept order, read before the first list; absent until the first move.
+    const openOrder = createOpenOrder({
+      store: deck.store,
+      log: quietLog,
+      stopping: () => stopBegun,
+    });
     // F37 (design 7.8): the slots each session last had in this boot, a restore's order.
     const slotMemory = createSlotMemory({ store: deck.store, bootId: own.bootId, log: quietLog });
     const reorder = createReorder({
@@ -697,6 +708,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         selected: row === undefined ? null : selectedPayload(deck, row),
         nowNs: clock.nowNs(),
         attention: attending.attention.facts(),
+        openOrder: openOrder.ids(),
       });
       // The sections' rows, and a hidden selection whose header the page shows (E13: it has a
       // terminal of the window), whose pull requests that header shows too (review 2, ruled).
@@ -738,6 +750,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       storeNewer: (reason) => {
         storeNewer(reason);
       },
+      openOrder: () => openOrder.ids(),
     });
     const pages = createPages({
       platform,
@@ -789,6 +802,36 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       log('server: the store was migrated by a newer skydeck; the server stops');
       void stop(reason);
     };
+    let freezeFailure: string | null = null;
+    /**
+     * F42 (S2 12.1): after a refresh that worked, while a kept order exists, it takes Open's drawn
+     * order (done ones shown) with the places held for a process's next session (`frozenOrder`),
+     * so that a row keeps the place it was first drawn at; nothing once the stop began, or while
+     * the tick has no rows. Never throws: a throw here would count as a failed refresh.
+     */
+    const freezeOpen = (): void => {
+      try {
+        if (stopBegun || tick === null) return;
+        const rows = tick.rows();
+        if (rows.length === 0 || !openOrder.keeps()) return;
+        const input = {
+          rows,
+          terminals: created.list(),
+          elsewhere: tick.elsewhere(),
+          nowNs: clock.nowNs(),
+          openOrder: openOrder.ids(),
+        };
+        const open = openRows(input).map((one) => one.id);
+        openOrder.freeze(frozenOrder(input.openOrder, open, heldPlaces(input)));
+        freezeFailure = null;
+      } catch (error) {
+        const kind = failureKind(error);
+        if (freezeFailure !== kind) {
+          freezeFailure = kind;
+          quietLog(`open order: Open's order was not computed (${kind})`);
+        }
+      }
+    };
     const startedTick = createTick({
       deck,
       hub: created,
@@ -801,6 +844,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         pageMark.update(pages.count()); // plan C20; it never throws
         decidePostponed();
         created.flushSlots(); // F37: a write of the moved slots that failed; it never throws
+        freezeOpen(); // F42: Open's kept order takes the order drawn now; it never throws
         slotMemory.update(created.list()); // F37: the restore's order; it never throws
       },
       storeNewer,
