@@ -29,6 +29,7 @@ import type { Frame, KeeperExit, KeeperHello, KeeperSpec, KeeperStarted } from '
 import type { StreamSink, TerminalHub, TerminalInfo, TerminalState } from './hub.ts';
 import { isBusy } from './busy.ts';
 import { claimKeeper } from './keeper-link.ts';
+import { lostProgramMayRun } from './mapping.ts';
 import type { KeeperLink } from './keeper-link.ts';
 import { parsePidLine, pidLineState } from './pidline.ts';
 import type { ThemePayload } from './protocol.ts';
@@ -239,6 +240,8 @@ interface Term {
   metaSlot: number | null;
   /** F43: its program is over and its slot was freed: it never takes one again. */
   slotFreed: boolean;
+  /** F43: stops the watch that frees a lost terminal's slot once its program may no longer run. */
+  lostHold: (() => void) | null;
   hello: KeeperHello | null;
   claim: Claim | null;
   screen: ScreenSide | null;
@@ -408,6 +411,32 @@ export function createRegistry(deps: RegistryDeps): Registry {
     term.info.slot = null;
     if (moved.delete(term.info.id)) saveSlots();
     return had;
+  }
+
+  /**
+   * F43 (S2 7.5, 7.6): a lost keeper's program may still run for a moment (`lostProgramMayRun`, the
+   * one rule: the program its keeper reported, alive by design 5.5 or unreadable, less than 60 s
+   * after the loss), and its terminal keeps its slot meanwhile. Freed at once when the rule does
+   * not hold (no program, or it is gone), else at the first second it no longer does, announced.
+   * The watch ends with the terminal (`forget`) and with the registry (`stopAll`).
+   */
+  function holdLostSlot(term: Term): void {
+    const over = (): boolean => !lostProgramMayRun(term.info, platform.proc, clock.nowNs());
+    if (over()) {
+      freeSlot(term); // announced with the loss
+      return;
+    }
+    const stop = clock.every(RECONNECT_MS, () => {
+      if (term.forgotten || stopped) {
+        stop();
+        return;
+      }
+      if (!over()) return;
+      stop();
+      term.lostHold = null;
+      if (freeSlot(term)) changed();
+    });
+    term.lostHold = stop;
   }
 
   /**
@@ -685,6 +714,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     return {
       metaSlot: meta.slot,
       slotFreed: false,
+      lostHold: null,
       info: {
         id,
         slot: meta.slot,
@@ -1231,6 +1261,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     void term.last.then(() => {
       if (term.forgotten) return;
       term.info.state = 'lost';
+      holdLostSlot(term);
       toAllSinks(term, (sink) => {
         sink.exit(exit, true);
       });
@@ -1427,6 +1458,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
   function forget(term: Term): void {
     term.forgotten = true;
     stopReconnecting(term);
+    term.lostHold?.();
+    term.lostHold = null;
     term.claim?.link.destroy();
     term.claim = null;
     term.screen?.dispose();
@@ -1656,6 +1689,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
       await Promise.all(
         [...terms.values()].map(async (term) => {
           stopReconnecting(term);
+          term.lostHold?.();
+          term.lostHold = null;
           await park(term); // one in progress
           await park(term); // the records since
           const claim = term.claim;
