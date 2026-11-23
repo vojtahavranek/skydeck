@@ -4,7 +4,8 @@
 // the state, Note and Done; the directory, "opened <time> · last active <age>", where the title
 // comes from, the short id and (F16) the flags the session was started with; (F18) the ticket's
 // chip, the window's chip (S2 12.3), the open pull requests and the buttons of the ticket's and
-// the pull-request dialogs; the note's first line —, the resume card, the card of a session
+// the pull-request dialogs; the note's first line —, the resume card (issue #188: with its
+// "Other flags…", the New form's flags line in place of its action line), the card of a session
 // running in another terminal (or, F34, in Claude Code's background), the ended bar, the new form
 // and (F9) the small card of a group whose closed caption is selected in the list. Its interface is contract 2.9's with plan D 2.4's
 // changes. Every server string reaches the DOM through textContent or a tooltip.
@@ -31,7 +32,7 @@
 /** @import { ElsewherePayload, ExitMessage, ResultMessage, RowPayload, SelectedPayload, TerminalPayload } from '../src/window/protocol.ts' */
 /** @import { EditWhat } from './keys.js' */
 /** @import { NewFormDefaults } from './new-form-text.js' */
-import { chipWords } from './favourite-text.js';
+import { chipWords, flagsText as flagsFieldText } from './favourite-text.js';
 import { favouriteControls } from './favourites.js';
 import {
   noteLine,
@@ -61,6 +62,9 @@ import { groupCardText } from './search-text.js';
  *   while none is open; app.js calls it at once with the favourites it has, then at every list
  */
 
+/** Issue #188: the key bar's words for `f` while the right side shows no resume card. */
+export const NO_RESUME_CARD =
+  'this session is not on a resume card: f resumes one with other flags';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const COPIED_MS = 2000;
 /** How often the header's ages are drawn again (A18, as the list's). */
@@ -550,6 +554,12 @@ export function createCards(root, deps) {
    * @type {{ key: string, fill: (...args: any[]) => void, facts: string } | null}
    */
   let shown = null;
+  /**
+   * Issue #188: the shown resume card's "Other flags…" — open it (null, or why not), close it
+   * (whether it was open), whether it is open; null while no resume card is built.
+   * @type {{ open: () => string | null, close: (back: boolean) => boolean, shown: () => boolean } | null}
+   */
+  let flagsCard = null;
 
   /**
    * Shows the card `key`: the one shown when it is the same, else a new one from `build`. Its
@@ -562,6 +572,7 @@ export function createCards(root, deps) {
    */
   function showCard(key, build, args) {
     if (shown === null || shown.key !== key) {
+      flagsCard = null; // a resume card's `build` sets its own
       const made = build();
       card.replaceChildren(...made.parts);
       shown = { key, fill: made.fill, facts: '' };
@@ -626,6 +637,67 @@ export function createCards(root, deps) {
     return { line, value };
   };
 
+  /**
+   * Issue #188: the resume card's "Other flags…" — a form of its own in place of the card's
+   * action line: F15's flags line (the New form's component: the field, the ★, the chips), Start,
+   * the hint and its own result line. The field starts with `text`; `note`, when not null, is a
+   * line above it. Start (Enter in the field, on the ★ or the chips, a click) sends `act resume`
+   * with the field's text as `flags`; a refusal stays in the form's result line, with the field's
+   * text and the keyboard. Esc is app.js's (`closeFlags`).
+   * @param {string} sessionId
+   * @param {string} text
+   * @param {string | null} note
+   */
+  function flagsEditor(sessionId, text, note) {
+    const form = /** @type {HTMLFormElement} */ (element('form', 'card-flags-form'));
+    form.noValidate = true;
+    form.autocomplete = 'off';
+    const start = /** @type {HTMLButtonElement} */ (
+      element('button', 'card-button primary', 'Start')
+    );
+    start.type = 'submit';
+    const actions = element('div', 'card-actions');
+    const hint = element(
+      'span',
+      'card-hint',
+      'resumes in this window with these flags · Esc goes back',
+    );
+    actions.append(start, hint);
+    const lines = element('div', 'card-lines');
+    const { line, flags, favourites } = flagsControls({
+      form,
+      hint,
+      lines,
+      act: deps.act,
+      id: 'card-resume-flags-label',
+      placeholder: 'none: it resumes without flags',
+    });
+    if (note !== null) {
+      form.append(element('div', 'card-warning', note));
+    }
+    form.append(line, favourites.line, actions, lines);
+    flags.value = text;
+    let pending = false;
+    form.addEventListener('keydown', refuseHeldEnter);
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (pending) {
+        return;
+      }
+      pending = true;
+      lines.textContent = 'resuming…';
+      void deps
+        .act({ kind: 'resume', sessionId, flags: flags.value })
+        .then((result) => {
+          lines.textContent = linesOf(result).join('\n');
+        })
+        .finally(() => {
+          pending = false;
+        });
+    });
+    return { form, flags, update: favourites.update };
+  }
+
   /** @param {string} sessionId */
   function buildResume(sessionId) {
     const ended = element('div', 'card-ended');
@@ -645,12 +717,77 @@ export function createCards(root, deps) {
       showResult(lines, result);
     });
     button.dataset['fact'] = '';
+    // Issue #188: beside Resume, the editor of this resume's flags; disabled with Resume.
+    const other = actionButton('Other flags…', '', async () => {
+      openEditor();
+    });
+    other.title = 'Resume it with other flags for claude (f)';
     const actions = element('div', 'card-actions');
     // True whenever it is shown: an expired session's card says it cannot be resumed instead.
     const hint = element('span', 'card-hint', 'opens in this window, in a new terminal');
-    actions.append(button, hint);
+    actions.append(button, other, hint);
+    const host = element('div', 'card-flags-host');
+    /** The open editor, null while the card shows its action line. @type {ReturnType<typeof flagsEditor> | null} */
+    let editor = null;
+    /** The list's `selected` of the last fill: what a plain resume passes on. @type {SelectedPayload | null} */
+    let last = null;
+    /** The last fill found the session expired: nothing resumes it. */
+    let gone = false;
+    /** The editor's toggle is no change of the card's facts: the keyboard stays where it went. */
+    const factsNow = () => {
+      if (shown !== null) {
+        shown.facts = factsOf();
+      }
+    };
+    /** Opens the editor, the keyboard in its field at the end; why not, when it cannot. */
+    const openEditor = () => {
+      if (gone) {
+        return 'its transcript is gone: it cannot be resumed';
+      }
+      if (editor === null) {
+        const recorded = last?.resumeFlags;
+        const words = Array.isArray(recorded) ? recorded : null;
+        editor = flagsEditor(
+          sessionId,
+          words === null ? '' : flagsFieldText(words),
+          words === null
+            ? 'the flags it was started with hold a character this field cannot show; Resume here passes them on as they are'
+            : null,
+        );
+        host.replaceChildren(editor.form);
+        setHidden(actions, true);
+        setHidden(lines, true);
+        factsNow();
+        deps.watchFavourites(editor.update);
+      }
+      const field = editor.flags;
+      field.focus();
+      field.setSelectionRange(field.value.length, field.value.length);
+      return null;
+    };
+    /** Closes the editor (nothing sent); `back`: the keyboard to Other flags…. */
+    const closeEditor = (/** @type {boolean} */ back) => {
+      if (editor === null) {
+        return false;
+      }
+      editor = null;
+      host.replaceChildren();
+      setHidden(actions, false);
+      setHidden(lines, false);
+      factsNow();
+      deps.watchFavourites(null);
+      if (back) {
+        other.focus();
+      }
+      return true;
+    };
+    flagsCard = {
+      open: openEditor,
+      close: closeEditor,
+      shown: () => editor !== null,
+    };
     return {
-      parts: [ended, activity.line, where.line, command.line, warnings, actions, lines],
+      parts: [ended, activity.line, where.line, command.line, warnings, actions, host, lines],
       /**
        * @param {RowPayload} row
        * @param {SelectedPayload | null} selected
@@ -701,9 +838,17 @@ export function createCards(root, deps) {
           warnings.replaceChildren(...warned.map((text) => element('div', 'card-warning', text)));
         }
         button.disabled = expired;
+        other.disabled = expired;
         setHidden(hint, expired);
         if (!pending) {
           setText(lines, resultLines.join('\n'));
+        }
+        last = selected;
+        gone = expired;
+        if (expired) {
+          closeEditor(false); // nothing resumes it any more
+        } else if (editor !== null) {
+          deps.watchFavourites(editor.update); // `hide()` before this call took the listener away
         }
       },
     };
@@ -977,8 +1122,31 @@ export function createCards(root, deps) {
     newForm(defaults) {
       card.dataset['card'] = 'new';
       shown = null; // a form opened again starts from its defaults
+      flagsCard = null;
       card.replaceChildren(newFormOf(defaults, deps));
       setHidden(card, false);
+    },
+    /**
+     * Issue #188: opens "Other flags…" on the shown resume card, the keyboard in its field (as its
+     * button does; the list key `f`). Null when it is open; else why not, for the key bar.
+     * @returns {string | null}
+     */
+    openFlags() {
+      return flagsCard === null || card.hidden ? NO_RESUME_CARD : flagsCard.open();
+    },
+    /**
+     * Issue #188: closes "Other flags…", nothing sent: the card's action line again. `back` (Esc):
+     * the keyboard on `Other flags…`; false (app.js, when the right side shows something else: the
+     * resume card shown again later is the plain one) moves no keyboard. Whether it was open.
+     * @param {boolean} back
+     * @returns {boolean}
+     */
+    closeFlags(back) {
+      return flagsCard?.close(back) ?? false;
+    },
+    /** Issue #188: whether the shown resume card's "Other flags…" is open. */
+    flagsShown() {
+      return !card.hidden && (flagsCard?.shown() ?? false);
     },
     hide() {
       // Hidden, not removed: what had the keyboard in it is given back by app.js.
@@ -987,6 +1155,37 @@ export function createCards(root, deps) {
       deps.watchFavourites(null); // a form that is no longer shown takes no list
     },
   };
+}
+
+/**
+ * F15's flags line (S2 12.6), the one component of the New form and, issue #188, of the resume
+ * card's "Other flags…": the label `Flags for claude`, the field (monospace; its accessible name
+ * the label's words alone, `id`, not the ★'s too), the ★ at its end, and the line of favourite
+ * chips under it (favourites.js), which the caller puts right after `line`. `hint` and `lines` are
+ * the form's hint and result lines (the ★'s Undo and a favourite's refusal go there).
+ * @param {object} parts
+ * @param {HTMLFormElement} parts.form
+ * @param {HTMLElement} parts.hint
+ * @param {HTMLElement} parts.lines
+ * @param {CardsDeps['act']} parts.act
+ * @param {string} parts.id the id of the label's words, unique in the page
+ * @param {string} parts.placeholder
+ * @returns {{ line: HTMLElement, flags: HTMLInputElement, favourites: ReturnType<typeof favouriteControls> }}
+ */
+function flagsControls({ form, hint, lines, act, id, placeholder }) {
+  const flags = /** @type {HTMLInputElement} */ (element('input', 'card-field mono'));
+  flags.name = 'flags';
+  flags.spellcheck = false;
+  flags.placeholder = placeholder;
+  const words = element('span', 'card-label', 'Flags for claude');
+  words.id = id;
+  flags.setAttribute('aria-labelledby', id);
+  const favourites = favouriteControls({ form, flags, hint, lines, act });
+  const withStar = element('span', 'card-flags');
+  withStar.append(flags, favourites.star);
+  const line = element('label', 'card-form-line');
+  line.append(words, withStar);
+  return { line, flags, favourites };
 }
 
 /**
@@ -1054,14 +1253,6 @@ function newFormOf(defaults, deps) {
   if (defaults.group !== null) {
     groupChip(group, defaults.group);
   }
-  const flags = field('flags', 'Flags for claude', '', 'optional, e.g. --model opus');
-  flags.classList.add('mono');
-  // The field's name is its label's words alone, not the ★'s too, which the label also holds.
-  const flagsLabel = flags.closest('label')?.querySelector('.card-label');
-  if (flagsLabel instanceof HTMLElement) {
-    flagsLabel.id = 'card-new-flags-label';
-    flags.setAttribute('aria-labelledby', flagsLabel.id);
-  }
   const start = /** @type {HTMLButtonElement} */ (
     element('button', 'card-button primary', 'Start')
   );
@@ -1071,11 +1262,19 @@ function newFormOf(defaults, deps) {
   actions.append(start, hint);
   const lines = element('div', 'card-lines');
   // F15: the ★ at the end of the flags field, the chips of the favourites on the line under it.
-  const favourites = favouriteControls({ form, flags, hint, lines, act: deps.act });
-  const withStar = element('span', 'card-flags');
-  flags.replaceWith(withStar);
-  withStar.append(flags, favourites.star);
-  form.append(favourites.line, actions, lines);
+  const {
+    line: flagsLine,
+    flags,
+    favourites,
+  } = flagsControls({
+    form,
+    hint,
+    lines,
+    act: deps.act,
+    id: 'card-new-flags-label',
+    placeholder: 'optional, e.g. --model opus',
+  });
+  form.append(flagsLine, favourites.line, actions, lines);
   deps.watchFavourites(favourites.update);
   let pending = false;
   form.addEventListener('keydown', refuseHeldEnter);

@@ -87,7 +87,9 @@ export function tourSteps(mode) {
       title: 'The right side',
       lines: [
         ['The selected session: its terminal, when it runs in this window.'],
-        ['Otherwise its card: what it is about, and the way to resume it here.'],
+        [
+          'Otherwise its card: what it is about, and the way to resume it here, also with other flags.',
+        ],
       ],
     },
     {

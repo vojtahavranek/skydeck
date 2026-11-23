@@ -698,3 +698,22 @@ describe('F40: c, the carry-over bar (S2 12.9)', () => {
     assert.equal(listKey(ev('C', 'KeyC', 'shift')), null);
   });
 });
+
+describe('issue #188: f, the resume card’s Other flags… (S2 12.9)', () => {
+  test('f alone is the key; with Ctrl, Alt, Meta or Shift (F) it is not', () => {
+    assert.deepEqual(listKey(ev('f', 'KeyF')), { kind: 'flags' });
+    assert.equal(listKey(ev('f', 'KeyF', 'ctrl')), null);
+    assert.equal(listKey(ev('f', 'KeyF', 'alt')), null);
+    assert.equal(listKey(ev('f', 'KeyF', 'meta')), null);
+    assert.equal(listKey(ev('F', 'KeyF', 'shift')), null);
+  });
+
+  test('matched by the character typed, not the key: f on another key is f, KeyF typing another letter is not', () => {
+    assert.deepEqual(listKey(ev('f', 'KeyQ')), { kind: 'flags' });
+    assert.equal(listKey(ev('ú', 'KeyF')), null);
+  });
+
+  test('Ctrl+Shift+F stays the find chord', () => {
+    assert.deepEqual(windowChord(ev('F', 'KeyF', 'ctrl', 'shift'), 'list'), { kind: 'find' });
+  });
+});

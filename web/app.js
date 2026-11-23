@@ -66,7 +66,7 @@ import { decodeKey, loadKey, takeToken } from './auth.js';
 import { createBanner } from './banner.js';
 import { createCarryOver } from './carry-over.js';
 import { NOTHING_TO_CARRY } from './carry-over-text.js';
-import { createCards } from './cards.js';
+import { createCards, NO_RESUME_CARD } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
 import { createEndDialog } from './end-dialog.js';
@@ -826,6 +826,8 @@ const KEY_OF = { label: 'l', group: 'g', note: 'n', ticket: 't', pr: 'p' };
 
 /** The fields of an action that S2 8.2.3's limits hold, with their names for a refusal. */
 const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
+  // Issue #188: "Other flags…", held as the new form's flags.
+  resume: [['flags', 'the flags', TEXT_BYTES]],
   new: [
     ['dir', 'the directory', PATH_BYTES],
     ['label', 'the label', TEXT_BYTES],
@@ -1027,7 +1029,12 @@ function act(action) {
         // come up to a second after its answer; a `view` asks for it now (as for EDITS above).
         sendView();
       }
-      if (action.kind === 'resume' && typeof action['sessionId'] === 'string') {
+      // The lines of a plain resume are its card's; "Other flags…" shows its own (#188).
+      if (
+        action.kind === 'resume' &&
+        typeof action['sessionId'] === 'string' &&
+        action['flags'] === undefined
+      ) {
         state.lines.set(
           action['sessionId'],
           result.ok ? [] : result.error === null ? result.lines : [result.error],
@@ -2025,6 +2032,10 @@ function render() {
   dom.rightZone.dataset.pane = pane.kind;
   dom.rightZone.dataset.paneTerm = pane.kind === 'terminal' ? pane.term.id : '';
   terminalView.show(pane.kind === 'terminal' ? pane.term : null);
+  if (pane.kind !== 'resume') {
+    // #188: Other flags… belongs to the resume card it was opened on; shown again, the card is plain.
+    cards.closeFlags(false);
+  }
   cards.hide();
   switch (pane.kind) {
     case 'terminal':
@@ -2490,6 +2501,24 @@ function doListKey(action, event) {
         say(state.selected === null ? 'no session selected' : NOTHING_TO_CARRY);
       }
       return true;
+    case 'flags': {
+      // Issue #188 (S2 12.6, 12.9): the resume card's Other flags…, the keyboard in its field; a
+      // held f acts once and types nothing into it.
+      if (event.repeat) {
+        return true;
+      }
+      if (state.selected === null) {
+        say('no session selected');
+        return true;
+      }
+      const why = state.pane.kind === 'resume' ? cards.openFlags() : NO_RESUME_CARD;
+      if (why === null) {
+        state.openedBy = event.code;
+      } else {
+        say(why);
+      }
+      return true;
+    }
     case 'escape':
       // S2 12.9: Esc clears the filter — the list's, which also clears its field —, then goes
       // back to the terminal; a held Esc does only the first step (Z1, item 6).
@@ -2565,6 +2594,15 @@ function onKeyDown(event) {
   if (updateDialog.shown() && updateDialog.key(event)) {
     return; // F38: Esc and Tab are the dialog's
   }
+  if (
+    event.repeat &&
+    state.openedBy !== '' &&
+    event.code === state.openedBy &&
+    cards.flagsShown()
+  ) {
+    event.preventDefault();
+    return; // #188: a held f that opened Other flags… types nothing into its field
+  }
   const zone = state.zone;
   let handled = false;
   const chord = windowChord(event, zone);
@@ -2598,6 +2636,22 @@ function onKeyDown(event) {
     ) {
       // Esc closes the new form (the page has the keyboard: xterm.js has not).
       closeNew();
+      handled = true;
+    } else if (
+      zone === 'terminal' &&
+      state.pane.kind === 'resume' &&
+      cards.flagsShown() &&
+      event.key === 'Escape' &&
+      !event.isComposing &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey
+    ) {
+      // Issue #188: Esc in Other flags… goes back to the card, nothing sent; a held Esc once.
+      if (!event.repeat) {
+        cards.closeFlags(true);
+      }
       handled = true;
     }
   }
