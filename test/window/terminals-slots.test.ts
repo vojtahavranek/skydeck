@@ -689,3 +689,110 @@ describe('registry: a slot gained and a slot lost (F42)', () => {
     assert.equal(slotOf(r3, late), 1);
   });
 });
+
+// Follow-up F43 (S2 7.6): a number belongs only to a terminal whose program may run. Once the
+// keeper's exit is applied (ended, not started) or a hello says the program exited, the terminal
+// has no slot: the lowest-free rule hands it to the next terminal, its moved entry goes, and no
+// hello, reconnect or restart gives it back.
+describe('registry: the number of a terminal whose program is over (F43)', () => {
+  test('a terminal that ends frees its number at once: nextSlot gives it, the next terminal takes it, the ended one stays listed without one', async (t) => {
+    const box = await registrySandbox(t);
+    const r = box.registry({ persistSlots: store().persist });
+    const a = await open(box, r, 1);
+    const b = await open(box, r, 2);
+    const c = await open(box, r, 3);
+    await ended(r, b);
+    assert.equal(info(r.registry, b).state, 'not-started');
+    assert.equal(slotOf(r, b), null, 'the ended terminal has no number');
+    assert.equal(r.registry.nextSlot(), 2, 'its number is the lowest free one');
+    const d = await open(box, r, r.registry.nextSlot());
+    assert.deepEqual(
+      [a, b, c, d].map((id) => slotOf(r, id)),
+      [1, null, 3, 2],
+      'the others keep theirs; the new one takes 2',
+    );
+    assert.equal(r.registry.list().length, 4, 'the ended terminal is still listed');
+  });
+
+  test("an ended terminal's moved number goes with it, from the store too; the gap stays a gap", async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const r = box.registry({ persistSlots: kept.persist });
+    const a = await open(box, r, 1);
+    const b = await open(box, r, 2);
+    const c = await open(box, r, 3);
+    r.registry.setSlots(
+      new Map([
+        [a, 2],
+        [b, 1],
+      ]),
+    );
+    assert.deepEqual(
+      kept.latest(),
+      new Map([
+        [a, 2],
+        [b, 1],
+      ]),
+    );
+    await ended(r, a);
+    assert.equal(slotOf(r, a), null);
+    assert.deepEqual(kept.latest(), new Map([[b, 1]]), "a's entry is gone, written at its end");
+    assert.deepEqual([slotOf(r, b), slotOf(r, c)], [1, 3], 'nothing is renumbered');
+    assert.equal(r.registry.nextSlot(), 2);
+    const writes = kept.writes.length;
+    assert.equal(r.registry.close(a), 'ok');
+    assert.equal(kept.writes.length, writes, 'the close has nothing left to write');
+  });
+
+  test('a restart over a keeper whose program ended while no server ran: its hello says so, it takes no number and its stored entry goes', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const r1 = box.registry({ persistSlots: kept.persist });
+    // a's keeper ends its program by itself (not started by its deadline) once r1 is gone.
+    const startBy = String(box.tp.platform.clock.nowNs() + 2_000_000_000n);
+    const aSpec = box.spec({ startBy, meta: { ...box.spec().meta, slot: 1 } });
+    await r1.registry.spawn(aSpec);
+    const a = aSpec.id;
+    const b = await open(box, r1, 2);
+    r1.registry.setSlots(
+      new Map([
+        [a, 2],
+        [b, 1],
+      ]),
+    );
+    r1.drop();
+    await sleep(3000);
+    const r2 = box.registry({ movedSlots: kept.latest(), persistSlots: kept.persist });
+    await r2.registry.rediscover();
+    await until(() => info(r2.registry, a).state === 'not-started', "a's exit applied", 10_000);
+    assert.equal(r2.events.hello.find((e) => e.hello.id === a)?.hello.exited !== null, true);
+    assert.deepEqual([slotOf(r2, a), slotOf(r2, b)], [null, 1]);
+    assert.deepEqual(kept.latest(), new Map([[b, 1]]), "a's stored entry is gone");
+    assert.equal(r2.registry.nextSlot(), 2);
+    assert.equal(
+      r2.events.hello.some((e) => e.hello.id === a && e.term.slot !== null),
+      false,
+      'not even at its hello did it hold a number',
+    );
+  });
+
+  test('a terminal ending while others open: never two terminals with one number', async (t) => {
+    const box = await registrySandbox(t);
+    const r = box.registry({ persistSlots: store().persist });
+    const first = await open(box, r, r.registry.nextSlot());
+    const second = await open(box, r, r.registry.nextSlot());
+    r.registry.refuse(first, 'closing it');
+    // Terminals opened while the first one's exit is on its way, and after.
+    const opened: string[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      opened.push(await open(box, r, r.registry.nextSlot()));
+    }
+    await until(() => info(r.registry, first).state === 'not-started', 'the first ended');
+    opened.push(await open(box, r, r.registry.nextSlot()));
+    const slots = r.registry.list().flatMap((term) => (term.slot === null ? [] : [term.slot]));
+    assert.equal(new Set(slots).size, slots.length, `no number twice: ${slots.join(' ')}`);
+    assert.equal(slotOf(r, first), null);
+    assert.equal(slotOf(r, second), 2);
+    assert.equal(slots.length, 6, 'every terminal that may run has a number');
+  });
+});

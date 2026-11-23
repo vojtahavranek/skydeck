@@ -87,9 +87,11 @@ export interface Registry extends TerminalHub {
   start(termId: string): void; // G
   refuse(termId: string, reason: string): void; // N
   /** The lowest free slot 1–9, or null (S2 7.6): not held by a listed terminal, nor moved to a
-   *  keeper still being found (F37: it keeps its place). A slot is held until `close` forgets its
-   *  terminal (ruled), also while the terminal is ended. A terminal is opened with it in its
-   *  keeper's meta; a slot moved later (`setSlots`), or none, wins over the meta's. */
+   *  keeper still being found (F37: it keeps its place). F43: a slot is held while the terminal's
+   *  program may run; it is free once its exit is applied (ended, not started), a hello says it
+   *  exited, or a lost keeper's program may no longer run — the ended terminal stays listed
+   *  without one. A terminal is opened with it in its keeper's meta; a slot moved later
+   *  (`setSlots`), or none, wins over the meta's. */
   nextSlot(): number | null;
   /**
    * F37, F42 (S2 7.6, 12.9): gives listed terminals other slots, all at once; null takes a
@@ -235,6 +237,8 @@ interface Term {
   /** The slot of the keeper's meta (the one it was opened with); `info.slot` differs from it once
    *  moved by hand (F37). */
   metaSlot: number | null;
+  /** F43: its program is over and its slot was freed: it never takes one again. */
+  slotFreed: boolean;
   hello: KeeperHello | null;
   claim: Claim | null;
   screen: ScreenSide | null;
@@ -358,12 +362,17 @@ export function createRegistry(deps: RegistryDeps): Registry {
    * when a move took it), else its meta's; when another terminal holds that one (or it is kept for
    * a keeper being found), the lowest free slot, null only when all nine are held. A slot that
    * differs from what `moved` said is kept in `moved` and written; none, or the meta's, is left out
-   * (so a terminal that found all nine taken gets its meta's back at a later hello). Once stopped
-   * the slot is left as it is.
+   * (so a terminal that found all nine taken gets its meta's back at a later hello). F43: a
+   * terminal whose slot was freed, or whose hello says its program exited (`over`), takes none
+   * (`freeSlot`). Once stopped the slot is left as it is.
    */
-  function slotAtHello(term: Term, metaSlot: number | null): void {
+  function slotAtHello(term: Term, metaSlot: number | null, over: boolean): void {
     term.metaSlot = metaSlot;
     if (stopped) return;
+    if (over || term.slotFreed) {
+      freeSlot(term);
+      return;
+    }
     const id = term.info.id;
     const wanted = moved.has(id) ? (moved.get(id) ?? null) : metaSlot;
     let slot = wanted;
@@ -384,6 +393,23 @@ export function createRegistry(deps: RegistryDeps): Registry {
       saveSlots();
     }
   }
+
+  /**
+   * F43 (S2 7.6): the terminal's program is over, so its slot is free at once and for good: no
+   * slot, none at a later hello (`slotFreed`), and its moved entry gone, written, so that no later
+   * server applies it. No null is written for it: a hello of its keeper says its program exited.
+   * True when the terminal had a slot (the caller announces the change). Once stopped nothing
+   * changes.
+   */
+  function freeSlot(term: Term): boolean {
+    if (stopped) return false;
+    term.slotFreed = true;
+    const had = term.info.slot !== null;
+    term.info.slot = null;
+    if (moved.delete(term.info.id)) saveSlots();
+    return had;
+  }
+
   /**
    * The server ends a claim itself (a frame it refuses, no hello, a stalled tail): logged once
    * while it repeats, and never reconnected to at once as a claim that fell behind is (ruled,
@@ -658,6 +684,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
   function newTerm(id: string, meta: KeeperSpec['meta'], cols: number, rows: number): Term {
     return {
       metaSlot: meta.slot,
+      slotFreed: false,
       info: {
         id,
         slot: meta.slot,
@@ -889,7 +916,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     claim.hello = hello;
     term.hello = hello;
     const info = term.info;
-    slotAtHello(term, hello.meta.slot);
+    slotAtHello(term, hello.meta.slot, hello.exited !== null);
     info.expectedSessionId = hello.meta.sessionId;
     info.kind = hello.meta.kind;
     info.label = hello.meta.label;
@@ -1079,6 +1106,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     void term.last.then(() => {
       if (term.forgotten) return;
       term.info.state = exit.notStarted === null ? 'ended' : 'not-started';
+      freeSlot(term); // F43: the keeper reaped the program; announced with the state below
       // The sinks first, then the announcement: a sink attached inside it has the exit from the
       // state already (shown), and must not get it twice.
       toAllSinks(term, (sink) => {
