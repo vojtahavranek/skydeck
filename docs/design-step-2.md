@@ -3943,8 +3943,9 @@ step: the files are made once from the picture and committed). `index.html` name
 button show it, and whether it is sharp there, is check W3. Low priority: stage E (19).
 
 As built (stage E, plan E14; the picture changed by follow-ups F10, F12 and F14, 2026-11-17 and
-18; since 2026-11-23 one picture on a transparent background, drawn for each size the taskbar and
-a title bar show at most display scales, its lines bolder below 24 pixels):
+18; since 2026-11-23 one picture on a transparent background, drawn for every size the taskbar and
+the title bar show at a scaling of 100 % to 250 % in steps of 25 %, its lines bolder below 24
+pixels):
 
 - **The picture** is one, `scripts/icons/skydeck-source.png`: 1076 × 903 pixels, RGBA, 749,296
   bytes, a cloud drawn as a line with a terminal box in front of it and a white `>_` in the box, in
@@ -3957,22 +3958,22 @@ a title bar show at most display scales, its lines bolder below 24 pixels):
   page's accent colour); from F10 to 2026-11-23 two pictures on a dark navy rounded tile, a
   detailed one for the large files and a simpler one, cropped to its drawing, for the small ones.
   All three are gone.
-- **The files.** `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-192.png` and `icon-512.png`
-  are the picture on a transparent square: no tile and no crop; the picture centred, its longer
-  side filling the square but for 2 % of the side on each side (the drawing is 0.96 of the icon's
-  width and 0.81 of its height). The corners, and every pixel the picture does not cover, are fully
+- **The files.** `icon-16.png`, `icon-32.png`, `icon-48.png`, `icon-192.png` and `icon-512.png` are
+  the picture on a transparent square: no tile and no crop; the picture centred, its longer side
+  filling the square but for 2 % of the side on each side (the drawing is 0.96 of the icon's width
+  and 0.81 of its height). The corners, and every pixel the picture does not cover, are fully
   transparent, so that the taskbar's or the title bar's own colour shows around the drawing.
-  **`favicon.ico` holds an image drawn for each size the taskbar and a title bar show at most
-  display scales**: 16, 20, 24, 30, 32, 36, 40, 48 and 64 pixels. Windows' taskbar shows 24 pixels
-  times the display scale, 24, 30, 36 and 48 at 100, 125, 150 and 200 %; a title bar 16 times it,
-  16, 20, 24, 32, 36 and 40 at 100, 125, 150, 200, 225 and 250 %. An icon of a size the file does
-  not hold is a neighbour resized, which blurs it (the ICO before held 16, 32 and 48 only): that
-  is still so at 175 % (the taskbar's 42 pixels, the title bar's 28) and on the taskbar from 225 %
-  up (54 and 60). Each image is drawn from the picture for its size, never resized from another; the
-  16, 32 and 48 pixel ones are the PNG files' bytes. `index.html` names the nine in its `sizes`. The
-  files are drawn by `scripts/icons.ts` with the page suite's pinned Chromium, headless and in an
-  environment of its own, and committed; no test and no CI step runs the script, and two runs give
-  the same bytes. Nothing is fetched from outside, at build time or at run time.
+  **`favicon.ico` holds an image drawn for every size the taskbar and the title bar show at a
+  scaling of 100 % to 250 % in steps of 25 %**, and 64: thirteen images, 16, 20, 24, 28, 30, 32, 36,
+  40, 42, 48, 54, 60 and 64 pixels. Windows' taskbar shows 24 pixels times the scaling (24, 30, 36,
+  42, 48, 54 and 60), a title bar 16 times it (16, 20, 24, 28, 32, 36 and 40). An icon of a size the
+  file does not hold is a neighbour resized, which blurs it (the ICO before held 16, 32 and 48
+  only), as it still is at another scaling. Each image is drawn from the picture for its size, never
+  resized from another; the 16, 32 and 48 pixel ones are the PNG files' bytes. `index.html` names
+  the thirteen in its `sizes`. The files are drawn by `scripts/icons.ts` with the page suite's
+  pinned Chromium, headless and in an environment of its own, and committed; no test and no CI step
+  runs the script, and two runs give the same bytes. Nothing is fetched from outside, at build time
+  or at run time.
 - **How a size is reduced.** Chromium decodes the picture; for each pixel of an icon the script
   averages the picture's pixels under it, weighted by the area they cover, premultiplied and in
   linear light: a box filter at exactly the icon's pixel pitch, so that no pixel of the picture is
@@ -4016,20 +4017,21 @@ a title bar show at most display scales, its lines bolder below 24 pixels):
   from 48 halved, an area average of the area average is the area average, the same drawing, so
   that each image is drawn from the picture is held by the script, each of whose jobs reduces the
   picture, not by this bound); and
-  checks the ICO's nine entries, the transparency outside the drawing, the line's coverage at 16
+  checks the ICO's thirteen entries, the transparency outside the drawing, the line's coverage at 16
   and 20, and the maskable files' safe zone and background.
 - **Which image a panel takes is not verified.** No test can look at a Windows taskbar, and nobody
-  has looked at these files on a Windows taskbar or title bar: they were judged from enlarged
-  sheets of them on a dark and a light background. Which image of the ICO (or of the manifest)
-  Edge hands to the taskbar and to the title bar for a window started with `--app` is not known.
-  With an image drawn for each size the two show at 100, 125, 150 and 200 %, none should need one
-  resized there; W3 asks whether the icon is sharp in the taskbar at the display's scaling. Edge
+  has looked at these files on a Windows taskbar or title bar: they were judged from enlarged sheets
+  of them on a dark and a light background. Which image of the ICO (or of the manifest) Edge hands
+  to the taskbar and to the title bar for a window started with `--app` is not known. With an image
+  drawn for each size the two show at a scaling of 100 % to 250 % in steps of 25 %, none should need
+  one resized there; W3 asks whether the icon is sharp in the taskbar at the display's scaling. Edge
   may keep the old icon until the window is opened anew.
 - **The manifest and the page** are as before: `web/manifest.webmanifest` holds `name`,
   `short_name`, `display` and the seven PNGs, each `src` under the versioned path; it is served at
   `/manifest.webmanifest` with the build put in, and the ICO at `/favicon.ico` (8.2.1). `index.html`
-  names the favicon by its versioned path (`/assets/<build>/web/icons/favicon.ico`, with the nine
-  sizes, `sizes="16x16 20x20 24x24 30x30 32x32 36x36 40x40 48x48 64x64"`) and the manifest by
+  names the favicon by its versioned path (`/assets/<build>/web/icons/favicon.ico`, with the
+  thirteen sizes, `sizes="16x16 20x20 24x24 28x28 30x30 32x32 36x36 40x40 42x42 48x48 54x54 60x60
+  64x64"`) and the manifest by
   `/manifest.webmanifest`; the policy's `img-src 'self'` and `manifest-src 'self'` let the page load
   both. The manifest has no `start_url`, `scope` or `id` (ruled, plan E task 94): the page is not
   meant to be installed as an app — Chromium counts it as not installable without `start_url`, and

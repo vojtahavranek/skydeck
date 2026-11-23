@@ -1830,22 +1830,22 @@ the short id).
    above the page): skydeck's icon, not Edge's. Expected at both: a blue-to-violet cloud drawn as
    a line, a terminal box in front of it and a white `>_` in the box, and nothing behind the
    drawing (no square or tile: around it the icon is transparent, so the taskbar's own colour
-   shows). The page's `favicon.ico` holds an image drawn for each of 16, 20, 24, 30, 32, 36, 40, 48
-   and 64 pixels, the lines bolder at 16 and 20: at a display scale of 100, 125, 150 or 200 %
-   neither place should need one resized. At 175 % (the taskbar's 42 pixels, the title bar's 28)
-   and on the taskbar from 225 % up (54 pixels at 225 %, 60 at 250 %) the size is not in the file:
-   there a neighbour is resized, and a soft icon is expected; write it down as such.
-   Expected, by place:
+   shows). The page's `favicon.ico` holds an image drawn for every size the taskbar and the title
+   bar show at a scaling of 100 % to 250 % in steps of 25 % (16, 20, 24, 28, 30, 32, 36, 40, 42, 48,
+   54, 60 and 64 pixels), the lines bolder at 16 and 20: at those scalings neither place should need
+   one resized. At another scaling the size is not in the file: there a neighbour is resized, and a
+   soft icon is expected; write it down as such. Expected, by place:
    - the **taskbar button**, the one that matters most: **the icon is sharp in the taskbar at this
      display's scaling**: the cloud's line, the box and the `>_` have crisp edges, not the soft
      look of an icon stretched from a smaller one, and the drawing is about as large as the icons
      of the buttons beside it. Look up the scaling (Windows' Settings, System, Display, "Scale")
      and write it down with what you see. Which of the page's images Edge hands to the taskbar is
-     not known (at 100 % the taskbar shows 24 pixels, at 125 % 30, at 150 % 36, at 200 % 48): when
-     the icon is soft at your scaling, write down how (blurred, or sharp but small, or large and
-     soft);
-   - the **title bar**, which matters less: the same drawing, smaller (16 pixels at 100 %, 20 at
-     125 %, 24 at 150 %), its lines bolder at the two smallest sizes; the `>_` may only just read.
+     not known (the taskbar shows 24 pixels times the scaling: 24 at 100 %, 30 at 125 %, 36 at
+     150 %, 42 at 175 %, 48 at 200 %): when the icon is soft at your scaling, write down how
+     (blurred, or sharp but small, or large and soft);
+   - the **title bar**, which matters less: the same drawing, smaller (16 pixels times the scaling:
+     16 at 100 %, 20 at 125 %, 24 at 150 %), its lines bolder at the two smallest sizes; the `>_`
+     may only just read.
 
    The taskbar's look was NOT tried in Edge when the files were made, and nobody has looked at
    them on a Windows taskbar or title bar: they were judged from enlarged sheets of them on a dark

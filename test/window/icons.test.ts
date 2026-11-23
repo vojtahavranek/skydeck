@@ -44,10 +44,10 @@ const ICONS = 'web/icons';
 const TRANSPARENT = [16, 32, 48, 192, 512].map((size) => ({ file: `icon-${size}.png`, size }));
 const MASKABLE = [192, 512].map((size) => ({ file: `icon-${size}-maskable.png`, size }));
 const PNGS = [...TRANSPARENT, ...MASKABLE];
-/** The images of favicon.ico, each drawn for its size: the sizes the taskbar shows at a display
- *  scale of 100, 125, 150 and 200 % (24, 30, 36 and 48 pixels) and a title bar from 100 to 250 %
- *  but 175 % (16, 20, 24, 32, 36 and 40), and 64. */
-const IN_ICO = [16, 20, 24, 30, 32, 36, 40, 48, 64];
+/** The images of favicon.ico, each drawn for its size: every size the taskbar (24 pixels times the
+ *  scaling) and the title bar (16 times it) show at a scaling of 100 % to 250 % in steps of 25 %,
+ *  and 64. */
+const IN_ICO = [16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 54, 60, 64];
 
 /** The picture: where it lives, its size in bytes and its sha256. Every file is drawn from it. */
 const PICTURE = {
@@ -947,7 +947,7 @@ describe('the PNG files', () => {
     }
   });
 
-  test('the five, and the nine images of favicon.ico, are the picture on a transparent square: no tile; the corners, and every pixel the picture does not cover, fully transparent', () => {
+  test('the five, and the thirteen images of favicon.ico, are the picture on a transparent square: no tile; the corners, and every pixel the picture does not cover, fully transparent', () => {
     const transparent = [
       ...TRANSPARENT.map(({ file, size }) => ({
         file,
@@ -1073,7 +1073,7 @@ describe('the PNG files', () => {
   });
 });
 
-test('favicon.ico: a directory of nine images, 16, 20, 24, 30, 32, 36, 40, 48 and 64 pixels, each a PNG of its size; the 16, 32 and 48 pixel ones are the PNG files', () => {
+test('favicon.ico: a directory of thirteen images, 16, 20, 24, 28, 30, 32, 36, 40, 42, 48, 54, 60 and 64 pixels, each a PNG of its size; the 16, 32 and 48 pixel ones are the PNG files', () => {
   const ico = read(`${ICONS}/favicon.ico`);
 
   assert.equal(ico.readUInt16LE(0), 0, 'reserved');
@@ -1114,7 +1114,7 @@ test('favicon.ico: a directory of nine images, 16, 20, 24, 30, 32, 36, 40, 48 an
 });
 
 describe('scripts/icons.ts and what it wrote', () => {
-  test('the script draws the sizes the manifest names, puts the nine of IN_ICO into favicon.ico, and index.html names those nine', () => {
+  test('the script draws the sizes the manifest names, puts the thirteen of IN_ICO into favicon.ico, and index.html names those thirteen', () => {
     assert.deepEqual(
       SCRIPT_SIZES,
       TRANSPARENT.map((t) => t.size),
