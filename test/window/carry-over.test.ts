@@ -567,12 +567,14 @@ describe('carry: the review of 4035aed', () => {
   test('a stored done tick is kept when done is not offered', (t) => {
     const w = world(t);
     cleared(w, { label: 'work', doneAtNs: T0 });
-    w.deck.store.setKv(TICKS_KEY, JSON.stringify({ done: false }));
+    w.deck.store.setKv(TICKS_KEY, JSON.stringify({ done: true }));
     assert.equal(offerOf(w)?.done, null);
 
     assert.deepEqual(w.carry.carry(act(w, { fields: ['label'], done: false })), { ok: true });
 
-    assert.equal(JSON.parse(w.deck.store.getKv(TICKS_KEY) ?? 'null').done, false);
+    // The act sends done false (it is not offered); the stored tick stays the one of the last
+    // carry over that offered it.
+    assert.equal(JSON.parse(w.deck.store.getKv(TICKS_KEY) ?? 'null').done, true);
   });
 
   test('a carried note removes the note file a failed editor kept for the new session', (t) => {
