@@ -134,3 +134,58 @@ export function blockInfo(list, section, group) {
     needYou: rows.filter((row) => row.attention !== null).length,
   };
 }
+
+/**
+ * Follow-up F40 (S2 12.9, "The selection follows its terminal"): the session the selection
+ * follows to, or null. When the list drawn until now (`before`) had the selected session shown by
+ * a terminal T — its row's `terminal` (a hidden selection without a row: a terminal that holds
+ * it), whose `sessionId` was the selection — and in the list that came (`list`) T is still there,
+ * not ended, shows ANOTHER session, and the selected session's row no longer has T, that other
+ * session (after `/clear`, an in-session `/resume` or a fork inside T: the page cannot tell them
+ * apart). Pure.
+ * @param {ListMessage | null} before
+ * @param {ListMessage} list
+ * @param {string | null} selected
+ * @returns {string | null}
+ */
+export function movedWith(before, list, selected) {
+  if (before === null || selected === null) {
+    return null;
+  }
+  const row = sessionRow(before, selected);
+  const termId =
+    row !== null
+      ? row.terminal
+      : (before.terminals.find((term) => term.sessionId === selected)?.id ?? null);
+  const was = termId === null ? undefined : before.terminals.find((term) => term.id === termId);
+  if (was === undefined || was.sessionId !== selected) {
+    return null;
+  }
+  const now = list.terminals.find((term) => term.id === was.id);
+  if (now === undefined || isEnded(now) || now.sessionId === null || now.sessionId === selected) {
+    return null;
+  }
+  if (sessionRow(list, selected)?.terminal === now.id) {
+    return null;
+  }
+  return now.sessionId;
+}
+
+/**
+ * F40: the most-recently-used order after the selection followed its terminal from `from` to
+ * `to`: `to` takes `from`'s place (any other `to` dropped), or comes first when `from` is not
+ * there — so that the "previous" chord goes to the session the user came from, not to `from`.
+ * @param {readonly string[]} mru
+ * @param {string} from
+ * @param {string} to
+ * @returns {string[]}
+ */
+export function movedMru(mru, from, to) {
+  if (from === to) {
+    return [...mru];
+  }
+  if (!mru.includes(from)) {
+    return [to, ...mru.filter((id) => id !== to)];
+  }
+  return mru.filter((id) => id !== to).map((id) => (id === from ? to : id));
+}

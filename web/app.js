@@ -68,7 +68,7 @@ import { createList } from './list.js';
 import { holdsNoSession } from './list-text.js';
 import { newFormDefaults } from './new-form-text.js';
 import { createNotifications } from './notify.js';
-import { blockInfo, paneFor, sessionRow } from './pane.js';
+import { blockInfo, movedMru, movedWith, paneFor, sessionRow } from './pane.js';
 import { cutWords } from './search-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
@@ -1731,8 +1731,18 @@ function welcomed(welcome, change, lostSince) {
 /** @param {ServerMessage} message */
 function received(message) {
   switch (message.t) {
-    case 'list':
+    case 'list': {
+      const before = state.list;
       state.list = message;
+      // F40 (S2 12.9): the selection follows the terminal that showed it to its new session (after
+      // `/clear`), so that the same terminal stays shown under the new session's header.
+      const followed = state.caption === null ? movedWith(before, message, state.selected) : null;
+      if (followed !== null && state.selected !== null) {
+        state.mru = movedMru(state.mru, state.selected, followed);
+        state.selected = followed;
+        sendView();
+        sendFocus();
+      }
       state.listAt = performance.now();
       state.lists++;
       state.unlisted.clear(); // a list after the answer holds the result
@@ -1740,7 +1750,8 @@ function received(message) {
       if (state.selected === null && state.caption === null && state.mru.length === 0) {
         // Nothing selected yet: the first row (Open's first slot when there is one). Only before
         // anything was ever selected (F9: once a selected caption's block opened without a key,
-        // nothing is selected on purpose, and no list selects a session for the user).
+        // nothing is selected on purpose, and no list selects a session for the user — but for
+        // F40's, above: a list moves the selection only with the terminal that showed it).
         const first = rows()[0];
         if (first !== undefined) {
           state.selected = first.id;
@@ -1777,6 +1788,7 @@ function received(message) {
         nextReattach();
       }
       return;
+    }
     case 'snap':
       terminalView.snap(message);
       keepKeyboard();
