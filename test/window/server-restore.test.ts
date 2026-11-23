@@ -668,4 +668,38 @@ describe('the restore order (F37, design 7.8)', () => {
       test.server.hub.list().find((term) => term.expectedSessionId === id)?.slot ?? null;
     assert.deepEqual([slotOf(X3), slotOf(X1), slotOf(X2)], [1, 2, 3]);
   });
+
+  test("F42: the order of Open the earlier boot's window remembered: the restore brings them back under Open in that order, their numbers ascending", async (t) => {
+    const r = restoreSandbox(t, { config: { restoreStartTimeoutSeconds: 120, restoreBatch: 1 } });
+    const { d } = r;
+    threeSessions(r);
+    d.deck.store.setKv(
+      'window_restore_order',
+      JSON.stringify([{ bootId: EARLIER_BOOT, order: [X2, X3, X1] }]),
+    );
+    const test = await d.start();
+    const page = await connectTestPage(t, d, test.server);
+    await offering(page, [X2, X3, X1]);
+    const result = await page.act({ kind: 'restore', sessionIds: [X1, X2, X3] });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    for (const id of [X2, X3, X1]) {
+      await until(() => r.waiting(id), `${id} at its gate`, WAIT_MS);
+      r.open(id);
+    }
+    await noticed(page, 'restore finished: 3 started');
+    const list = await page.list(
+      (candidate) =>
+        (candidate.sections.find((section) => section.name === 'open')?.rows ?? []).length === 3,
+      'the three under Open',
+    );
+    const open = list.sections.find((section) => section.name === 'open')?.rows ?? [];
+    assert.deepEqual(
+      open.map((row) => [row.id, row.slot]),
+      [
+        [X2, 1],
+        [X3, 2],
+        [X1, 3],
+      ],
+    );
+  });
 });

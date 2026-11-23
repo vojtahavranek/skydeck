@@ -80,7 +80,7 @@ import { decideFoundKeeper } from './starts.ts';
 import { readMovedSlots, writeMovedSlots } from './moved-slots.ts';
 import { createReorder } from './reorder.ts';
 import { createOpenOrder, writeOpenOrder } from './open-order.ts';
-import { createSlotMemory } from './slot-memory.ts';
+import { createRestoreMemory } from './restore-memory.ts';
 import { createRegistry } from './terminals.ts';
 import type { Registry } from './terminals.ts';
 import { createTick } from './tick.ts';
@@ -591,8 +591,46 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       log: quietLog,
       stopping: () => stopBegun,
     });
-    // F37 (design 7.8): the slots each session last had in this boot, a restore's order.
-    const slotMemory = createSlotMemory({ store: deck.store, bootId: own.bootId, log: quietLog });
+    // F37, F42 (design 7.8): the order of Open in this boot, a restore's order.
+    const restoreMemory = createRestoreMemory({
+      store: deck.store,
+      bootId: own.bootId,
+      log: quietLog,
+    });
+    let openFailure: string | null = null;
+    /**
+     * F42 (S2 12.1, design 7.8): after a refresh that worked (`freeze`) or a move: Open as drawn now
+     * (done ones shown) — computed once — taken by the kept order (only after a refresh, while one
+     * exists: `frozenOrder` with the places held for a process's next session, so that a row keeps
+     * the place it was first drawn at) and by the restore memory. Nothing once the stop began, or
+     * while the tick has no rows. Never throws: a throw after a refresh would count as a failed one.
+     */
+    const tookOpen = (freeze: boolean): void => {
+      try {
+        if (stopBegun || tick === null) return;
+        const rows = tick.rows();
+        if (rows.length === 0) return;
+        const input = {
+          rows,
+          terminals: created.list(),
+          elsewhere: tick.elsewhere(),
+          nowNs: clock.nowNs(),
+          openOrder: openOrder.ids(),
+        };
+        const open = openRows(input).map((one) => one.id);
+        if (freeze && openOrder.keeps()) {
+          openOrder.freeze(frozenOrder(input.openOrder, open, heldPlaces(input)));
+        }
+        restoreMemory.update(open, rows); // it never throws
+        openFailure = null;
+      } catch (error) {
+        const kind = failureKind(error);
+        if (openFailure !== kind) {
+          openFailure = kind;
+          quietLog(`open order: Open's order was not computed (${kind})`);
+        }
+      }
+    };
     const reorder = createReorder({
       registry: created,
       rows: () => tick?.rows() ?? NO_ROWS,
@@ -607,7 +645,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         });
       },
       remember: () => {
-        slotMemory.update(created.list());
+        tookOpen(false);
       },
     });
     const acting = createActions({
@@ -810,36 +848,6 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       log('server: the store was migrated by a newer skydeck; the server stops');
       void stop(reason);
     };
-    let freezeFailure: string | null = null;
-    /**
-     * F42 (S2 12.1): after a refresh that worked, while a kept order exists, it takes Open's drawn
-     * order (done ones shown) with the places held for a process's next session (`frozenOrder`),
-     * so that a row keeps the place it was first drawn at; nothing once the stop began, or while
-     * the tick has no rows. Never throws: a throw here would count as a failed refresh.
-     */
-    const freezeOpen = (): void => {
-      try {
-        if (stopBegun || tick === null) return;
-        const rows = tick.rows();
-        if (rows.length === 0 || !openOrder.keeps()) return;
-        const input = {
-          rows,
-          terminals: created.list(),
-          elsewhere: tick.elsewhere(),
-          nowNs: clock.nowNs(),
-          openOrder: openOrder.ids(),
-        };
-        const open = openRows(input).map((one) => one.id);
-        openOrder.freeze(frozenOrder(input.openOrder, open, heldPlaces(input)));
-        freezeFailure = null;
-      } catch (error) {
-        const kind = failureKind(error);
-        if (freezeFailure !== kind) {
-          freezeFailure = kind;
-          quietLog(`open order: Open's order was not computed (${kind})`);
-        }
-      }
-    };
     const startedTick = createTick({
       deck,
       hub: created,
@@ -852,8 +860,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         pageMark.update(pages.count()); // plan C20; it never throws
         decidePostponed();
         created.flushSlots(); // F37: a write of the moved slots that failed; it never throws
-        freezeOpen(); // F42: Open's kept order takes the order drawn now; it never throws
-        slotMemory.update(created.list()); // F37: the restore's order; it never throws
+        tookOpen(true); // F42: the kept order and the restore's order take Open; it never throws
       },
       storeNewer,
       attention: attending.tick,

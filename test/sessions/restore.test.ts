@@ -13,7 +13,6 @@ import {
   restorePlan,
   runRestore,
 } from '../../src/sessions/restore.ts';
-import { formatRememberedSlots, rememberSlots } from '../../src/sessions/restore-order.ts';
 import type {
   ReportOutcome,
   RestoreEntry,
@@ -1993,11 +1992,14 @@ test('the fixtures: BOOT_A’s last event is T0 and the clock is two hours later
 
 // --- F37: the restore's order (design 7.8) -------------------------------------------------------
 
-/** The window's record of the slots: BOOT_A's part, session n → slot. */
+/** The window's record as F37 wrote it, the slots of BOOT_A's part (session n → slot): an F42
+ *  skydeck reads it by slot. */
 function rememberInBootA(d: TestDeck, slots: [number, number][]): void {
   d.deck.store.setKv(
     'window_restore_order',
-    formatRememberedSlots(rememberSlots([], BOOT_A, new Map(slots.map(([n, s]) => [sid(n), s])))),
+    JSON.stringify([
+      { bootId: BOOT_A, sessions: Object.fromEntries(slots.map(([n, s]) => [sid(n), s])) },
+    ]),
   );
 }
 
@@ -2018,23 +2020,11 @@ test("F37: under --all each entry is ordered by its own boot's slots", (t) => {
   const d = restartedMachine(t);
   d.deck.store.setKv(
     'window_restore_order',
-    formatRememberedSlots(
-      rememberSlots(
-        rememberSlots(
-          [],
-          BOOT_A,
-          new Map([
-            [sid(3), 2],
-            [sid(1), 5],
-          ]),
-        ),
-        BOOT_B,
-        new Map([
-          [sid(6), 3],
-          [sid(9), 1], // sid(9)'s entry is of BOOT_A: this part says nothing of it
-        ]),
-      ),
-    ),
+    JSON.stringify([
+      // sid(9)'s entry is of BOOT_A: this part says nothing of it
+      { bootId: BOOT_B, sessions: { [sid(9)]: 1, [sid(6)]: 3 } },
+      { bootId: BOOT_A, sessions: { [sid(3)]: 2, [sid(1)]: 5 } },
+    ]),
   );
   const listed = planRestore(listOrder(d), d.deck.store.events(), BOOT_B, true).map(
     (entry) => entry.row.id,
@@ -2043,6 +2033,20 @@ test("F37: under --all each entry is ordered by its own boot's slots", (t) => {
   assert.deepEqual(
     restorePlan(d.deck, true).entries.map((entry) => entry.row.id),
     [sid(3), sid(6), sid(1), ...rest],
+  );
+});
+
+test('F42: restorePlan puts the entries in the order they last had under Open, sessions without a number included, the rest after in list order', (t) => {
+  const { d } = fiveToRestore(t);
+  // Open's order in BOOT_A: sid(5) (another terminal's), sid(2), sid(4) (a terminal without a
+  // number); sid(7) is not one of the entries.
+  d.deck.store.setKv(
+    'window_restore_order',
+    JSON.stringify([{ bootId: BOOT_A, order: [sid(5), sid(7), sid(2), sid(4)] }]),
+  );
+  assert.deepEqual(
+    restorePlan(d.deck, false).entries.map((entry) => entry.row.id),
+    [5, 2, 4, 1, 3].map(sid),
   );
 });
 

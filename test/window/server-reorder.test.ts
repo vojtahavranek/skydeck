@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
-import { parseRememberedSlots } from '../../src/sessions/restore-order.ts';
+import { parseRememberedOrder } from '../../src/sessions/restore-order.ts';
 import { readOpenOrder, writeOpenOrder } from '../../src/window/open-order.ts';
 import type { ListMessage } from '../../src/window/protocol.ts';
 import { REORDER_REFUSALS } from '../../src/window/view/slot-moves.ts';
@@ -84,9 +84,9 @@ describe('moving a session of Open (F37)', () => {
     const order = ['S1:1', 'S3:2', 'S2:3'];
     const shown = await page.list(reads(order), 'the new order on the page that moved it');
     assertSlotsMatchRows(shown);
-    // What a restore after a reboot goes by (design 7.8): this boot's slots, as moved.
-    const remembered = parseRememberedSlots(d.deck.store.getKv('window_restore_order'))[0];
-    assert.deepEqual(Object.fromEntries(remembered?.sessions ?? []), { [S1]: 1, [S3]: 2, [S2]: 3 });
+    // What a restore after a reboot goes by (design 7.8): this boot's order of Open, as moved.
+    const remembered = parseRememberedOrder(d.deck.store.getKv('window_restore_order'))[0];
+    assert.deepEqual(remembered?.order, [S1, S3, S2]);
     await other.list(reads(order), 'the new order on the other page');
     const later = await connectTestPage(t, d, first.server);
     assertSlotsMatchRows(await later.list(reads(order), 'the new order after a reload'));
@@ -182,15 +182,13 @@ describe('moving a session of Open (F37)', () => {
     assertSlotsMatchRows(list);
   });
 
-  test('without a move, a refresh takes the slots of the window into the restore order', async (t) => {
+  test('without a move, a refresh takes the order of Open into the restore order', async (t) => {
     const { d } = await threeOpen(t);
-    const remembered = (): Record<string, number> =>
-      Object.fromEntries(
-        parseRememberedSlots(d.deck.store.getKv('window_restore_order'))[0]?.sessions ?? [],
-      );
+    const remembered = (): readonly string[] =>
+      parseRememberedOrder(d.deck.store.getKv('window_restore_order'))[0]?.order ?? [];
     await until(
-      () => JSON.stringify(remembered()) === JSON.stringify({ [S1]: 1, [S2]: 2, [S3]: 3 }),
-      () => `the restore order holds the three slots: ${JSON.stringify(remembered())}`,
+      () => JSON.stringify(remembered()) === JSON.stringify([S1, S2, S3]),
+      () => `the restore order holds Open's order: ${JSON.stringify(remembered())}`,
       10_000,
     );
   });

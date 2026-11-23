@@ -17,7 +17,7 @@ import { buildList, flatRows } from './list.ts';
 import type { ListRow } from './list.ts';
 import { loadRows } from './load.ts';
 import { refresh } from './refresh.ts';
-import { inRememberedOrder, readRememberedSlots } from './restore-order.ts';
+import { inRememberedOrder, readRememberedOrder } from './restore-order.ts';
 import { prepareResumeById } from './resume-by-id.ts';
 import {
   checkResumable,
@@ -102,6 +102,21 @@ export function latestEarlierBoot(
 }
 
 /**
+ * Whether `row` is a restore's candidate in any boot (planRestore's rule without the boot): a
+ * session whose program ended unexpectedly, not done, not expired and no empty copy. F42: the
+ * window's restore memory keeps such a session at its place under Open after it left (design 7.8).
+ */
+export function restorable(row: ListRow): boolean {
+  return (
+    row.session.lastHolding !== null &&
+    row.marks.includes('ended-unexpectedly') &&
+    !row.done &&
+    !row.marks.includes('expired') &&
+    !row.marks.includes('empty-copy')
+  );
+}
+
+/**
  * 7.8 set and preselection, in the order of `rows` (pass list order).
  *
  * The default set is the rows marked `ended-unexpectedly`, not done, not expired and not an empty
@@ -123,13 +138,7 @@ export function planRestore(
   const entries: RestoreEntry[] = [];
   for (const row of rows) {
     const holding = row.session.lastHolding;
-    if (
-      holding === null ||
-      !row.marks.includes('ended-unexpectedly') ||
-      row.done ||
-      row.marks.includes('expired') ||
-      row.marks.includes('empty-copy')
-    ) {
+    if (holding === null || !restorable(row)) {
       continue;
     }
     const { bootId } = holding.process;
@@ -159,8 +168,8 @@ export interface RestorePlan {
 /**
  * The plan of a restore, shared by the command and the window's server (S2 11.1): planRestore over
  * `rows` (default loadRows(deck)) in list order (`ls --all`), its entries then put in the order of
- * the slots their sessions last had in the window in their boot (F37, `inRememberedOrder` over the
- * store's `window_restore_order`; the others after, in list order), with the boot id the rows were derived
+ * the places their sessions last had under Open in the window in their boot (F37, F42:
+ * `inRememberedOrder` over the store's `window_restore_order`; the others after, in list order), with the boot id the rows were derived
  * with as the current one — never a second read, so a read that failed for the rows and one that
  * worked are not mixed (design 7.6) —, and the latest earlier boot. Without that boot id it refuses
  * (SkydeckError): every process would look dead, so this boot's running sessions would be offered,
@@ -189,7 +198,7 @@ export function restorePlan(
   return {
     entries: inRememberedOrder(
       planRestore(inOrder, events, bootId, all),
-      readRememberedSlots(deck.store),
+      readRememberedOrder(deck.store),
     ),
     earlier: latestEarlierBoot(events, bootId),
   };
