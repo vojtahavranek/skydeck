@@ -1373,9 +1373,11 @@ function jsonBody(
 
 const SHUTDOWN_JSON = jsonBody({}, () => ({ route: 'shutdown' }));
 
+/** `claude` flags as words (`/new`'s, and issue #188's `/resume`'s): at most LIST_LIMIT, each well
+ *  formed without NUL. */
+const FLAG_WORDS = list(noNul(WELL_FORMED), false, false);
 /** `POST /new`'s fields (plan C3): the directory a path without NUL, the label and the group text
  *  or null, at most LIST_LIMIT flags, each well formed without NUL. */
-const FLAG_WORDS = list(noNul(WELL_FORMED), false, false);
 const NEW_FIELDS: Record<string, Check> = {
   dir: noNul(PATH),
   label: nullable(TEXT),

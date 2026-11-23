@@ -243,7 +243,7 @@ test("the resume card's Other flags… (#188)", async (t) => {
   await t.test(
     "Other flags… beside Resume here; it opens the New form's flags field in place of the action line, filled with the plain resume's flags written so that they parse back word for word (spaces, both quotes), the keyboard at its end; Will run stays",
     async (t) => {
-      const w = await world(t, chromium, ['--verbose']);
+      const w = await world(t, chromium, ['--verbose', '--model opus']);
       await cardOfS1(w.page);
       assert.deepEqual(await cardButtons(w.page), ['Resume here', 'Other flags…']);
       assert.equal(
@@ -269,7 +269,11 @@ test("the resume card's Other flags… (#188)", async (t) => {
       // The New form's component: its label, the ★, the chip row; the form's own Start and hint.
       await showsText(w.page, `${EDITOR} .card-label`, /^Flags for claude$/);
       assert.equal(await w.page.locator(`${EDITOR} .card-star`).count(), 1);
-      assert.deepEqual(await chips(w.page), [{ text: '--verbose', on: false }]);
+      // A chip is on at once when the recorded flags hold its words.
+      assert.deepEqual(await chips(w.page), [
+        { text: '--verbose', on: false },
+        { text: '--model opus', on: true },
+      ]);
       await showsText(w.page, `${EDITOR} .card-hint`, new RegExp(`^${HINT}$`));
       assert.equal(await w.page.locator(`${EDITOR} button[type="submit"]`).textContent(), 'Start');
       // The action line is gone while the form is open; Will run still says the plain resume.

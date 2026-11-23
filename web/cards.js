@@ -671,12 +671,12 @@ export function createCards(root, deps) {
       act: deps.act,
       id: 'card-resume-flags-label',
       placeholder: 'none: it resumes without flags',
+      value: text,
     });
     if (note !== null) {
       form.append(element('div', 'card-warning', note));
     }
     form.append(line, favourites.line, actions, lines);
-    flags.value = text;
     let pending = false;
     form.addEventListener('keydown', refuseHeldEnter);
     form.addEventListener('submit', (event) => {
@@ -1170,11 +1170,14 @@ export function createCards(root, deps) {
  * @param {CardsDeps['act']} parts.act
  * @param {string} parts.id the id of the label's words, unique in the page
  * @param {string} parts.placeholder
+ * @param {string} parts.value the field's text to start with (before the chips are drawn, so that
+ *   each starts on or off by it)
  * @returns {{ line: HTMLElement, flags: HTMLInputElement, favourites: ReturnType<typeof favouriteControls> }}
  */
-function flagsControls({ form, hint, lines, act, id, placeholder }) {
+function flagsControls({ form, hint, lines, act, id, placeholder, value }) {
   const flags = /** @type {HTMLInputElement} */ (element('input', 'card-field mono'));
   flags.name = 'flags';
+  flags.value = value;
   flags.spellcheck = false;
   flags.placeholder = placeholder;
   const words = element('span', 'card-label', 'Flags for claude');
@@ -1273,6 +1276,7 @@ function newFormOf(defaults, deps) {
     act: deps.act,
     id: 'card-new-flags-label',
     placeholder: 'optional, e.g. --model opus',
+    value: '',
   });
   form.append(flagsLine, favourites.line, actions, lines);
   deps.watchFavourites(favourites.update);

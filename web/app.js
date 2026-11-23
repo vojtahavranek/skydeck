@@ -1029,16 +1029,17 @@ function act(action) {
         // come up to a second after its answer; a `view` asks for it now (as for EDITS above).
         sendView();
       }
-      // The lines of a plain resume are its card's; "Other flags…" shows its own (#188).
-      if (
-        action.kind === 'resume' &&
-        typeof action['sessionId'] === 'string' &&
-        action['flags'] === undefined
-      ) {
-        state.lines.set(
-          action['sessionId'],
-          result.ok ? [] : result.error === null ? result.lines : [result.error],
-        );
+      // The lines of a plain resume are its card's; "Other flags…" shows its own (#188), and
+      // one that started leaves the card no older line.
+      if (action.kind === 'resume' && typeof action['sessionId'] === 'string') {
+        if (action['flags'] === undefined) {
+          state.lines.set(
+            action['sessionId'],
+            result.ok ? [] : result.error === null ? result.lines : [result.error],
+          );
+        } else if (result.ok) {
+          state.lines.set(action['sessionId'], []);
+        }
       }
       if (result.ok && result.sessionId !== null) {
         state.bringing = result.sessionId;
