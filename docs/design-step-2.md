@@ -93,7 +93,10 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   window (follow-up F30, 12.10): its keeper sends that program SIGHUP and then SIGCONT, what the
   kernel sends when a terminal's window is closed, and nothing else — never SIGTERM or SIGKILL, and
   never to a session in another terminal. Every other session ends when the user ends it inside
-  `claude`.
+  `claude`. Nothing moves from one session to another but on the user's word in the window: from
+  follow-up F40 the bar of 12.6 copies the fields the user ticks from the session `/clear` started
+  out of to the new one, each time it is answered, and the old session keeps all of them (design
+  7.1).
 - **Principle 8 (local only)**: the server listens on the loopback interface only (15). Its one
   network use is the check for a newer skydeck: `git fetch` of skydeck's own checkout when it
   starts and once a day, which the setting `window.updateCheck` turns off; nothing is applied
@@ -203,14 +206,16 @@ Added to design 11:
 | `bin/skydeck-keepalive` | The keep-alive's inner script (6.1): `sh` builtins, `sleep`, `mv` and `rm` only (`rm` for its own `keepalive.pid` and temporary file). | — |
 | `src/claude/terminal.ts` | What Claude Code sets in its children's environment (7.4); the meaning of a live-file status change for a turn end (10.3). | platform |
 | `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses; from follow-up F19 the reads of a ticket's status (`ticket-fetches.ts`); from follow-up F36 the settings screen's table of every key of `config.json` and the change of one of them (`settings.ts`, 12.13); from follow-up F38 the check for a newer skydeck (`updates.ts`, 16.5). | platform, text, store, claude, sessions, terminals, github, ticket-status (F19), update (F38) |
+| `src/window/carry-over.ts` | Follow-up F40 (design 7.1, 12.6): the offer to carry fields over after `/clear` — the lookups it is computed with from the store (the `clear` link and the mark of the first start, the pull requests attached by hand, the resume lock), its `rev`, the two acts in one transaction each, the kv entries and their removal. | platform, store, sessions, `view/carry-over.ts`, `protocol.ts`'s types, and `auth.ts`'s `failureKind` |
 | `src/window/updates.ts` | Follow-up F38 (16.5): the server's check for a newer skydeck — when it runs, the state every page is told, the stored outcome; it decides everything the page shows of it. Milestone 2: Update now — its refusals, the start of `skydeck update --from-window` (through python3 for the core limit), the run entry, the result. | platform, sessions (the deck), update, text, `log.ts`'s `serverLog`, and `auth.ts`'s `failureKind` |
 | `src/update/` | Follow-up F38: the look for a newer skydeck, one copy for three callers — `skydeck update`, the window's server and `doctor` (the server may not import `src/cli/`): `git.ts` (how skydeck runs git on its own checkout, and the window's fetch that never asks; moved from `src/cli/update-git.ts`), `look.ts` (the look in the command's order and in the window's tolerant one, and `--check`'s lines), `record.ts` (the stored outcome, `kv window_update_check`, and the run entry of an update from the window, `kv window_update_run`). | platform, text, store (types), and `protocol.ts`'s types |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
-| `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12); from follow-up F37 the move of a session of Open by hand and the slots it gives out (`slot-moves.ts`, 12.9, 7.6). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
+| `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12); from follow-up F37 the move of a session of Open by hand and the slots it gives out (`slot-moves.ts`, 12.9, 7.6); from follow-up F40 the parts of the offer to carry fields over after `/clear` (`carry-over.ts`, design 7.1: it imports no value). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
 | `src/window/view/search/` | The rules of search as pure functions (stage E, plan E1): the filter's words and chips (12.8), the blocks (12.2; the code calls them stacks), the switcher's ranking (12.8); `build.ts` calls them. No pattern is ever built from a search text. | values: its own files and `text`'s `sanitize` only; types: sessions, `protocol.ts`, `hub.ts`, `view/sections.ts` |
 | `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the stored choices of the theme's Mode and colour themes on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
+| `web/carry-over.js`, `web/carry-over-text.js` | Follow-up F40 (12.6, 12.9): the bar that offers to carry fields over after `/clear`, and its words as pure functions. The page draws the server's offer and sends one act; it decides nothing. | — |
 | `web/update.js`, `web/update-text.js` | Follow-up F38 (12.1, 12.13, 16.5): the dialog of `Update available`, and its words and the lines of the settings screen's group Updates as pure functions. They put the server's texts into sentences and decide nothing. | `web/format.js` |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
 
@@ -258,6 +263,7 @@ restore changes with follow-up F37 (the last row): the command's restore follows
 | `src/store/`, `src/sessions/`, `src/cli/` | Follow-up F18, a session's ticket (design 7.1, 12.5): migration 3 (10.2) adds `session_meta.ticket_url`; `readTicket`, `ticketText` and `setTicket`; a list row carries the ticket, which the expiry rule (design 7.2) and the filter (design 7.4) count; the new command `skydeck ticket set` / `clear`; `show` prints the ticket as `ticket:` and in `--json`; `t` in the interactive list. | F18 |
 | `src/ticket-status.ts`, `src/github.ts`, `src/platform/config.ts`, `src/store/`, `src/sessions/list.ts`, `src/window/ticket-fetches.ts`, `tick.ts`, `actions.ts`, `protocol.ts`, `src/cli/`, `web/` | Follow-up F19, a ticket's status (design 7.3, 12.2, 12.3, 12.5): the provider of an address (a `ticketStatus` rule, else a GitHub issue: `statusProvider` in `src/github.ts`, beside the issues' key and batch), the configured program and its answer, the due rule and the fetch in `src/ticket-status.ts`; the keys `ticketStatus` and `ticketRefreshMinutes` (16.4); migration 4 (10.2) adds the table `ticket_status`; a list row and `list.selected` carry the status (8.2.3) and the filter finds its text (12.8); the server reads it in the background, one read at a time (10.1; the actions `ticket` and `ticket-refresh`); `skydeck ticket refresh` reads and prints it and `show` prints it (`ticket set` reads nothing, as F18); the page draws the header's chip, the row's small chip and the dialog's line and ↻ (12.2, 12.5). | F19 |
 | `src/sessions/restore.ts`, `src/sessions/restore-order.ts` | Follow-up F37 (design 7.8): `restorePlan` puts its entries in the order of the slots their sessions last had in the window in their boot (`inRememberedOrder`), the others after in list order; the slots are read from the kv key `window_restore_order` (10.2), which the window's server writes. The command's restore (also `--dry-run`, and `POST /restore`) follows that order: it decides the batches, which sessions start before a memory stop, and which one is handed off `--here`. | F37 |
+| `src/sessions/meta.ts`, `src/store/types.ts` | Follow-up F40 (design 7.1): `carryFields`, the copy of the ticked fields to the new session that the window's carry over makes inside its transaction; three `kv` keys (10.2). Nothing else of step 1 changes, and no command asks or copies. | F40 |
 | `package.json`, `.prettierignore`, `tsconfig.json` | Development dependencies: `playwright`, `ws`, and the `@xterm/*` packages of 16.6 (exact versions); scripts `vendor`, `test:page`, `check` (17.5); `vendor/` added to `.prettierignore`, so that the vendored files are kept byte for byte; `web/tsconfig.json` beside the root one. | A |
 | `.github/workflows/ci.yml` | 17.5: `shellcheck` by name, the jobs `lint`, `unit (i/n)` and `page (i/n)` side by side with Node's `--test-shard`, the page suite on the newest leg only, on a runner pin of its own, the time limits. | A |
 
@@ -1099,7 +1105,8 @@ both in memory: the **expected session**. Which session it shows is decided agai
   rests on it (stage A's plan, task 21, ruled);
 - a terminal shows the session one of its holders holds. After `/clear` or an in-session `/resume`
   that is the new session; the old one becomes `not-running` (with no mark, design 6.3), and the
-  terminal moves to the new session's row with its slot;
+  terminal moves to the new session's row with its slot; from follow-up F40 a page that showed
+  that terminal keeps showing it, its selection going to the new session (12.9);
 - a terminal whose program has no holder yet is **starting** (12.7 shows it on the expected
   session's row; a new session has no row yet, so the server shows the terminal as a row of its
   own, titled with the label or "new session in <directory>"). After `restoreStartTimeoutSeconds`
@@ -1605,6 +1612,8 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `update-look` | — | Follow-up F38, 16.5: the dialog's look, without the network; while a check runs it starts nothing and answers the state as it is. The result's `update` is the state. Neither kind carries a field: the checkout, its remote and the program are the server's. |
 | `update-apply` | `to` (a full commit id: 40 or 64 lower-case hexadecimal digits) | Follow-up F38, 16.5 "Update now": the dialog's second click. The server makes a look of its own without the network and starts `skydeck update --from-window <to>` only when that look names `to`, not blocked; `to` is compared, never passed to git by the server. Refused while the server stops, an update runs, a check runs or a restore runs (16.5's words); the result's `update` is the state, also with a refusal. |
 | `update-seen` | — | Follow-up F38, 16.5: the result bar's ×: the result of the last update from the window is dismissed on every page. The result's `update` is the state. |
+| `carry-over` | `sessionId` (the new session), `rev` (16 lower-case hexadecimal digits: the offer as drawn, `list.selected.carryOver.rev`), `fields` (0 to 5 distinct names of `label`, `group`, `ticket`, `note`, `prs`: the ticked ones), `done` (a boolean: `mark the old one done` ticked) | Follow-up F40, 12.6, design 7.1: in one transaction the server computes the offer again from the store and copies the ticked fields from the old session to the new one and, with `done`, marks the old one done; every page's `list` follows. Refused, nothing written, with the words as the result's error: a session the store does not know; `this offer was answered or dismissed already`; `there is nothing to carry over to this session any more` (no `clear` link from after the first start with F40, or nothing left to carry); `the sessions changed since this offer was drawn; look at it again` (`rev` is not the offer's now, or a name or `done` that the offer does not offer); `nothing is ticked: tick what to carry over, or close the offer with ×`; `cleanLabel`'s and `cleanGroup`'s refusals; a busy store. |
+| `dismiss-carry-over` | `sessionId` | Follow-up F40, 12.6: the bar's ×: the offer of that session ends for good, nothing copied; `ok` also when it was answered already (sent twice, or from two windows), and then nothing is written. Refused, nothing written, with `there is no offer to dismiss for this session` for a session without a `clear` link from after the first start with F40. |
 
 An unknown kind or field is refused, and so is a string over its limit (in UTF-8 bytes: paths and
 URLs 4,096 — a `ticket`'s `text` too —, `input.data` 64 KiB, a note's `text` and `base` 64 KiB
@@ -1612,7 +1621,9 @@ each, other text 1,024; the action of 9.6 then opens a URL only up to 2,048 char
 from 1 to 65,535, a session id that does not pass the session-id rule (a lower-case UUID, 4.3) —
 in a `restore` each of its ids, which must also be distinct, at least one and at most 1,000 — or
 a `dismiss-restore` boot id that is not a lower-case UUID (stage C, plan C 2.2), or a
-`favourite-add` whose `at` is not a whole number from 0 to 11 (follow-up F15), or a `setting-set`
+`favourite-add` whose `at` is not a whole number from 0 to 11 (follow-up F15), or a
+`carry-over` whose `rev` is not 16 lower-case hexadecimal digits or whose `fields` holds a name
+twice, more than five or one that is not a field's (follow-up F40), or a `setting-set`
 whose `value` is an object, a list or a boolean (never a whole configuration) or a text over the URL
 limit, or whose `key` is not a text of at most 1,024 bytes (follow-up F36). A note may be any
 length (design 7.1), so 1,024 bytes would refuse most notes;
@@ -1645,6 +1656,19 @@ Server → page:
 | `notify` | `sessionId`, `title` (the row's, sanitised), `reason` (the kind: `asks`, `ended` or `finished`, 12.4; the page writes the words), `detail` (the row's attention detail, else null) (13). |
 | `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. `restore-progress`: one report line of a restore, sanitised, to every page, whoever asked for the restore (11.3, 12.7; stage C). |
 | `bye` | `reason` (5.5). |
+
+From follow-up F40, `list.selected` has the member `carryOver` exactly when the selected session
+has an offer to carry fields over after `/clear` (design 7.1; absent is none, so no list of before
+changes): `from` (the old session's `id`, its `title` as the list shows it, and its ticket's short
+name `ticket` or null), `fields` (the offered fields in the order label, group, ticket, note, pull
+requests: each its `name` — `label`, `group`, `ticket`, `note` or `prs` —, `text` — the label, the
+group, the ticket's short name, null for the note and the pull requests — and `ticked`, its
+starting tick), `prs` (how many pull requests `prs` would attach; 0 when it is not offered),
+`kept` (the names of the fields the old session has that the new one already has: named, not
+offered), `done` (`{ ticked }`, the starting tick of `mark the old one done`, or null when it is
+not offered) and `rev` (16 lower-case hexadecimal digits: what the offer was computed from, which
+`act carry-over` sends back). The note's text is not sent. A failure to compute the offer costs the
+list nothing: it goes without `carryOver`, and the server logs one line by the failure's kind.
 
 Output is sent in binary frames: one byte 1, the channel number as a 4-byte big-endian integer,
 then the bytes of one record. The channel number is the one `snap` gave; a page attached to
@@ -2099,6 +2123,9 @@ install.md "Going back").
 | `window_restore_order` | Follow-up F37 (design 7.8): the slots the sessions last had in the window, a JSON array of at most two parts, the newest boot first, each `{ "bootId", "sessions": { <session id>: <slot> } }`; within a boot each slot names the latest session that held it and each session one slot. The server takes the terminals' slots into its own boot's part after each refresh that worked and after a move, writing only when that changes it; nothing is removed when a terminal goes, so a reboot that ends the keepers first cannot empty it. Read tolerantly; the command's restore reads it too. |
 | `window_update_check` | Follow-up F38 (16.5): what the window's server's last look for a newer skydeck said, as JSON: `{ v: 1, root, lookedAtNs, checkedAtNs, fetchedAtNs, failure, head, outcome }` — `root` the checkout it looked at (its real path: one database serves every checkout of the user), `checkedAtNs` when the last check ended, whatever it found (null: none yet), `fetchedAtNs` when the last fetch that worked ended (null: never), `failure` `{ atNs, line }` while the last check failed, `head` HEAD's full id at the look, and `outcome` one of `{ kind: 'cannot', line }`, `{ kind: 'current', line }` and `{ kind: 'available', upstream, count, to, lines, blocked }`. Written by the server only, after each check and look; read by it and by `doctor`. Every line in it clipped to 300 characters. A value that is not exactly such a record is read as none, and so is one of another root, which the next look writes over. |
 | `window_update_run` | Follow-up F38 (16.5, "Update now"): the one update started from a window, as JSON: `{ v: 1, root, state, to, atNs }`, and `line` for `failed` — `state` `applying` (written by the server that starts the updater), then `applied` or `failed` (written by `skydeck update --from-window` once the merge's outcome is known, before the window is brought back; nothing after it), `root` the checkout (its real path), `to` the commit the window listed, `atNs` when it was written, `line` the command's line without the bring-back's tail, clipped to 600 characters. Read and removed by the next server of that checkout (its result), or by the server whose updater ended while it ran; an entry of another root is left as it is. A value that is not exactly such a record is read as none. |
+| `window_carry_over_since` | Follow-up F40 (design 7.1): the server's clock at its first start with F40 on this store, a decimal number of nanoseconds (canonical: no sign, no leading zero). Written at the server's start, before its first tick, in one transaction that writes only when there is no usable entry; when that write fails, the tick tries again once a second until it works. A usable entry is never changed or removed. Without one, and with a damaged one (replaced by the next try's time), no `clear` link makes an offer. |
+| `window_carry_over:<session id>` | Follow-up F40: `carried` or `dismissed`, the answer to the offer of that new session; its existence alone ends the offer (a damaged value reads as answered). Removed at the server's start, after its first tick, for a session that has a row, does not run and that the list would not show even with done sessions shown; an entry whose session has no row is left. |
+| `window_carry_over_ticks` | Follow-up F40: the ticks of the last `carry-over` that was written, a JSON object of booleans `label`, `group`, `ticket`, `note`, `prs`, `done`, the starting ticks of the next offer. Each member is read alone: anything but a boolean is that member's default (label, group, ticket and done ticked, note and pull requests not). A carry over writes the act's ticks over the offered checkboxes and keeps the stored ones of the others. Never removed. |
 
 ### 10.3 When a turn ends
 
@@ -3356,6 +3383,26 @@ nothing; `ls` is unchanged.
   the list's sessions (a closed block's too), each once, as the list shows them, the selected
   session's first, then in the list's order — as the Directory field offers the known
   directories. The form takes both when it opens, as it takes its directory.
+- **The carry-over bar** (follow-up F40, design 7.1). When the selected session has an offer
+  (`list.selected.carryOver`, 8.2.3), one bar stands under the header and above what the right
+  side shows of it: its terminal of the window (running or ended), its resume card, or the card of
+  a session running elsewhere; no other pane has it. It reads, left to right and wrapping:
+  `Cleared from "<the old session's title>"`, ` · <its ticket>` when it has one; one checkbox per
+  offered field (`label`, `group <group>`, `ticket <name>`, `note`, `1 pull request` / `<n> pull
+  requests`); `already set here: <names>` for the fields the new session has already (named, no
+  checkbox); the checkbox `mark the old one done` when it is offered; the button `Carry over`; the
+  button `×` (`Dismiss: carry nothing over`). The ticks start from the offer's and are the page's
+  while the same offer (`rev`) is drawn; a new `rev` starts them again. A click on the bar takes no
+  keyboard: the keyboard stays where it was (the terminal, the list), as on the banner; its texts
+  (the heading, the kept line, the message) stay selectable. `Carry over` sends one `act
+  carry-over` with the ticks, `×` one `dismiss-carry-over`; while the answer waits the heading's
+  place says `carrying over…` and the controls take no press; on `ok` the bar goes at once, and
+  every page's list follows; a refusal is shown in the heading's place, in the refusal colour, and
+  in the key bar, and the controls work again. The message lies over the heading on one line, so
+  the bar's height changes only when it comes and when it goes: one `resize` of a terminal each
+  way, none on a click or an answer. On two pages at once the first answer wins: the other page's
+  bar goes with the list that follows. Its keys are 12.9's. A session cleared before the window
+  first ran F40 never shows it (design 7.1).
 - **Nothing, while the list holds no session at all** (follow-up F22): one muted line above the
   empty cards, `The selected session shows here.` (12.1), also while a session the
   list no longer shows (the last one marked done) is still selected; the New form takes the right
@@ -3643,12 +3690,47 @@ run (`window_slots`, 7.6, 10.2); a restore after a reboot opens the sessions in 
 slots they last had (design 7.8). Drag and drop is left out (20); `assignSlots` takes any new order,
 so it would only need to name one.
 
+**The carry-over bar's keys** (follow-up F40, 12.6). `c` in the list gives the bar's first
+checkbox the keyboard whenever the right side shows the bar; with nothing selected it says `no
+session selected`, on a pane without the bar `nothing to carry over to this session`; with the
+keyboard on the bar it does nothing, as every list key there. On the bar Space ticks a checkbox and
+Enter presses a button (the browser's own), and Esc gives the keyboard back to the list. The
+keyboard on the bar can never fall into the terminal, where an Enter would submit what stands in
+Claude Code's prompt: (1) while a control of the bar has the keyboard the page is in the list zone
+(`Focus: list`), where no rule gives the terminal the keyboard and no list key acts; only the
+user's own zone chords (Ctrl+Shift+L, a slot chord, Ctrl+Tab, the new form) leave it, and then
+the terminal is meant; (2) a list of the same offer replaces no element of the bar, so the focused
+control keeps the keyboard; (3) a new offer that hides the focused checkbox gives the keyboard to
+the next visible checkbox, else the one before, and a new offer while a button has it gives it to
+the first checkbox, so an Enter never presses a button for an offer the user has not seen; (4)
+when the bar goes away with the keyboard on it (answered here or on another page, the offer gone,
+another pane), the list takes the keyboard; a bar answered by the mouse moves no keyboard; (5) the
+bar is a focus trap: Tab and Shift+Tab move among its visible controls and wrap, always cancelled,
+so the browser's own focus order — the terminal's text control after it, the header's buttons
+before it — never applies from it; the ways out are Esc, an answer, the bar going away and the
+user's own zone chords and clicks; (6) an Enter held on `Carry over` or `×` is no list key once
+the bar is gone: its repeats are swallowed until it is released, as for the restore banner, so it
+resumes nothing and moves no keyboard. A click on the bar's ground moves no keyboard. The bar is
+not one of the things of the page that have the keyboard in the terminal zone (above), since it
+never is.
+
+**The selection follows its terminal** (follow-up F40). When the list drawn until now had the
+selected session shown by a terminal of the window, and in the list that comes that terminal, not
+ended, shows another session (after `/clear`, an in-session `/resume` or a fork inside it: the
+page has no link kinds), while the selected session's row no longer has it, the page selects that
+session: the same terminal stays shown, now under the new session's header, the zone and the
+keyboard stay, and the page's `view` names the new session, whose answer brings its carry-over
+offer. In the most-recently-used order the new session takes the old one's place (the old one is
+dropped from it), so Ctrl+Tab goes back to the session the user came from, not to the old one's
+resume card. A page whose selection was another session does not move.
+
 Two focus zones; the terminal is the default. Clicking a running row focuses its terminal;
 clicking a row that is not running focuses the list (so Enter resumes). Ctrl+Shift+L toggles; Esc
 never leaves the terminal — while xterm.js has the keyboard; Esc in the page's own new form closes
 the form (12.6). In the list: as in step 1's interactive list, ↑ ↓ `j` `k` move, `/`
 filters, `l` label, `g` group, `n` note, `t` ticket (follow-up F18, 12.5), `p` attach a pull
-request, `d` done, `a` show done; new in the window, Home, End, PgUp, PgDn, ← → (fold, unfold), F2
+request, `d` done, `a` show done; new in the window, `c` (carry over after `/clear`, follow-up
+F40: the keyboard to the bar of 12.6), Home, End, PgUp, PgDn, ← → (fold, unfold), F2
 (label) and Esc (clear the filter, then back to the terminal). `/` gives the keyboard to the filter's field, where every key but Enter and
 Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also
 clears the field), so from the field the terminal is one more Esc away (ruled by the plan owner,
@@ -3719,7 +3801,9 @@ a session takes its toast from the row, since it is in no section: `Marked done.
 while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
 the lead on 2026-11-15). The list keys (`l`, F2,
 `g`, `n`, `t`, `p`, `d`) act only on a row the list shows: on a hidden selection, and on a selected
-caption, they say `no session selected` and send nothing. A named limit: when Ctrl+Tab, a slot chord or a click on its
+caption, they say `no session selected` and send nothing. `c` (follow-up F40) is the exception: it
+acts whenever the right side shows the carry-over bar, a hidden selection's too (after `/clear`
+the new session has a new title and often no row under a filter). A named limit: when Ctrl+Tab, a slot chord or a click on its
 notification selects a session the list does not show that runs again in another terminal while an
 ended terminal of the window still names it, the right side first shows that ended terminal as
 stage A did (no header, no Resume), until the list that answers the new selection comes —
@@ -5311,6 +5395,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last slotted row and under a filter; `skydeck window --restart` keeps the order. The restore order only where W16's drill runs anyway. | F37 | 7.6, 12.9 |
 | W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Update now` and `Close`; `doctor`'s `update:` line; the group's switch `Check for updates every day` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
 | W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links, The window and (F38) Updates with seven plain labels and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
+| W46 | **Real claude**, follow-up F40: carry over after `/clear` in a window terminal — the bar without a click, a click on it leaves the keyboard in the prompt, `Carry over`, `×`, two clears, `c` from the list with the list changing under it, a session cleared outside the window, and an old cleared session that shows no bar (manual-checks.md, "Carry over after /clear"). | F40 | 12.6, 12.9, design 7.1 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
@@ -5410,6 +5495,9 @@ page's own icon (12.12). Checks W30, W31, and W3's icon on the taskbar button.
 - **A "by ticket" view, more than nine slots.** Since follow-up F37 the user reorders Open by key
   (12.9); dragging a row with the mouse, sort modes and reordering Recent or Earlier are left out.
 - **Stopping a session from the window** (principle 6).
+- **Carrying fields over after `/clear` without asking** (follow-up F40: no setting for it), an
+  offer after a fork, a copy or an in-session `/resume`, and undoing a carry over (the old session
+  keeps its fields, and each field is edited as before).
 - **Bells and program notifications** (OSC 9, OSC 777).
 - **Rotating the secret by itself** (`--new-secret` does it on request).
 - **A Start-menu shortcut — proposed, needs the user's agreement.** `skydeck window --shortcut`
