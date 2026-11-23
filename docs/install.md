@@ -922,7 +922,8 @@ effect.
   places with its neighbour. A session without a slot (the tenth terminal, one running in another
   terminal or in Claude Code's background), one under Recent or Earlier, and any session while a
   filter or a chip is set do not move: the key bar says why. Caps Lock alone moves nothing (Shift
-  must be held).
+  must be held). `c` in the list gives the keyboard to the carry-over bar after `/clear` ("After
+  `/clear`: carry over" below).
 
 #### Editing a session (stage D)
 
@@ -1110,6 +1111,48 @@ and the quick switcher's chip show the state's words in the same colour. Session
 stay the strongest in the list: only they have a coloured bar at the left and their reason's line
 in its colour, and their titles are the boldest (a running session's title is semibold, any other
 row's regular); no chip's text is brighter than an ordinary row's title.
+
+#### After `/clear`: carry over (follow-up F40)
+
+After `/clear` the work usually goes on under the same label, group and ticket, but the new
+session starts with none of them. The window asks, on the new session, which of the old session's
+fields to carry over, and nothing is copied without that answer. The commands (`skydeck ls`,
+`show`, `label` and the others) and the interactive list neither ask nor copy.
+
+- **Where.** A bar under the header of the new session, above its terminal when it runs in a
+  terminal of the window, and above its card when it runs elsewhere or not at all. It takes no
+  keyboard and blocks nothing: the terminal keeps the keys, also when you click on the bar. The
+  page that showed the terminal in which you typed `/clear` keeps showing it, now on the new
+  session's row, so the bar is there without a click; Ctrl+Tab still goes back to the session you
+  came from. Every window shows the bar, and a reload shows it again, until it is answered.
+- **What it says.** `Cleared from "<the old session's title>"` (and its ticket), then one checkbox
+  for each field the old session has: `label`, `group <group>`, `ticket <name>`, `note`, `<n> pull
+  requests`; then `mark the old one done` (while the old session is not running and not done),
+  `Carry over` and `×`. Label, group, ticket and `mark the old one done` are ticked at first, note
+  and pull requests are not; from then on the ticks of your last `Carry over` are the starting
+  ones.
+- **Never overwritten.** A field the new session already has (a label, a group you set, a ticket,
+  a note, the same pull request) is not offered: the bar names it after `already set here:`. A
+  group the new session has only from its title counts as not set, and a carried group replaces
+  it.
+- **`Carry over`** copies the ticked fields in one go, all or nothing, and marks the old session
+  done when that is ticked. The old session keeps all its fields, its pull requests too (they are
+  attached to both, as by hand). When something changed meanwhile (another window edited one of
+  the two sessions), nothing is copied and the bar says so; look at it again and press once more.
+  **`×`** closes the offer for good, in every window; nothing is copied.
+- **Twice in a row.** After two `/clear`s with the first offer unanswered, the bar of the newest
+  session names the nearest session up the chain that has a field you set. A pull request Claude
+  Code attached by itself does not make a session "the old one".
+- **By keyboard.** `c` in the list (`Focus: list`) gives the bar's first checkbox the keyboard,
+  also when a filter hides the new session's row. There Tab and Shift+Tab stay inside the bar,
+  Space ticks, Enter presses a button and Esc gives the keyboard back to the list; the keyboard
+  never lands in the terminal from the bar, so an Enter meant for `Carry over` never reaches
+  Claude Code's prompt. Ctrl+Shift+L goes to the terminal as everywhere.
+- **Only a `/clear` from now on.** The bar shows only for a `/clear` made after the window first
+  ran with this feature: the sessions you cleared before it never show it.
+- **Known limits.** No bar when the hook recorded no process for the session or its record was
+  lost; none while the machine's clock is set back behind that first start; a resume of a session
+  whose offer waits resizes its terminal once, when the bar comes.
 
 #### The ticket link
 

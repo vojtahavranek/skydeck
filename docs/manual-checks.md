@@ -24,7 +24,8 @@ a copy that Claude Code's background feature makes (follow-up F33), at "A copy m
 W41 checks the window's settings screen (follow-up F36), at "The settings screen"; W42 checks moving
 a session of Open by hand (follow-up F37), at "Moving a session in Open"; W43 checks the window's
 notice of a newer skydeck (follow-up F38), at "The update notice"; W44 checks the short settings
-screen and its gear (follow-up F39), at "The short settings screen".
+screen and its gear (follow-up F39), at "The short settings screen"; W46 checks the carry over
+after `/clear` (follow-up F40), at "Carry over after /clear".
 
 Setup:
 
@@ -127,7 +128,8 @@ skydeck ls
 
 Expected: two rows. The old session is `not-running` and has no marks. The new one is `waiting` and has
 the mark `continued`. `skydeck show <new ref>` prints `continues: <old id>` and a line
-`link:      clear <old short id> -> <new short id> at <time>`.
+`link:      clear <old short id> -> <new short id> at <time>`. The commands copy nothing from the
+old session to the new one; the window offers it on the new session (W46).
 
 ## 4. Exit
 
@@ -3038,3 +3040,50 @@ Write down: for each step whether it went as expected, and the words where they 
 the gear looked right, and the screen read well in your theme.
 
 Not tried before this check was written: all of it, in Edge.
+
+## Carry over after /clear
+
+The check of the carry over after `/clear` (follow-up F40; design.md 7.1; design-step-2.md 12.6,
+12.9; [install.md](install.md), "After `/clear`: carry over"): W46, in your window, with real
+Claude Code, on throwaway sessions in a scratch folder. It writes labels, groups, tickets and done
+marks of those sessions only. Commands are typed in W, a WSL terminal of your own (never a `!`
+command inside Claude Code). The tests run the bar in headless Chromium against the stand-in
+program; only here does it meet real Claude Code and Edge.
+
+## W46. The bar after /clear
+
+Setup: skydeck updated to a commit that has follow-up F40 (`skydeck update`, W32), and the window
+opened at least once since (the bar shows only for a `/clear` made after that); a throwaway session
+started from the New form in a scratch folder, running in a terminal of the window, with a label
+(`l`), a group (`g`) and a ticket (`t`, a link such as `https://example.com/browse/TRY-1`).
+
+1. **The bar without a click.** In its terminal type `/clear` and Enter. Expected: the terminal
+   stays shown, the selected row is the new session's, and under the header a bar reads `Cleared
+   from "<the label>" · TRY-1`, `label`, `group <group>`, `ticket TRY-1` ticked, `mark the old one
+   done` ticked, `Carry over` and `×`. Claude Code keeps the session's name in its terminal tab.
+2. **A click keeps the prompt.** Click on the `group` checkbox (it unticks), then type a letter:
+   it lands in Claude Code's prompt, and the key bar says `Focus: terminal`. Delete the letter.
+3. **Carry over.** Click on the group checkbox again and on `Carry over`. Expected: the bar goes,
+   the header shows the label, the group and the ticket; the old session is gone from the list and
+   shows again with `a` (Show done), marked done. Press `a` again.
+4. **×.** Type `/clear` again, then click `×`. Expected: the bar goes; after Ctrl+Shift+R the new
+   session shows no bar; `skydeck show <its short id>` in W prints no label.
+5. **Two clears.** Type `/clear` twice without answering the first bar. Expected: the newest
+   session's bar names the session of step 4 (it has the fields from step 3, by the label). Leave
+   it unanswered.
+6. **By keyboard while the list changes.** Have another session work (a prompt that takes some
+   seconds) so that the list changes under you. Press Ctrl+Shift+L (`Focus: list`), `c`: the first
+   checkbox has the keyboard, the key bar says `Focus: list`. Press Tab until `Carry over` has it,
+   wait for the other session's state to change in the list, then Enter. Expected: the bar goes,
+   and nothing was typed into Claude Code's prompt (look at its prompt line).
+7. **Outside the window.** In W, in the scratch folder, run `claude`, give it a label from the
+   window (`l` on its row), and type `/clear` in that terminal. Expected: in the window the new
+   session's card shows the bar; `×` closes it. Exit that `claude`.
+8. **An old clear.** Select one of your own sessions that was cleared out of a labelled one before
+   this skydeck was installed (only look at it; press nothing on it). Expected: no bar.
+9. **The end.** Exit the throwaway sessions (`/exit`) and mark them done.
+
+Write down: for each step whether it went as expected, and the words where they differ; whether
+the bar read well in your theme and changed the terminal's size only when it came and went.
+
+Not tried before this check was written: all of it, in Edge and with real Claude Code.

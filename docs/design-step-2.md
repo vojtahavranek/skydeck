@@ -215,7 +215,7 @@ Added to design 11:
 | `src/window/view/search/` | The rules of search as pure functions (stage E, plan E1): the filter's words and chips (12.8), the blocks (12.2; the code calls them stacks), the switcher's ranking (12.8); `build.ts` calls them. No pattern is ever built from a search text. | values: its own files and `text`'s `sanitize` only; types: sessions, `protocol.ts`, `hub.ts`, `view/sections.ts` |
 | `web/` | The page: `index.html`, plain JavaScript modules with JSDoc types (checked by `tsc`), CSS, and one classic script, `web/theme-early.js`, that puts the stored choices of the theme's Mode and colour themes on the page before its first paint (12.1; follow-up F13). No bundler, no build step: the files are served as they are. | `vendor/xterm/` |
 | `web/keys.js` | The key table (12.9) and the terminal key mapping (9.1), as pure functions. | — |
-| `web/carry-over.js`, `web/carry-over-text.js` | Follow-up F40 (12.6, 12.9): the bar that offers to carry fields over after `/clear`, and its words as pure functions. The page draws the server's offer and sends one act; it decides nothing. | — |
+| `web/carry-over.js`, `web/carry-over-text.js` | Follow-up F40 (12.6, 12.9): the bar that offers to carry fields over after `/clear`, and its words as pure functions. The page draws the server's offer and sends one act; it decides nothing. | `web/carry-over.js`: `web/carry-over-text.js` only |
 | `web/update.js`, `web/update-text.js` | Follow-up F38 (12.1, 12.13, 16.5): the dialog of `Update available`, and its words and the lines of the settings screen's group Updates as pure functions. They put the server's texts into sentences and decide nothing. | `web/format.js` |
 | `vendor/xterm/` | The vendored xterm.js files (16.6). | — |
 
