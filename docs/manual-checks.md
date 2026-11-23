@@ -3251,8 +3251,9 @@ terminal of the window and selected.
 8. **A browser tab.** In W, `skydeck window --print-url`, open the address in a tab of your usual
    Edge. Expected: the tab's list keeps a width of its own (400 px the first time: another browser
    profile than the window's), and a drag there leaves the window's width as it is. Close the tab.
-9. **The end.** Double-click the border. Expected: the list is 400 px wide again (as before the
-   update); after Ctrl+Shift+R too.
+9. **The end.** Double-click the border, letting the pointer slip a px or two between the clicks if
+   your hand does. Expected: the list is 400 px wide again (as before the update); after
+   Ctrl+Shift+R too. A single click on the border that slips a little changes nothing.
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge
 version; whether the handle is easy enough to find and to grab.
