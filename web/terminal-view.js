@@ -159,11 +159,15 @@ export function createTerminalView(root, deps) {
   // a drag over the text just copied is a new one (the press cleared it). The places are
   // compared, not xterm.js's `onSelectionChange`: a press clears the selection without reporting
   // it, and a release reports nothing when it ends where xterm.js's last report was — also after
-  // a resize or a key cleared it. The release listener is on the window, in the capture phase, so
-  // that no listener of the page on the way can hide a release, wherever it is (xterm.js follows a
-  // drag outside the terminal and scrolls with it). It runs before xterm.js's own on the document,
-  // which changes no selection but in one case: a quick Alt+click it takes as moving the cursor
-  // ends no selection (`movesCursor`). Every press of the primary button first forgets the last
+  // a resize or a key cleared it. The release listener is on the window, in the bubble phase, so
+  // that it reads the selection AFTER xterm.js's own release listener on the document: that one can
+  // still change it (a quick Alt+click is a cursor move there, whose arrow keys clear the character
+  // it selected; scrolled up, xterm.js sends nothing and leaves it, but ends no selection either:
+  // `movesCursor` skips that release in both cases). It misses no release xterm.js hears, wherever
+  // it is (xterm.js follows a drag outside the terminal and scrolls with it): the only listeners of
+  // the page that stop a mouseup (app.js's and switcher.js's guards of a click sequence) do so in
+  // the capture phase on the window, which keeps it from xterm.js's listener too. Every press of
+  // the primary button first forgets the last
   // one (a release the page never saw: the window lost the mouse); the release of any button ends
   // the press, as xterm.js ends its own; the window losing the focus (Alt+Tab in the middle of a
   // drag, whose release it then never hears) forgets it too. A selection made by code comes with
@@ -198,7 +202,7 @@ export function createTerminalView(root, deps) {
         copySelection(press.t);
       }
     },
-    true,
+    false,
   );
 
   // --- the terminals ----------------------------------------------------------------------------
@@ -1358,7 +1362,8 @@ const ALT_CLICK_MS = 500;
  * Issue #184: whether xterm.js 6.0.0 takes this release as "move the cursor here" (its
  * SelectionService `_handleMouseUp`, with the option `altClickMovesCursor`, on by default, which
  * this page leaves): Alt held, at most one character selected, within ALT_CLICK_MS of the press.
- * It then ends no selection: it reports none, and the arrow keys it sends clear that character.
+ * It then ends no selection: it reports none; the arrow keys it sends clear that character, and
+ * while the terminal is scrolled up it sends none and leaves the character selected.
  * @param {Terminal} xterm
  * @param {MouseEvent} event
  * @param {number} pressedAt the press's `timeStamp`

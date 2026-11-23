@@ -1902,9 +1902,12 @@ cleared it) and copies again. The places are compared rather than xterm.js's own
 its last report was (also after a resize or a key cleared the selection). Every press of the
 primary button forgets the last one first, and the release of any button ends it, as xterm.js
 ends its own; the window losing the focus (Alt+Tab in the middle of a drag, whose release it then
-never hears) forgets it too. The release is heard on the window before any listener of the page
-can stop it; a quick Alt+click that xterm.js takes as moving the cursor (at most one character
-selected, within 500 ms) ends no selection and copies nothing. The scroll bar cancels its
+never hears) forgets it too. The page reads the selection at the release after xterm.js's own
+release listener, which can still change it: a quick Alt+click (at most one character selected,
+within 500 ms) is xterm.js's cursor move, whose arrow keys clear that character — scrolled up it
+sends none and leaves the character, but ends no selection either —, and it copies nothing. No
+release xterm.js hears is missed: the only listeners of the page that stop a mouseup do so in the
+capture phase on the window, which keeps it from xterm.js too. The scroll bar cancels its
 `pointerdown`, so the browser makes no mouse event of its press at all. So nothing else writes the clipboard: not a selection the page or
 an add-on makes (the search's match, 9.7: it comes with no press; and while the find bar is open
 the add-on finds again by itself 200 ms after output or a resize and selects its match, which,

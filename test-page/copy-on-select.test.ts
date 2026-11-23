@@ -333,7 +333,7 @@ test('copy on select (issue #184)', async (t) => {
   );
 
   await t.test(
-    'a drag released outside the terminal copies, unless another press or the window losing the focus came before its release; one that scrolls the scrollback copies every line it reached; a release a listener of the page stops on its way copies too',
+    'a drag released outside the terminal copies, unless another press or the window losing the focus came before its release; one that scrolls the scrollback copies every line it reached; an Alt+click that moves the cursor copies nothing, also scrolled up',
     async (t) => {
       const { l, term } = await withLine(t, chromium);
       const { page } = l;
@@ -397,19 +397,20 @@ test('copy on select (issue #184)', async (t) => {
         'every line from there to the press',
       );
 
-      // A listener of the page that stops the release on its way hides it from no copy (last:
-      // xterm.js's own listener on the document no longer hears a release after this).
-      await page.evaluate(() => {
-        document.body.addEventListener('mouseup', (event) => event.stopPropagation(), true);
-      });
+      // Scrolled up (the drag above left it so), a quick Alt+click over one character is still
+      // xterm.js's cursor move: it sends no arrow keys then and leaves the character selected, but
+      // ends no selection, and nothing is copied.
       await setClipboard(page, 'copied elsewhere');
+      const keys = inputOf(l.d.record, S1).length;
       const shown = `line ${Number(/^line (\d+)$/m.exec(await screenText(page))?.[1]) + 2}`;
-      const [stopped, stoppedTo] = await endsOf(page, shown, shown);
-      await drag(page, stopped, stoppedTo);
-      await until(
-        async () => (await clipboardText(page)) === shown,
-        'a release stopped on its way',
-      );
+      const [a, b] = await endsOf(page, 'n', shown);
+      await page.keyboard.down('Alt');
+      await drag(page, { x: a.x - 1, y: a.y }, { x: b.x + 1, y: b.y });
+      await page.keyboard.up('Alt');
+      await stillHolds(page, 'copied elsewhere', 'an Alt+click while scrolled up');
+      assert.equal(inputOf(l.d.record, S1).slice(keys), '', 'no arrow keys');
+      await page.keyboard.press('Control+Shift+C');
+      await until(async () => (await clipboardText(page)) === 'n', 'the one character stood');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );
