@@ -63,8 +63,7 @@ import { groupCardText } from './search-text.js';
  */
 
 /** Issue #188: the key bar's words for `f` while the right side shows no resume card. */
-export const NO_RESUME_CARD =
-  'this session is not on a resume card: f resumes one with other flags';
+const NO_RESUME_CARD = 'this session is not on a resume card: f resumes one with other flags';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const COPIED_MS = 2000;
 /** How often the header's ages are drawn again (A18, as the list's). */
@@ -560,6 +559,10 @@ export function createCards(root, deps) {
    * @type {{ open: () => string | null, close: (back: boolean) => boolean, shown: () => boolean } | null}
    */
   let flagsCard = null;
+  /** How many times the right side was drawn anew (`hide()`), and at which of them the resume
+   *  card was shown last: a draw without it between two drops its "Other flags…" (#188). */
+  let draws = 0;
+  let resumeDrawn = -1;
 
   /**
    * Shows the card `key`: the one shown when it is the same, else a new one from `build`. Its
@@ -1087,6 +1090,12 @@ export function createCards(root, deps) {
       if (typeof selected?.command === 'string' && !expired) {
         setHidden(flags, true);
       }
+      // #188: "Other flags…" belongs to the card it was opened on: after a draw of something else
+      // (the session's terminal, another pane) the card shown again is the plain one.
+      if (resumeDrawn !== draws - 1) {
+        flagsCard?.close(false);
+      }
+      resumeDrawn = draws;
       showCard(`resume:${row.id}`, () => buildResume(row.id), [row, selected, resultLines]);
     },
     /** @param {RowPayload} row */
@@ -1135,20 +1144,19 @@ export function createCards(root, deps) {
       return flagsCard === null || card.hidden ? NO_RESUME_CARD : flagsCard.open();
     },
     /**
-     * Issue #188: closes "Other flags…", nothing sent: the card's action line again. `back` (Esc):
-     * the keyboard on `Other flags…`; false (app.js, when the right side shows something else: the
-     * resume card shown again later is the plain one) moves no keyboard. Whether it was open.
-     * @param {boolean} back
+     * Issue #188: Esc in "Other flags…": the card's action line again, nothing sent, the keyboard
+     * on `Other flags…`. Whether it was open.
      * @returns {boolean}
      */
-    closeFlags(back) {
-      return flagsCard?.close(back) ?? false;
+    closeFlags() {
+      return flagsCard?.close(true) ?? false;
     },
     /** Issue #188: whether the shown resume card's "Other flags…" is open. */
     flagsShown() {
       return !card.hidden && (flagsCard?.shown() ?? false);
     },
     hide() {
+      draws += 1;
       // Hidden, not removed: what had the keyboard in it is given back by app.js.
       setHidden(head, true);
       setHidden(card, true);

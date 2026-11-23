@@ -1,6 +1,7 @@
 // Test fixture: a verbatim copy of web/cards.js at 40f7886 (task 26's placeholder), kept so
 // that the page shell's own tests do not change when the real module arrives; not developed
-// further. pinModules (test-page/helpers/shell.ts) serves it in place of web/cards.js.
+// further, but for the no-op methods of issue #188's "Other flags…", which app.js calls. pinModules
+// (test-page/helpers/shell.ts) serves it in place of web/cards.js.
 //
 // The right side's header and cards (S2 7.8, 7.9, 12.5, 12.6) — the smallest working version,
 // replaced by task 29 (plan A16): a header line, the resume card with its button, the card of a
@@ -184,6 +185,16 @@ export function createCards(root, deps) {
           .then((result) => showResult(lines, result));
       });
       dir.focus();
+    },
+    // Issue #188's "Other flags…" (contract 2.9 as widened then): this module has none.
+    openFlags() {
+      return 'this module has no resume card with other flags';
+    },
+    closeFlags() {
+      return false;
+    },
+    flagsShown() {
+      return false;
     },
     hide() {
       // Hidden, not removed: what had the keyboard in it is given back by app.js.

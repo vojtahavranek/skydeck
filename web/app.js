@@ -66,7 +66,7 @@ import { decodeKey, loadKey, takeToken } from './auth.js';
 import { createBanner } from './banner.js';
 import { createCarryOver } from './carry-over.js';
 import { NOTHING_TO_CARRY } from './carry-over-text.js';
-import { createCards, NO_RESUME_CARD } from './cards.js';
+import { createCards } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
 import { createEndDialog } from './end-dialog.js';
@@ -246,6 +246,9 @@ const state = {
   /** The key (`code`) whose keydown opened the dialog or the switcher shown, until it is
    *  released: its auto-repeats type nothing into the field. */
   openedBy: '',
+  /** Issue #188: the key (`code`) of the `f` that opened a resume card's Other flags…, until it is
+   *  released: its auto-repeats type nothing into the field. */
+  flagsBy: '',
   /** F30: what had the keyboard when the dialog "Mark done" opened: Cancel gives it back. */
   enderFrom: /** @type {Element | null} */ (null),
   /** F36: what had the keyboard when the settings screen opened: it gets it back. */
@@ -2033,10 +2036,6 @@ function render() {
   dom.rightZone.dataset.pane = pane.kind;
   dom.rightZone.dataset.paneTerm = pane.kind === 'terminal' ? pane.term.id : '';
   terminalView.show(pane.kind === 'terminal' ? pane.term : null);
-  if (pane.kind !== 'resume') {
-    // #188: Other flags… belongs to the resume card it was opened on; shown again, the card is plain.
-    cards.closeFlags(false);
-  }
   cards.hide();
   switch (pane.kind) {
     case 'terminal':
@@ -2512,9 +2511,10 @@ function doListKey(action, event) {
         say('no session selected');
         return true;
       }
-      const why = state.pane.kind === 'resume' ? cards.openFlags() : NO_RESUME_CARD;
+      // The cards say why not: no resume card is shown, or its session expired.
+      const why = cards.openFlags();
       if (why === null) {
-        state.openedBy = event.code;
+        state.flagsBy = event.code;
       } else {
         say(why);
       }
@@ -2595,12 +2595,7 @@ function onKeyDown(event) {
   if (updateDialog.shown() && updateDialog.key(event)) {
     return; // F38: Esc and Tab are the dialog's
   }
-  if (
-    event.repeat &&
-    state.openedBy !== '' &&
-    event.code === state.openedBy &&
-    cards.flagsShown()
-  ) {
+  if (event.repeat && state.flagsBy !== '' && event.code === state.flagsBy) {
     event.preventDefault();
     return; // #188: a held f that opened Other flags… types nothing into its field
   }
@@ -2641,17 +2636,17 @@ function onKeyDown(event) {
     } else if (
       zone === 'terminal' &&
       state.pane.kind === 'resume' &&
-      cards.flagsShown() &&
       event.key === 'Escape' &&
       !event.isComposing &&
       !event.ctrlKey &&
       !event.shiftKey &&
       !event.altKey &&
-      !event.metaKey
+      !event.metaKey &&
+      cards.flagsShown()
     ) {
       // Issue #188: Esc in Other flags… goes back to the card, nothing sent; a held Esc once.
       if (!event.repeat) {
-        cards.closeFlags(true);
+        cards.closeFlags();
       }
       handled = true;
     }
@@ -2832,6 +2827,9 @@ addEventListener(
   (event) => {
     if (event.code === state.openedBy) {
       state.openedBy = '';
+    }
+    if (event.code === state.flagsBy) {
+      state.flagsBy = '';
     }
     pressedInDialog.delete(event.code);
     heldIntoTerminal(event);

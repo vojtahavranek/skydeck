@@ -336,7 +336,7 @@ test("the resume card's Other flags… (#188)", async (t) => {
         'as typed: the server splits',
       );
       await untilTerminalOf(w.page, S1);
-      assert.equal(await w.page.locator(EDITOR).count(), 0, 'the form is gone with the card');
+      assert.equal(await w.page.locator(EDITOR).isVisible(), false, 'the form went with the card');
     },
   );
 
