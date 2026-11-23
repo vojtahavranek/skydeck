@@ -3,8 +3,10 @@
 // S2 8.2.4 and sized by the server only (S2 8.2.6: the view only computes the proposal sent in
 // `attach` and `resize`, by its own rule of what fits — see `fitIn`). The page's terminal answers
 // no query (S2 9.3), maps the keys of S2 9.1, writes the clipboard only for the shown terminal of
-// a focused window (S2 9.5), opens links only on a Ctrl+click and through the server (S2 9.6),
-// finds in the scrollback (S2 9.7) and ignores the program's window title (S2 15.4).
+// a focused window (S2 9.5), and (issue #184, S2 9.5) a selection the user ends with the mouse in
+// the shown terminal while the setting `window.copyOnSelect` is on, opens links only on a
+// Ctrl+click and through the server (S2 9.6), finds in the scrollback (S2 9.7) and ignores the
+// program's window title (S2 15.4).
 //
 // Up to eight terminals stay attached, the least recently shown detached beyond that; while the
 // window is hidden only the shown one stays attached (S2 12.6). A detached terminal's xterm.js is
@@ -29,6 +31,8 @@ import { terminalKey } from './keys.js';
  * @property {(message: Record<string, unknown> & { t: string }) => void} send
  * @property {(e: KeyboardEvent) => boolean} chord
  * @property {(url: string) => void} openLink
+ * @property {() => boolean} [copyOnSelect] issue #184: whether a selection the user ends with the
+ *   mouse is copied (`window.copyOnSelect`), asked at each release; absent: never
  */
 
 /** S2 12.6: at most this many terminals stay attached. */
@@ -135,8 +139,43 @@ export function createTerminalView(root, deps) {
   /** @type {Term | null} */
   let shown = null;
   let hidden = false;
+  /** Copy on select (issue #184): the terminal in which the primary button that is down was
+   *  pressed, when xterm.js's selection service took that press as the start of a selection; else
+   *  null. @type {Term | null} */
+  let pressed = null;
   const find = findBar();
   root.append(find.element);
+
+  // Issue #184 (S2 9.5): the end of a selection made with the mouse is the release that ends the
+  // press which began it — the next release of a button, as xterm.js's selection service ends its
+  // own. Every press of the primary button first forgets the last one (a release the page never
+  // saw: the window lost the mouse); the terminal's own listener (`create`) then notes one its
+  // selection service takes. The release may come anywhere — xterm.js follows a drag outside the
+  // terminal and scrolls with it — so it is heard on the window, in the capture phase, before any
+  // listener of the page can stop it; xterm.js's own release changes no selection, so what is
+  // selected now is what the drag made.
+  // A selection made by code (the search's match, any `select…`) comes with no press and copies
+  // nothing; a click clears a selection at its press, so its release finds nothing to copy.
+  window.addEventListener(
+    'mousedown',
+    (event) => {
+      if (event.button === 0) {
+        pressed = null;
+      }
+    },
+    true,
+  );
+  window.addEventListener(
+    'mouseup',
+    () => {
+      const t = pressed;
+      pressed = null;
+      if (t !== null && t === shown && deps.copyOnSelect?.() === true) {
+        copySelection(t);
+      }
+    },
+    true,
+  );
 
   // --- the terminals ----------------------------------------------------------------------------
 
@@ -218,6 +257,19 @@ export function createTerminalView(root, deps) {
     });
     xterm.onBinary((data) => sendInput(t, data, true));
     xterm.open(screen);
+    // Issue #184: a press xterm.js's selection service takes, by its own rule (SelectionService
+    // `handleMouseDown`): the primary button, and while the program has mouse reporting on only
+    // with Shift (a plain press is then the program's). In the capture phase: before xterm.js's own
+    // listeners, one of which stops the event when Shift forces a selection.
+    xterm.element?.addEventListener(
+      'mousedown',
+      (event) => {
+        if (event.button === 0 && (xterm.modes.mouseTrackingMode === 'none' || event.shiftKey)) {
+          pressed = t;
+        }
+      },
+      true,
+    );
     screen.addEventListener('wheel', (event) => wheelInMargin(t, event), {
       capture: true,
       passive: false,
@@ -336,6 +388,17 @@ export function createTerminalView(root, deps) {
       clipboardWrite(t, data);
       return true;
     });
+  };
+
+  /**
+   * S2 9.1, 9.5: the terminal's selection to the clipboard, when it has one — Ctrl+Shift+C's copy,
+   * and copy on select's (issue #184); a write the browser refuses is swallowed.
+   * @param {Term} t
+   */
+  const copySelection = (t) => {
+    if (t.xterm.hasSelection()) {
+      navigator.clipboard.writeText(t.xterm.getSelection()).catch(() => {});
+    }
   };
 
   /**
@@ -1186,9 +1249,8 @@ export function createTerminalView(root, deps) {
       find.open();
     },
     copy() {
-      const t = shown;
-      if (t !== null && t.xterm.hasSelection()) {
-        navigator.clipboard.writeText(t.xterm.getSelection()).catch(() => {});
+      if (shown !== null) {
+        copySelection(shown);
       }
     },
     pasteRaw() {
