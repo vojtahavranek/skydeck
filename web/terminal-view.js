@@ -139,23 +139,32 @@ export function createTerminalView(root, deps) {
   /** @type {Term | null} */
   let shown = null;
   let hidden = false;
-  /** Copy on select (issue #184): the terminal in which the primary button that is down was
-   *  pressed, when xterm.js's selection service took that press as the start of a selection; else
-   *  null. @type {Term | null} */
+  /**
+   * Copy on select (issue #184): the press of the primary button that is down, on a terminal whose
+   * selection xterm.js starts with it (`startsSelection`), and where that selection was before the
+   * press and right after xterm.js handled it (`selectionPlace`); else null.
+   * @type {{ t: Term, before: string, after: string } | null}
+   */
   let pressed = null;
   const find = findBar();
   root.append(find.element);
 
-  // Issue #184 (S2 9.5): the end of a selection made with the mouse is the release that ends the
-  // press which began it — the next release of a button, as xterm.js's selection service ends its
-  // own. Every press of the primary button first forgets the last one (a release the page never
-  // saw: the window lost the mouse); the terminal's own listener (`create`) then notes one its
-  // selection service takes. The release may come anywhere — xterm.js follows a drag outside the
-  // terminal and scrolls with it — so it is heard on the window, in the capture phase, before any
-  // listener of the page can stop it; xterm.js's own release changes no selection, so what is
-  // selected now is what the drag made.
-  // A selection made by code (the search's match, any `select…`) comes with no press and copies
-  // nothing; a click clears a selection at its press, so its release finds nothing to copy.
+  // Issue #184 (S2 9.5): a selection the user made with the mouse is copied at the release that
+  // ends the press which began it, when the press CHANGED the selection — xterm.js cleared or
+  // restarted it at the press (a word, a line), or the moves built or moved it by the release —,
+  // the selection is not empty, and the terminal is still the one shown. So a press that changes
+  // nothing (a Shift+click where the selection ends already, a drag of the scroll bar, which
+  // reaches the page as no press at all) never writes an old selection over the clipboard again;
+  // a drag over the text just copied is a new one (the press cleared it). The places are
+  // compared, not xterm.js's `onSelectionChange`: a press clears the selection without reporting
+  // it, and a release reports nothing when it ends where xterm.js's last report was — also after
+  // a resize or a key cleared it. The listener is on the window, in the bubble phase: after
+  // xterm.js's own on the document has ended its press (an Alt+click that moves the cursor clears
+  // a one-character selection there), and it hears every release xterm.js hears, wherever it is
+  // (xterm.js follows a drag outside the terminal and scrolls with it). Every press of the primary
+  // button first forgets the last one (a release the page never saw: the window lost the mouse);
+  // the release of any button ends the press, as xterm.js ends its own. A selection made by code
+  // (the search's match, any `select…`) comes with no press.
   window.addEventListener(
     'mousedown',
     (event) => {
@@ -165,17 +174,17 @@ export function createTerminalView(root, deps) {
     },
     true,
   );
-  window.addEventListener(
-    'mouseup',
-    () => {
-      const t = pressed;
-      pressed = null;
-      if (t !== null && t === shown && deps.copyOnSelect?.() === true) {
-        copySelection(t);
-      }
-    },
-    true,
-  );
+  window.addEventListener('mouseup', () => {
+    const press = pressed;
+    pressed = null;
+    if (press === null || press.t !== shown || deps.copyOnSelect?.() !== true) {
+      return;
+    }
+    const now = selectionPlace(press.t.xterm);
+    if (now !== '' && (press.after !== press.before || now !== press.after)) {
+      copySelection(press.t);
+    }
+  });
 
   // --- the terminals ----------------------------------------------------------------------------
 
@@ -257,19 +266,26 @@ export function createTerminalView(root, deps) {
     });
     xterm.onBinary((data) => sendInput(t, data, true));
     xterm.open(screen);
-    // Issue #184: a press xterm.js's selection service takes, by its own rule (SelectionService
-    // `handleMouseDown`): the primary button, and while the program has mouse reporting on only
-    // with Shift (a plain press is then the program's). In the capture phase: before xterm.js's own
-    // listeners, one of which stops the event when Shift forces a selection.
+    // Issue #184: a press that starts a selection, and where the selection was before it. In the
+    // capture phase: before xterm.js's own listeners (one of which stops the event when Shift
+    // forces a selection under the program's mouse reporting).
     xterm.element?.addEventListener(
       'mousedown',
       (event) => {
-        if (event.button === 0 && (xterm.modes.mouseTrackingMode === 'none' || event.shiftKey)) {
-          pressed = t;
+        if (startsSelection(xterm, event)) {
+          const before = selectionPlace(xterm);
+          pressed = { t, before, after: before };
         }
       },
       true,
     );
+    // After xterm.js's own listeners of the press (on this element, made by `open` before this
+    // one): where it put the selection — cleared, a word, a line, an end moved by Shift.
+    xterm.element?.addEventListener('mousedown', () => {
+      if (pressed?.t === t) {
+        pressed.after = selectionPlace(xterm);
+      }
+    });
     screen.addEventListener('wheel', (event) => wheelInMargin(t, event), {
       capture: true,
       passive: false,
@@ -1295,6 +1311,30 @@ export function createTerminalView(root, deps) {
       return fitInside(Math.floor(width), Math.floor(height), cell, shown?.xterm.element ?? root);
     },
   };
+}
+
+/**
+ * Issue #184: whether xterm.js 6.0.0 starts a selection with this press (its SelectionService
+ * `handleMouseDown`): the primary button, and while the program has mouse reporting on only with
+ * the key that forces a selection — Shift here; on a Mac xterm.js uses Alt instead, and only with
+ * its option `macOptionClickForcesSelection`, which this page leaves off. Where this guesses wrong
+ * the press changes no selection, which the release then finds.
+ * @param {Terminal} xterm
+ * @param {MouseEvent} event
+ * @returns {boolean}
+ */
+function startsSelection(xterm, event) {
+  return event.button === 0 && (xterm.modes.mouseTrackingMode === 'none' || event.shiftKey);
+}
+
+/**
+ * Where the terminal's selection is, as a text to compare (`''` with none).
+ * @param {Terminal} xterm
+ * @returns {string}
+ */
+function selectionPlace(xterm) {
+  const at = xterm.getSelectionPosition();
+  return at === undefined ? '' : `${at.start.x},${at.start.y}-${at.end.x},${at.end.y}`;
 }
 
 /**

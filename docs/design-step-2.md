@@ -1886,16 +1886,27 @@ function as Ctrl+Shift+C (9.1), once per ended selection, at the release — nev
 at the release that ends the press which began it, wherever the release is (xterm.js follows a drag
 outside the terminal, and scrolls with one past its top or bottom), so every way xterm.js's
 selection takes the mouse counts: a drag, a double click (a word), a triple click (a line), a
-Shift+click that extends. The press counts when xterm.js's own selection
-takes it (its `handleMouseDown`'s rule): the primary button, and while the program has turned
-mouse reporting on, only with Shift — a plain drag is then the program's, xterm.js makes no
-selection, and a program's own copy still comes by OSC 52 as above. A release copies only when the
-terminal of the press is still the one shown and something is selected; every press of the
-primary button forgets the last one first. So nothing else writes the clipboard: not a selection
-the page or an add-on makes (the search's match, 9.7: it comes with no press), not one that only
-went away (a click clears a selection at its press, so its release finds nothing; output and a
-resize that clear one have no release), not a terminal that is no longer shown, not a release with
-nothing selected — the clipboard is never emptied. A program cannot cause a copy by its output: the
+Shift+click that extends. The press counts when xterm.js's own selection takes it (its
+`handleMouseDown`'s rule, one small function of the page): the primary button, and while the
+program has turned mouse reporting on, only with Shift (xterm.js uses another key on a Mac) — a
+plain drag is then the program's, xterm.js makes no selection, and a program's own copy still
+comes by OSC 52 as above. Ruled by the lead (R1): a press that does not CHANGE the selection copies
+nothing. The page compares where the selection is before the press, right after xterm.js handled
+it (cleared, a word, a line, an end moved by Shift) and at the release: a release copies only when
+one of the three differs from the one before, the selection is not empty, and the terminal of the
+press is still the one shown. So a Shift+click where the selection ends already, or a drag of the
+scroll bar (whose press reaches the page as none at all), never writes an old selection over a
+clipboard the user filled since; a drag over the text just copied is a new selection (its press
+cleared it) and copies again. The places are compared rather than xterm.js's own
+`onSelectionChange`, which reports neither the clearing at a press nor a release that ends where
+its last report was (also after a resize or a key cleared the selection). Every press of the
+primary button forgets the last one first, and the release of any button ends it, as xterm.js
+ends its own. So nothing else writes the clipboard: not a selection the page or an add-on makes
+(the search's match, 9.7: it comes with no press), not one that only went away (a click clears a
+selection at its press, so its release finds nothing; output and a resize that clear one have no
+release), not a terminal that is no longer shown, not a release with nothing selected — the
+clipboard is never emptied — and not output that trims the scrollback under a selection, which
+moves it, during a press the program takes. A program cannot cause a copy by its output: the
 copy needs a press of the user's on the terminal and its release, which no output makes; output can
 change only what an ongoing selection covers, as it can for Ctrl+Shift+C. No message, toast or mark
 says that it copied; a write the browser refuses is swallowed as Ctrl+Shift+C's is. The page reads
@@ -4114,8 +4125,8 @@ screen's describe Advanced, which keeps F36's screen whole.
     `after a restart`), `Typed commands start sessions in` (`terminal`: `That terminal`, `A
     WezTerm tab`, `The window`; hint `skydeck resume, new and restore, typed in a terminal.`) and,
     from issue #184, `Copy on select` (`window.copyOnSelect`: a switch, on `true`, off `false`; hint
-    `Text selected with the mouse in a terminal.`, since the label alone could be read as the
-    group's whole window, whose list and header text it does not copy, 9.5).
+    `In a session’s terminal; Ctrl+Shift+C copies either way.`, since the label alone could be read
+    as the group's whole window, whose list and header text it does not copy, 9.5).
   - **Updates** (follow-up F38): `Check for updates every day` (`window.updateCheck`: a switch, on
     `daily`, off `off`), then the group's extra block, the last check and `Check now` (the bullet
     Updates below).

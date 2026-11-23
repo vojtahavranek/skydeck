@@ -346,6 +346,8 @@ describe('what a page may send (G2): every refusal changes nothing', () => {
       ['wezterm.domain', '', '"wezterm.domain" must be a non-empty string or null'],
       // Issue #184: true or false, nothing else; and no other key takes either.
       ['window.copyOnSelect', 'false', '"window.copyOnSelect" must be true or false'],
+      ['window.copyOnSelect', 'true', '"window.copyOnSelect" must be true or false'],
+      ['window.copyOnSelect', 1, '"window.copyOnSelect" must be true or false'],
       ['window.copyOnSelect', null, '"window.copyOnSelect" must be true or false'],
       ['window.copyOnSelect', 0, '"window.copyOnSelect" must be true or false'],
       ['prRefreshMinutes', true, '"prRefreshMinutes" must be a positive integer'],

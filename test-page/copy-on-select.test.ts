@@ -220,7 +220,7 @@ test('copy on select (issue #184)', async (t) => {
   const chromium = await browser(t);
 
   await t.test(
-    'a drag copies its selection at the release, once, not at each move; Ctrl+C then still interrupts the program; a click, output and a resize that clear it leave the clipboard as it was',
+    'a drag copies its selection at the release, once, not at each move, and the same text dragged again is copied again (also after a resize cleared it); Ctrl+C then still interrupts the program; a click, output and a resize that clear it leave the clipboard as it was',
     async (t) => {
       const { l, term } = await withLine(t, chromium);
       const { page, d } = l;
@@ -449,6 +449,86 @@ test('copy on select (issue #184)', async (t) => {
         'the program got that press, in the default encoding',
       );
       await stillHolds(page, 'copied elsewhere', "the program's drag copies no earlier selection");
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    'a press whose release changes no selection copies nothing: a Shift+click at the end the selection already has, a drag of the scroll bar; the selection still stands (Ctrl+Shift+C copies it)',
+    async (t) => {
+      const { l, term } = await withLine(t, chromium);
+      const { page } = l;
+      l.server.hub.input(term, Buffer.from('/lines 300\r'));
+      await untilScreen(page, /^line 300$/m);
+      await untilScreen(page, promptOf(S1));
+      const top = Number(/^line (\d+)$/m.exec(await screenText(page))?.[1]);
+      const row = `line ${top + 5}`;
+      const [from, to] = await endsOf(page, row, row);
+      await drag(page, from, to);
+      await until(async () => (await clipboardText(page)) === row, 'the drag copied');
+      await setClipboard(page, 'copied elsewhere');
+
+      // A Shift+click where the selection ends already: xterm.js extends it to where it was.
+      await page.mouse.move(to.x, to.y);
+      await page.keyboard.down('Shift');
+      await page.mouse.down();
+      await page.mouse.up();
+      await page.keyboard.up('Shift');
+      await stillHolds(page, 'copied elsewhere', 'a Shift+click that changed nothing');
+
+      // The scroll bar, shown once the pointer is over the terminal: its slider dragged up.
+      const bar =
+        '#terminal .tv-term:not([hidden]) .xterm-scrollable-element > .scrollbar.vertical';
+      await page.waitForSelector(`${bar}.visible`, { state: 'attached', timeout: PAGE_WAIT_MS });
+      const slider = await page.locator(`${bar} > .slider`).boundingBox();
+      assert.ok(slider !== null && slider.height > 0, 'the slider is there');
+      const grip = { x: slider.x + slider.width / 2, y: slider.y + slider.height / 2 };
+      await drag(page, grip, { x: grip.x, y: grip.y - 120 });
+      await until(
+        async () => Number(/^line (\d+)$/m.exec(await screenText(page))?.[1]) < top,
+        'the scroll bar scrolled the terminal up',
+      );
+      await stillHolds(page, 'copied elsewhere', 'a drag of the scroll bar');
+
+      // The selection stood all along: Ctrl+Shift+C copies it.
+      await page.keyboard.press('Control+Shift+C');
+      await until(async () => (await clipboardText(page)) === row, 'the selection stood');
+      assert.deepEqual(l.problems, [], 'the page reports no problem');
+    },
+  );
+
+  await t.test(
+    "a press the program's mouse reporting takes copies nothing, also while output trims the scrollback under a selection and so moves it",
+    async (t) => {
+      const { l, term } = await withLine(t, chromium);
+      const { page } = l;
+      // The scrollback full (5,000 lines and the screen): every new line now trims one.
+      l.server.hub.input(term, Buffer.from('/lines 5200\r'));
+      await untilScreen(page, /^line 5200$/m, 60_000);
+      await typeLine(page, '/mouse');
+      await page.waitForSelector('#terminal .tv-term:not([hidden]) .xterm.enable-mouse-events', {
+        state: 'attached',
+        timeout: PAGE_WAIT_MS,
+      });
+      // The default encoding: a report is no input of the user's, which would clear the selection.
+      l.server.hub.input(term, Buffer.from('/red \x1b[?1006ldefault encoding\r'));
+      await untilScreen(page, /^default encoding$/m);
+      const [from, to] = await endsOf(page, 'line 5190', 'line 5190');
+      await drag(page, from, to, { shift: true });
+      await until(async () => (await clipboardText(page)) === 'line 5190', 'the Shift+drag copied');
+      await setClipboard(page, 'copied elsewhere');
+      // A plain press, the program's; while it is held, output trims the scrollback.
+      const [press] = await endsOf(page, 'line 5195', 'line 5195');
+      await drag(page, press, press, {
+        beforeRelease: async () => {
+          l.server.hub.input(term, Buffer.from('\r/lines 80\r'));
+          await untilScreen(page, /^line 80$/m);
+        },
+      });
+      await stillHolds(page, 'copied elsewhere', "the program's press");
+      // The selection stood, moved with the trim: Ctrl+Shift+C copies it.
+      await page.keyboard.press('Control+Shift+C');
+      await until(async () => (await clipboardText(page)) === 'line 5190', 'the selection stood');
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );

@@ -87,10 +87,11 @@ export const SHORT = [
       },
       {
         // Issue #184: the window's terminal copies a mouse selection at once (web/terminal-view.js);
-        // the hint, because the list's and the header's text is not copied so.
+        // the hint, because the list's and the header's text is not copied so, and Ctrl+Shift+C
+        // copies with it on or off.
         key: 'window.copyOnSelect',
         label: 'Copy on select',
-        hint: 'Text selected with the mouse in a terminal.',
+        hint: 'In a session’s terminal; Ctrl+Shift+C copies either way.',
         control: 'switch',
         on: 'true',
         off: 'false',

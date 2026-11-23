@@ -1002,7 +1002,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
               labelled: true,
               control: 'checkbox switch',
               value: true,
-              hint: ['Text selected with the mouse in a terminal.'],
+              hint: ['In a session’s terminal; Ctrl+Shift+C copies either way.'],
               mark: [],
             },
           ],

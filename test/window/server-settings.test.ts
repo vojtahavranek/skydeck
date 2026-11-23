@@ -131,6 +131,13 @@ describe('the settings through the server (S2 12.13, 8.2.3)', () => {
         '"window.copyOnSelect" must be true or false',
       ],
       [{ key: 'window.copyOnSelect', value: null }, '"window.copyOnSelect" must be true or false'],
+      // A boolean only: its text and 1 change nothing either (an object closes the connection,
+      // below).
+      [
+        { key: 'window.copyOnSelect', value: 'true' },
+        '"window.copyOnSelect" must be true or false',
+      ],
+      [{ key: 'window.copyOnSelect', value: 1 }, '"window.copyOnSelect" must be true or false'],
     ];
     for (const [fields, error] of refusals) {
       const result = await a.act({ kind: 'setting-set', ...fields } as never);
@@ -158,6 +165,7 @@ describe('the settings through the server (S2 12.13, 8.2.3)', () => {
       { kind: 'setting-set', key: 'window', value: { links: 'edge' } },
       { kind: 'setting-set', key: 'prRefreshMinutes', value: [1] },
       { kind: 'setting-set', key: 'window.copyOnSelect', value: [false] },
+      { kind: 'setting-set', key: 'window.copyOnSelect', value: { on: true } },
       { kind: 'setting-set', key: 'window', value: { copyOnSelect: false } },
       {
         kind: 'setting-set',

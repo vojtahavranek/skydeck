@@ -3005,9 +3005,9 @@ with the terminal of a session shown (any running one; no prompt is typed into i
    under it `Light and dark each keep their own.`), `Links` (`Open links in`, `Ticket address` and
    its hint about `{key}`), `The window` (`Keep WSL running`, a switch with `after a restart`
    beside it; `Typed commands start sessions in` and its hint; from issue #184 `Copy on select`,
-   a switch, and its hint `Text selected with the mouse in a terminal.`), `Updates` (follow-up
-   F38: the switch `Check for updates every day`, the line of the last check and `Check now`; W43
-   tries them), and at the end `Advanced (14 more settings)` and `Close`. No `Save`, no `Default`, no file name. The keyboard
+   a switch, and its hint `In a session’s terminal; Ctrl+Shift+C copies either way.`),
+   `Updates` (follow-up F38: the switch `Check for updates every day`, the line of the last check
+   and `Check now`; W43 tries them), and at the end `Advanced (14 more settings)` and `Close`. No `Save`, no `Default`, no file name. The keyboard
    is on `Mode`. Write down what Mode and Colour theme show.
 4. **The theme.** Choose the other of `Light` and `Dark` in Mode (from `Auto`, `Dark`). Expected:
    the whole window behind the dialog changes at once, the terminal too. Choose another `Colour
