@@ -1005,6 +1005,7 @@ function act(action) {
       // C1 (ruled): the list that holds an edit's result is one that came since the act was sent
       // (the real server sends it before the answer), else the next one; until then a dialog of
       // that session would start from the old text.
+      let asked = false;
       if (
         result.ok &&
         EDITS.has(action.kind) &&
@@ -1016,8 +1017,9 @@ function act(action) {
         // shown none would come: a `view` asks for one, which the server answers at once
         // (review 2 of task 37, M2).
         sendView();
+        asked = true;
       }
-      if (result.ok && (FAVOURITE_ACTS.has(action.kind) || CARRY_ACTS.has(action.kind))) {
+      if (result.ok && !asked && (FAVOURITE_ACTS.has(action.kind) || CARRY_ACTS.has(action.kind))) {
         // F15: the server sends a page at most one list a second, so the list of a change can
         // come up to a second after its answer; a `view` asks for it now (as for EDITS above).
         sendView();

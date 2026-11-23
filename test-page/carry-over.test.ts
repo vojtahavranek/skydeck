@@ -19,6 +19,7 @@ import {
   clickRow,
   connection,
   editWorld,
+  keyMessage,
   launched,
   logOf,
   mark,
@@ -167,6 +168,11 @@ test('the selection after /clear (F40)', async (t) => {
       await showsText(page, '#focus-zone', /^Focus: list$/);
       assert.equal(await active(page), keyboard, 'the keyboard stays where it was');
       await until(() => w.selected() === S2, 'a view names S2', PAGE_WAIT_MS);
+      await until(
+        () => w.sent.some((one) => one['t'] === 'focus' && one['selected'] === S2),
+        'a focus names S2',
+        PAGE_WAIT_MS,
+      );
     },
   );
 });
@@ -244,6 +250,10 @@ interface World {
   terminals: Row[];
   /** The offer of NEW's `selected`, null for none. */
   offer: Row | null;
+  /** The offers of other sessions' `selected`, by session. */
+  others?: Record<string, Row>;
+  /** The closed blocks of Open. */
+  closedStacks?: Row[];
 }
 
 function listOf(world: World, selected: string | null): Row {
@@ -257,12 +267,14 @@ function listOf(world: World, selected: string | null): Row {
         lastNs: null,
         count: world.rows.length,
         rows: world.rows,
-        closedStacks: [],
+        closedStacks: world.closedStacks ?? [],
       },
     ],
     terminals: world.terminals,
     selected:
-      selected === null ? null : selectedOf(selected, selected === NEW ? world.offer : null),
+      selected === null
+        ? null
+        : selectedOf(selected, selected === NEW ? world.offer : (world.others?.[selected] ?? null)),
   };
 }
 
@@ -1258,4 +1270,239 @@ test("the carry-over bar's keys (F40)", async (t) => {
       await showsText(other.page, '#key-message', /^nothing to carry over to this session$/);
     },
   );
+});
+
+// --- the review of 4035aed ----------------------------------------------------------------------
+
+/** The `view`s the page sent so far. */
+function views(w: EditWorld): number {
+  return w.sent.filter((one) => one['t'] === 'view').length;
+}
+
+/** A new rev of the offer: another label, the note offered and ticked. */
+const UNSEEN = offer({
+  rev: REV2,
+  fields: [
+    { name: 'label', text: 'another label', ticked: true },
+    { name: 'group', text: 'backend', ticked: true },
+    { name: 'ticket', text: 'TRY-1', ticked: true },
+    { name: 'note', text: null, ticked: true },
+  ],
+});
+
+test('the carry-over bar after the review (F40)', async (t) => {
+  const chromium = await browser(t);
+
+  for (const dialog of ['the tour', 'Settings'] as const) {
+    await t.test(
+      `${dialog} gives the keyboard back to Carry over after a new rev came under it: it goes to the first checkbox, and Enter sends nothing`,
+      async (t) => {
+        const s = await barWorld(t, chromium, 'terminal');
+        await onBar(s);
+        await apply(s.page).focus();
+        assert.equal(await keyboardAt(s.page), 'bar:Carry over');
+        if (dialog === 'the tour') {
+          await s.page.keyboard.press('Control+Shift+H');
+          await s.page.waitForSelector('#help:not([hidden])');
+          await s.page.locator('#help .help-tour').click();
+          await s.page.waitForSelector('#tour:not([hidden])', {
+            state: 'attached',
+            timeout: PAGE_WAIT_MS,
+          });
+        } else {
+          await s.page.locator('#settings-button').click();
+          await s.page.waitForSelector('#settings:not([hidden])', {
+            state: 'attached',
+            timeout: PAGE_WAIT_MS,
+          });
+        }
+        s.set({ offer: UNSEEN });
+        await s.page.waitForTimeout(400);
+        await s.page.keyboard.press('Escape');
+        await s.page.waitForSelector(
+          dialog === 'the tour' ? '#tour[hidden]' : '#settings[hidden]',
+          {
+            state: 'attached',
+            timeout: PAGE_WAIT_MS,
+          },
+        );
+        await until(async () => (await keyboardAt(s.page)) === 'bar:label', 'the first checkbox');
+        assert.equal(await zone(s.page), 'Focus: list');
+        await s.page.keyboard.press('Enter');
+        await s.page.waitForTimeout(300);
+        assert.deepEqual(barActs(s.w), [], 'no act');
+        assert.equal(inputs(s.w), 0, 'nothing reached the terminal');
+      },
+    );
+  }
+
+  for (const from of ['bar', 'list', 'terminal'] as const) {
+    await t.test(
+      `a click on the heading that selects nothing leaves the keyboard ${from === 'bar' ? 'on the bar' : from === 'list' ? 'on the list' : 'in the terminal'}`,
+      async (t) => {
+        const s = await barWorld(t, chromium, from === 'terminal' ? 'terminal' : 'list');
+        if (from === 'bar') await onBar(s);
+        const before = await keyboardAt(s.page);
+        const zoneBefore = await zone(s.page);
+        await inBar(s.page, '.carry-heading').click();
+        await s.page.waitForTimeout(300);
+        assert.equal(await keyboardAt(s.page), before);
+        assert.equal(await zone(s.page), zoneBefore);
+        if (from !== 'terminal') {
+          await s.page.keyboard.press('Enter');
+          await s.page.waitForTimeout(300);
+          assert.equal(inputs(s.w), 0, 'the next Enter reaches no program');
+          assert.deepEqual(barActs(s.w), []);
+        }
+      },
+    );
+  }
+
+  await t.test(
+    'a click on the refusal over the heading leaves the keyboard on the bar',
+    async (t) => {
+      const s = await barWorld(t, chromium, 'list');
+      await onBar(s);
+      await apply(s.page).focus();
+      await s.page.keyboard.press('Enter');
+      s.w.answer(await s.w.act(1), { ok: false, error: CHANGED });
+      await until(async () => (await barOf(s.page)).message === CHANGED, 'the refusal');
+      await inBar(s.page, '.carry-message').click();
+      await s.page.waitForTimeout(300);
+      assert.equal(await keyboardAt(s.page), 'bar:Carry over');
+      assert.equal(await zone(s.page), 'Focus: list');
+      assert.equal(inputs(s.w), 0);
+    },
+  );
+
+  await t.test('a held Enter on Carry over whose act is refused sends one act', async (t) => {
+    const s = await barWorld(t, chromium, 'list');
+    await onBar(s);
+    await apply(s.page).focus();
+    await hold(s.page, 'Enter', 6, async () => {
+      s.w.answer(await s.w.act(1), { ok: false, error: CHANGED });
+      await until(async () => (await barOf(s.page)).message === CHANGED, 'refused');
+    });
+    await s.page.waitForTimeout(300);
+    assert.equal(barActs(s.w).length, 1);
+  });
+
+  await t.test('while the answer waits a checkbox takes no press', async (t) => {
+    const s = await barWorld(t, chromium, 'list');
+    await apply(s.page).click();
+    await s.w.act(1);
+    const before = (await barOf(s.page)).fields;
+    await box(s.page, 'group').click({ force: true });
+    await s.page.waitForTimeout(200);
+    assert.deepEqual((await barOf(s.page)).fields, before);
+  });
+
+  for (const button of ['Carry over', '×'] as const) {
+    await t.test(
+      `the second click of a double click on ${button} sends nothing, also when the first was refused in between`,
+      async (t) => {
+        const s = await barWorld(t, chromium, 'list');
+        const at = await (button === 'Carry over' ? apply : dismiss)(s.page).boundingBox();
+        assert.ok(at !== null);
+        await s.page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+        await s.page.mouse.down({ clickCount: 1 });
+        await s.page.mouse.up({ clickCount: 1 });
+        s.w.answer(await s.w.act(1), { ok: false, error: CHANGED });
+        await until(async () => (await keyMessage(s.page)) === CHANGED, 'refused');
+        await s.page.mouse.down({ clickCount: 2 });
+        await s.page.mouse.up({ clickCount: 2 });
+        await s.page.waitForTimeout(300);
+        assert.equal(barActs(s.w).length, 1);
+      },
+    );
+  }
+
+  await t.test(
+    'an ok carry-over asks for its list with one view; an ok dismissal with one view; after an ok carry-over its dialogs wait for that list',
+    async (t) => {
+      const s = await barWorld(t, chromium, 'list');
+      s.w.holdViews(true);
+      await apply(s.page).click();
+      const sent = await s.w.act(1);
+      const before = views(s.w);
+      s.w.answer(sent, { ok: true });
+      await untilBar(s.page, false);
+      await s.page.waitForTimeout(300);
+      assert.equal(views(s.w) - before, 1, 'one view after the carry over');
+      await s.page.keyboard.press('l');
+      await showsText(s.page, '#key-message', /^the label is not here yet; press l again$/);
+      s.w.holdViews(false);
+      s.set({ offer: offer({ rev: REV2 }) });
+      await untilBar(s.page, true);
+      await dismiss(s.page).click();
+      const dismissed = await s.w.act(2);
+      const beforeDismiss = views(s.w);
+      s.w.answer(dismissed, { ok: true });
+      await untilBar(s.page, false);
+      await s.page.waitForTimeout(300);
+      assert.equal(views(s.w) - beforeDismiss, 1, 'one view after the dismissal');
+    },
+  );
+
+  await t.test(
+    "a refusal that comes back after another session's offer was selected is not drawn on that bar",
+    async (t) => {
+      const s = await barWorld(t, chromium, 'list', {
+        ...RUNNING,
+        others: {
+          [OLD]: offer({ rev: 'eeeeeeeeeeeeeeee', from: { id: S3, title: 'older', ticket: null } }),
+        },
+      });
+      await apply(s.page).click();
+      const sent = await s.w.act(1);
+      await clickRow(s.page, OLD);
+      await until(
+        async () => (await barOf(s.page)).heading === 'Cleared from "older"',
+        "OLD's bar",
+      );
+      s.w.answer(sent, { ok: false, error: CHANGED });
+      await showsText(
+        s.page,
+        '#key-message',
+        new RegExp(CHANGED.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      );
+      assert.equal((await barOf(s.page)).message, '', "not on OLD's bar");
+    },
+  );
+
+  await t.test('the bar is hidden on a group card and on an empty pane', async (t) => {
+    // NEW and OLD are one open block (a card); ← on NEW closes it and selects its caption.
+    const stack = (role: 'head' | 'member') => ({ group: 'blocked', size: 2, role, head: NEW });
+    const s = await barWorld(t, chromium, 'list', {
+      ...RUNNING,
+      rows: [
+        row(NEW, { state: 'running', terminal: TERM_A, slot: 1, stack: stack('head') }),
+        row(OLD, { stack: stack('member') }),
+      ],
+    });
+    await s.page.keyboard.press('ArrowLeft');
+    await until(
+      async () =>
+        (await readPage(
+          s.page,
+          () => document.getElementById('right-zone')?.dataset['pane'],
+          null,
+        )) === 'group',
+      'the group card',
+    );
+    await untilBar(s.page, false);
+    await s.page.keyboard.press('ArrowRight'); // opens the block and selects its first row
+    await untilBar(s.page, true);
+    s.set({ rows: [row(OLD)], terminals: [] });
+    await until(
+      async () =>
+        (await readPage(
+          s.page,
+          () => document.getElementById('right-zone')?.dataset['pane'],
+          null,
+        )) === 'none',
+      'the empty pane',
+    );
+    await untilBar(s.page, false);
+  });
 });

@@ -233,11 +233,20 @@ export function createCarryOver(host, deps) {
   let tickedKey = '';
   /** The page's ticks while that offer is drawn. @type {Map<CarryField | 'done', boolean>} */
   let ticks = new Map();
-  /** The offer an act waits for: 'carry' shows `carrying over…`; null when none waits. */
+  /** The act that waits for its answer: 'carry' shows `carrying over…`; null when none waits. */
   /** @type {'carry' | 'dismiss' | null} */
   let waiting = null;
-  /** The last refusal, shown over the heading ('' when none). */
+  /** The (session, rev) the waiting act is for: it is shown on that offer's bar only. */
+  let waitingKey = '';
+  /** The last refusal ('' when none), and the (session, rev) it is of: shown on that bar only. */
   let refusal = '';
+  let refusalKey = '';
+  /** The offer (session, rev) under which a control of the bar last had the keyboard: a button
+   *  that gets the keyboard under another offer gives it to the first checkbox (rule 3). */
+  let seenKey = '';
+  /** What had the keyboard when a press on one of the bar's texts began, until its click ends. */
+  /** @type {Element | null} */
+  let pressFrom = null;
   /** The (session, rev) pairs answered `ok` here: hidden at once, before the list comes. */
   const answered = new Set();
   /** A new `rev` came while a button had the keyboard: the next draw gives it to the first box. */
@@ -245,6 +254,11 @@ export function createCarryOver(host, deps) {
 
   /** @returns {string} */
   const keyOf = () => (offer === null || sessionId === null ? '' : `${sessionId} ${offer.rev}`);
+
+  /** Whether an act for the offer drawn now waits for its answer. */
+  function busyHere() {
+    return waiting !== null && waitingKey === keyOf();
+  }
 
   /** Whether the bar is drawn for the offer as it stands. */
   function drawn() {
@@ -353,21 +367,30 @@ export function createCarryOver(host, deps) {
     const keptWords = keptText(shown.kept);
     setText(kept, keptWords);
     setHidden(kept, keptWords === '');
-    const words = waiting === 'carry' ? WAITING_TEXT : refusal;
+    const here = keyOf();
+    const waitsHere = busyHere();
+    const words =
+      waiting === 'carry' && waitsHere ? WAITING_TEXT : refusalKey === here ? refusal : '';
     setText(message, words);
     message.title = words;
-    message.dataset['kind'] = waiting === 'carry' ? 'waiting' : 'refusal';
+    message.dataset['kind'] = waiting === 'carry' && waitsHere ? 'waiting' : 'refusal';
     setHidden(message, words === '');
     headBox.dataset['message'] = String(words !== '');
-    const busy = String(waiting !== null);
+    const busy = String(waitsHere);
     for (const control of controls()) {
       if (control.getAttribute('aria-disabled') !== busy) {
         control.setAttribute('aria-disabled', busy);
       }
     }
+    if (host.contains(document.activeElement)) {
+      seenKey = here; // the keyboard is on the bar while this offer is drawn
+    }
   }
 
-  // No keyboard on a click: a press anywhere on the bar but on its three texts is cancelled.
+  // No keyboard on a click: a press anywhere on the bar but on its three texts is cancelled. A
+  // press on a text is let through, so that a drag selects it; a click on one that selects
+  // nothing gives the keyboard back to what had it (a control of the bar, the list, the
+  // terminal), before app.js's rule for a click on the right side would move it.
   host.addEventListener('mousedown', (event) => {
     const target = event.target;
     if (
@@ -375,6 +398,58 @@ export function createCarryOver(host, deps) {
       target.closest('.carry-heading, .carry-kept, .carry-message') === null
     ) {
       event.preventDefault();
+      return;
+    }
+    if (event.button === 0) {
+      pressFrom = document.activeElement;
+    }
+  });
+  addEventListener('mouseup', () => {
+    const from = pressFrom;
+    pressFrom = null;
+    if (from === null) {
+      return;
+    }
+    setTimeout(() => {
+      const selection = getSelection();
+      if (selection !== null && !selection.isCollapsed) {
+        return; // a drag selected text: it stays selected to be copied
+      }
+      if (
+        from instanceof HTMLElement &&
+        from !== document.body &&
+        from.isConnected &&
+        from.checkVisibility()
+      ) {
+        from.focus();
+      }
+    }, 0);
+  });
+  // Rule 3: a button that gets the keyboard under an offer the bar did not have the keyboard
+  // under (a dialog gives it back after a new `rev` came under it) hands it to the first
+  // checkbox, so that Enter never presses a button for an offer the user has not seen.
+  // The move is made once the code that gave the keyboard is done (a dialog's close checks that
+  // what it gave the keyboard to has it), and only while the button still has it.
+  for (const button of [apply, dismiss]) {
+    button.addEventListener('focus', () => {
+      if (seenKey === keyOf() && drawn()) {
+        return;
+      }
+      queueMicrotask(() => {
+        if (document.activeElement !== button) {
+          return;
+        }
+        if (offer === null || !drawn()) {
+          deps.back();
+        } else if (seenKey !== keyOf()) {
+          boxesOf(offer)[0]?.focus();
+        }
+      });
+    });
+  }
+  host.addEventListener('focusin', (event) => {
+    if (event.target !== apply && event.target !== dismiss) {
+      seenKey = keyOf(); // a checkbox has the keyboard: the user is on this offer's bar
     }
   });
   for (const parts of [...checks.values(), done]) {
@@ -388,7 +463,7 @@ export function createCarryOver(host, deps) {
       }
     });
     box.addEventListener('click', (event) => {
-      if (waiting !== null) {
+      if (busyHere()) {
         event.preventDefault(); // while the answer waits a checkbox takes no press
       }
     });
@@ -396,6 +471,7 @@ export function createCarryOver(host, deps) {
     box.addEventListener('change', () => {
       ticks.set(/** @type {CarryField | 'done'} */ (name), box.checked);
       refusal = '';
+      refusalKey = '';
       draw();
     });
   }
@@ -433,11 +509,14 @@ export function createCarryOver(host, deps) {
   });
 
   /**
-   * A refused act's words: over the heading while the bar is drawn, and in the key bar.
+   * A refused act's words: over the heading of its own offer's bar while it is drawn, and in the
+   * key bar.
+   * @param {string} key the (session, rev) the act was for
    * @param {ResultMessage} result
    */
-  function refused(result) {
+  function refused(key, result) {
     refusal = result.error ?? result.lines[0] ?? NOT_CARRIED;
+    refusalKey = key;
     deps.say(refusal);
   }
 
@@ -447,18 +526,21 @@ export function createCarryOver(host, deps) {
    * @param {ResultMessage} result
    */
   function answer(key, result) {
-    waiting = null;
+    if (waitingKey === key) {
+      waiting = null;
+      waitingKey = '';
+    }
     if (result.ok) {
       answered.add(key);
     } else {
-      refused(result);
+      refused(key, result);
     }
     draw();
   }
 
   // The second click of a double click is no second press: its offer is about to go.
   apply.addEventListener('click', (event) => {
-    if (event.detail > 1 || waiting !== null || !drawn() || offer === null || sessionId === null) {
+    if (event.detail > 1 || busyHere() || !drawn() || offer === null || sessionId === null) {
       return;
     }
     const shown = offer;
@@ -467,7 +549,9 @@ export function createCarryOver(host, deps) {
       .map((field) => field.name);
     const key = keyOf();
     waiting = 'carry';
+    waitingKey = key;
     refusal = '';
+    refusalKey = '';
     draw();
     void deps
       .act({
@@ -481,12 +565,14 @@ export function createCarryOver(host, deps) {
   });
 
   dismiss.addEventListener('click', (event) => {
-    if (event.detail > 1 || waiting !== null || !drawn() || sessionId === null) {
+    if (event.detail > 1 || busyHere() || !drawn() || sessionId === null) {
       return;
     }
     const key = keyOf();
     waiting = 'dismiss';
+    waitingKey = key;
     refusal = '';
+    refusalKey = '';
     draw();
     void deps.act({ kind: 'dismiss-carry-over', sessionId }).then((result) => answer(key, result));
   });
@@ -506,12 +592,11 @@ export function createCarryOver(host, deps) {
       offer = next;
       const key = keyOf();
       if (key !== '' && key !== tickedKey) {
-        // A new offer (or a new `rev`): the ticks start again from its own, and an old refusal
-        // no longer holds.
+        // A new offer (or a new `rev`): the ticks start again from its own (a refusal and a wait
+        // are shown on the bar of their own offer only).
         ticks = new Map(next?.fields.map((field) => [field.name, field.ticked]) ?? []);
         ticks.set('done', next?.done?.ticked === true);
         tickedKey = key;
-        refusal = '';
         // Rule 3: a new `rev` takes the keyboard off a button to the first checkbox, so that an
         // Enter presses nothing for an offer the user has not seen.
         toFirst = before !== '' && (active === apply || active === dismiss);
