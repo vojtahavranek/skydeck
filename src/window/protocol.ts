@@ -179,7 +179,17 @@ export interface ResizeMessage {
  *  tick of `mark the old one done`; the server computes the offer again in one transaction and
  *  copies or refuses (src/window/carry-over.ts). `dismiss-carry-over` ends that offer for good. */
 export type ActMessage =
-  | { t: 'act'; id: number; kind: 'resume'; sessionId: string; cols: number; rows: number }
+  | {
+      t: 'act';
+      id: number;
+      kind: 'resume';
+      sessionId: string;
+      cols: number;
+      rows: number;
+      /** Issue #188 ("Other flags…"): the flags field's text as typed, in place of the recorded
+       *  flags; absent: a plain resume. */
+      flags?: string;
+    }
   | {
       t: 'act';
       id: number;
@@ -406,6 +416,12 @@ export interface SelectedPayload {
    *  recorded launch. The header shows them, then `unknownFlags`, as the flags it was started
    *  with (S2 12.5). */
   launchFlags: string[];
+  /** Issue #188: the flags a plain resume passes on (`passedOnFlags`), each token exactly as
+   *  recorded — not sanitised: the page puts them only into the value of the flags field of the
+   *  resume card's "Other flags…", from which they come back as `act resume`'s `flags` —, [] without
+   *  a recorded launch; null when a token holds what that field cannot hold as it is (a line break,
+   *  another control character, a bidirectional control: the favourites' CONTROL). */
+  resumeFlags: string[] | null;
   ended: 'exited' | 'unexpectedly' | 'mid-turn' | null;
   expiring: boolean;
   expired: boolean;
@@ -1067,7 +1083,11 @@ const THEME = object({ fg: TEXT, bg: TEXT });
 
 /** `t` and `kind` were read before a message's own check runs. */
 const ACTS: Readonly<Record<string, Check>> = {
-  resume: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, cols: SIZE, rows: SIZE }),
+  // Issue #188: an optional `flags`, the text as typed, as `new` sends its flags.
+  resume: object(
+    { t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, cols: SIZE, rows: SIZE, flags: TEXT },
+    ['flags'],
+  ),
   new: object({
     t: ANY,
     id: COUNT,
@@ -1278,6 +1298,13 @@ export interface NewRequest {
   group: string | null;
   flags: string[];
 }
+/** `POST /resume` (plan C3): a session id; issue #188: `flags`, the words after `--` as given (no
+ *  splitting), as `/new`'s, only when the command was given `--` (absent: a plain resume). */
+export interface ResumeRequest {
+  route: 'resume';
+  sessionId: string;
+  flags?: string[];
+}
 /** `POST /restore` (plan C3): 1–1,000 distinct session ids; `all` as `restore --all`. */
 export interface RestoreRequest {
   sessionIds: string[];
@@ -1290,7 +1317,7 @@ export type ControlRequest =
   | { route: 'token'; seconds: 30 | 600 }
   | { route: 'token-state'; id: string }
   | { route: 'token-drop'; id: string }
-  | { route: 'resume'; sessionId: string }
+  | ResumeRequest
   | ({ route: 'new' } & NewRequest)
   | ({ route: 'restore' } & RestoreRequest);
 /** POST /resume and POST /new (plan C2): the exit code and the lines the command prints on stderr,
@@ -1327,12 +1354,14 @@ function noBody(request: ControlRequest): (body: string) => ControlResult {
     body === '' ? { ok: true, value: request } : { ok: false, kind: 'body: not empty' };
 }
 
-/** A JSON object body with exactly `fields`; `make` builds the request from it. */
+/** A JSON object body with exactly `fields` (those in `optional` may be absent); `make` builds the
+ *  request from it. */
 function jsonBody(
   fields: Record<string, Check>,
   make: (body: Fields) => ControlRequest,
+  optional: readonly string[] = [],
 ): (body: string) => ControlResult {
-  const check = object(fields);
+  const check = object(fields, optional);
   return (body) => {
     const json = parseJson(body);
     if (!json.ok) return { ok: false, kind: 'body: not JSON' };
@@ -1346,11 +1375,12 @@ const SHUTDOWN_JSON = jsonBody({}, () => ({ route: 'shutdown' }));
 
 /** `POST /new`'s fields (plan C3): the directory a path without NUL, the label and the group text
  *  or null, at most LIST_LIMIT flags, each well formed without NUL. */
+const FLAG_WORDS = list(noNul(WELL_FORMED), false, false);
 const NEW_FIELDS: Record<string, Check> = {
   dir: noNul(PATH),
   label: nullable(TEXT),
   group: nullable(TEXT),
-  flags: list(noNul(WELL_FORMED), false, false),
+  flags: FLAG_WORDS,
 };
 
 const ROUTES: Readonly<Record<string, Readonly<Record<string, (body: string) => ControlResult>>>> =
@@ -1374,11 +1404,17 @@ const ROUTES: Readonly<Record<string, Readonly<Record<string, (body: string) => 
       })),
     },
     // Stage C (plan C3).
+    // Issue #188: an optional `flags`, checked as `/new`'s.
     '/resume': {
-      POST: jsonBody({ sessionId: SESSION }, (body) => ({
-        route: 'resume',
-        sessionId: body['sessionId'] as string,
-      })),
+      POST: jsonBody(
+        { sessionId: SESSION, flags: FLAG_WORDS },
+        (body) => ({
+          route: 'resume',
+          sessionId: body['sessionId'] as string,
+          ...(Object.hasOwn(body, 'flags') ? { flags: body['flags'] as string[] } : {}),
+        }),
+        ['flags'],
+      ),
     },
     '/new': {
       POST: jsonBody(NEW_FIELDS, (body) => ({

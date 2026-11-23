@@ -27,7 +27,7 @@ import { runOn, startFakeServe, windowMachine } from '../../helpers/window-machi
 import type { Lines, WindowMachine } from '../../helpers/window-machine.ts';
 import { writeWindowConfig } from '../../helpers/window-config.ts';
 
-const USAGE_FIRST_LINE = 'skydeck resume <ref> [--here | --tab | --window]\n';
+const USAGE_FIRST_LINE = 'skydeck resume <ref> [--here | --tab | --window] [-- <claude flags>]\n';
 
 type Options = Parameters<typeof testDeck>[1];
 
@@ -467,6 +467,217 @@ test('resume keeps the permission flag the session was started with, once', asyn
   );
 });
 
+// ---------------------------------------------------------------------------------------------
+// Issue #188: `skydeck resume <ref> [--here | --tab | --window] [-- <claude flags>]` — the words after
+// `--` are the flags of this resume, in place of the recorded ones.
+
+describe('resume <ref> -- <claude flags> (issue #188)', () => {
+  const RECORDED = ['claude', '--model', 'opus', '--mcp-config', '/tmp/old.json'];
+
+  test('the words after -- in place of the recorded flags, as given and in their order, after the id and the label', async (t) => {
+    const d = deck(t);
+    const dir = session(d, { argv: RECORDED });
+    d.deck.store.updateMeta(S1, { label: 'fix retry' }, T0);
+    const flags = ['--mcp-config', '/tmp/example.json', '--model', 'example', 'go on, please'];
+    assert.equal(await main(['resume', '0b5f', '--', ...flags], d.ctx), 0);
+    assert.equal(
+      handoff(d),
+      handoffScript({ cwd: dir, argv: ['claude', '--resume', S1, '-n', 'fix retry', ...flags] }),
+    );
+    assert.equal(d.stderr(), '');
+  });
+
+  test('-- with nothing after it resumes with no flags at all', async (t) => {
+    const d = deck(t);
+    const dir = session(d, { argv: [...RECORDED, '--frob'] });
+    assert.equal(await main(['resume', '0b5f', '--'], d.ctx), 0);
+    assert.equal(handoff(d), handoffScript({ cwd: dir, argv: ['claude', '--resume', S1] }));
+    assert.equal(d.stderr(), '', 'nothing about the recorded flags: they are not this resume’s');
+  });
+
+  test('of a session without a recorded launch: the given flags, and no "original flags unknown"', async (t) => {
+    const d = deck(t);
+    const dir = session(d);
+    assert.equal(await main(['resume', '0b5f', '--', '--model', 'example'], d.ctx), 0);
+    assert.equal(
+      handoff(d),
+      handoffScript({ cwd: dir, argv: ['claude', '--resume', S1, '--model', 'example'] }),
+    );
+    assert.equal(d.stderr(), '');
+  });
+
+  test('without -- nothing changes: the recorded flags', async (t) => {
+    const d = deck(t);
+    const dir = session(d, { argv: RECORDED });
+    assert.equal(await main(['resume', '0b5f'], d.ctx), 0);
+    assert.equal(
+      handoff(d),
+      handoffScript({ cwd: dir, argv: ['claude', '--resume', S1, ...RECORDED.slice(1)] }),
+    );
+  });
+
+  test('--here, and the options before --: the flags after it', async (t) => {
+    const d = deck(t, { config: { terminal: 'wezterm' } });
+    const dir = session(d, { argv: RECORDED });
+    assert.equal(await main(['resume', '0b5f', '--here', '--', '--model', 'example'], d.ctx), 0);
+    assert.equal(
+      handoff(d),
+      handoffScript({ cwd: dir, argv: ['claude', '--resume', S1, '--model', 'example'] }),
+    );
+    assert.deepEqual(d.runner.calls, []);
+  });
+
+  test('--tab: the tab runs the given flags', async (t) => {
+    const d = deck(t, { config: { terminal: 'wezterm' } });
+    const dir = session(d, { argv: RECORDED });
+    assert.equal(await main(['resume', '0b5f', '--tab', '--', '--model', 'example'], d.ctx), 0);
+    assert.deepEqual(
+      d.runner.calls.map((call) => [call.command, ...call.args]),
+      [
+        [
+          'wezterm',
+          'cli',
+          '--no-auto-start',
+          'spawn',
+          '--cwd',
+          dir,
+          '--',
+          'claude',
+          '--resume',
+          S1,
+          '--model',
+          'example',
+        ],
+      ],
+    );
+  });
+
+  test('a word after -- that looks like an option of skydeck is claude’s: --here, --window, --help', async (t) => {
+    const d = deck(t, { config: { terminal: 'wezterm' } });
+    session(d, { argv: RECORDED });
+    assert.equal(await main(['resume', '0b5f', '--', '--help', '--verbose'], d.ctx), 0);
+    assert.deepEqual(d.runner.calls[0]?.args.slice(-4), ['--resume', S1, '--help', '--verbose']);
+    assert.equal(d.stdout(), '', 'no usage printed');
+  });
+
+  test('a given permission flag is kept, none is added', async (t) => {
+    const d = deck(t);
+    const dir = session(d, { argv: ['claude', '--dangerously-skip-permissions'] });
+    assert.equal(
+      await main(['resume', '0b5f', '--', '--permission-mode', 'acceptEdits'], d.ctx),
+      0,
+    );
+    assert.equal(
+      handoff(d),
+      handoffScript({
+        cwd: dir,
+        argv: ['claude', '--resume', S1, '--permission-mode', 'acceptEdits'],
+      }),
+    );
+  });
+
+  /** `resume 0b5f -- <flags>` refused: exit 2, `line` on stderr; nothing started, no lock. */
+  async function refusedWith(t: TestContext, flags: string[], line: string): Promise<void> {
+    const d = deck(t, { config: { terminal: 'wezterm' } });
+    session(d, { argv: RECORDED });
+    for (const where of [[], ['--here'], ['--tab']]) {
+      assert.equal(await main(['resume', '0b5f', ...where, '--', ...flags], d.ctx), 2);
+    }
+    assert.equal(d.stderr(), `skydeck: ${line}\n`.repeat(3));
+    assert.equal(existsSync(handoffPath(d)), false);
+    assert.deepEqual(d.runner.calls, []);
+    assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+  }
+
+  test("a flag that picks a session is refused in new's words: exit 2, nothing started, no lock", async (t) => {
+    await refusedWith(
+      t,
+      ['--model', 'x', '--continue'],
+      'cannot pass --continue to claude: it picks an existing session; use skydeck resume',
+    );
+  });
+
+  test("--name and -n are refused in new's words", async (t) => {
+    await refusedWith(
+      t,
+      ['--name', 'other'],
+      'cannot pass --name to claude: the label is given with --label, and skydeck passes it as the name',
+    );
+  });
+
+  test('a flag only a new session takes is refused, named: exit 2, nothing started, no lock', async (t) => {
+    await refusedWith(
+      t,
+      ['--model', 'x', '-pw', 'feat'],
+      'cannot pass -pw (--worktree) to claude on a resume: it says where or how a new session starts',
+    );
+    await refusedWith(
+      t,
+      ['--maintenance'],
+      'cannot pass --maintenance to claude on a resume: it says where or how a new session starts',
+    );
+  });
+
+  test('the guard still refuses a running session with flags given: exit 4, no handoff, no lock', async (t) => {
+    const d = deck(t);
+    session(d, { argv: RECORDED, running: true });
+    assert.equal(await main(['resume', '0b5f', '--', '--model', 'example'], d.ctx), 4);
+    assert.equal(d.stderr(), 'skydeck: 0b5f3c1e is running (pid 4242)\n');
+    assert.equal(existsSync(handoffPath(d)), false);
+    assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+  });
+
+  test('a start that failed leaves the recorded flags the ones a plain resume passes on', async (t) => {
+    const d = deck(t, { config: { terminal: 'wezterm' } });
+    const dir = session(d, { argv: RECORDED });
+    const { ctx } = withRunner(d, () => runResult({ code: 1, stderr: 'no window\n' }));
+    assert.equal(await main(['resume', '0b5f', '--tab', '--', '--model', 'example'], ctx), 1);
+    assert.ok(
+      d.stderr().includes(`${fallback(dir, ['claude', '--resume', S1, '--model', 'example'])}\n`),
+      d.stderr(),
+    );
+    d.clock.setNs(T0 + 61n * SEC); // the lock of the printed command has gone stale
+    assert.equal(await main(['resume', '0b5f', '--tab'], d.ctx), 0);
+    assert.deepEqual(d.runner.calls.at(-1)?.args.slice(-6), [
+      '--resume',
+      S1,
+      '--model',
+      'opus',
+      '--mcp-config',
+      '/tmp/old.json',
+    ]);
+  });
+
+  test('once the session started with the given flags, a later plain resume passes those on', async (t) => {
+    const d = deck(t);
+    const dir = session(d, { argv: RECORDED });
+    assert.equal(await main(['resume', '0b5f', '--', '--model', 'example'], d.ctx), 0);
+    // The claude it started records its start (its own command line), then ends.
+    const fields = {
+      event: 'SessionStart' as const,
+      timeNs: T0 + SEC,
+      pid: 4343,
+      pwd: dir,
+      argv: ['claude', '--resume', S1, '--model', 'example'],
+      input: hookInput('SessionStart', S1, { source: 'resume', cwd: dir }),
+    };
+    writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, 2)), spoolText(fields));
+    d.clock.setNs(T0 + 120n * SEC);
+    assert.equal(await main(['resume', '0b5f'], d.ctx), 0);
+    assert.equal(
+      handoff(d),
+      handoffScript({ cwd: dir, argv: ['claude', '--resume', S1, '--model', 'example'] }),
+    );
+  });
+
+  test('the usage names -- and what it does', async (t) => {
+    const d = deck(t);
+    assert.equal(await main(['resume', '--help'], d.ctx), 0);
+    assert.ok(d.stdout().includes('\n  -- <flags>  '), d.stdout());
+    assert.ok(d.stdout().includes('in place of the ones it was started with'), d.stdout());
+  });
+});
+
 for (const code of ['EACCES', 'EMFILE']) {
   test(`a holder whose /proc cannot be read (${code}) is never taken as gone: resume stops, starts nothing, takes no lock`, async (t) => {
     const d = deck(t);
@@ -591,6 +802,35 @@ describe('resume --window (S2 11.4; plan C11, C12)', () => {
     assert.deepEqual(w.m.deck.store.kvEntries('resume_lock:'), [], 'the command took no lock');
     assert.ok(!r.asked.includes('POST /token'), JSON.stringify(r.asked));
     assert.deepEqual(w.edgeCalls(), []);
+  });
+
+  test('with -- <flags>: the server is handed the words after --, as given (#188); with -- alone, none', async (t) => {
+    const w = windowCase(t);
+    await serving(t, w, STARTED, { FAKE_SERVE_PAGES: '1' });
+
+    const flags = ['--model', 'example', '--worktree', 'go on'];
+    const r = await w.run(['resume', '0b5f', '--window', '--', ...flags]);
+    assert.equal(r.code, 0, r.stderr);
+    const bare = await w.run(['resume', '0b5f', '--window', '--']);
+    assert.equal(bare.code, 0, bare.stderr);
+
+    // The server checks them (a refused flag is its answer, not the command's): sent as they are.
+    assert.deepEqual(w.requests(), [
+      { route: 'resume', sessionId: S1, flags },
+      { route: 'resume', sessionId: S1, flags: [] },
+    ]);
+    assert.deepEqual(w.m.deck.store.kvEntries('resume_lock:'), [], 'the command took no lock');
+  });
+
+  test('with "terminal": "window" and no option, -- <flags> goes to the server too', async (t) => {
+    const w = windowCase(t);
+    withTerminal(w.m, 'window');
+    await serving(t, w, STARTED, { FAKE_SERVE_PAGES: '1' });
+    const r = await w.run(['resume', '0b5f', '--', '--model', 'example']);
+    assert.equal(r.code, 0, r.stderr);
+    assert.deepEqual(w.requests(), [
+      { route: 'resume', sessionId: S1, flags: ['--model', 'example'] },
+    ]);
   });
 
   test('no page connected: a window opened as skydeck window opens one — Edge once with a token, the token given up — and C12’s line; the exit code stays the answer’s', async (t) => {

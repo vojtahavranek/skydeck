@@ -3,7 +3,7 @@ import { utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { RefError, ResumeRefusedError } from '../../src/platform/errors.ts';
+import { RefError, ResumeRefusedError, UsageError } from '../../src/platform/errors.ts';
 import { statLine } from '../helpers/platform.ts';
 import { loadRows } from '../../src/sessions/load.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
@@ -65,6 +65,34 @@ test('prepareResumeById resumes a session that is not running, and takes the loc
   assert.deepEqual(prepared.argv, ['claude', '--resume', S1, '--model', 'opus']);
   // The time it was taken, and the latest event of S1 the decision was made on.
   assert.equal(lockOf(d, S1), `${T0}:${d.deck.store.latestEventIdOfSession(S1)}`);
+});
+
+test('prepareResumeById with given flags: those flags in place of the recorded ones, the lock taken (#188)', (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  const prepared = prepareResumeById(d.deck, S1, ['--model', 'example']);
+  assert.deepEqual(prepared.argv, ['claude', '--resume', S1, '--model', 'example']);
+  assert.equal(lockOf(d, S1), `${T0}:${d.deck.store.latestEventIdOfSession(S1)}`);
+});
+
+test('prepareResumeById refuses a flag a resume must not take: a usage error, no lock (#188)', (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  assert.throws(
+    () => prepareResumeById(d.deck, S1, ['--tmux']),
+    (error: unknown) =>
+      error instanceof UsageError &&
+      error.message ===
+        'cannot pass --tmux to claude on a resume: it says where or how a new session starts',
+  );
+  assert.equal(lockOf(d, S1), null);
+  // the guard after it, with good flags: a session another skydeck resumed meanwhile
+  anotherSkydeckResumes(d);
+  assert.equal(
+    refusal(() => prepareResumeById(d.deck, S1, ['--model', 'x'])),
+    '0b5f3c1e is running (pid 4343)',
+  );
+  assert.equal(lockOf(d, S1), null);
 });
 
 test('prepareResumeById refreshes first: a start event still in the spool is seen, and the session refused', (t) => {

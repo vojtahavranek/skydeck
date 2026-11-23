@@ -38,8 +38,9 @@ export const FAVOURITE_REFUSALS = {
 /** What a favourite never holds (ruled on review 2 of F15): a line break (U+2028 and U+2029
  *  too) or another control character (C0, DEL, C1) and the bidirectional controls — what design
  *  7.4's sanitiser takes away or changes —, so that a chip shows the favourite as it is (the
- *  page's CONTROL is the same). */
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+ *  page's CONTROL is the same). Issue #188: a recorded flag that holds one is not put into the
+ *  resume card's flags field either (selected.ts, `resumeFlags`). */
+export const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
 
 /** The words of a text, or null when splitFlags refuses it. */
 function wordsOf(text: string): string[] | null {

@@ -16,12 +16,20 @@ import type { PreparedLaunch } from './resume.ts';
  * to a session id however they like, and call this with the id, never with a row they loaded
  * earlier. `sessionId` must be a whole session id: a prefix or a label names nothing here. Throws
  * RefError when the refreshed deck has no such session, and what prepareResume throws.
+ *
+ * Issue #188: `flags` given (not null) are this resume's flags in place of the recorded ones,
+ * handed to prepareResume, which refuses what a resume must not take before the guard (no lock).
+ * Without them (the interactive list, restore, a plain resume) nothing changes.
  */
-export function prepareResumeById(deck: Deck, sessionId: string): PreparedLaunch {
+export function prepareResumeById(
+  deck: Deck,
+  sessionId: string,
+  flags: readonly string[] | null = null,
+): PreparedLaunch {
   refresh(deck);
   const row = loadRows(deck).find((candidate) => candidate.id === sessionId);
   if (row === undefined) {
     throw new RefError(`no session matches '${sanitize(sessionId)}'`, []);
   }
-  return prepareResume(deck, row);
+  return prepareResume(deck, row, flags);
 }

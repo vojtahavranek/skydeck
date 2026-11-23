@@ -502,6 +502,129 @@ test('a hub whose close throws does not stop the resume; the failure is logged b
   assert.ok(!(h.logs[0] ?? '').includes(SECRET));
 });
 
+// --- resume with other flags (issue #188) -------------------------------------------------------
+
+const resumeWith = (sessionId: string, flags: string, id = 7): ActMessage => ({
+  t: 'act',
+  id,
+  kind: 'resume',
+  sessionId,
+  cols: 100,
+  rows: 30,
+  flags,
+});
+
+test('resume with flags: the field’s text split as new’s, in place of the recorded flags, after the id and the label', async (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  d.deck.store.updateMeta(S1, { label: 'fix retry' }, T0);
+  const h = harness(d);
+  const result = await h.act(
+    resumeWith(S1, `--mcp-config  /tmp/example.json\t--model example 'go on' "a b"`),
+  );
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.sessionId, S1);
+  assert.deepEqual(h.specs[0]?.argv, [
+    'claude',
+    '--resume',
+    S1,
+    '-n',
+    'fix retry',
+    '--mcp-config',
+    '/tmp/example.json',
+    '--model',
+    'example',
+    'go on',
+    'a b',
+  ]);
+  assert.equal(h.specs[0]?.kind, 'resume');
+  assert.notEqual(h.specs[0]?.lock ?? null, null, 'the lock is taken as for a plain resume');
+});
+
+test('resume with an empty or blank flags text: no flags at all; without the member, the recorded ones', async (t) => {
+  for (const flags of ['', '   ']) {
+    const d = testDeck(t);
+    resumableSession(d);
+    const h = harness(d);
+    assert.equal((await h.act(resumeWith(S1, flags))).ok, true);
+    assert.deepEqual(h.specs[0]?.argv, ['claude', '--resume', S1], JSON.stringify(flags));
+  }
+  const d = testDeck(t);
+  resumableSession(d);
+  const h = harness(d);
+  assert.equal((await h.act(resume(S1))).ok, true);
+  assert.deepEqual(h.specs[0]?.argv, ['claude', '--resume', S1, '--model', 'opus']);
+});
+
+test('resume with flags refuses what a resume must not take, each as a message to the page: nothing opened, no lock', async (t) => {
+  const cases: [string, string][] = [
+    [
+      '--resume x',
+      'cannot pass --resume to claude: it picks an existing session; use skydeck resume',
+    ],
+    ['-c', 'cannot pass -c to claude: it picks an existing session; use skydeck resume'],
+    [
+      '--name y',
+      'cannot pass --name to claude: the label is given with --label, and skydeck passes it as the name',
+    ],
+    [
+      '--model x --worktree',
+      'cannot pass --worktree to claude on a resume: it says where or how a new session starts',
+    ],
+    [
+      '-pw feat',
+      'cannot pass -pw (--worktree) to claude on a resume: it says where or how a new session starts',
+    ],
+    ["'unclosed", "the flags have an unclosed '"],
+    ['a\0b', 'the flags contain a NUL character'],
+  ];
+  for (const [flags, message] of cases) {
+    await t.test(JSON.stringify(flags), async (t) => {
+      const d = testDeck(t);
+      resumableSession(d);
+      const h = harness(d);
+      assert.deepEqual(await h.act(resumeWith(S1, flags)), refused(7, message));
+      assert.ok(!h.events.some((event) => event.startsWith('open ')), h.events.join(', '));
+      assert.deepEqual(h.specs, []);
+      assert.equal(d.deck.store.getKv(lockKey(S1)), null);
+    });
+  }
+});
+
+test('resume with flags of a running session answers the guard: nothing opened, no lock', async (t) => {
+  const d = testDeck(t);
+  writeTranscript(d, S1);
+  startRunning(d, S1, 5151);
+  const h = harness(d);
+  assert.deepEqual(
+    await h.act(resumeWith(S1, '--model example')),
+    refused(7, '0b5f3c1e is running (pid 5151)'),
+  );
+  assert.deepEqual(h.specs, []);
+  assert.equal(d.deck.store.getKv(lockKey(S1)), null);
+});
+
+test("resume's flags are held to new's bounds: 1,024 bytes are taken, more and a wrong type are no action", async (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  const h = harness(d);
+  const at = `--append-system-prompt ${'é'.repeat((1024 - 23) / 2)}x`; // 1,024 UTF-8 bytes
+  assert.equal(Buffer.byteLength(at, 'utf8'), 1024);
+  assert.equal((await h.act(resumeWith(S1, at))).ok, true);
+  const odd = [
+    resumeWith(S1, `${at}x`),
+    { ...resume(S1), flags: ['--model', 'x'] },
+    { ...resume(S1), flags: null },
+    { ...resume(S1), flags: 5 },
+    { ...resume(S1), flags: '\ud800' },
+    { ...resume(S1), flag: '--model x' },
+  ] as unknown as ActMessage[];
+  for (const action of odd) {
+    assert.deepEqual(await h.act(action), refused(7, 'skydeck cannot do that action'));
+  }
+  assert.equal(h.specs.length, 1, 'only the action at the limit was acted on');
+});
+
 // --- new --------------------------------------------------------------------------------------
 
 test('new with a directory, a label, a group and flags opens buildNewCommand and stores the meta', async (t) => {

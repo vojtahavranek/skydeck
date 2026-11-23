@@ -353,8 +353,8 @@ function stageC(): {
     return Promise.resolve(JSON.parse(launchText.slice('answer:'.length)) as LaunchAnswer);
   };
   const launch: ControlLaunch = {
-    resume(sessionId) {
-      recordRequest({ route: 'resume', sessionId });
+    resume(sessionId, flags) {
+      recordRequest({ route: 'resume', sessionId, ...(flags === null ? {} : { flags }) });
       return answer();
     },
     newSession(request) {

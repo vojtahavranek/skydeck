@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { buildResumeCommand } from '../../src/claude/launch.ts';
 import { lockKey } from '../../src/sessions/resume.ts';
 import type { ListRow } from '../../src/sessions/list.ts';
 import type { DerivedSession, LastHolding, Mark } from '../../src/sessions/types.ts';
@@ -44,6 +45,7 @@ test('selectedPayload: the command a resume would run, with the recorded flags a
     flagsKnown: true,
     unknownFlags: [],
     launchFlags: ['--model', 'opus'],
+    resumeFlags: ['--model', 'opus'],
     ended: null,
     expiring: false,
     expired: false,
@@ -157,6 +159,66 @@ test('selectedPayload: launchFlags also for a row whose id is not a session id (
   assert.deepEqual(
     selectedPayload(d.deck, row({ dir: null, launch: ['claude', '--verbose'] })).launchFlags,
     ['--verbose'],
+  );
+});
+
+// --- issue #188: the flags field of "Other flags…" ------------------------------------------------
+
+test('selectedPayload: resumeFlags are the flags a plain resume passes on, each token exactly as recorded', (t) => {
+  const d = testDeck(t);
+  const launch = [
+    'claude',
+    '--frob',
+    '--append-system-prompt',
+    `be  "brief", it's\u00a0now`,
+    '-w',
+    'feat',
+    '--model',
+    'opus',
+    '',
+    'a prompt',
+  ];
+  const payload = selectedPayload(d.deck, row({ launch }, { label: 'x' }));
+  // What buildResumeCommand passes on after the id and the label, token by token: no program, no
+  // removed flag, no unknown one, no prompt.
+  assert.deepEqual(payload.resumeFlags, [
+    '--append-system-prompt',
+    `be  "brief", it's\u00a0now`,
+    '--model',
+    'opus',
+  ]);
+  const argv = buildResumeCommand({ claudeCommand: 'claude', launch, sessionId: S1, label: 'x' });
+  assert.deepEqual(payload.resumeFlags, argv.argv.slice(5));
+});
+
+test('selectedPayload: resumeFlags [] without a recorded launch or with nothing passed on', (t) => {
+  const d = testDeck(t);
+  assert.deepEqual(selectedPayload(d.deck, row({ launch: null })).resumeFlags, []);
+  assert.deepEqual(selectedPayload(d.deck, row({ launch: ['claude', '--frob'] })).resumeFlags, []);
+});
+
+test('selectedPayload: resumeFlags null when a passed-on token holds what a text field cannot hold as it is', (t) => {
+  const d = testDeck(t);
+  for (const value of [
+    'a\nb',
+    'a\rb',
+    'a\tb',
+    'a\x1b[31mb',
+    'a\x7fb',
+    'a\u0085b',
+    'a\u2028b',
+    'a\u2029b',
+    'a\u202eb',
+    'a\u2066b',
+    '\0',
+  ]) {
+    const payload = selectedPayload(d.deck, row({ launch: ['claude', '--model', value] }));
+    assert.equal(payload.resumeFlags, null, JSON.stringify(value));
+  }
+  // in a flag that is not passed on, it does not matter
+  assert.deepEqual(
+    selectedPayload(d.deck, row({ launch: ['claude', '-n', 'a\nb', '--model', 'x'] })).resumeFlags,
+    ['--model', 'x'],
   );
 });
 

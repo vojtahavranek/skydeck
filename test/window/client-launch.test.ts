@@ -293,6 +293,56 @@ describe('controlClient: POST /resume and POST /new (plan C2, C4, C11)', () => {
     assert.equal(b.sent.length, 1);
   });
 
+  test('resume with flags (#188): the body carries them as they are; null or absent sends none', async (t) => {
+    const b = await bench(t, { FAKE_SERVE_LAUNCH: `answer:${JSON.stringify(ANSWER)}` });
+    const flags = ['--model', 'example', 'a b', ''];
+
+    assert.deepEqual(await b.client.resume(S1, 5000, flags), ANSWER);
+    assert.deepEqual(await b.client.resume(S1, 5000, []), ANSWER);
+    assert.deepEqual(await b.client.resume(S1, 5000, null), ANSWER);
+    assert.deepEqual(await b.client.resume(S1), ANSWER);
+
+    assert.deepEqual(
+      b.sent.map((s) => s.body),
+      [
+        { sessionId: S1, flags },
+        { sessionId: S1, flags: [] },
+        { sessionId: S1 },
+        { sessionId: S1 },
+      ],
+    );
+    assert.deepEqual(b.requests(), [
+      { route: 'resume', sessionId: S1, flags },
+      { route: 'resume', sessionId: S1, flags: [] },
+      { route: 'resume', sessionId: S1 },
+      { route: 'resume', sessionId: S1 },
+    ]);
+  });
+
+  test('a server before #188 refuses the field flags (400 unknown field): unknown-route, an older server; a plain resume’s 400 stays a refusal', async (t) => {
+    const m = windowMachine(t);
+    const net: Net = {
+      ...m.platform.net,
+      requestUnix: () => Promise.resolve({ status: 400, body: { error: 'body: unknown field' } }),
+    };
+    const client = controlClient(net, '/nowhere.sock', m.platform.clock);
+
+    assert.equal(await client.resume(S1, 5000, ['--model', 'x']), 'unknown-route');
+    assert.equal(await client.resume(S1, 5000, []), 'unknown-route');
+    await rejectsWith(
+      client.resume(S1),
+      "the window's server refused the request (body: unknown field); use --here",
+    );
+    const other: Net = {
+      ...m.platform.net,
+      requestUnix: () => Promise.resolve({ status: 400, body: { error: 'body.flags: too long' } }),
+    };
+    await rejectsWith(
+      controlClient(other, '/nowhere.sock', m.platform.clock).resume(S1, 5000, ['x']),
+      "the window's server refused the request (body.flags: too long); use --here",
+    );
+  });
+
   test('a 404 of a kind that is not a route’s: a refusal, not unknown-route', async (t) => {
     const m = windowMachine(t);
     const net: Net = {

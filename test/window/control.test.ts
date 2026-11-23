@@ -906,9 +906,13 @@ interface LaunchCalls {
 function fakeLaunch(over: Partial<ControlLaunch> = {}): { launch: ControlLaunch } & LaunchCalls {
   const record: LaunchCalls = { calls: [], closed: [] };
   const launch: ControlLaunch = {
-    resume: (sessionId) => {
-      record.calls.push({ route: 'resume', request: sessionId });
-      return over.resume?.(sessionId) ?? Promise.resolve(ANSWER);
+    resume: (sessionId, flags) => {
+      // A plain resume as before (its id); with #188's flags, both.
+      record.calls.push({
+        route: 'resume',
+        request: flags === null ? sessionId : { sessionId, flags },
+      });
+      return over.resume?.(sessionId, flags) ?? Promise.resolve(ANSWER);
     },
     newSession: (request) => {
       record.calls.push({ route: 'new', request });
@@ -985,6 +989,50 @@ test('with a launch, each stage C route calls it once with the parsed body and a
   assert.equal(fake.closed[0]?.aborted, false);
   assert.deepEqual(c.calls, { ping: 0, status: 0, mint: 0, shutdown: 0 });
   assert.deepEqual(c.logs, []);
+});
+
+test('POST /resume with flags (#188): the launch is given the words as they are; without them, null', async (t) => {
+  const fake = fakeLaunch();
+  const c = await startControl(t, () => ({ launch: fake.launch }));
+  const flags = ['--model', 'example', '', ' a b ', '--worktree', '-c'];
+  for (const body of [{ sessionId: S1, flags }, { sessionId: S1, flags: [] }, RESUME_BODY]) {
+    assert.deepEqual(await ask(c, 'POST', '/resume', body), { status: 200, body: ANSWER });
+  }
+  // The server's launch checks them (prepareResumeById), not the route.
+  assert.deepEqual(fake.calls, [
+    { route: 'resume', request: { sessionId: S1, flags } },
+    { route: 'resume', request: { sessionId: S1, flags: [] } },
+    { route: 'resume', request: S1 },
+  ]);
+});
+
+test("POST /resume's flags are held to /new's rules: a list of at most 1,000 well-formed words without NUL; else 400, nothing called", async (t) => {
+  const fake = fakeLaunch();
+  const c = await startControl(t, () => ({ launch: fake.launch }));
+  const refused: [unknown, string][] = [
+    ['--model x', 'body.flags: wrong type'],
+    [null, 'body.flags: wrong type'],
+    [[1], 'body.flags: wrong type'],
+    [['a\0b'], 'body.flags: wrong value'],
+    [['\ud800'], 'body.flags: wrong value'],
+    [Array.from({ length: 1001 }, () => 'x'), 'body.flags: too long'],
+  ];
+  for (const [flags, kind] of refused) {
+    assert.deepEqual(
+      await ask(c, 'POST', '/resume', { sessionId: S1, flags }),
+      { status: 400, body: { error: kind } },
+      JSON.stringify(flags).slice(0, 40),
+    );
+  }
+  assert.deepEqual(
+    await ask(c, 'POST', '/resume', {
+      sessionId: S1,
+      flags: Array.from({ length: 1000 }, () => 'x'),
+    }),
+    { status: 200, body: ANSWER },
+    '1,000 words pass',
+  );
+  assert.equal(fake.calls.length, 1);
 });
 
 test('with a launch and launchState null, the routes act; while it says starting or stopping they are 503 and launch is never called', async (t) => {
