@@ -597,6 +597,10 @@ let keyMessageTimer = null;
 /** F37: this page's `reorder` waits for its answer; a press meanwhile does nothing (a held key
  *  moves the session at the round trip's pace). */
 let reordering = false;
+/** F42: the session this page moved, to be scrolled into view with the first list after the
+ *  answer (a local render in between does not take it). */
+/** @type {string | null} */
+let followNext = null;
 /** @param {string} text */
 function say(text) {
   dom.keyMessage.textContent = text;
@@ -1847,6 +1851,10 @@ function received(message) {
       // of the banner that had it went away (a restore began: Restore is gone).
       banner.render(message.banner ?? null);
       favouritesListener?.(favouritesOf(message)); // F15: the open form's chips (S2 12.6)
+      if (followNext !== null) {
+        list.follow(followNext); // F42: the moved row, scrolled into view by this render
+        followNext = null;
+      }
       render();
       if (editor.shown()) {
         editor.update(message); // the dialog's session's row (task 38's list)
@@ -2424,8 +2432,9 @@ function doListKey(action, event) {
             say(result.error ?? result.lines[0] ?? 'the session was not moved');
             return;
           }
-          list.follow(sessionId);
-          // The list of the new order can come up to a second after the answer (as for F15's).
+          // The list of the new order can come up to a second after the answer (as for F15's); the
+          // scroll goes with the first list after it.
+          followNext = sessionId;
           sendView();
         },
       );
