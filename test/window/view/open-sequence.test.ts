@@ -203,12 +203,12 @@ describe('F42: openSequence', () => {
   });
 
   test('kept rows in kept order whatever their kind; ids not under Open left out; the rest by the rule', () => {
-    // t2 goes before the first window terminal with no number or a higher one (tx), ty after the
-    // last window terminal (t1), e1 last.
+    // t2 goes before the first window terminal with a higher number (t4), ty after the last
+    // window terminal (t1), e1 last.
     assert.deepEqual(openSequence(entries, ['e2', 'gone', 'tx', 't4', 't1'], new Map()), [
       'e2',
-      't2',
       'tx',
+      't2',
       't4',
       't1',
       'ty',
@@ -231,6 +231,25 @@ describe('F42: openSequence', () => {
       't3',
       't4',
     ]);
+  });
+
+  test('a new numbered terminal with no higher number placed: after the last numbered one, above the numberless ones', () => {
+    const today: SequenceEntry[] = [
+      { id: 't1', window: true, slot: 1 },
+      { id: 't2', window: true, slot: 2 },
+      { id: 't3', window: true, slot: 3 },
+      { id: 'tx', window: true, slot: null },
+      { id: 'ty', window: true, slot: null },
+    ];
+    assert.deepEqual(openSequence(today, ['t1', 't2', 'tx', 'ty'], new Map()), [
+      't1',
+      't2',
+      't3',
+      'tx',
+      'ty',
+    ]);
+    // Only numberless window terminals placed: before the first of them.
+    assert.deepEqual(openSequence(today.slice(2), ['tx', 'ty'], new Map()), ['t3', 'tx', 'ty']);
   });
 
   test('no window terminal placed: a new window terminal goes first, numbered or not', () => {
@@ -316,6 +335,21 @@ describe('F42: Open drawn from a kept order', () => {
       ),
       [3, 5],
     );
+  });
+
+  test("a block that draws a numberless terminal above numbered ones: a new numbered terminal still lands at its number's place", () => {
+    // T1…T9 without T7; G = T2 + T10 (no number), drawn at T2's place.
+    const specs: Spec[] = [];
+    for (const n of [1, 2, 3, 4, 5, 6, 8, 9])
+      specs.push(n === 2 ? { n, slot: n, group: 'G' } : { n, slot: n });
+    specs.push({ n: 10, slot: null, group: 'G' });
+    const before = world(specs);
+    assert.deepEqual(drawn(before), [1, 2, 10, 3, 4, 5, 6, 8, 9]);
+    const kept = drawn(before);
+    const opened = [...specs, { n: 11, slot: 7 }];
+    // T11 opens with 7: between 6 and 8, as without a kept order.
+    assert.deepEqual(drawn(world(opened)), [1, 2, 10, 3, 4, 5, 6, 11, 8, 9]);
+    assert.deepEqual(drawn(world(opened, kept)), [1, 2, 10, 3, 4, 5, 6, 11, 8, 9]);
   });
 
   test('through buildListMessage: the kept order orders Open and the switcher alike; chips keep it on the subset', () => {

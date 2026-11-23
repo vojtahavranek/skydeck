@@ -8,9 +8,9 @@
  * moves no other row.
  *
  * `openSequence` draws the kept rows in their kept order and places each row not kept yet by
- * today's rule: a terminal of the window with number k before the first window terminal with no
- * number or a higher one, one without a number after the window's terminals, a session that does
- * not run in the window last. With nothing kept that is exactly `compareOpen`'s order.
+ * today's rule: a terminal of the window with number k before the first window terminal with a
+ * higher number (else after the last numbered one), one without a number after the window's
+ * terminals, a session that does not run in the window last. With nothing kept that is exactly `compareOpen`'s order.
  *
  * A held place (`build.ts`'s `heldPlaces`): a kept session whose process went on with another
  * session (`/clear`, an in-session `/resume`, a fork made in that process) keeps its place for
@@ -68,18 +68,30 @@ export function openSequence(
       placed.push(entry);
       continue;
     }
-    const lastWindow = placed.findLastIndex((one) => one.window);
-    let at = lastWindow + 1;
-    if (entry.slot !== null) {
-      const slot = entry.slot;
-      const before = placed.findIndex(
-        (one) => one.window && (one.slot === null || one.slot > slot),
-      );
-      if (before !== -1) at = before;
-    }
-    placed.splice(at, 0, entry);
+    placed.splice(placeOf(placed, entry.slot), 0, entry);
   }
   return placed.map((entry) => entry.id);
+}
+
+/**
+ * Where today's rule puts a new terminal of the window among the rows placed so far. With number
+ * `slot`: before the first window terminal WITH a higher number; if none, right after the last
+ * window terminal with a number; if none, before the first window terminal (first when none) — so
+ * that a numberless terminal a block draws above numbered ones does not stop it. Without a number:
+ * right after the last window terminal (first when none).
+ */
+function placeOf(placed: readonly SequenceEntry[], slot: number | null): number {
+  if (slot === null) {
+    return placed.findLastIndex((one) => one.window) + 1;
+  }
+  const higher = placed.findIndex((one) => one.window && one.slot !== null && one.slot > slot);
+  if (higher !== -1) return higher;
+  const lastNumbered = placed.findLastIndex((one) => one.window && one.slot !== null);
+  if (lastNumbered !== -1) return lastNumbered + 1;
+  return Math.max(
+    0,
+    placed.findIndex((one) => one.window),
+  );
 }
 
 /**
