@@ -944,8 +944,9 @@ effect.
   number, and a session that does not run in the window never has one. Ctrl+Shift+1…9 go to the
   row that shows that number, every open window shows the new order, and it stays after a reload
   and `skydeck window --restart`. A session that ends leaves a gap (nothing is renumbered), and a
-  new terminal takes the lowest free number, at that number's place; once you moved something, a
-  session that opens or ends moves no other row. A block moves as one, and inside a block a session
+  new terminal takes the lowest free number, at that number's place: after the terminals with lower
+  numbers, before the next one with a higher number, also when a block shows a terminal out of its
+  number's order; once you moved something, a session that opens or ends moves no other row. A block moves as one, and inside a block a session
   trades places with its neighbour; when a block puts a terminal without a number above numbered
   ones, the next move — also of another session — gives that terminal a number and takes one from
   the last numbered terminal. After `/clear`, or a `/resume` inside a session, the new session keeps

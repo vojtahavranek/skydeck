@@ -2506,10 +2506,12 @@ bar at the bottom. The list has three sections:
   it is the server's, kept per session (`window_open_order`, 10.2): every refresh takes the order
   drawn then as the kept one, so a row keeps the place it was first drawn at and a session that
   ends or starts moves no other row. A new row is placed by the rule above until then: a terminal
-  of the window with a slot before the first window terminal with a higher slot (none higher:
-  right after the last one with a slot; none with a slot: before the first window terminal), so
-  that a terminal without a slot that a block draws above slotted ones does not stop it; one
-  without a slot after the window's terminals, a session of another terminal last. The kept order
+  of the window with a slot goes after the last window terminal with a lower slot, before the
+  next one after it with a higher slot (none higher: right after it; none lower: before the first
+  window terminal with a higher slot, else before the first window terminal), so that a terminal
+  a block draws out of its slot's order (one without a slot, or a higher one above lower ones)
+  does not stop it; one without a slot after the window's terminals, a session of another
+  terminal last. The kept order
   ends when a refresh sees Open empty and holds no place (every reboot, or closing every session):
   Open is then computed again until the next move. Every window and a reloaded page show the kept
   order, and it survives a server restart while the sessions run.

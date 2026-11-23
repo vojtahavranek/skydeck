@@ -8,9 +8,10 @@
  * moves no other row.
  *
  * `openSequence` draws the kept rows in their kept order and places each row not kept yet by
- * today's rule: a terminal of the window with number k before the first window terminal with a
- * higher number (else after the last numbered one), one without a number after the window's
- * terminals, a session that does not run in the window last. With nothing kept that is exactly `compareOpen`'s order.
+ * today's rule: a terminal of the window with number k after the last window terminal with a lower
+ * number, before the next one with a higher number (`placeOf`), one without a number after the
+ * window's terminals, a session that does not run in the window last. With nothing kept that is
+ * exactly `compareOpen`'s order.
  *
  * A held place (`build.ts`'s `heldPlaces`): a kept session whose process went on with another
  * session (`/clear`, an in-session `/resume`, a fork made in that process) keeps its place for
@@ -75,19 +76,23 @@ export function openSequence(
 
 /**
  * Where today's rule puts a new terminal of the window among the rows placed so far. With number
- * `slot`: before the first window terminal WITH a higher number; if none, right after the last
- * window terminal with a number; if none, before the first window terminal (first when none) — so
- * that a numberless terminal a block draws above numbered ones does not stop it. Without a number:
- * right after the last window terminal (first when none).
+ * `slot` (k): let L be the last placed window terminal with a number below k; the new row goes
+ * before the first window terminal with a number above k that comes after L (from the start when
+ * there is no L); if there is none, right after L; with neither, before the first window terminal
+ * (first when there is none). So a terminal a block draws out of its number's order — one without a
+ * number, or a higher one above lower ones — does not stop it. Without a number: right after the
+ * last window terminal (first when none).
  */
 function placeOf(placed: readonly SequenceEntry[], slot: number | null): number {
   if (slot === null) {
     return placed.findLastIndex((one) => one.window) + 1;
   }
-  const higher = placed.findIndex((one) => one.window && one.slot !== null && one.slot > slot);
+  const lower = placed.findLastIndex((one) => one.window && one.slot !== null && one.slot < slot);
+  const higher = placed.findIndex(
+    (one, at) => at > lower && one.window && one.slot !== null && one.slot > slot,
+  );
   if (higher !== -1) return higher;
-  const lastNumbered = placed.findLastIndex((one) => one.window && one.slot !== null);
-  if (lastNumbered !== -1) return lastNumbered + 1;
+  if (lower !== -1) return lower + 1;
   return Math.max(
     0,
     placed.findIndex((one) => one.window),
