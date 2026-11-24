@@ -964,6 +964,8 @@ describe('skydeck update: the database at step 1 (ruled by the plan owner)', () 
       ['note', 'abcd', '--set', 'x'],
       ['done', 'abcd'],
       ['undone', 'abcd'],
+      ['park', 'abcd'],
+      ['unpark', 'abcd'],
       ['pr', 'refresh'],
       ['new'],
       ['resume', 'abcd'],

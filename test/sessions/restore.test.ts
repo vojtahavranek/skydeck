@@ -182,6 +182,21 @@ test('F44: a parked session that ended unexpectedly is no entry, with and withou
   assert.equal(d.deck.store.meta(sid(1))?.parkedAtNs, NOW);
 });
 
+test('F44: a session whose parking a prompt ended, and which then ended unexpectedly, is an entry; its stored time stays', (t) => {
+  const d = restartedMachine(t);
+  // sid(1)'s last input is a minute (less 5 s) after its start: the parking before it has ended.
+  d.deck.store.updateMeta(sid(1), { parkedAtNs: T0 - HOUR }, T0 - HOUR);
+  refresh(d.deck);
+  const rows = loadRows(d.deck);
+  const row = rows.find((candidate) => candidate.id === sid(1));
+  assert.equal(row?.parked, false);
+  assert.equal(row?.session.parkedAtNs, T0 - HOUR, 'the stored time of the ended parking');
+  assert.equal(row !== undefined && restorable(row), true);
+
+  const entries = planRestore(rows, d.deck.store.events(), BOOT_B, false);
+  assert.deepEqual(entries.map(shape), [S1_ENTRY, S2_ENTRY, S3_ENTRY, S9_ENTRY]);
+});
+
 test('entries come out in the order of the given rows', (t) => {
   const d = restartedMachine(t);
   const rows = loadRows(d.deck).reverse();

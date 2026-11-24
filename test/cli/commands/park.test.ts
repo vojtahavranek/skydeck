@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { main } from '../../../src/cli/main.ts';
+import { isoFromNs } from '../../../src/platform/time.ts';
 import { isListed } from '../../../src/sessions/list.ts';
 import { loadRows } from '../../../src/sessions/load.ts';
+import { markParked } from '../../../src/sessions/meta.ts';
 import { refresh } from '../../../src/sessions/refresh.ts';
 import { refCases } from '../../helpers/command-cases.ts';
 import { S1, S2, SEC, T0 } from '../../helpers/platform.ts';
@@ -125,6 +127,30 @@ test('a parked session with a later prompt in its transcript is no longer parked
 
   assert.equal(rowOf(d, S1).parked, false);
   assert.equal(d.deck.store.meta(S1)?.parkedAtNs, T0);
+});
+
+test('a parking a prompt ended is parked again: the mark is written anew (true), with the new time, and ls shows it parked', async (t) => {
+  const d = twoSessions(t);
+  assert.equal(await main(['park', '0b5f'], d.ctx), 0);
+  appendRecord(d, S1, userRecord(S1, T0 + 60n * SEC), T0 + 60n * SEC);
+  refresh(d.deck);
+  const ended = rowOf(d, S1);
+  assert.equal(ended.parked, false);
+  assert.equal(ended.session.parkedAtNs, T0, 'the stored time of the ended parking stays');
+  d.clock.setNs(T0 + 120n * SEC);
+
+  assert.equal(markParked(d.deck, ended), true);
+
+  assert.equal(d.deck.store.meta(S1)?.parkedAtNs, T0 + 120n * SEC);
+  assert.equal(rowOf(d, S1).parked, true);
+  const printed = d.stdout().length;
+  assert.equal(await main(['ls', '--json'], d.ctx), 0);
+  const { sessions } = JSON.parse(d.stdout().slice(printed)) as {
+    sessions: { id: string; parked: boolean; parkedAt: string | null }[];
+  };
+  const listed = sessions.find((session) => session.id === S1);
+  assert.equal(listed?.parked, true);
+  assert.equal(listed?.parkedAt, isoFromNs(T0 + 120n * SEC));
 });
 
 test('park with an extra argument is a usage error (exit 2)', async (t) => {
