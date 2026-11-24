@@ -22,11 +22,15 @@ import {
   dumpDatabase,
   isTicketStatusEntry,
   schema1Database,
+  withoutParkedColumn,
   withoutUptime,
 } from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
 
 const TICKET = 'https://tickets.example.com/browse/ABC-12';
+
+/** The newest schema version, as kv holds it (F44 and #207: an open goes on with migrations 5 and 6). */
+const NEWEST = String(SCHEMA_VERSION);
 
 /**
  * A database at `path` as schema 3 leaves it: schema1Database's rows, then migrations 2 and 3's own
@@ -70,17 +74,16 @@ function opened(t: TestContext, path: string): Store {
   return store;
 }
 
-/** The newest schema version, as kv holds it (#207: an open goes on with migration 5). */
-const NEWEST = String(SCHEMA_VERSION);
-
 /**
  * `newest` is `before` (a schema-3 database) migrated to 4: sqlite_master is as it was and holds
  * migration 4's table and its key's index besides; every row of every table is as it was, but kv
- * schema_version, which is the newest; `ticket_status` is empty. (#207: the open goes on with
- * migration 5, whose nullable column uptime_cs of events is left out here.)
+ * schema_version, which is the newest; `ticket_status` is empty.
  */
 function assertMigrated(before: DatabaseDump, newest: DatabaseDump): void {
-  const after = withoutUptime(newest);
+  // F44: the open goes on with migration 5, which only adds the column parked_at_ns to
+  // session_meta, NULL in every row; #207: and with migration 6, which only adds the nullable
+  // column uptime_cs to events.
+  const after = withoutUptime(withoutParkedColumn(newest));
   assert.deepEqual(
     after.schema.filter((entry) => !isTicketStatusEntry(entry)),
     before.schema,

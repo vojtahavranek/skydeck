@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import type { LiveFile, ProcessKey } from '../../src/claude/live.ts';
-import { NS_PER_DAY, NS_PER_MS } from '../../src/platform/time.ts';
+import { EMPTY_FACTS, foldLines } from '../../src/claude/transcripts.ts';
+import { NS_PER_DAY, NS_PER_MS, isoFromNs } from '../../src/platform/time.ts';
 import type { Ns } from '../../src/platform/types.ts';
 import { deriveSessions } from '../../src/sessions/derive.ts';
 import type { DeriveInput } from '../../src/sessions/derive.ts';
@@ -123,6 +124,7 @@ function meta(sessionId: string, over: Partial<SessionMeta> = {}): SessionMeta {
     note: null,
     doneAtNs: null,
     ticket: null,
+    parkedAtNs: null,
     createdNs: T0,
     updatedNs: T0,
     ...over,
@@ -947,6 +949,158 @@ test('done after the session’s only event, with no transcript, is hidden', () 
   assert.equal(s.hidden, true);
 });
 
+// ---- parked (follow-up F44, design 7.1) -------------------------------------------------------
+
+const PARKED = T0 + 100n * SEC;
+
+test('F44: parked while the transcript has no input after the parking; the stored time is carried', () => {
+  for (const lastUserNs of [null, T0 + 50n * SEC, PARKED]) {
+    const s = session(
+      { metas: [meta(S1, { parkedAtNs: PARKED })], transcripts: [tr(S1, { lastUserNs })] },
+      S1,
+    );
+    assert.equal(s.parked, true, String(lastUserNs));
+    assert.equal(s.parkedAtNs, PARKED);
+    assert.equal(s.hidden, false);
+  }
+});
+
+test('F44: an input after the parking ends it, and the stored time stays', () => {
+  const s = session(
+    {
+      metas: [meta(S1, { parkedAtNs: PARKED })],
+      transcripts: [tr(S1, { lastUserNs: PARKED + 1n })],
+    },
+    S1,
+  );
+  assert.equal(s.parked, false);
+  assert.equal(s.parkedAtNs, PARKED);
+});
+
+test('F44: a start by resume or startup after the parking does not end it (unlike done)', () => {
+  for (const detail of ['startup', 'resume'] as const) {
+    const s = session(
+      {
+        metas: [meta(S1, { parkedAtNs: PARKED })],
+        transcripts: [tr(S1, { lastUserNs: T0 + 50n * SEC })],
+        events: [start(P1, S1, PARKED + 50n * SEC, detail)],
+        isAlive: alive(P1),
+      },
+      S1,
+    );
+    assert.equal(s.parked, true, detail);
+    assert.equal(s.state, 'running', detail);
+  }
+});
+
+test("F44: a tool result, another agent's turn and a slash command after the parking do not end it; a prompt does", () => {
+  const record = (atNs: Ns, over: Record<string, unknown>): string =>
+    JSON.stringify({
+      type: 'user',
+      sessionId: S1,
+      timestamp: isoFromNs(atNs),
+      entrypoint: 'cli',
+      message: { role: 'user', content: 'invented prompt' },
+      ...over,
+    });
+  const prompt = record(T0 + 50n * SEC, {});
+  const after = PARKED + 10n * SEC;
+  const others: [what: string, line: string][] = [
+    [
+      'a tool result',
+      record(after, {
+        toolUseResult: {},
+        message: { role: 'user', content: [{ type: 'tool_result', content: 'invented' }] },
+      }),
+    ],
+    ["another agent's turn", record(after, { isMeta: true, turnOrigin: 'peer' })],
+    ['a scheduled wakeup', record(after, { isMeta: true, turnOrigin: 'scheduled' })],
+    [
+      'a slash command',
+      record(after, {
+        message: { role: 'user', content: '<command-name>/compact</command-name>' },
+      }),
+    ],
+  ];
+  const parkedWith = (lines: string[]): DerivedSession => {
+    const { facts } = foldLines(EMPTY_FACTS, lines);
+    return session(
+      {
+        metas: [meta(S1, { parkedAtNs: PARKED })],
+        transcripts: [tr(S1, { lastUserNs: facts.lastUserNs })],
+      },
+      S1,
+    );
+  };
+  for (const [what, line] of others) {
+    assert.equal(parkedWith([prompt, line]).parked, true, what);
+  }
+  assert.equal(parkedWith([prompt, record(after, { turnOrigin: 'human' })]).parked, false);
+  assert.equal(parkedWith([prompt, record(after, {})]).parked, false, 'an older record');
+});
+
+test('F44: both marks set and done (a database changed by other means): hidden, not parked', () => {
+  const s = session(
+    {
+      metas: [meta(S1, { parkedAtNs: PARKED, doneAtNs: PARKED + SEC })],
+      transcripts: [tr(S1, { lastUserNs: T0 })],
+    },
+    S1,
+  );
+  assert.equal(s.hidden, true);
+  assert.equal(s.parked, false);
+  assert.equal(s.parkedAtNs, PARKED);
+});
+
+test('F44: both marks set and the done mark ended by a start: parked', () => {
+  const s = session(
+    {
+      metas: [meta(S1, { parkedAtNs: PARKED, doneAtNs: PARKED + SEC })],
+      transcripts: [tr(S1, { lastUserNs: T0 })],
+      events: [start(P1, S1, PARKED + 2n * SEC, 'resume')],
+    },
+    S1,
+  );
+  assert.equal(s.hidden, false);
+  assert.equal(s.parked, true);
+});
+
+test('F44: a session that is not parked has no parkedAtNs', () => {
+  const s = session({ metas: [meta(S1)], transcripts: [tr(S1)] }, S1);
+  assert.equal(s.parked, false);
+  assert.equal(s.parkedAtNs, null);
+  assert.equal(session({ transcripts: [tr(S2)] }, S2).parked, false, 'no meta row');
+});
+
+test('F44: after /clear the session the process holds is not parked, the old one still is', () => {
+  const given: Given = {
+    events: clearPair('clear', 'clear'),
+    links: [link(S1, S2, 'clear', T0 + 60n * SEC)],
+    metas: [meta(S1, { parkedAtNs: T0 + 30n * SEC })],
+    transcripts: [tr(S1, { lastUserNs: T0 + 10n * SEC })],
+    isAlive: alive(P1),
+  };
+  const old = session(given, S1);
+  assert.equal(old.parked, true);
+  assert.equal(old.state, 'not-running');
+  const held = session(given, S2);
+  assert.equal(held.parked, false);
+  assert.equal(held.parkedAtNs, null);
+  assert.equal(held.state, 'running');
+});
+
+test('F44: a copy of a parked session is not parked', () => {
+  const given: Given = {
+    links: [link(S1, S2, 'copy', T0 + 60n * SEC)],
+    metas: [meta(S1, { parkedAtNs: T0 + 30n * SEC })],
+    transcripts: [tr(S1), tr(S2)],
+  };
+  assert.equal(session(given, S1).parked, true);
+  const copy = session(given, S2);
+  assert.equal(copy.copyOf, S1);
+  assert.equal(copy.parked, false);
+});
+
 // ---- dir, launch, times (cases 22-24) ---------------------------------------------------------
 
 test('22: dir is the transcript’s first cwd, else the earliest event’s cwd, else null', () => {
@@ -1624,6 +1778,8 @@ test('every derived session carries the fields of the contract', () => {
     'lastHolding',
     'launch',
     'marks',
+    'parked',
+    'parkedAtNs',
     'sinceNs',
     'state',
     'stateDetail',

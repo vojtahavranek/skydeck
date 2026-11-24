@@ -9,7 +9,8 @@
  * `setting-default`, settings.ts: no path, no program, no key outside its table's changeable ones);
  * since F37 move a session of Open one place up or down (`reorder`, reorder.ts; since F42 any row of
  * Open); since F40 answer the offer to carry fields over after `/clear` (`carry-over`,
- * `dismiss-carry-over`, carry-over.ts: the offer computed again, one transaction). Every field of an action is the page's — any page that passed the handshake — so each
+ * `dismiss-carry-over`, carry-over.ts: the offer computed again, one transaction); since F44 park
+ * and un-park a session (`park`, `unpark`: step 1's markParked and markUnparked). Every field of an action is the page's — any page that passed the handshake — so each
  * one is checked here again and goes through step 1's own rules: a resume
  * names a session and nothing more (the guard, the lock and the command builder decide the rest,
  * S2 11.1), a new session's directory, label, group and flags are checked as `skydeck new` checks
@@ -22,13 +23,16 @@ import { statusProvider } from '../github.ts';
 import { RefError, SkydeckError } from '../platform/errors.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { cleanGroup, cleanLabel } from '../sessions/labels.ts';
+import type { ListRow } from '../sessions/list.ts';
 import { loadRows } from '../sessions/load.ts';
 import {
   attachManualPr,
   detachSessionPr,
   discardKeptNote,
   markDone,
+  markParked,
   markUndone,
+  markUnparked,
   requireTicket,
   setGroup,
   setLabel,
@@ -113,6 +117,8 @@ type EditAction = Extract<
       | 'note'
       | 'done'
       | 'undone'
+      | 'park'
+      | 'unpark'
       | 'pr-refresh'
       | 'pr-add'
       | 'pr-rm'
@@ -262,10 +268,12 @@ export function createActions(deps: ActionDeps): ActionHandler {
    * Plan D9: an edit acts only on a session the store knows, a row of loadRows — the id is whole,
    * so nothing is resolved and no refresh runs first. The row of a `new` terminal whose session
    * the store does not know yet (A28) is refused as not started (2.5); any other id is RefError's,
-   * as for `act resume`.
+   * as for `act resume`. Its row is the answer (F44: `park` reads whether it is parked now and
+   * its transcript).
    */
-  function requireKnown(sessionId: string): void {
-    if (loadRows(deck).some((row) => row.id === sessionId)) return;
+  function requireKnown(sessionId: string): ListRow {
+    const known = loadRows(deck).find((row) => row.id === sessionId);
+    if (known !== undefined) return known;
     const waits = hub
       .list()
       .some((terminal) => terminal.kind === 'new' && terminal.expectedSessionId === sessionId);
@@ -327,7 +335,9 @@ export function createActions(deps: ActionDeps): ActionHandler {
    * `group` are none when blank, else cleanLabel / cleanGroup (their refusals are the commands'),
    * then setLabel / setGroup; `ticket` (F18) requireTicket with the configuration's `ticketUrl`
    * (its refusals are `skydeck ticket set`'s), then setTicket — empty text removes it; `note`
-   * saveNote; `done`, `undone` markDone, markUndone; `pr-add`
+   * saveNote; `done`, `undone` markDone, markUndone; F44: `park` markParked over the session's row
+   * (nothing written, and no `changed()`, when it is parked already: the first time is kept),
+   * `unpark` markUnparked; `pr-add`
    * attachManualPr (origin manual, an earlier detach cleared), then the fetch in the background
    * (D8), answered `attached <url>` without waiting for it; `pr-rm` detachSessionPr; `pr-refresh`
    * the explicit refresh in the background, `ok` at once. F19: a ticket set that a provider reads
@@ -337,7 +347,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
    */
   function edit(action: EditAction): Answer {
     const { sessionId } = action;
-    requireKnown(sessionId);
+    const known = requireKnown(sessionId);
     switch (action.kind) {
       case 'label': {
         const text = orNone(action.text);
@@ -372,6 +382,11 @@ export function createActions(deps: ActionDeps): ActionHandler {
         return wrote(action.kind);
       case 'undone':
         markUndone(deck, sessionId);
+        return wrote(action.kind);
+      case 'park':
+        return markParked(deck, known) ? wrote(action.kind) : DONE;
+      case 'unpark':
+        markUnparked(deck, sessionId);
         return wrote(action.kind);
       case 'pr-add': {
         const key = attachManualPr(deck, sessionId, action.url);
@@ -435,6 +450,8 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'note':
       case 'done':
       case 'undone':
+      case 'park':
+      case 'unpark':
       case 'pr-refresh':
       case 'pr-add':
       case 'pr-rm':

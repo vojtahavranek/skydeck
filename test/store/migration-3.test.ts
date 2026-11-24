@@ -20,6 +20,7 @@ import {
   SCHEMA1,
   dumpDatabase,
   schema1Database,
+  withoutParkedColumn,
   withoutTicketStatus,
   withoutUptime,
 } from '../helpers/schema1.ts';
@@ -88,9 +89,10 @@ function withTicketColumn(sql: string | null): string | null {
  * migration 4, whose empty table ticket_status is left out here).
  */
 function assertMigrated(before: DatabaseDump, newest: DatabaseDump): void {
-  // F19: the open goes on with migration 4, which only adds the table ticket_status, empty.
-  // #207: and with migration 5, which only adds the nullable column uptime_cs to events.
-  const after = withoutUptime(withoutTicketStatus(newest));
+  // F19: the open goes on with migration 4, which only adds the table ticket_status, empty, and
+  // F44's migration 5, which only adds the column parked_at_ns to session_meta, NULL in every row;
+  // #207: and with migration 6, which only adds the nullable column uptime_cs to events.
+  const after = withoutUptime(withoutTicketStatus(withoutParkedColumn(newest)));
   assert.deepEqual(
     after.schema,
     before.schema.map((entry) =>

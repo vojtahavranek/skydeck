@@ -142,6 +142,7 @@ Design 3's words keep their meaning. New:
 | screen side | The server's model of a terminal's screen: a headless xterm.js fed every byte the program writes (7.2). |
 | snapshot | The screen side serialised: viewport, scrollback, cursor and modes, as escape sequences that rebuild it. |
 | park | The server hands a snapshot to the keeper, which keeps the latest one. |
+| parked (a session) | Follow-up F44: a session the user set aside with the mark Parked (design 7.1). It has nothing to do with a park of a terminal's screen above: the registry and the keeper never use the word for a session. |
 | tail | What the keeper has received since the parked snapshot: output chunks and resizes, in order. |
 | record | One element of the stream a keeper produces: an output chunk or a resize. Records are numbered from 1. |
 | attach | A page asks for a terminal's stream: it gets a snapshot, then every later record. |
@@ -993,14 +994,15 @@ leaves it at its start; the keeper cuts records only between UTF-8 characters.
   taken over"). So a restored keeper whose hello comes late, or after a reconnect, is started. A
   renewal an older skydeck wrote carries no mark and is refused as taken over, the cautious side
   (stage C's plan, C19, task 80; it replaces stage A's exact comparison, ruled in its task 21).
-- **Park.** The server parks a snapshot when the tail has grown past 1 MiB, when 30 seconds have
-  passed with output since the last park, and for every terminal when it stops (5.5). A park names
-  the last record it covers; the keeper drops those from the tail. Serialising 5,000 lines takes
-  about 75 ms (measured: 10,000 lines in 145–166 ms), so parking is rare by design. The keeper's
-  first size is in no frame (a hello carries the current size), so the server that spawns a keeper
-  parks its empty screen at record 0 right after the first `hello`: every later claim gets that
-  size in `S`, and a rebuild without any other park starts at the right width (stage A's plan,
-  task 16).
+- **Park.** (A screen's park, not a session's: a parked session, design 7.1, is a mark of the user's
+  that this section never meets.) The server parks a snapshot when the tail has grown past 1 MiB,
+  when 30 seconds have passed with output since the last park, and for every terminal when it stops
+  (5.5). A park names the last record it covers; the keeper drops those from the tail. Serialising
+  5,000 lines takes about 75 ms (measured: 10,000 lines in 145–166 ms), so parking is rare by
+  design. The keeper's first size is in no frame (a hello carries the current size), so the server
+  that spawns a keeper parks its empty screen at record 0 right after the first `hello`: every later
+  claim gets that size in `S`, and a rebuild without any other park starts at the right width (stage
+  A's plan, task 16).
 - **Reading.** The server reads a keeper no faster than its screen side applies the records: while
   more than 4 MiB of records wait for the screen side it stops reading that keeper's socket, and
   reads again below 1 MiB. The keeper then does what 7.1 step 7 designs for a slow reader: it
@@ -1180,6 +1182,70 @@ written to `window_slots` and no `hello` changes a slot. An entry of a keeper ne
 A move writes the map and Open's new order (`window_open_order`, 12.1) in one store transaction,
 both or neither. `setSlots` checks the change before it writes: every terminal listed, the values
 before and after the same (none counted as a value), and no two terminals ending with one slot.
+
+Follow-up F44: a terminal whose slot the server withholds holds none (its session is parked, 12.15;
+the registry knows no session, and never uses the word for one). The registry keeps a set of such
+terminals beside the moved slots, and one operation, `withholdSlots(ids)`, which names the whole
+set each time: the listed terminals withheld are from then on exactly those named (an id not
+listed, and a terminal whose program is over, are ignored). One that enters gives its slot up at
+once — no slot, its moved entry gone —, so its number is the lowest free one for the next terminal
+(`nextSlot` is unchanged). One that leaves takes the lowest free slot — every listed terminal's slot
+and the slots moved to keepers still being found count as held, less those of the terminals
+entering in the same call —, none while all nine are held; several take theirs by opening time,
+then id. Its moved entry is that slot when it is not its meta's, null when it gets none and its meta
+has one (F42's meaning: a later `hello` keeps it without one), else none. Withholding only ever
+takes a number away and its end only ever gives one: a terminal is still opened with the lowest free
+slot in its keeper's meta, so a withheld state that is missing, late or lost (a write that failed, a
+lost entry, a restart) leaves the terminal its number by the rules above. A lost stored set can
+change another terminal's number, though: when a parked session's terminal and the one that took its
+freed number meet at their `hello`s with the same meta slot, the later of the two takes the lowest
+free slot (as for any doubled meta slot, logged), and that stays, also after the parked one gives
+its own up at the first refresh. The operation is
+synchronous and reads and changes the slots in one step, as a move does. It writes the moved slots
+and the set (`window_slots_withheld`, 10.2) in one store transaction before it applies anything: a
+write that throws changes nothing, is logged once by kind while it repeats, and the next call tries
+again. At a `hello` a withheld terminal takes no slot, whatever its moved entry or its meta say, and
+nothing is written, so a reconnect and a restart keep it without one. `setSlots` refuses a slot for
+a withheld terminal (`changed`, as for an ended one): withheld means no slot. An entry goes, and the
+set is written, at the end of the terminal's program, at its close, and when a terminal withheld
+before its keeper's `hello` is forgotten because its keeper could not start; an id of a keeper still
+being found stays, and one of a keeper never found again goes at the next write. Once the server is
+stopping the operation changes and writes nothing (`stopping`). A terminal withheld before its
+`hello` whose spawn ends because the server is stopping leaves the set but not the store (nothing
+is written once stopping): its keeper may live, a later server finds it withheld, and that
+server's first refresh gives it the lowest free slot (none while all nine are held) when its
+session is no longer parked.
+
+Who calls it, and when (F44). Whether a session is parked now is derived from the store and the
+transcripts, and the mark can be written by another process (`skydeck park`), so no act owns the
+numbers: the server makes the registry agree with the derived state every time its rows or its
+terminals change, by one call that names the whole truth — every terminal whose session (the one
+the mapping gave it, else the one it was opened for; twins too) has a parked row —
+(`src/window/parked-slots.ts`). It runs after every refresh that worked (first, after the mapping
+set each terminal's session), after every reload of the rows an act or a fetch asks for (10.1),
+and in the step that spawns a terminal (11.2). It does nothing until the first refresh that worked
+has run (the keepers are found by then: before it a stored set would be pruned against an empty
+registry), nothing once the stop began, and never throws. So an act (`park`, `unpark`, `done` of a
+parked session, the toast's Undo) writes the mark and the numbers in one synchronous section of
+the server's one thread, before its lists go out, and no terminal opens between them; a prompt
+that ends a parking, or a parking written by the command, reaches the numbers at the next refresh
+that reads it (about 2 s). The mark and the numbers are two writes, on purpose (the mark is also
+written by processes that have no registry): in the gap of a numbers' write that failed the row is
+under Parked and its terminal still holds its number, which the list shows nowhere (12.1), so the
+next terminal takes a higher one, and the next refresh tries again; un-parked with the write
+failing, the row is under Open without a number until then, and a move that would give that
+terminal a number is refused (`the list changed meanwhile; try again`). A terminal opened for a
+parked session (a resume from its row, `skydeck resume --window`) is born as any terminal, with the
+lowest free slot in its keeper's meta, and gives it up in the same synchronous step as the spawn:
+the registry lists it before its first await, and the call follows at once; no page is sent the
+number, and when the withholding cannot be written, or the session is un-parked first, the
+terminal simply keeps it. A terminal that takes a slot back in such a call (it leaves the withheld
+ones) has its session dropped from Open's kept order in the same step, as a parked session's is:
+a refresh while its write failed may have kept its row at the place of a row without a number, and
+back under Open it is placed by its number (12.1). A parking the server has not seen yet (the command's, less than a refresh
+ago) leaves the terminal its number until that refresh; a terminal whose session changed since the
+last mapping (`/clear` in it) is judged by its old session until the next refresh, and then, no
+longer a parked session's, takes the lowest free slot.
 
 A limit: an older skydeck's server reads only the meta slots, so after a move its window can show
 two terminals with one slot until one of them closes. An F37 server reads a null entry as none and
@@ -1613,7 +1679,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `t` | Fields | Effect |
 |---|---|---|
 | `ping` | `n` | `pong` with the same `n`, `bootId`, `serverId`. |
-| `view` | `filter`, `unfolded`, `showDone`, `selected` (null while the page's selection is a closed block's caption, 12.2: from follow-up F9 no session is selected then); from stage E, each optional (a page before stage E sends none): `chips` (12.8's Running, Open PR, Has note and, from follow-up F35, Done as `running`, `open-pr`, `note`, `done`, each once — a page before F35 sends no `done`: not set; Show done is `showDone`, no chip), `closed` (the blocks the user closed, 12.2: at most 64 entries, each exactly a `section` — `open`, `week` or `earlier` — and a `group`, a text, each section and group once; absent: no block closed. It replaced stage E's `opened` on 2026-11-16, follow-up F3: a view that still names `opened` is refused as any view with a field it does not know, and the server closes the page's connection, 1008 `message refused: view: unknown field`; the page and the server are one build, 8.2.2), `switcher` (the quick switcher's text while it is shown, else null; each change of it is a `view`) | The page's view state; the server answers with `list` at once and keeps sending `list` when it changes (12). |
+| `view` | `filter`, `unfolded`, `showDone`, `selected` (null while the page's selection is a closed block's caption, 12.2: from follow-up F9 no session is selected then); from stage E, each optional (a page before stage E sends none): `chips` (12.8's Running, Open PR, Has note and, from follow-up F35, Done as `running`, `open-pr`, `note`, `done`, each once — a page before F35 sends no `done`: not set; Show done is `showDone`, no chip), `closed` (the blocks the user closed, 12.2: at most 64 entries, each exactly a `section` — `open`, `week` or `earlier`, from follow-up F44 also `parked` — and a `group`, a text, each section and group once; absent: no block closed. It replaced stage E's `opened` on 2026-11-16, follow-up F3: a view that still names `opened` is refused as any view with a field it does not know, and the server closes the page's connection, 1008 `message refused: view: unknown field`; the page and the server are one build, 8.2.2), `switcher` (the quick switcher's text while it is shown, else null; each change of it is a `view`) | The page's view state; the server answers with `list` at once and keeps sending `list` when it changes (12). |
 | `focus` | `focused`, `selected` (null then too), `area` (`cols`, `rows`: what the terminal area holds at the page's font) | Window focus, selection and terminal area, for seen (12.4), notifications (13), the size owner and the first size of a terminal the command line or a restore opens (8.2.6). Sent on every change and after `start`. |
 | `attach` | `term`, `cols`, `rows` | Start a terminal stream (8.2.4). The page's size is a proposal (8.2.6). |
 | `detach` | `term` | Stop it. |
@@ -1630,6 +1696,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `label`, `group` | `sessionId`, `text` (empty clears) | 12.5. |
 | `note` | `sessionId`, `text`, `base` (the note the edit started from) | 12.5. |
 | `done`, `undone` | `sessionId` | 12.5, 12.10. |
+| `park`, `unpark` | `sessionId` | Follow-up F44, 12.15: `park` parks the session (design 7.1: the time it is parked, its done mark cleared, in one write; a session parked already is not written and keeps its first time, answered `ok` all the same), `unpark` ends its parking. Absolute, never a toggle: the page picks the act from its row's `parked`, as it picks `done` or `undone`. Refused as `done` is: a session the store does not know, a `new` terminal's session not started yet, a busy store. Every page's `list` follows a write; before it goes out, a terminal of the window running the session gives its number up (`park`) or takes the lowest free one (`unpark`), 7.6. |
 | `pr-add`, `pr-rm` | `sessionId`, `url` | 12.5. |
 | `pr-refresh` | `sessionId` | An explicit refresh of that session's pull requests (design 7.3). |
 | `ticket` | `sessionId`, `text` (a link or a key as typed; empty removes the ticket) | 12.5 (follow-up F18): the server reads `text` by design 7.1's rule (`readTicket`) and stores the address, replacing the ticket before; a refusal's words are the result's error, nothing stored. `text` is held to the URL limit, so that a link of 2,048 characters is sent whole. Every page's `list` follows. |
@@ -1685,7 +1752,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, `week`, `earlier`, each with `folded`, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, from follow-up F42 the order they last had under Open, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), from issue #188 `resumeFlags`, the same flags each exactly as recorded — not sanitised: the page puts them only into the value of the resume card's `Other flags…` field (12.6), as it puts `note` only into a text box — or null when one holds what that field cannot hold as it is (a line break, another control character, a bidirectional control: the favourites' rule; `[]` without a recorded launch), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); issue #184 `copyOnSelect`: `window.copyOnSelect` as the running server uses it (9.5; always sent, so a page has it from its first list and follows a change in Settings at its next; absent, as in a scripted list of the tests, is false: the page holds no default); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4 — from follow-up F44 those whose `needsYou` is true, never a parked one —, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, from follow-up F44 `parked`, `week`, `earlier`, in that order, each with `folded` — false for `parked` always: only Earlier folds as a whole —, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4; from F44 by their `needsYou`), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, from follow-up F42 the order they last had under Open, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), from issue #188 `resumeFlags`, the same flags each exactly as recorded — not sanitised: the page puts them only into the value of the resume card's `Other flags…` field (12.6), as it puts `note` only into a text box — or null when one holds what that field cannot hold as it is (a line break, another control character, a bidirectional control: the favourites' rule; `[]` without a recorded launch), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); issue #184 `copyOnSelect`: `window.copyOnSelect` as the running server uses it (9.5; always sent, so a page has it from its first list and follows a change in Settings at its next; absent, as in a scripted list of the tests, is false: the page holds no default); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, from follow-up F44 `parked` (a session under Parked, never `need`), `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none; from follow-up F44 `parked`, whether the session is parked now — design 7.1's derived mark: marked, and no prompt of the user's since —, and `parkedAtNs`, the time it was parked while it is, else null, both always sent, absent, as in a list of a server before F44, false and null) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), from follow-up F44 `needsYou` (whether the row counts as needing you, 12.4: `attention` set and the session not parked; always sent; absent, as in a list of a server before F44, is `attention` not null; the page counts and closes on it and decides nothing of it), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -2054,7 +2121,7 @@ In memory only:
 - a running restore (12.7).
 
 Nothing of a terminal is stored but a slot moved by hand (follow-up F37, 7.6: `window_slots`,
-10.2): a server restart rediscovers terminals from `<runtimeDir>/terms/` and their keepers'
+10.2) and, from follow-up F44, whether its slot is withheld (`window_slots_withheld`): a server restart rediscovers terminals from `<runtimeDir>/terms/` and their keepers'
 `hello`. Follow-up F42: once a move made Open's order the server's, every refresh that worked
 takes the order drawn then as the kept one (`window_open_order`, 12.1), and the restore memory takes
 it too (design 7.8); neither runs once the stop began, and neither makes a refresh count as
@@ -2076,7 +2143,9 @@ cannot be read, is not taken for gone (design 5.5). The server then sends
 the server's own writes move no change mark, so after one the server loads the rows again and
 sends the lists at once, within the pages' once-a-second rule, and so does a pull-request fetch
 of 12.5 that saved something or failed after it may have; a reload that fails is logged by kind
-and left to the next refresh (stage D, plan D7). A tick that fails is logged and shown once to the
+and left to the next refresh (stage D, plan D7). Follow-up F44: after such a reload, before the
+lists go out, and after every refresh that worked, the server sets the numbers of parked sessions'
+terminals (7.6). A tick that fails is logged and shown once to the
 pages; the next tick tries again. The server's store connection checks the schema version at the
 start of every write transaction, and before every write that is a single statement; when the
 store is newer than the server knows (a command of an updated checkout migrated it, 16.5), the
@@ -2204,21 +2273,42 @@ nothing removes the table; the way back is the copy kept before the migration (d
 install.md "Going back").
 `test/store/migration-4.test.ts` migrates a filled schema-3 database and compares every value.
 
-**Migration 5** (issue #207, the order of one process's events, design 5.2 and 5.3):
+**Migration 5** (follow-up F44, a session's parking, design 7.1):
+
+```sql
+ALTER TABLE session_meta ADD COLUMN parked_at_ns INTEGER;  -- F44: when the user parked the session; NULL for none
+```
+
+As migration 3's, it adds one nullable column and nothing else, so every row keeps its values (the
+column is NULL in each) and a reader of schema 4 still reads `session_meta` (its rows carry one
+column more). The column holds the time the session was parked (design 7.1: the later of the clock
+and one nanosecond after the last input known then), never cleared by itself: whether the session
+is parked now is derived, as Done is. Parking writes it and clears `done_at_ns` in one statement,
+marking done clears it in the same way, so a row has at most one of them. Like every migration it
+runs in one transaction with its `kv` update, the version read again inside the write lock, after
+the copy the store keeps before a migration (design 9.2, follow-up F21). **An older skydeck refuses
+it**, as for migrations 3 and 4: from then on an older skydeck (one of schema 4, F19's) refuses the
+database at its open ("written by a newer skydeck … update skydeck", exit 1), a server of an older
+checkout still running stops at its next write (10.1's guard), and nothing removes the column; the
+way back is the copy kept before the migration (install.md, "Going back").
+`test/store/migration-5.test.ts` migrates a filled schema-4 database and compares every value.
+
+**Migration 6** (issue #207, the order of one process's events, design 5.2 and 5.3):
 
 ```sql
 ALTER TABLE events ADD COLUMN uptime_cs INTEGER;  -- #207: /proc/uptime at the event in centiseconds, which orders one process's events; NULL for none
 ```
 
 It adds one nullable column and nothing else, as migration 3 did: every row keeps its values (the
-column is NULL in each; nothing is filled in afterwards) and a reader of schema 4 still reads
+column is NULL in each; nothing is filled in afterwards) and a reader of schema 5 still reads
 `events`. The column holds the machine's uptime when the event was stamped: the hook's `uptime`
 key (design 5.2), and for the server's own events (the window's end, 12.10; reconcile's
 `observed`, design 5.4) its own read of /proc/uptime. It is never shown: it only orders the events
 of one process (design 5.3 "Order"), whose stamps a wall clock that stepped back can invert. **An
-older skydeck refuses it**, as for migrations 3 and 4, and the way back is the copy kept before the
+older skydeck refuses it**, as for migrations 3 to 5, and the way back is the copy kept before the
 migration (design 9.2, install.md "Going back"). A spool file with the new key, read by an older
 skydeck still running, parses as before: the key is not one it knows, and those are ignored.
+`test/store/migration-6.test.ts` migrates a filled schema-5 database and compares every value.
 
 `kv` entries (no migration; `kv` is free text):
 
@@ -2233,7 +2323,8 @@ skydeck still running, parses as before: the key is not one it knows, and those 
 | `window_restore_dismissed` | The boot id whose restore the user dismissed with "Not now" (12.7): written only when it is the earlier boot the banner offers; while it names that boot the banner is not shown. |
 | `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; at an orderly stop the server writes it once more as its pages are, and when it dies it stays as the last refresh left it, so that the next server knows that a window may come back (ruled by the plan owner, plan task 74). |
 | `window_favourites` | The new form's favourite flags (12.6, follow-up F15): a JSON array of their texts, in the order they were added, at most 12; absent while there is none (the last one removed takes the entry away). One write is one transaction that reads the list first. A value that is not such an array is read as no favourite, and of an array only the entries 12.6's rule takes are read; the next save writes the list afresh. An older skydeck reads only the keys it knows and leaves this one alone. |
-| `window_slots` | Follow-up F37 (7.6): the slots moved by hand, a JSON object from terminal id (12 lower-case hex characters) to slot 1–9 or, from follow-up F42, null (a slot a move took away; only a move writes one), holding every live terminal whose slot is not the one of its keeper's meta; absent while there is none. Written whole at a move (before it is applied, in one transaction with `window_open_order`), when a moved terminal's slot is freed at the end of its program (follow-up F43, 7.6), at the close of a moved terminal and at a `hello` that changed an entry; pruned to the terminals listed or being found. A write that failed outside a move is tried again after the next refresh (7.6). Read tolerantly: an entry with another key or value is left out. An older skydeck leaves it alone and goes by the meta slots. |
+| `window_slots` | Follow-up F37 (7.6): the slots moved by hand, a JSON object from terminal id (12 lower-case hex characters) to slot 1–9 or, from follow-up F42, null (a slot a move took away; only a move writes one), holding every live terminal whose slot is not the one of its keeper's meta; absent while there is none. Written whole at a move (before it is applied, in one transaction with `window_open_order`), when a moved terminal's slot is freed at the end of its program (follow-up F43, 7.6), at the close of a moved terminal, at a `hello` that changed an entry and, from follow-up F44, whenever the withheld terminals change (with `window_slots_withheld`, in one transaction: a terminal that enters loses its entry, one that leaves gets one when its slot is not its meta's, 7.6); pruned to the terminals listed or being found. A write that failed outside a move is tried again after the next refresh (7.6). Read tolerantly: an entry with another key or value is left out. An older skydeck leaves it alone and goes by the meta slots. |
+| `window_slots_withheld` | Follow-up F44 (7.6, 12.15): the terminals whose slot the server withholds (their sessions are parked), a JSON array of terminal ids (12 lower-case hex characters) in id order; absent while there is none. Written whole with `window_slots`, in one transaction, at every write of the slots outside a move (a move's own write leaves it alone); pruned to the terminals listed or being found. Applied at each `hello`: such a terminal takes no slot. Read tolerantly: what is not a terminal id is left out. An older skydeck never sees it: after migration 5 it refuses the database. |
 | `window_restore_order` | Follow-up F37, F42 (design 7.8): the order the sessions last had under Open in the window, a JSON array of at most two parts, the newest boot first, each `{ "bootId", "order": [<session id>, …] }`: Open's drawn order (done ones shown) in that boot, with each session that left Open while still a restore's candidate put back after the nearest earlier session still there; at most 500 ids a part. The server takes Open into its own boot's part after each refresh that worked and after a move, writing only when that changes it; nothing changes while Open is empty, so a reboot that ends the keepers first cannot empty it. Read tolerantly: a part F37 wrote, `{ "bootId", "sessions": { <session id>: <slot> } }`, is read as its sessions in the order of their slots. The command's restore reads it too. A limit: an F37 skydeck reads an F42 part as none, restores in list order and drops the part at its next write. |
 | `window_open_order` | Follow-up F42 (12.1): Open's kept order, a JSON array of session ids (at most 500 read, each once); absent until the first move by hand, and while it is absent Open is computed and nothing is written. Written whole at a move (with `window_slots`, one transaction) and, from then on, at every refresh that worked where Open's drawn order changed (the freeze): the drawn order with done ones shown, plus the place held for a process's next session after `/clear`, an in-session `/resume` or a fork in that process (12.9; at most one per running process). A refresh that sees Open empty and holds no place removes it: the kept order ends. A failed write is logged once by kind and tried again at the next refresh. Read tolerantly. An older skydeck leaves it alone; a limit: after a switch back to a version before F42 and forward again, the old kept order wins over the older version's moves until the next move or until a refresh sees Open empty (7.6). |
 | `window_update_check` | Follow-up F38 (16.5): what the window's server's last look for a newer skydeck said, as JSON: `{ v: 1, root, lookedAtNs, checkedAtNs, fetchedAtNs, failure, head, outcome }` — `root` the checkout it looked at (its real path: one database serves every checkout of the user), `checkedAtNs` when the last check ended, whatever it found (null: none yet), `fetchedAtNs` when the last fetch that worked ended (null: never), `failure` `{ atNs, line }` while the last check failed, `head` HEAD's full id at the look, and `outcome` one of `{ kind: 'cannot', line }`, `{ kind: 'current', line }` and `{ kind: 'available', upstream, count, to, lines, blocked }`. Written by the server only, after each check and look; read by it and by `doctor`. Every line in it clipped to 300 characters. A value that is not exactly such a record is read as none, and so is one of another root, which the next look writes over. |
@@ -2378,7 +2469,10 @@ Five changes to step 1's code make that possible, with no change of behaviour fo
 in `src/window/` (4.3) and exists **only inside the server**: no other process opens a terminal of
 the window, and nothing hands the server a launch to run (8.3); the `Terminal` type's names gain
 `window`. Its `open(spec)` spawns a keeper (7.1) with the spec's launch, session id, kind, lock
-value and start deadline (11.1), the first size (8.2.6) and the next free slot; claims it, sends
+value and start deadline (11.1), the first size (8.2.6) and the next free slot (follow-up F44: also
+for a parked session, whose terminal gives that slot up in the same synchronous step: right after
+the spawn is called, before it is awaited, the server sets the numbers of parked sessions'
+terminals, 7.6; a throw there is ignored and the spawn is always awaited); claims it, sends
 `G` on its `hello`, and resolves on what comes back:
 
 - `T` (8.1): `{ ok: true }`; the program runs, and the terminal is tied to its pid and process start
@@ -2420,7 +2514,8 @@ gives them back when its program never started (7.8).
   failed unexpectedly (<kind>)" on the card), never its message (ruled by the plan owner, review of
   plan task 32).
 - **Restore.** The banner (12.7) → the shared restore planning (11.1: design 7.8's set and preselection, on rows
-  refreshed just before, in the set's order: from follow-up F37 that of the slots the sessions
+  refreshed just before, which never holds a parked session (follow-up F44: it stays ended, and is
+  resumed from its row like any other, still parked), in the set's order: from follow-up F37 that of the slots the sessions
   last had in the window in their boot, from follow-up F42 the order they last had under Open
   there, then list order, design 7.8) → `runRestore` with the
   window terminal, the entries in that order, so that their new slots, each the lowest free one,
@@ -2541,10 +2636,10 @@ pure function in `src/window/view/` (4.3).
 ### 12.1 Layout and sections
 
 A title bar, the list on the left, the selected session's header and terminal on the right, a key
-bar at the bottom. The list has three sections:
+bar at the bottom. The list has four sections (from follow-up F44; three before it, Parked new):
 
-- **Open**: every session that is running or starting, in the window or elsewhere.
-  Never folded. Order: terminals of the window by slot, then terminals without a slot by opening
+- **Open**: every session that is running or starting, in the window or elsewhere, and not
+  parked (follow-up F44: a parked session is under Parked, also while it runs). Never folded. Order: terminals of the window by slot, then terminals without a slot by opening
   time, then sessions running in another terminal by the time they started. The order does not
   change while the window is open except when a row joins or leaves, or the user moves one
   (follow-up F37, 12.9: the slots follow the move, 7.6); attention is a mark on the row (12.4),
@@ -2561,13 +2656,24 @@ bar at the bottom. The list has three sections:
   ends when a refresh sees Open empty and holds no place (every reboot, or closing every session):
   Open is then computed again until the next move. Every window and a reloaded page show the kept
   order, and it survives a server restart while the sessions run.
+- **Parked** (follow-up F44, 12.15): every session that is parked now (design 7.1), running or
+  not, whatever its age: it never sinks into Recent or Earlier, and is in no other section, on
+  every page. The most recently parked first, ties by id. It never folds as a whole section (only
+  Earlier does); its blocks close as in every section (12.2). An empty Parked has no header, as
+  every section but Open. A row under Parked never shows a number, nor does its terminal in the
+  list's `terminals` (7.6), and it is in none of Open's order (it leaves the kept order at once,
+  in the same step that frees its number, so an Undo right after a parking does not give the
+  kept place back; back under Open it is placed as a row that was not kept, by the rule above, and
+  no other row moves). Its band's bar is `--dim`, as Recent's,
+  its title in the text colour; its header has no tooltip. Its key in the code and the protocol is
+  `parked`.
 - **Recent**: not running, last activity within 7 days (a rolling 7 days, not the calendar week),
   most recent first. A row under Recent or Earlier never shows a number (follow-up F43, 7.6): an
   ended terminal has none, and a row there whose terminal still holds one for a moment (a lost
   keeper's program in its 60 seconds, a session that ended a moment before its program) is drawn
   without it. Its title is `Recent`; its key in the code and the protocol is `week`. Its
   header's tooltip says `last active in the last 7 days` (follow-up F5); the other
-  two headers have no tooltip.
+  headers have no tooltip.
 - **Earlier**: the rest, folded by default; the folded header shows the count and the time span.
   A click on its header folds and unfolds it, as ← and → do, and leaves the keyboard on the list
   (ruled by the plan owner, plan task 27).
@@ -2578,8 +2684,9 @@ background (`--bg`: a step darker than the list's `--panel`, so the band looks s
 with a 1 px line above and below it in the line colour, 28 px high with them — within 1 px of the
 header it replaced (27.85 px), and below the rows' scroll margin, so that a row or a caption the
 keyboard scrolls into view is never left under it. Before the title a small bar (3 × 12 px, rounded)
-marks the section: Open's in the accent colour, Recent's in `--dim`, Earlier's in `--faint`. The
-title is 12 px, bold, in capitals: Open's and Recent's in the text colour, Earlier's in `--dim`
+marks the section: Open's in the accent colour, Parked's (F44) and Recent's in `--dim`, Earlier's in
+`--faint`. The title is 12 px, bold, in capitals: Open's, Parked's and Recent's in the text colour,
+Earlier's in `--dim`
 (`--faint` reads too weakly on the darker ground); the count follows it, dim; a folded Earlier's
 span sits at the right end. Earlier's fold arrow keeps its place before the bar, at least 5 px apart
 from it, so that the two never read as one sign. While its section scrolls, the band stays at the
@@ -2645,8 +2752,8 @@ terminal is counted `in another terminal`; from follow-up F34 one in Claude Code
 is counted apart, `in the background`, right after it (`counts.background`, 8.2.3), and not among
 those in another terminal.
 
-The `need you` count is every listed session that needs you (12.4), whatever the filter or the
-fold; a session that needs you is counted there and in no other count, so that the parts add up
+The `need you` count is every listed session that needs you (12.4; from follow-up F44 never a parked
+one, which is counted by its state instead), whatever the filter or the fold; a session that needs you is counted there and in no other count, so that the parts add up
 (3 + 3 + 2 above). The window title's `(3)` is the same count. Which rows need you, and in which
 order Ctrl+Shift+J goes, the server sends with each `list` (8.2.3 `needYou`): the page decides no
 rule (4.3; stage B, plan B7).
@@ -2838,6 +2945,12 @@ command-line flag. Check W48.
   it the first session was the block's head, with `ORB-2107 ×4`, the
   others indented under it, and a closed block was its head and a line `+3 more`.)
 - Slot numbers 1–9 show at the left of Open's rows.
+- **A parked row** (follow-up F44, 12.15) carries the mark `parked 6d` — how long it has been
+  parked, in skydeck's one age format (`parked` alone when the time cannot be read), drawn as the
+  `done` mark is, repainted with the other ages —, whose tooltip is `parked 6d ago: it waits; a
+  prompt in it, or w, brings it back under Open`. It shows no number, also while it runs in a
+  terminal of the window (7.6). Its other marks, its attention mark and second line included
+  (12.4), show as on any row.
 - **The selected line** — a row, a row inside a block's card, a selected closed caption — has an
   outline in `--selline` (the 1 px edge every line has, transparent until then) whichever zone has
   the keyboard (12.9). While the list has it, the line also keeps its `--sel` fill, so that the line
@@ -2848,10 +2961,11 @@ command-line flag. Check W48.
 
 The rule of blocks is the server's (4.3; stage E, plan E6 as ruled on 2026-11-16 for follow-up F3,
 and follow-up F9). A block is what the code and the protocol call a stack (`stackRows`, the row's
-`stack`, `data-stack`). In every section — Open, Recent and Earlier —, each on its own, the rows of
-one group (the row's group as sanitised, compared as exact text) form a block when there are at
-least two: Open holds only blocks of running sessions, Recent only of recent ones (not running, last
-active within 7 days), and a group with rows in two sections is two blocks. Every row of the group
+`stack`, `data-stack`). In every section — Open, Parked (follow-up F44), Recent and Earlier —, each
+on its own, the rows of one group (the row's group as sanitised, compared as exact text) form a
+block when there are at least two: Open holds only blocks of running sessions, Parked only of parked
+ones, Recent only of recent ones (not running, last active within 7 days), and a group with rows in
+two sections is two blocks. Every row of the group
 is in its block, one that a terminal of the window holds (running, starting or ended: it may hold a
 slot) and one that needs you (12.4) too. A block sits where its first row sits in the section's
 order (12.1), its other rows right after it in that order; the protocol calls that first row its
@@ -2905,7 +3019,9 @@ that it is seen as an edge in the light and in the dark scheme), rounded corners
 step off the list's (`--panel2`) and 8 px of room around it. Its first line is its caption: the fold
 arrow (▾ while open, ▸ while closed), the group's name (cut with an ellipsis when it is long; it
 reaches the page as text only), the number of its sessions (small and dim) and, while the block is
-closed and sessions it hides need you, ` · 1 needs you` (` · 2 need you`), that part alone in the
+closed and sessions it hides need you (follow-up F44: counted by the rows' `needsYou`, so never a
+parked one; the group card of an open block, 12.9, counts the same way, `web/pane.js`), ` · 1
+needs you` (` · 2 need you`), that part alone in the
 colour of the title bar's `need you` count, with no bar and no bold, which stay the marks of a row
 that needs you (12.4). The arrow, the count and that part always show; the name gives way. The count
 is the server's (`needYou` of the closed block, 8.2.3), taken from the same fact as a row's own
@@ -3048,6 +3164,23 @@ A session **needs you** for one of three reasons, in this order:
 3. **finished**: `turn_ended_seq` is greater than `seen_seq`, and the session is running and idle.
    It ends when seen or when the next turn starts.
 
+**A parked session is quiet** (follow-up F44, 12.15; the owner's decision of 2026-11-24). Its marks
+— asks, finished, ended — show in its row as on any row (the bar, the bold title, the reason's
+line), but it does not **count** as needing you: it sends no desktop notification (13), the title
+bar's `need you` count and the window title's `(n)` leave it out (it is counted by its state
+instead, so the parts still add up), Ctrl+Shift+J skips it, a closed block's caption does not count
+it, and the switcher never ranks it `Needs you` (12.8). The rule sits in one place, the view model
+(`buildListMessage`): a row counts as needing you when its `attention` is set and it is not parked,
+and the server says that per row (`needsYou`, 8.2.3), which feeds `needYou.count`, `needYou.order`,
+a closed block's `needYou`, the switcher's rank and the notifier (which reads `needYou.order` of the
+list it builds). The page's two readers of it — the group card of an open block (`web/pane.js`
+`blockInfo`) and the closing of a notification (`web/notify.js` `update`) — read that boolean too
+(`needsYou` in `web/attention-text.js`; a row without it, a scripted one, is judged by its
+`attention`), so the page decides none of it: what it draws is `attention`, what it counts or closes
+on is `needsYou`. Un-parked, the session counts again at the next list; if it needs you then, it
+starts to need you then and gets its one notification by the rule of 13. Seen is unchanged:
+selecting a parked row marks it seen as any row.
+
 How the view model judges them (stage B, plan B5, B6, B13). "Running" is the row's state: anything
 but not running (an ask and a finished turn need it; an end of the window does not). A session with
 several holders (a duplicate) has one status: `waiting` when any holder waits, else `busy` when any
@@ -3155,7 +3288,8 @@ For the selected session: the title (a click edits the label, stage D), the grou
 `+ group` when none; its tooltip says when the group comes from the title; a ✎ beside it edits
 it), the state pill, the project directory, "opened <time> · last active <age>", the short id (a
 click copies the whole id), where the title comes from, from follow-up F16 the flags the session
-was started with (below), and buttons Note and Done / Undone. Then
+was started with (below), and buttons Note, Done / Undone and, from follow-up F44, Park / Unpark
+(12.15: tooltips `park it: it waits under Parked (w)` and `back under Open (w)`). Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
 F18 the session's ticket first (below, with its status from F19), then the window's chip (12.3),
@@ -3681,7 +3815,8 @@ The banner is the view model's (4.3: the page decides no rule). It offers design
 of the latest earlier boot, in its order (from follow-up F37 that of the slots the sessions last
 had in the window in that boot, from follow-up F42 the order they last had under Open there, then
 list order: design 7.8), each session once, every text sanitised as the list's
-are; the last activity is that boot's last event (11.1). An earlier boot whose id is not of the
+are; a parked session is never in it (follow-up F44, design 7.8), nor in the switcher's offer,
+which is the banner's; the last activity is that boot's last event (11.1). An earlier boot whose id is not of the
 form of `/proc/sys/kernel/random/boot_id` (a lower-case UUID) gets no offer: "Not now" could not
 name it. "Not now" names the boot the banner offers and is stored only when that is still the one
 offered (otherwise `this offer to restore is no longer shown`, nothing stored); while it is, the
@@ -3750,7 +3885,8 @@ Enter does.
 - Chips: Running, Open PR, Has note, Done; at the end of their row, apart from them, the switch
   Show done (follow-up F35).
 - Ctrl+Shift+P opens the quick switcher over all sessions, ranked: needs you, open (in Open's
-  order, 12.1), not running (most recent first), done. Enter switches to a running one and resumes
+  order, 12.1), parked (follow-up F44: Parked's order, the most recently parked first), not
+  running (most recent first), done. Enter switches to a running one and resumes
   one that is not running (11.3).
 
 The rules are the server's (4.3: `src/window/view/search/`, stage E, plans E2–E5 and E9); the page
@@ -3772,7 +3908,8 @@ One rule matches for the filter and for the switcher:
   pattern is ever built from a search text. The cost is linear in the rows, the words and the
   units searched, on the server's one thread at each keystroke; the switcher adds where the words
   are in each of the at most 50 titles it lists.
-- **Chips.** Running: the row is in Open (running or starting, in the window or elsewhere). Open
+- **Chips.** Running: the row is running or starting, in the window or elsewhere (in Open, or,
+  from follow-up F44, under Parked while it runs). Open
   PR: at least one attached pull request is not known to be merged or closed (open, draft, never
   fetched, can't read; 12.3's open ones). Has note. Done (follow-up F35): the row is marked done,
   running or not. Every chip set must hold, with every word. A chip narrows the list as it is
@@ -3808,9 +3945,11 @@ One rule matches for the filter and for the switcher:
   list lists with done ones shown — also those the page's filter, chips, folded Earlier or closed
   blocks leave out, but an empty copy (12.1, follow-up F33) while the list does not show it —
   whose fields match every word of its text (all of them for none), ranked:
-  needs you (in 12.4's order), open (Open's order, 12.1: slots, then by opening time, then those
-  elsewhere; from follow-up F42 the kept order once a move made it the server's), not running
-  (most recent first), done (not running and done, most recent first). At most 50, with how many
+  needs you (in 12.4's order; never a parked session, 12.4), open (Open's order, 12.1: slots, then
+  by opening time, then those elsewhere; from follow-up F42 the kept order once a move made it the
+  server's), parked (follow-up F44: every session under Parked, running or not, in Parked's order —
+  the most recently parked first, whatever its last activity —, under the heading `Parked`), not
+  running (most recent first), done (not running and done, most recent first). At most 50, with how many
   more match. Each item carries where the words are in its title (every occurrence, overlapping ones
   merged, at most 32) and what this page's list would have to change to show it: the filter cleared,
   done sessions shown, Earlier unfolded (under chips alone a done session they match needs done
@@ -3818,7 +3957,7 @@ One rule matches for the filter and for the switcher:
   text whose first character is `>` is a command and lists no session (12.7).
 - **The switcher on the page** (stage E, plan E10, E11). Ctrl+Shift+P, or the title bar's
   `Switch…`, shows a panel over the page with an empty field, the items under the headings
-  `Needs you`, `Open`, `Not running` and `Done`, and a footer that names its keys
+  `Needs you`, `Open`, `Parked` (follow-up F44), `Not running` and `Done`, and a footer that names its keys
   (`↑ ↓ move · Enter switch · Esc close`; `Enter resume here` on a session Enter would resume,
   `Enter restore` on the offer, then `3 more: type to narrow` when items were left out). An item
   shows the state icon, the group dim before the title when the title does not start with it, the
@@ -3941,7 +4080,10 @@ terminal whose program ended has no number, its row under Recent or Earlier show
 next new or resumed terminal takes the freed number, so Ctrl+Shift+N never goes to an ended
 terminal. A terminal that still holds its number while its row is under Recent — a lost one in
 its 60 seconds (7.6), or a running one whose session ended a moment before its program — is still
-reached by Ctrl+Shift+N, through the window's terminals, though its row shows no number. A move
+reached by Ctrl+Shift+N, through the window's terminals, though its row shows no number.
+Follow-up F44: a parked session's terminal has no number (its number is free at once, 12.15), and
+the list carries none for it on its row or in its `terminals`, also in the moment a write of the
+numbers failed, so Ctrl+Shift+N never goes to a parked session. A move
 hands every number out again from the top: when a block draws a terminal without a number above
 numbered ones (12.2), any move — also of another row — gives that terminal a number and takes one
 from the last numbered terminal; the first move after a block made the numbers read out of order
@@ -4096,7 +4238,7 @@ session at all), never its card. The header's Done on such
 a session takes its toast from the row, since it is in no section: `Marked done. Stays under Open
 while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
 the lead on 2026-11-15). The list keys (`l`, F2,
-`g`, `n`, `t`, `p`, `d`) act only on a row the list shows: on a hidden selection, and on a selected
+`g`, `n`, `t`, `p`, `d`, from follow-up F44 `w`) act only on a row the list shows: on a hidden selection, and on a selected
 caption, they say `no session selected` and send nothing. `c` (follow-up F40) is the exception: it
 acts whenever the right side shows the carry-over bar, a hidden selection's too (after `/clear`
 the new session has a new title and often no row under a filter). A named limit: when Ctrl+Tab, a slot chord or a click on its
@@ -4113,17 +4255,60 @@ longer shows the row as not done in its section, since one that still does is ol
 else the next one, which the page asks for with a `view`) no longer has the row, while that session is
 still the selected one (moved away meanwhile, the selection stays where the user put it) — the row after it in the
 same section is selected, else the one before it in that section, else none; never a row of Open.
+From follow-up F44 that row can still run: under Parked a running session sits beside stopped ones,
+so "never a row of Open" no longer means "never a running row". It is selected with the keyboard
+kept in the list, as after `w`, and only while the user stayed in the list (below).
 The Undo of that `d` selects the session again once it is back in the list, if the selection is
 still where that `d` left it (the row it selected, or none); if the user moved it meanwhile, it
 stays (ruled for plan D task 37). That list decides once: a row it still has (running, under
 Open) moves nothing later either; a run of `d` marks one row each time (ruled 2026-11-15 on review 2
-of plan D task 37). The header's Done leaves the selection to the main rule. The second click of
+of plan D task 37). The header's Done leaves the selection to the main rule.
+
+**After `w`** (follow-up F44, 12.15; the owner's decision of 2026-11-24, beside the exception for
+`d` and on purpose unlike it). When this page's own `w` in the list has parked the selected session,
+the selection moves to the row after it in the section it left, else the one before it, else none
+(no row and no caption is selected, the right side shows no session, and no later list selects a
+row by itself: the most-recently-used order is kept, so Ctrl+Tab goes back to the session just
+parked and ↓ starts from the first row). Unlike `d`'s rule that row may be a row of Open: parking
+stops nothing. It is decided at the first list that shows the row out of the section it left (the
+server sends the list that carries the parking before the act's answer, and such a list proves the
+write), before that list is drawn and without waiting for the answer; when the answer comes first,
+the page asks for a list with a `view` and that list decides; a list that still has the row in its
+section is older than the write, and only the row's place in it is kept. So the list stays where it
+was: the next row is the one beside the cursor, and the parked row is never scrolled to under
+Parked. A refused `w` moves nothing; when the user moved meanwhile, the selection stays. **Moving**
+is, for `w` and for `d`'s exception above alike, decided by where the user is WHEN that list comes,
+not by where they went meanwhile (there and back again still moves on): the list moves the
+selection on only while the session is still the selected one and was not chosen again since (by
+Enter, which shows or resumes it, a click or a double click on its row, or a chord), the list has
+the keyboard's zone, the new session's form is not open and no dialog is shown (the switcher
+included). Anything else counts as the user having moved: another row selected, the terminal
+(Enter, Esc, a click there, the zone chord), the form, a dialog, or the same session chosen again.
+Otherwise a key pressed in that moment would hand the keyboard to the next row's terminal, or the
+next key to the next row (`w` then Enter on a stopped row resumes it; the next letter belongs to
+it), acting on a session the user never chose. So `w` followed at once by Enter or Esc leaves the selection,
+and the keyboard, with the parked session's own terminal (a prompt typed there brings it back, as
+any prompt does). The
+keyboard stays in the list, so a run of `w` parks one row each and types nothing into the next
+session, also when that one runs. **`w` on a row under Parked** un-parks it and keeps the selection
+with the session: it goes back under Open (or Recent, Earlier), stays selected, and the list follows
+it there by the rule for a selected row that moved to another section (no call of its own), so a run
+of `w` under Parked is the toggle on one session (a named limit: to un-park several, move to each).
+The toast's Undo of a `w` selects the session again once it is no longer under Parked, if the
+selection is still where that `w` left it (that row, or none); moved meanwhile, it stays. The
+header's Park and Unpark leave the selection to the main rule (it stays with the session), and the
+list then scrolls to the row in its new section by that same rule. **One guard** for `w`, `d` and
+the end dialog: while this page's own `w`, `d` or end of a session has not been decided by its list
+yet, a `w` and a `d` on that session do nothing (the header's Park and Done too), so a second key on
+the row just marked never un-parks what `w` parked, marks done what `w` parked, or parks what `d`
+marked. The end dialog needs no check of its own: it opens only past `d`'s, and while it is shown it
+is modal, so no list key and no header control is reachable. The second click of
 a double click on a button of the header, or on a pull request's × in its dialog, does nothing
 (ruled for plan D task 38), nor does it on a block's caption, wherever the list has moved under
 it: such a double click opens or closes the block once, and its second click selects no row, takes
 no keyboard and resumes nothing (ruled for plan E task 97; the caption since follow-up F9, before it
 the `+n more` line and `×n`). A held
-`d` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
+`d` or `w` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
 closed as any window. The focused zone has a
@@ -4246,7 +4431,9 @@ a double click that slips still resets. Resizing with the keyboard is not offere
 ### 12.10 Done
 
 A session marked done disappears as in design 7.1, except that a running session marked done
-stays under Open with a `done` mark until it stops (then it is hidden). Marking done shows an Undo
+stays under Open with a `done` mark until it stops (then it is hidden). Marking a parked session
+done ends its parking (follow-up F44, 12.15): it leaves Parked, under Open with its `done` mark while
+it runs (its terminal with the lowest free number, 7.6), else hidden. Marking done shows an Undo
 toast. An empty copy (12.1, follow-up F33) is not kept under Open by running: done or not, it is
 hidden until it has a message or a terminal of the window shows it.
 
@@ -4668,7 +4855,7 @@ none: no made-up data.
   | the list | The list | every session, one row each, of this window and of any terminal; Open, Recent (the last 7 days) and Earlier; the number 1–9 is the slot |
   | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it, also with other flags (issue #188) |
   | the key bar | Where the keyboard is | `Focus: list` or `Focus: terminal`; Ctrl+Shift+L moves it; with `Focus: terminal` a letter goes to Claude Code |
-  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done; `/` filter, `a` show done |
+  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park (the version is not raised for it: the tour is not shown again); `/` filter, `a` show done |
   | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+J the next session that needs you; Ctrl+Shift+N a new one |
   | the list | After a restart | a restart of the PC or of WSL ends the running sessions; run `skydeck window` again, and the top of the list offers the ones that were open (the banner, 12.7); `Restore` brings the ticked ones back, and after `Not now` `> restore` in `Switch…` offers it again |
   | the gear | Settings and every key (step 7) | the gear opens Settings; Ctrl+Shift+H shows every key; the tour again: `Take the tour` in the key help, or `> tour` in `Switch…` |
@@ -4694,6 +4881,69 @@ none: no made-up data.
 - **Tests.** Every browser context of the page suite is made by `newContext`
   (`test-page/helpers/browser.ts`), which marks the tour seen in each page's storage, so that no
   case but the tour's own meets it; those ask for a context without the mark, or with an older one.
+
+### 12.15 Parked
+
+Follow-up F44 (issue #193; the owner's decisions of 2026-11-23 and 2026-11-24). Some sessions are
+alive but not the user's to move right now: the work is sent to review, waits for a person, or for
+another part of the work. The user sets them aside with one manual mark, **Parked**, the sibling of
+Done (design 7.1), and the list shows them in a section of their own after Open (12.1).
+
+**What the acts write.** `park` (8.2.3) stores the time the session is parked
+(`session_meta.parked_at_ns`, 10.2's migration 5: the later of the clock and one nanosecond after
+the last input known then, design 7.1) and clears its done mark in the same statement; `unpark`
+clears the time.
+Parking a session that is parked already writes nothing and keeps its first time (a second page's
+act, the command's). Nothing parks by itself, and parking never stops or moves a process: a running
+session goes on running, under Parked.
+
+**The three states.** Open, Parked and Done exclude one another: parking a done session makes it
+parked and no longer done; marking a parked session done ends its parking (12.10); a session that is
+un-done is not parked. `skydeck park` and `skydeck unpark` (design 7.5) write the same mark from the
+command line; the window follows within a refresh.
+
+**What brings a session back.** Whether a session is parked now is derived, as Done is: it is parked
+while it has the mark and no prompt of the user's in its transcript later than the time (design 7.1;
+the transcript's `lastUserNs`, the signal Done's return uses, so a session outside the window comes
+back too). So sending it a prompt brings it back under Open (Recent or Earlier when it does not run)
+by itself, at the next refresh that reads the transcript (about 2 s); a start or a resume alone does
+not, and neither does a key typed and not sent. The stored time stays: nothing clears it by itself.
+`unpark` brings it back at once. A session left by `/clear` stays parked, and the session the
+program goes on with is not parked: the mark is not carried (design 7.1, F40's offer is unchanged).
+
+**In the window: one key and one button, no dialog** (the owner's decisions of 2026-11-24). The
+list's key `w` ("waits", 12.9) parks the selected session, and un-parks a parked one; the header has
+the same control after Done, `Park` (tooltip `park it: it waits under Parked (w)`), `Unpark` on a
+parked row (tooltip `back under Open (w)`), 12.5. The page picks `park` or `unpark` from the row's
+`parked`. Parking a running session leaves it running; no dialog asks anything. A park shows the
+toast `Parked: listed under Parked. It comes back when you send it a prompt.` — for a running or
+starting session `Parked: listed under Parked, and it keeps running. It comes back when you send it
+a prompt.` — with Undo, which gives back what was there: `unpark`, or `done` for a session that was
+done. Both ways: the Undo after `d` on a parked session parks it again (its age starts again, a named
+limit). An un-park shows no toast and has no Undo: `w` on its row, still selected, parks it again.
+Where the selection goes after `w`, and the one guard for `w`, `d` and the end dialog, are 12.9's:
+the selection moves on only while the user stayed in the list, so going to the terminal or opening
+the new session's form before the list that decides counts as having moved, and no key reaches the
+next row's session.
+The key help names `w` after `d`, and the tour's line of the list's keys ends `d done · w park`
+(12.14).
+
+**The numbers** (the owner's decision of 2026-11-24, "parking frees it"). Parking a session that
+runs in a terminal of the window frees its number 1-9 at once: the terminal holds none, and the
+next new or resumed terminal takes it by the lowest-free rule; `Ctrl+Shift+N` never goes to a
+parked session. Back under Open while it runs (an `unpark`, a prompt, `done`), it takes the lowest
+free number, none while all nine are taken (then it is moved like any row without one, 12.9). Its
+terminal is otherwise untouched: it runs, and its pane shows when its row is selected. A parked
+session resumed from its row gets no number. No two terminals ever hold one number, also at a
+reconnect, a restart and a write that fails (7.6 has the rules and the races). Back under Open it
+is placed by its number as a row that was not kept, also when the write of the numbers failed for a
+while: once its terminal takes its number, it leaves the kept order and goes to that number's place.
+
+**Where it shows.** Under Parked on every page, running or not, whatever its age, the most recently
+parked first (12.1), its row with `parked 6d` and no number (12.2); quiet (12.4, 13); ranked
+`Parked` in the switcher (12.8). Restore leaves it ended (design 7.8, 12.7): no banner, switcher
+offer, `act restore` or `skydeck restore` starts it; resumed from its row it runs under Parked,
+still parked.
 
 ## 13. Notifications
 
@@ -4739,7 +4989,9 @@ none: no made-up data.
   `needYou.order` no longer holds it —, with the same line, which names the closed block for it
   (F6). The
   page closes a session's notification once that session no longer needs you: at a list that holds
-  the session's row without attention, or in which nothing needs you (`needYou.count` 0); a session
+  the session's row without attention — from follow-up F44 a row whose `needsYou` is false, so a
+  notification shown before the session was parked closes at the list that carries the parking —,
+  or in which nothing needs you (`needYou.count` 0); a session
   the list does not show (the filter, the folded Earlier) keeps its notification until a list shows
   its row (ruled). Best effort: what Windows does with a closed notification is check W11. Named
   limits: a notification whose session changes its reason (it asked, then finished) keeps the words
@@ -4748,6 +5000,9 @@ none: no made-up data.
   the user's to judge on a shared screen (ruled).
 - No notification for the session that is selected in a focused window, and none while the page
   has no permission.
+- None for a parked session (follow-up F44, 12.4): it never starts to need you while it is parked,
+  since the server judges over the list's `needYou.order`, which leaves it out. Un-parked while it
+  needs you, it starts to need you then, by the rule above.
 - Permission is asked once, on a user gesture: a "Turn on notifications" item in the title bar
   while the permission is `default`. It is asked per origin and profile (section 21), so it stays
   granted while the port and profile folder stay the same.
@@ -5642,7 +5897,20 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
   `test/window/restore-memory.test.ts`): the tenth terminal moved above the ninth takes 9 on every
   page and after a stop or a crash, a kept order is drawn from the first list, a session closing or
   opening moves no other row, the new session after `/clear` keeps the old one's place, closing
-  every terminal ends the kept order, a locked store delays the freeze without failing the refresh.
+  every terminal ends the kept order, a locked store delays the freeze without failing the refresh;
+- follow-up F44, Parked (`test/window/server-parked.test.ts`, `server-parked-slots.test.ts`; the
+  section, its order and quiet in `test/window/view/parked.test.ts`; the withheld slots with real
+  keepers in `test/window/terminals-withheld.test.ts`; who sets them, with a real registry and
+  scripted rows and no tick, in `test/window/parked-slots.test.ts`; the spawn's step in
+  `test/window/window-terminal.test.ts`): a parking written by the command reaches every page
+  within a refresh, a prompt in its transcript brings a session back, a parked session that asks
+  sends no `notify` (with its control); parking frees the terminal's number in the act itself and
+  the next resume takes it, back under Open it takes the lowest free one or none with nine taken;
+  no two terminals share a number around a move made just before or after, a restart, `/clear`, a
+  parked session resumed from its row (born with a number, withheld in the same step, no list
+  carrying it), the registry's write held failing (the server's `beforeSlotsWrite` seam, a test
+  option `serve` never sets) and the mark's write busy; before the first refresh nothing is
+  withheld or written, and a stored set is never pruned against an empty registry.
 
 ### 17.4 The page
 
@@ -5690,6 +5958,11 @@ In the browser suite, besides those:
   for the selected session, a refusal's line shows in the key bar, one act waits at a time, the
   moved row is scrolled into view, (follow-up F42) the last row's refusal shows its line, and against a real server the slot chords reach the rows that show
   their numbers after a move;
+- follow-up F44 (`test-page/parked.test.ts`): `w` and the header's Park / Unpark against a real
+  server, the toast and its Undo, where the selection goes after `w` and that the list does not
+  jump, the one guard for `w`, `d` and the end dialog, the key help's line, and the number freed:
+  after `w` Ctrl+Shift+2 says `no session in slot 2`, and the next session takes 2; the moment a
+  list comes held still against a scripted stand-in;
 - follow-up F41 (`test-page/tour.test.ts`): the tour starts by itself after the first list, with
   sessions and on an empty list, and never where it was seen, where the storage throws or refuses a
   write, or without a key; each step's ring lies on its region and its panel beside it with the
@@ -5873,6 +6146,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W47 | **Real claude**, follow-up F40: carry over after `/clear` in a window terminal — the bar without a click, a click on it leaves the keyboard in the prompt, `Carry over`, `×`, two clears, `c` from the list with the list changing under it, a session cleared outside the window, and an old cleared session that shows no bar (manual-checks.md, "Carry over after /clear"). | F40 | 12.6, 12.9, design 7.1 |
 | W48 | The list's width in the owner's Edge (issue #192): the handle shows its cursor and tooltip on the border, a drag changes the width live and stops at 240 and 800 px and where the right side keeps 320 px; after a reload and after the window is closed and opened again the width is there with no jump; a narrower window shows less and a wider one the kept width again; a double click gives 400 px back, also one with a slight slip; the list's scroll bar right beside the border scrolls the list and leaves its width; a drag with `Focus: terminal`, over a throwaway session's terminal, leaves the keyboard in the prompt and types nothing into it; the terminal fits its new width; a browser tab (`--print-url`) keeps its own width. At the end a double click puts 400 px back. | #192 | 12.1, 12.9 |
 | W49 | **Real claude**, issue #188 part 1: a throwaway session resumed from its card's `Other flags…` with another `--model` — the field filled with the flags it was started with, `f` from the list, the header showing the new flag once Claude Code has started, a plain `Resume here` keeping it (manual-checks.md, "Resuming with other flags"). | #188 | 12.6, 12.9, design 7.6 |
+| W50 | **Real claude**, follow-up F44: Parked on throwaway sessions — `w`, the toast and Undo; the number freed and taken by a new session, and the lowest free one back under Open; a prompt brings it back, a key typed and not sent does not; `skydeck park` and `skydeck unpark` in W show within seconds; a parked session that asks shows its mark, sends no notification and Ctrl+Shift+J passes it; `skydeck window --restart` keeps it parked without a number; after `w` the selection is on the next row and the list has not moved, three `w` in a row park three sessions and nothing is typed into the session the selection moved to; `w` on a row under Parked brings it back, still selected and in view; `/clear` in a parked session; `w` on a US and a Czech layout (manual-checks.md, "Parked"). | F44 | 7.6, 12.1, 12.4, 12.9, 12.15, design 7.1 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

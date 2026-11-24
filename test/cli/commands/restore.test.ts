@@ -136,6 +136,27 @@ test('restore --dry-run prints the default entries and their commands, and opens
   assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
 });
 
+test('restore --dry-run (F44, A6) leaves out a parked session that ended unexpectedly, also with --all, and keeps it parked', async (t) => {
+  const d = machine(t);
+  d.deck.store.updateMeta(sid(2), { parkedAtNs: T0 }, T0); // after its last input
+  assert.equal(await main(['restore', '--dry-run'], d.ctx), 0);
+  assert.equal(
+    d.stdout(),
+    `1. [x] 00000001  ${titleOf(d, sid(1))}  no exit recorded\n` +
+      `    ${command(d, sid(1))}\n` +
+      `2. [ ] 00000003  ${titleOf(d, sid(3))}  ended ${isoFromNs(T0 - 10n * MINUTE)}\n` +
+      `    ${command(d, sid(3))}\n`,
+  );
+  const printed = d.stdout().length;
+  assert.equal(await main(['restore', '--all', '--dry-run'], d.ctx), 0);
+  const all = d.stdout().slice(printed);
+  assert.ok(all.includes('00000001') && all.includes('00000005'), all);
+  assert.ok(!all.includes('00000002'), all);
+  assert.equal(d.stderr(), '');
+  assert.equal(loadRows(d.deck).find((row) => row.id === sid(2))?.parked, true);
+  assert.deepEqual(d.deck.store.kvEntries('resume_lock:'), []);
+});
+
 test('restore --all --dry-run lists what ended unexpectedly in the older and the current boot too', async (t) => {
   const d = machine(t);
   assert.equal(await main(['restore', '--all', '--dry-run'], d.ctx), 0);

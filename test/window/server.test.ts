@@ -322,7 +322,7 @@ describe('a page (S2 8.2, 12; A27)', () => {
     const list = await page.list((l) => rowsOf(l).length === 2, 'both sessions in the list');
     assert.deepEqual(
       list.sections.map((section) => section.name),
-      ['open', 'week', 'earlier'],
+      ['open', 'parked', 'week', 'earlier'],
     );
     assert.deepEqual(
       rowsOf(list)

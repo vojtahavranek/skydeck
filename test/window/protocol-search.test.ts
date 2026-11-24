@@ -189,8 +189,8 @@ describe(`view.closed: at most MAX_CLOSED (${MAX_CLOSED}) distinct entries, each
     refused(page({ ...VIEW, closed: mixed }));
   });
 
-  test('each of the three sections is taken; any other name is refused', () => {
-    for (const section of ['open', 'week', 'earlier']) {
+  test('each of the four sections is taken (F44: parked too); any other name is refused', () => {
+    for (const section of ['open', 'parked', 'week', 'earlier']) {
       taken({ ...VIEW, closed: closedIn(section, 'ORB-1') });
     }
     for (const section of [
@@ -199,6 +199,7 @@ describe(`view.closed: at most MAX_CLOSED (${MAX_CLOSED}) distinct entries, each
       'WEEK',
       'Recent',
       'recent',
+      'Parked',
       'Earlier',
       '',
       'done',

@@ -534,6 +534,7 @@ describe('rankHeading (E9)', () => {
   test('each rank of the switcher has its heading', () => {
     assert.equal(rankHeading('need'), 'Needs you');
     assert.equal(rankHeading('open'), 'Open');
+    assert.equal(rankHeading('parked'), 'Parked'); // F44
     assert.equal(rankHeading('not-running'), 'Not running');
     assert.equal(rankHeading('done'), 'Done');
   });

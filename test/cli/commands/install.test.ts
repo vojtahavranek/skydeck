@@ -772,6 +772,44 @@ describe('install: the first-run offer', () => {
     assert.deepEqual(doneOf(d), { [S3]: T0 });
   });
 
+  test('a parked session (F44) is neither counted nor marked, and stays parked', async (t) => {
+    const d = testPlatform(t);
+    transcript(d.places, S1, OLD);
+    transcript(d.places, S2, OLD);
+    // A database used before: S1 parked after its last input.
+    mkdirSync(d.places.dataDir, { recursive: true, mode: 0o700 });
+    withStore(d.places, (store) => store.updateMeta(S1, { parkedAtNs: OLD + SEC }, OLD + SEC));
+
+    const r = await run(d.platform, ['install'], { lines: ['y', 'y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.prompts.includes('> Mark 1 session older than 7 days as done? [y/N] '), r.stderr);
+    assert.deepEqual(doneOf(d), { [S1]: null, [S2]: T0 });
+    assert.equal(
+      withStore(d.places, (store) => store.meta(S1)?.parkedAtNs),
+      OLD + SEC,
+    );
+  });
+
+  test('a session whose parking (F44) an earlier prompt ended is counted and marked done', async (t) => {
+    const d = testPlatform(t);
+    transcript(d.places, S1, OLD); // its last input, after the parking
+    transcript(d.places, S2, OLD);
+    mkdirSync(d.places.dataDir, { recursive: true, mode: 0o700 });
+    withStore(d.places, (store) => store.updateMeta(S1, { parkedAtNs: OLD - SEC }, OLD - SEC));
+
+    const r = await run(d.platform, ['install'], { lines: ['y', 'y'] });
+
+    assert.equal(r.code, 0, r.stderr);
+    assert.ok(r.prompts.includes('> Mark 2 sessions older than 7 days as done? [y/N] '), r.stderr);
+    assert.deepEqual(doneOf(d), { [S1]: T0, [S2]: T0 });
+    assert.equal(
+      withStore(d.places, (store) => store.meta(S1)?.parkedAtNs),
+      null,
+      'marking done clears the stored time',
+    );
+  });
+
   test('the age comes from firstRunDoneAfterDays', async (t) => {
     const d = testPlatform(t);
     mkdirSync(d.places.configDir, { recursive: true });

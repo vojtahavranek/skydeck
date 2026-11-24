@@ -7,10 +7,12 @@ import { join } from 'node:path';
 import { prKey } from '../github.ts';
 import type { PrKey } from '../github.ts';
 import { SkydeckError, UsageError } from '../platform/errors.ts';
+import type { Ns } from '../platform/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import type { MetaPatch } from '../store/types.ts';
 import type { Deck } from './deck.ts';
 import { ACTIVITY_STARTS } from './derive.ts';
+import type { ListRow } from './list.ts';
 import { readTicket } from './ticket.ts';
 
 /** Sets the label; null clears it. The caller has cleaned the text with `cleanLabel`. */
@@ -100,25 +102,64 @@ export function discardKeptNote(deck: Deck, sessionId: string): void {
 }
 
 /**
- * Hides the session from now on (7.1). The session itself is not touched. The done time is the
- * clock now, but never below what would make the session active again (a start, a transcript's
- * input): the wall clock can be behind such a stamp after it stepped back, and the session would
- * then never be hidden (#207). A stamp from a clock that was far ahead keeps it hidden until the
- * clock passes it.
+ * Hides the session from now on (7.1), and ends its parking in the same statement (follow-up F44:
+ * Open, Parked and Done exclude one another, so every caller of this ends a parking). The session
+ * itself is not touched. The done time is the clock now, but never below what would make the
+ * session active again (a start, a transcript's input): the wall clock can be behind such a stamp
+ * after it stepped back, and the session would then never be hidden (#207; a parking has the same
+ * rule for its input, `parkTime`). A stamp from a clock that was far ahead keeps it hidden until
+ * the clock passes it.
  */
 export function markDone(deck: Deck, sessionId: string): void {
   const now = deck.platform.clock.nowNs();
   const latest = deck.store.latestActivityNs(sessionId, ACTIVITY_STARTS);
   deck.store.updateMeta(
     sessionId,
-    { doneAtNs: latest !== null && latest > now ? latest : now },
+    { doneAtNs: latest !== null && latest > now ? latest : now, parkedAtNs: null },
     now,
   );
 }
 
-/** Shows a hidden session again. */
+/**
+ * Shows a hidden session again. A parking it leaves alone: a done session has none (markDone
+ * cleared it), and on a parked session that is not done this changes nothing (F44).
+ */
 export function markUndone(deck: Deck, sessionId: string): void {
   deck.store.updateMeta(sessionId, { doneAtNs: null }, deck.platform.clock.nowNs());
+}
+
+/**
+ * Follow-up F44 (design 7.1): the time a parking is stored with, the later of `nowNs` and one
+ * nanosecond after `lastUserNs` (the user's last input known at the parking; null for none). The
+ * transcript's clock is Claude Code's and the wall clock of WSL steps back (design 7.6), so a
+ * parking right after a prompt could otherwise be dated before it and read as ended at once: input
+ * known at the parking is by definition not later than the parking.
+ */
+export function parkTime(nowNs: Ns, lastUserNs: Ns | null): Ns {
+  return lastUserNs !== null && lastUserNs + 1n > nowNs ? lastUserNs + 1n : nowNs;
+}
+
+/** What `markParked` reads of a row: its id, whether it is parked now, its transcript. */
+export type ParkTarget = Pick<ListRow, 'id' | 'parked' | 'session'>;
+
+/**
+ * Follow-up F44 (design 7.1): parks the session, and ends its done mark in the same statement.
+ * A row that is parked already is not written (the time it was parked is kept) and the answer is
+ * false; otherwise true. It never stops or moves anything.
+ */
+export function markParked(deck: Deck, row: ParkTarget): boolean {
+  if (row.parked) {
+    return false;
+  }
+  const now = deck.platform.clock.nowNs();
+  const at = parkTime(now, row.session.transcript?.lastUserNs ?? null);
+  deck.store.updateMeta(row.id, { parkedAtNs: at, doneAtNs: null }, now);
+  return true;
+}
+
+/** Follow-up F44: ends the session's parking; the session is listed under Open or as before. */
+export function markUnparked(deck: Deck, sessionId: string): void {
+  deck.store.updateMeta(sessionId, { parkedAtNs: null }, deck.platform.clock.nowNs());
 }
 
 /**

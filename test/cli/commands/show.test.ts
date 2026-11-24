@@ -124,6 +124,33 @@ test('show --json prints one parsed object with the session fields and the extra
   assert.equal(d.stdout(), `${JSON.stringify(json, null, 2)}\n`);
 });
 
+test('show and show --json of a parked session (F44): a "parked:" line with the time, and parked, parkedAt', async (t) => {
+  const d = twoSessions(t);
+  d.clock.setNs(T0 + 5n * SEC);
+  assert.equal(await main(['park', '0b5f'], d.ctx), 0);
+  let printed = d.stdout().length;
+
+  assert.equal(await main(['show', '0b5f'], d.ctx), 0);
+  const text = d.stdout().slice(printed);
+  assert.ok(text.includes('\nparked:    since 2026-11-12T09:00:05.000Z\n'), text);
+  printed = d.stdout().length;
+  assert.equal(await main(['show', '0b5f', '--json'], d.ctx), 0);
+  const json = JSON.parse(d.stdout().slice(printed)) as ShowJson;
+  assert.equal(json.parked, true);
+  assert.equal(json.parkedAt, '2026-11-12T09:00:05.000Z');
+  assert.equal(json.done, false);
+  assert.equal(json.doneAt, null);
+
+  printed = d.stdout().length;
+  assert.equal(await main(['show', '1c6a'], d.ctx), 0);
+  assert.ok(!d.stdout().slice(printed).includes('parked:'), 'a session not parked has no line');
+  printed = d.stdout().length;
+  assert.equal(await main(['show', '1c6a', '--json'], d.ctx), 0);
+  const other = JSON.parse(d.stdout().slice(printed)) as ShowJson;
+  assert.equal(other.parked, false);
+  assert.equal(other.parkedAt, null);
+});
+
 test('show --json carries the directory as it is', async (t) => {
   const d = testDeck(t);
   const dir = '/home/dev/pro\u0007jects/a\u009bb';

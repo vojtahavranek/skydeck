@@ -4,6 +4,7 @@
 // (test/web/pane.test.ts); app.js applies the answer to the modules of the right side.
 
 /** @import { ListMessage, RowPayload, TerminalPayload } from '../src/window/protocol.ts' */
+import { needsYou } from './attention-text.js';
 
 /**
  * @typedef {{ kind: 'terminal', row: RowPayload | null, term: TerminalPayload, ended: boolean }
@@ -131,7 +132,9 @@ export function blockInfo(list, section, group) {
   }
   return {
     size: rows[0]?.stack?.size ?? rows.length,
-    needYou: rows.filter((row) => row.attention !== null).length,
+    // F44: the server's `needsYou` (a parked row that asks is not counted), so that an open block
+    // says what its caption says closed.
+    needYou: rows.filter(needsYou).length,
   };
 }
 

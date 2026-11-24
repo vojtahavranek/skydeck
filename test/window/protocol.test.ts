@@ -151,6 +151,9 @@ const VALID: Record<string, PageMessage> = {
   },
   'act done': { t: 'act', id: 8, kind: 'done', sessionId: S1 },
   'act undone': { t: 'act', id: 9, kind: 'undone', sessionId: S1 },
+  // Follow-up F44.
+  'act park': { t: 'act', id: 9, kind: 'park', sessionId: S1 },
+  'act unpark': { t: 'act', id: 9, kind: 'unpark', sessionId: S1 },
   'act pr-refresh': { t: 'act', id: 10, kind: 'pr-refresh', sessionId: S1 },
   'act pr-add': {
     t: 'act',
@@ -192,6 +195,9 @@ const STAGE_D_ACTS = [
   'act pr-rm',
   // Follow-up F18's, which edits a session as stage D's do.
   'act ticket',
+  // Follow-up F44's, which name only the session as done and undone do.
+  'act park',
+  'act unpark',
 ] as const;
 
 /** A value of another JSON type than `value`. */
@@ -262,6 +268,11 @@ describe('parsePageMessage: what is refused', () => {
 
   test("a stage D act with another kind's fields: done carries no text, label no base, note needs its base", () => {
     refused(page({ ...VALID['act done'], text: 'x' }));
+    // F44: park and unpark name the session alone.
+    refused(page({ ...VALID['act park'], text: 'x' }));
+    refused(page({ ...VALID['act unpark'], at: 0 }));
+    refused(page({ t: 'act', id: 1, kind: 'Park', sessionId: S1 }));
+    refused(page({ t: 'act', id: 1, kind: 'park' }));
     refused(page({ ...VALID['act pr-refresh'], url: 'https://github.com/a/b/pull/7' }));
     refused(page({ ...VALID['act label'], base: '' }));
     refused(page({ ...VALID['act group'], url: 'https://github.com/a/b/pull/7' }));
@@ -416,7 +427,7 @@ describe('parsePageMessage: what is refused', () => {
 
   test("every act's id is a whole number from 0 (stage A's, stage D's and F18's kinds alike)", () => {
     const acts = Object.entries(VALID).filter(([, message]) => message.t === 'act');
-    assert.equal(acts.length, 18); // #188's two act resume with flags among them
+    assert.equal(acts.length, 20); // #188's two act resume with flags, F44's park and unpark
     for (const [name, message] of acts) {
       for (const id of [-1, 1.5, 2 ** 53]) {
         refused(page({ ...message, id }));
@@ -863,6 +874,9 @@ describe('types (checked by npm run typecheck)', () => {
       { t: 'act', id: 8, kind: 'pr-rm', sessionId: S1, url: 'https://github.com/a/b/pull/1' },
       // Follow-up F18.
       { t: 'act', id: 9, kind: 'ticket', sessionId: S1, text: 'ABC-123' },
+      // Follow-up F44.
+      { t: 'act', id: 10, kind: 'park', sessionId: S1 },
+      { t: 'act', id: 11, kind: 'unpark', sessionId: S1 },
     ];
     for (const act of acts) {
       assert.deepEqual(parsePageMessage(JSON.stringify(act)), { ok: true, value: act });

@@ -37,15 +37,42 @@ export const MAY_START: ReadonlySet<TerminalState> = new Set([
 ]);
 
 /**
- * S2 12.1: Open for a row that is open (running or starting, in the window or elsewhere: the caller
- * knows the terminals); else Recent (key `week`) when its last activity is at most 7 days before
- * `nowNs` (or after it: the clock can step back); else Earlier.
+ * S2 12.1: Parked for a row that is parked now (F44, S2 12.15: `row.parked`, running or not,
+ * whatever its age); else Open for a row that runs (running or starting, in the window or
+ * elsewhere: the caller knows the terminals); else Recent (key `week`) when its last activity is
+ * at most 7 days before `nowNs` (or after it: the clock can step back); else Earlier.
  */
-export function sectionOf(row: ListRow, nowNs: Ns, isOpen: boolean): 'open' | 'week' | 'earlier' {
-  if (isOpen) {
+export function sectionOf(
+  row: ListRow,
+  nowNs: Ns,
+  runs: boolean,
+): 'open' | 'parked' | 'week' | 'earlier' {
+  if (row.parked) {
+    return 'parked';
+  }
+  if (runs) {
     return 'open';
   }
   return nowNs - row.lastActivityNs <= WEEK_NS ? 'week' : 'earlier';
+}
+
+/**
+ * F44 (S2 7.6, 12.15): the ids of the terminals whose session is parked now — every terminal whose
+ * session (`sessionId`, else the one it was opened for, as `terminalsBySession` takes it) has a row
+ * in `rows` with `parked`; twins of one session are both in it. Their numbers are shown nowhere.
+ */
+export function parkedTerminals(
+  rows: readonly ListRow[],
+  terminals: readonly TerminalInfo[],
+): Set<string> {
+  const parked = new Set(rows.filter((row) => row.parked).map((row) => row.id));
+  const ids = new Set<string>();
+  for (const terminal of terminals) {
+    if (parked.has(terminal.sessionId ?? terminal.expectedSessionId)) {
+      ids.add(terminal.id);
+    }
+  }
+  return ids;
 }
 
 /** `line` cut to NOTE_LINE_MAX units with the cut marked by '…', never inside a surrogate pair. */
@@ -106,6 +133,9 @@ function noteHead(note: string | null): string[] {
  * the row's terminal of the window and that terminal can be ended (`TerminalInfo.endable`). F33:
  * `copyOf` names the session a copy began as a copy of (`ListRow.copyOf`), else null, with
  * `hiddenWhileEmpty` while the list hides it (`isHiddenCopy`, no terminal of the window showing it).
+ * F44: `parked` is the row's (`ListRow.parked`, the derived mark) and `parkedAtNs` the time it was
+ * parked while it is, else null; `needsYou` is false here (build.ts's `claimOf` sets it with
+ * `attention`).
  */
 export function rowPayload(
   row: ListRow,
@@ -158,6 +188,7 @@ export function rowPayload(
       MAY_START.has(terminal.state) &&
       row.state === 'not-running',
     attention: null,
+    needsYou: false,
     stack: null,
     endable:
       terminal !== null &&
@@ -180,6 +211,9 @@ export function rowPayload(
             title: row.copyOf.title,
             hiddenWhileEmpty: terminal === null && isHiddenCopy(row),
           },
+    parked: row.parked,
+    parkedAtNs:
+      row.parked && row.session.parkedAtNs !== null ? String(row.session.parkedAtNs) : null,
   };
 }
 

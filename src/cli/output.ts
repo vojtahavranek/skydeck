@@ -49,6 +49,10 @@ export interface SessionJson {
   hasNote: boolean;
   continuedFrom: string | null;
   done: boolean;
+  /** Follow-up F44: parked now (design 7.1). */
+  parked: boolean;
+  /** F44: when it was parked, while it is; null otherwise. */
+  parkedAt: string | null;
   prs: PrJson[];
 }
 
@@ -126,6 +130,12 @@ function prJson(pr: PrView): PrJson {
   };
 }
 
+/** F44: the time the session was parked, while it is parked; null otherwise. */
+function parkedAt(row: ListRow): string | null {
+  const { parkedAtNs } = row.session;
+  return row.parked && parkedAtNs !== null ? isoFromNs(parkedAtNs) : null;
+}
+
 /**
  * The session object of design 7.5. `dir` is the project directory as stored, not the sanitised
  * text of the row (`row.dir`, for display only): someone has to be able to `cd` to it, and
@@ -148,6 +158,8 @@ export function sessionJson(row: ListRow): SessionJson {
     hasNote: row.hasNote,
     continuedFrom: row.continuedFrom,
     done: row.done,
+    parked: row.parked,
+    parkedAt: parkedAt(row),
     prs: row.prs.map(prJson),
   };
 }
@@ -264,6 +276,12 @@ function doneField(row: ListRow): string[] {
   return [field('done:', doneAtNs === null ? 'yes' : `since ${isoFromNs(doneAtNs)}`)];
 }
 
+/** F44: `parked:` with the time the session was parked; nothing for a session that is not parked. */
+function parkedField(row: ListRow): string[] {
+  const at = parkedAt(row);
+  return at === null ? [] : [field('parked:', `since ${at}`)];
+}
+
 /**
  * One session in full (design 7.5): its title, then one line per field. Nothing is left to a
  * relative time, so `nowNs` is not used; it is part of the contract of 2.9.4. `ticket` is the
@@ -293,6 +311,7 @@ export function formatShow(
       `${row.state}${stateDetailSuffix(row.stateDetail)} since ${isoFromNs(row.sinceNs)}`,
     ),
     ...doneField(row),
+    ...parkedField(row),
     field('marks:', row.marks.length === 0 ? '-' : row.marks.join(',')),
     field('label:', row.label ?? '-'),
     field('group:', row.group ?? '-'),
