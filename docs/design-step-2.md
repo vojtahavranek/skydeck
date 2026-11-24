@@ -142,6 +142,7 @@ Design 3's words keep their meaning. New:
 | screen side | The server's model of a terminal's screen: a headless xterm.js fed every byte the program writes (7.2). |
 | snapshot | The screen side serialised: viewport, scrollback, cursor and modes, as escape sequences that rebuild it. |
 | park | The server hands a snapshot to the keeper, which keeps the latest one. |
+| parked (a session) | Follow-up F44: a session the user set aside with the mark Parked (design 7.1). It has nothing to do with a park of a terminal's screen above: the registry and the keeper never use the word for a session. |
 | tail | What the keeper has received since the parked snapshot: output chunks and resizes, in order. |
 | record | One element of the stream a keeper produces: an output chunk or a resize. Records are numbered from 1. |
 | attach | A page asks for a terminal's stream: it gets a snapshot, then every later record. |
@@ -993,14 +994,15 @@ leaves it at its start; the keeper cuts records only between UTF-8 characters.
   taken over"). So a restored keeper whose hello comes late, or after a reconnect, is started. A
   renewal an older skydeck wrote carries no mark and is refused as taken over, the cautious side
   (stage C's plan, C19, task 80; it replaces stage A's exact comparison, ruled in its task 21).
-- **Park.** The server parks a snapshot when the tail has grown past 1 MiB, when 30 seconds have
-  passed with output since the last park, and for every terminal when it stops (5.5). A park names
-  the last record it covers; the keeper drops those from the tail. Serialising 5,000 lines takes
-  about 75 ms (measured: 10,000 lines in 145–166 ms), so parking is rare by design. The keeper's
-  first size is in no frame (a hello carries the current size), so the server that spawns a keeper
-  parks its empty screen at record 0 right after the first `hello`: every later claim gets that
-  size in `S`, and a rebuild without any other park starts at the right width (stage A's plan,
-  task 16).
+- **Park.** (A screen's park, not a session's: a parked session, design 7.1, is a mark of the user's
+  that this section never meets.) The server parks a snapshot when the tail has grown past 1 MiB,
+  when 30 seconds have passed with output since the last park, and for every terminal when it stops
+  (5.5). A park names the last record it covers; the keeper drops those from the tail. Serialising
+  5,000 lines takes about 75 ms (measured: 10,000 lines in 145–166 ms), so parking is rare by
+  design. The keeper's first size is in no frame (a hello carries the current size), so the server
+  that spawns a keeper parks its empty screen at record 0 right after the first `hello`: every later
+  claim gets that size in `S`, and a rebuild without any other park starts at the right width (stage
+  A's plan, task 16).
 - **Reading.** The server reads a keeper no faster than its screen side applies the records: while
   more than 4 MiB of records wait for the screen side it stops reading that keeper's socket, and
   reads again below 1 MiB. The keeper then does what 7.1 step 7 designs for a slow reader: it
@@ -2203,6 +2205,26 @@ exit 1), a server of an older checkout still running stops at its next write (10
 nothing removes the table; the way back is the copy kept before the migration (design 9.2,
 install.md "Going back").
 `test/store/migration-4.test.ts` migrates a filled schema-3 database and compares every value.
+
+**Migration 5** (follow-up F44, a session's parking, design 7.1):
+
+```sql
+ALTER TABLE session_meta ADD COLUMN parked_at_ns INTEGER;  -- F44: when the user parked the session; NULL for none
+```
+
+As migration 3's, it adds one nullable column and nothing else, so every row keeps its values (the
+column is NULL in each) and a reader of schema 4 still reads `session_meta` (its rows carry one
+column more). The column holds the time the session was parked (design 7.1: the later of the clock
+and one nanosecond after the last input known then), never cleared by itself: whether the session
+is parked now is derived, as Done is. Parking writes it and clears `done_at_ns` in one statement,
+marking done clears it in the same way, so a row has at most one of them. Like every migration it
+runs in one transaction with its `kv` update, the version read again inside the write lock, after
+the copy the store keeps before a migration (design 9.2, follow-up F21). **An older skydeck refuses
+it**, as for migrations 3 and 4: from then on an older skydeck (one of schema 4, F19's) refuses the
+database at its open ("written by a newer skydeck … update skydeck", exit 1), a server of an older
+checkout still running stops at its next write (10.1's guard), and nothing removes the column; the
+way back is the copy kept before the migration (install.md, "Going back").
+`test/store/migration-5.test.ts` migrates a filled schema-4 database and compares every value.
 
 `kv` entries (no migration; `kv` is free text):
 

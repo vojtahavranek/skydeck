@@ -57,6 +57,11 @@ export interface SessionMeta {
   doneAtNs: Ns | null;
   /** F18: the ticket's address (column ticket_url, migration 3), null for none. */
   ticket: string | null;
+  /**
+   * F44: when the user parked the session (column parked_at_ns, migration 5), null for none. The
+   * stored time only: whether the session is parked now is derived (design 7.1).
+   */
+  parkedAtNs: Ns | null;
   createdNs: Ns;
   updatedNs: Ns;
 }
@@ -67,6 +72,7 @@ export interface MetaPatch {
   note?: string | null;
   doneAtNs?: Ns | null;
   ticket?: string | null;
+  parkedAtNs?: Ns | null;
 }
 
 export interface TranscriptRow {

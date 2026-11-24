@@ -47,8 +47,9 @@ section first.
    name is kept so that a resume can say it was not passed on.
 5. **Resume by id, with the session's own launch command.** Never by name (names are not unique).
    skydeck never adds a permission flag that the session was not started with.
-6. **Nothing is destroyed or moved automatically.** "Done" only hides. Notes never move from one
-   session to another, but for one copy on the user's word: the window copies a session's label,
+6. **Nothing is destroyed or moved automatically.** "Done" only hides; "Parked" only sets a
+   session aside in the list (follow-up F44, 7.1); neither stops or moves anything. Notes never
+   move from one session to another, but for one copy on the user's word: the window copies a session's label,
    group, ticket, note and pull requests to the session that `/clear` started out of it only when
    the user asks for it there, field by field, each time, and the old session keeps all of them
    (follow-up F40; 7.1; design-step-2.md 12.6). skydeck never stops a process by itself; the window ends a session's
@@ -426,6 +427,22 @@ Marks are shown next to the state.
   has activity after the done time: `user` input (5.6) in its transcript, or a `start` event with
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the
   transcript is not activity.
+- **Parked** (follow-up F44). Sets the session aside: alive, but not the user's to move now (it
+  waits for a review, a person or another part of the work). The user parks it and un-parks it;
+  nothing parks by itself, and it never stops a process. The time it was parked is kept
+  (`session_meta.parked_at_ns`, 9.2). Open, Parked and Done exclude one another, each mark one
+  statement that sets its own column and clears the other: parking a done session makes it parked
+  and no longer done, marking a parked session done ends its parking, and a session that is un-done
+  is not parked (un-doing a parked one that is not done changes nothing). Parking a session that is
+  parked already writes nothing and keeps the first time. A session is parked while it has the mark
+  and no `user` input (5.6) in its transcript later than the time, the signal by which Done shows a
+  session again: a prompt sent ends the parking, the stored time stays and nothing clears it by
+  itself. Unlike Done, a `start` event (`startup` or `resume`) does not end it, nor does a key typed
+  in a terminal and not sent. The time stored is the later of the clock and one nanosecond after the
+  last input the transcript held at the parking: the transcript's times are Claude Code's clock and
+  the wall clock of WSL steps back (7.6), so a parking right after a prompt is never dated before
+  that prompt. A limit: a prompt sent within such a step back of the clock right after a parking can
+  be dated before it and then does not end it; the next prompt does.
 - **First run.** `skydeck install` offers to mark as done every listed session whose last
   activity is older than `firstRunDoneAfterDays` (default 7) and that is not running. It shows
   the count and does nothing unless confirmed.
@@ -1289,9 +1306,10 @@ before F33 derives no mark from such a row (`show` prints its kind as it is).
 
 Step 2 adds migration 2 (the table `attention`), migration 3 (follow-up F18: the nullable column
 `ticket_url` of `session_meta`, the ticket of 7.1, by the first `ALTER TABLE`) and migration 4
-(follow-up F19: the table `ticket_status`, a cached ticket status by address, 7.3); their SQL is in
-design-step-2.md 10.2. A migration is never undone: a database migrated by a newer skydeck is refused
-by an older one at its open ("written by a newer skydeck").
+(follow-up F19: the table `ticket_status`, a cached ticket status by address, 7.3); follow-up F44
+adds migration 5 (the nullable column `parked_at_ns` of `session_meta`, the time of 7.1's Parked).
+Their SQL is in design-step-2.md 10.2. A migration is never undone: a database migrated by a newer
+skydeck is refused by an older one at its open ("written by a newer skydeck").
 
 The way back is a copy (follow-up F21). Before the first migration an open runs on a database that
 already holds a schema — never a new one, and never one at the code's version, whose open costs no

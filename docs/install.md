@@ -2567,7 +2567,11 @@ every checkout from before it refuses the database the same way (`schema version
 F19) upgrades it once more, to schema version 4: it adds one table for the statuses read so far,
 by address, and keeps everything else as it was; from then on every checkout from before it —
 the one of follow-up F18 included — refuses the database the same way (`schema version 4, this one
-knows 3`), and nothing takes the table away again. The way forward is its `update skydeck`:
+knows 3`), and nothing takes the table away again. The update that brings Parked (follow-up F44)
+upgrades it once more, to schema version 5: it adds one empty column for the time a session was
+parked to the table of labels, groups and notes, and keeps everything else as it was; from then on
+every checkout from before it refuses the database the same way (`schema version 5, this one knows
+4`), and nothing takes the column away again. The way forward is its `update skydeck`:
 `skydeck update` in a checkout that has the command (from the update that brings it on), and
 `git pull` in an older one (which prints the same `update skydeck` and has no `skydeck update`).
 `skydeck update` runs on such a database, although no other command does: it says `skydeck: the
