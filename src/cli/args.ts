@@ -20,6 +20,8 @@ export interface ParsedArgs {
   flags: Record<string, string | boolean | undefined>;
   positionals: string[];
   rest: string[];
+  /** With `allowRest`: whether '--' was given — `rest` may then be empty (`resume <ref> --`). */
+  restGiven: boolean;
 }
 
 /**
@@ -34,7 +36,7 @@ export function parseCommandArgs(args: readonly string[], spec: ArgSpec): Parsed
   const dashes = args.indexOf('--');
   const beforeDashes = dashes === -1 ? args : args.slice(0, dashes);
   if (beforeDashes.includes('--help') || beforeDashes.includes('-h')) {
-    return { help: true, flags: {}, positionals: [], rest: [] };
+    return { help: true, flags: {}, positionals: [], rest: [], restGiven: false };
   }
   const keepRest = spec.allowRest === true && dashes !== -1;
   let parsed: ReturnType<typeof parseArgs>;
@@ -66,7 +68,13 @@ export function parseCommandArgs(args: readonly string[], spec: ArgSpec): Parsed
       flags[name] = value;
     }
   }
-  return { help: false, flags, positionals, rest: keepRest ? args.slice(dashes + 1) : [] };
+  return {
+    help: false,
+    flags,
+    positionals,
+    rest: keepRest ? args.slice(dashes + 1) : [],
+    restGiven: keepRest,
+  };
 }
 
 function isParseError(error: unknown): error is Error & { code: string } {

@@ -6,7 +6,9 @@
  * and the flags (design 7.6, 7.7), the command builders with the configured `claudeCommand`, and
  * `launchPrepared`. Nothing a request carries is checked here a second time with another rule, and
  * no request can name a program or an argument list (S2 8.3): a `POST /new` body's label, group,
- * directory and flags reach `prepareNew` exactly as the command line's options do.
+ * directory and flags reach `prepareNew` exactly as the command line's options do, and a resume's
+ * flags (issue #188: `act resume`'s field, `POST /resume`'s words) reach `prepareResumeById` as
+ * the words after `skydeck resume <ref> --` do.
  *
  * What the window adds (stage A's actions, moved here unchanged): the refusal "this session is
  * already open in the window" before the guard while a terminal of the session may still run (S2
@@ -61,7 +63,10 @@ export interface Launched {
 }
 
 export interface Launches {
-  resume(sessionId: string, size: Size): Promise<Launched>;
+  /** `flags` (issue #188): this resume's flags in place of the recorded ones, given to
+   *  `prepareResumeById` as they are (its refusal is a refusal, code 2); null or absent: a plain
+   *  resume. */
+  resume(sessionId: string, size: Size, flags?: readonly string[] | null): Promise<Launched>;
   newSession(request: NewRequest, size: Size): Promise<Launched>;
   /** S2 11.1: "this session is already open in the window" while the hub lists a terminal of the
    *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else, while a lost
@@ -238,7 +243,7 @@ export function createLaunches(deps: LaunchesDeps): Launches {
   }
 
   return {
-    async resume(sessionId, size) {
+    async resume(sessionId, size, flags = null) {
       // Ruled (review 2 of stage A's task 32): a terminal of the window opened for the session
       // whose program may still run refuses a second resume, whatever the lock says — claude can
       // wait at a dialog before its SessionStart for longer than the lock holds. Task 82: so does
@@ -255,7 +260,7 @@ export function createLaunches(deps: LaunchesDeps): Launches {
       });
       let prepared: PreparedLaunch;
       try {
-        prepared = prepareResumeById(deck, sessionId);
+        prepared = prepareResumeById(deck, sessionId, flags);
       } catch (error) {
         if (error instanceof SkydeckError) return refusedBy(error);
         throw error;

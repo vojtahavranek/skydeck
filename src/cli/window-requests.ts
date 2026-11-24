@@ -101,13 +101,15 @@ async function answerOf<T>(server: WindowServer, asked: Promise<T | 'unknown-rou
   return answer;
 }
 
-/** `POST /resume` within `times.answerMs`: the answer, or a SkydeckError. Prints nothing. */
+/** `POST /resume` within `times.answerMs`: the answer, or a SkydeckError. Prints nothing. `flags`
+ *  (#188): the words after `--`, sent as they are; null (no `--`) sends none. */
 export function requestResume(
   server: WindowServer,
   sessionId: string,
   times: WindowTimes,
+  flags: readonly string[] | null = null,
 ): Promise<LaunchAnswer> {
-  return answerOf(server, server.client.resume(sessionId, times.answerMs));
+  return answerOf(server, server.client.resume(sessionId, times.answerMs, flags));
 }
 
 /** `POST /new` within `times.answerMs`: the answer, or a SkydeckError. Prints nothing. */
@@ -151,9 +153,15 @@ export async function restoreInWindow(
   return outcome.code;
 }
 
-/** `resume <ref> --window` (S2 11.4): the request for the session `<ref>` resolved to. */
-export function resumeInWindow(ctx: Context, deck: Deck, sessionId: string): Promise<number> {
-  return inWindow(ctx, deck, (server, times) => requestResume(server, sessionId, times));
+/** `resume <ref> --window` (S2 11.4): the request for the session `<ref>` resolved to, with the
+ *  words after `--` when it was given (#188; null: none given, a plain resume). */
+export function resumeInWindow(
+  ctx: Context,
+  deck: Deck,
+  sessionId: string,
+  flags: readonly string[] | null = null,
+): Promise<number> {
+  return inWindow(ctx, deck, (server, times) => requestResume(server, sessionId, times, flags));
 }
 
 /** `new --window` (S2 11.4): the request with the current directory, label, group and flags. */

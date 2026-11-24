@@ -3,7 +3,7 @@ import { utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
-import { RefError, ResumeRefusedError } from '../../src/platform/errors.ts';
+import { RefError, ResumeRefusedError, UsageError } from '../../src/platform/errors.ts';
 import { statLine } from '../helpers/platform.ts';
 import { loadRows } from '../../src/sessions/load.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
@@ -65,6 +65,57 @@ test('prepareResumeById resumes a session that is not running, and takes the loc
   assert.deepEqual(prepared.argv, ['claude', '--resume', S1, '--model', 'opus']);
   // The time it was taken, and the latest event of S1 the decision was made on.
   assert.equal(lockOf(d, S1), `${T0}:${d.deck.store.latestEventIdOfSession(S1)}`);
+});
+
+test('prepareResumeById with given flags: those flags in place of the recorded ones, the lock taken (#188)', (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  const prepared = prepareResumeById(d.deck, S1, ['--model', 'example']);
+  assert.deepEqual(prepared.argv, ['claude', '--resume', S1, '--model', 'example']);
+  assert.equal(lockOf(d, S1), `${T0}:${d.deck.store.latestEventIdOfSession(S1)}`);
+});
+
+test('prepareResumeById refuses a flag a resume must not take before its refresh: a usage error, nothing ingested, no lock (#188)', (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  assert.throws(
+    () => prepareResumeById(d.deck, S1, ['--tmux']),
+    (error: unknown) =>
+      error instanceof UsageError &&
+      error.message ===
+        'cannot pass --tmux to claude on a resume: it says where or how a new session starts',
+  );
+  assert.equal(lockOf(d, S1), null);
+  // before the refresh: the start event waiting in the spool was not ingested
+  assert.equal(d.deck.store.latestEventIdOfSession(S1), null, 'nothing ingested');
+  // the guard after it, with good flags: a session another skydeck resumed meanwhile
+  anotherSkydeckResumes(d);
+  assert.equal(
+    refusal(() => prepareResumeById(d.deck, S1, ['--model', 'x'])),
+    '0b5f3c1e is running (pid 4343)',
+  );
+  assert.equal(lockOf(d, S1), null);
+});
+
+test('a lock already there stays as it is through every refused resume with flags: a refused flag, the lock itself, the guard (#188)', (t) => {
+  const d = testDeck(t);
+  resumableSession(d);
+  prepareResumeById(d.deck, S1, ['--model', 'example']); // the first resume's lock
+  const first = lockOf(d, S1);
+  assert.notEqual(first, null);
+  assert.throws(() => prepareResumeById(d.deck, S1, ['--worktree']), UsageError);
+  assert.equal(lockOf(d, S1), first, 'a refused flag');
+  assert.match(
+    refusal(() => prepareResumeById(d.deck, S1, ['--model', 'x'])),
+    /^0b5f3c1e is being resumed/,
+  );
+  assert.equal(lockOf(d, S1), first, 'refused by the lock');
+  d.proc.setProcess(4242, { stat: statLine(4242, 51234567), cmdline: ['claude'] });
+  assert.equal(
+    refusal(() => prepareResumeById(d.deck, S1, ['--model', 'x'])),
+    '0b5f3c1e is running (pid 4242)',
+  );
+  assert.equal(lockOf(d, S1), first, 'refused by the guard');
 });
 
 test('prepareResumeById refreshes first: a start event still in the spool is seen, and the session refused', (t) => {

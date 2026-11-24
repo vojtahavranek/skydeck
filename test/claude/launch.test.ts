@@ -9,6 +9,7 @@ import {
   FLAGS,
   isPrintRun,
   nameFlags,
+  newSessionFlags,
   parseLaunchArgs,
   passedOnFlags,
   sessionPickingFlags,
@@ -298,6 +299,66 @@ test('nameFlags finds nothing else', () => {
   assert.deepEqual(nameFlags([]), []);
   assert.deepEqual(nameFlags(['-w', 'n', '--model', '-n', '-r', 'abc', 'fix the bug']), []);
   assert.deepEqual(nameFlags(['--model', 'x', '--', '-n', 'x']), []);
+});
+
+// Issue #188: the flags a resume removes because they only say where or how a NEW session starts.
+const NEW_SESSION_FLAGS = [
+  '--background',
+  '--bg',
+  '--cloud',
+  '--correlation-id',
+  '--desktop',
+  '--environment',
+  '--forward-home-settings',
+  '--init',
+  '--init-only',
+  '--maintenance',
+  '--on-branch',
+  '--pool',
+  '--ref',
+  '--remote',
+  '--tmux',
+  '--worktree',
+  '-w',
+];
+
+test('the flags only a new session takes: the removed ones that neither pick nor name a session', () => {
+  assert.deepEqual(
+    namesWhere((spec) => spec.remove && !spec.picksSession && !spec.names.includes('--name')),
+    NEW_SESSION_FLAGS,
+  );
+});
+
+test('newSessionFlags finds every flag only a new session takes: alone, as --flag=value, glued, in a cluster', () => {
+  for (const spec of FLAGS.filter(
+    (s) => s.remove && !s.picksSession && !s.names.includes('--name'),
+  )) {
+    const first = spec.names[0] as string;
+    for (const name of spec.names) {
+      assert.deepEqual(shown(newSessionFlags(withValue(spec, name))), [[name, first]], name);
+      if (name.startsWith('--') && spec.shape !== 'none') {
+        assert.deepEqual(shown(newSessionFlags([`${name}=v`])), [[name, first]], `${name}=v`);
+      }
+    }
+  }
+  assert.deepEqual(shown(newSessionFlags(['-wfeat'])), [['-w', '-w']]);
+  assert.deepEqual(shown(newSessionFlags(['-pw'])), [['-pw', '-w']]);
+  assert.deepEqual(shown(newSessionFlags(['-pw', 'feat'])), [['-pw', '-w']]);
+  // read before an unknown letter, as sessionPickingFlags reads its flags
+  assert.deepEqual(shown(newSessionFlags(['-p-tmux', '-pZ'])), [['-p-tmux', '--tmux']]);
+});
+
+test('newSessionFlags finds nothing else: no flag that picks or names a session, no value, nothing after --', () => {
+  assert.deepEqual(newSessionFlags([]), []);
+  assert.deepEqual(newSessionFlags(['--model', 'x', 'fix the bug']), []);
+  assert.deepEqual(newSessionFlags(['-c', '--resume', 'a', '-n', 'x', '--fork-session']), []);
+  assert.deepEqual(newSessionFlags(['--model', '--worktree']), []);
+  assert.deepEqual(newSessionFlags(['--model', 'x', '--', '--worktree', '--tmux']), []);
+  assert.deepEqual(shown(newSessionFlags(['--tmux', '--model', 'x', '--bg', '-w'])), [
+    ['--tmux', '--tmux'],
+    ['--bg', '--bg'],
+    ['-w', '-w'],
+  ]);
 });
 
 test('the removed flags that Claude Code hides (deep link, aliases) have the shapes its parser gives them', () => {
@@ -840,6 +901,66 @@ test('buildResumeCommand passes a label as -n right after the session id', () =>
 
 test('buildResumeCommand takes the program from claudeCommand', () => {
   assert.deepEqual(resume(['claude'], null, '/opt/claude').argv, ['/opt/claude', '--resume', S1]);
+});
+
+test('buildResumeCommand with given flags: those flags as given, in their order, in place of the recorded ones (#188)', () => {
+  const recorded = ['claude', '--model', 'opus', '--mcp-config', '/tmp/old.json'];
+  const flags = ['--mcp-config', '/tmp/example.json', '--model', 'example'];
+  const given = (launch: string[] | null, label: string | null = null) =>
+    buildResumeCommand({ claudeCommand: '/opt/claude', launch, sessionId: S1, label, flags });
+  assert.deepEqual(given(recorded), {
+    argv: ['/opt/claude', '--resume', S1, ...flags],
+    flagsKnown: true,
+  });
+  // the label right after the session id, as without flags; a session without a recorded launch
+  assert.deepEqual(given(null, 'fix retry'), {
+    argv: ['/opt/claude', '--resume', S1, '-n', 'fix retry', ...flags],
+    flagsKnown: true,
+  });
+});
+
+test('buildResumeCommand with given flags passes them as they are: a prompt, an unknown flag, a permission flag the user gave; none added', () => {
+  const flags = ['--frob', 'x', '--dangerously-skip-permissions', '--', 'fix the bug', '-c'];
+  const argv = buildResumeCommand({
+    claudeCommand: 'claude',
+    launch: ['claude', '--permission-mode', 'plan'],
+    sessionId: S1,
+    label: null,
+    flags,
+  }).argv;
+  assert.deepEqual(argv, [...R, ...flags]);
+  assert.deepEqual(
+    buildResumeCommand({
+      claudeCommand: 'claude',
+      launch: ['claude', '--dangerously-skip-permissions'],
+      sessionId: S1,
+      label: 'x',
+      flags: [],
+    }),
+    { argv: [...R, '-n', 'x'], flagsKnown: true },
+    'an empty list: no flags at all, the recorded permission flag neither',
+  );
+  assert.deepEqual(flags, [
+    '--frob',
+    'x',
+    '--dangerously-skip-permissions',
+    '--',
+    'fix the bug',
+    '-c',
+  ]);
+});
+
+test('buildResumeCommand with flags null is the plain resume', () => {
+  assert.deepEqual(
+    buildResumeCommand({
+      claudeCommand: 'claude',
+      launch: ['claude', '--model', 'opus'],
+      sessionId: S1,
+      label: null,
+      flags: null,
+    }),
+    resume(['claude', '--model', 'opus']),
+  );
 });
 
 test('buildResumeCommand treats an empty label as no label', () => {

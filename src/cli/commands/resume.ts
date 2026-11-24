@@ -1,6 +1,8 @@
-// `skydeck resume <ref> [--here | --tab | --window]` (design 7.6; S2 11.4: `--window`, or
-// `"terminal": "window"` without `--here`, sends the session id to the window's server,
-// src/cli/window-requests.ts; plan C13's whereFor decides).
+// `skydeck resume <ref> [--here | --tab | --window] [-- <claude flags>]` (design 7.6; S2 11.4:
+// `--window`, or `"terminal": "window"` without `--here`, sends the session id to the window's
+// server, src/cli/window-requests.ts; plan C13's whereFor decides). Issue #188: the words after
+// `--` are the flags of this resume in place of the recorded ones (design 7.6 "Other flags"); the
+// window's server is handed them as they are and checks them itself, as for `new --window`.
 import { UsageError } from '../../platform/errors.ts';
 import { loadRows } from '../../sessions/load.ts';
 import { resolveRef } from '../../sessions/refs.ts';
@@ -14,19 +16,22 @@ import { launchWhere, whereFor } from '../launching.ts';
 import { resumeInWindow } from '../window-requests.ts';
 
 const SPEC: ArgSpec = {
-  usage: `skydeck resume <ref> [--here | --tab | --window]
+  usage: `skydeck resume <ref> [--here | --tab | --window] [-- <claude flags>]
 
 Resumes a session that is not running, in its own directory and with the flags it was started
 with. <ref> is a session id, an id prefix of at least 4 characters, or a label.
 
-  --here    replace skydeck with claude in this terminal
-  --tab     open claude in a new terminal tab
-  --window  start it in the skydeck window (skydeck window must be running)
+  --here      replace skydeck with claude in this terminal
+  --tab       open claude in a new terminal tab
+  --window    start it in the skydeck window (skydeck window must be running)
+  -- <flags>  claude's flags for this resume, in place of the ones it was started with;
+              -- alone resumes it with none
 Without --here, --tab or --window, the configured "terminal" decides.
 `,
   flags: { here: { type: 'boolean' }, tab: { type: 'boolean' }, window: { type: 'boolean' } },
   min: 1,
   max: 1,
+  allowRest: true,
 };
 
 /** 'here', 'tab', 'window' or null (the configured terminal); UsageError when two are given. */
@@ -52,13 +57,16 @@ export const command: Command = {
     }
     const flag = whereFrom(parsed, SPEC.usage);
     const [ref = ''] = parsed.positionals;
+    // #188: `--` given, its words (maybe none) in place of the recorded flags; else the recorded.
+    const flags = parsed.restGiven ? parsed.rest : null;
     return withDeck(ctx, { refresh: true }, async (deck) => {
       const row = resolveRef(ref, loadRows(deck));
       const where = whereFor(deck.config, flag);
-      // The window's server prepares the resume itself, through the guard and the lock (S2 8.3).
-      if (where === 'window') return resumeInWindow(ctx, deck, row.id);
+      // The window's server prepares the resume itself, through the guard and the lock (S2 8.3),
+      // and checks the flags as this command would.
+      if (where === 'window') return resumeInWindow(ctx, deck, row.id, flags);
       // The guard refreshes again by itself and decides on the rows of that refresh, not on these.
-      const outcome = await launchWhere(deck, prepareResumeById(deck, row.id), where);
+      const outcome = await launchWhere(deck, prepareResumeById(deck, row.id, flags), where);
       for (const line of outcome.lines) {
         ctx.io.stderr(`${line}\n`);
       }

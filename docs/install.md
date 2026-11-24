@@ -887,7 +887,16 @@ effect.
   the list or the terminal, and nothing reaches the program in the terminal.
 - **A session that is not running**: one click selects it and shows its resume card, with the
   exact command it will run. Enter in the list, a double click or `Resume here` resumes it into the
-  window.
+  window. **Other flags…** beside it (or `f` in the list; on a session that just ended, the ended
+  bar's own Other flags…) resumes it with other flags for `claude`
+  instead, such as another `--model` or one more `--mcp-config`: the New form's `Flags for claude`
+  field, with your favourite flags under it, opens filled with the flags it was started with, and
+  Start resumes it with exactly the flags in the field (an empty field: none). The rules are the
+  New form's (no flag that picks or names a session), and a flag that only says where a new
+  session starts (`--worktree`, `--tmux`, `--bg`, the cloud flags) is refused too: the session
+  exists already. A refusal shows under Start; Esc goes back to the card. Nothing is saved for the
+  session: its start is recorded as every start is, so the header shows the new flags, and every
+  later Resume uses them. A start that fails before the session reports keeps the old ones.
 - **A running session** of the window: a click shows its terminal. A session that runs in another
   terminal shows a card instead: it cannot be shown in the window. Once you `/exit` it there, it
   can be resumed here. A session in Claude Code's background has no terminal at all. For one sent
@@ -921,7 +930,11 @@ effect.
   right after the Group field: a click on it (or Tab to it, then Enter) puts the name into the
   field, so that the new session joins that group. Without the click the field stays empty. The
   Group field also offers the groups of your list as you type.
-- **A session that ended** keeps its last screen, dimmed, under a bar with Resume and Close.
+- **A session that ended** keeps its last screen, dimmed, under a bar with Resume and Close, and
+  between them **Other flags…** (or `f` in the list): it closes the terminal, as Close does, and
+  shows the session's resume card with its Other flags… already open, the keyboard in the field.
+  For a session the list hides (a filter) or whose transcript is gone, it closes nothing and says
+  why on the bar.
 - **The tour**: the first time a browser shows the window, a tour of seven steps starts by itself
   once the list is drawn: each step makes one part of the window stand out (the list, the right
   side, the key bar, `Switch…`, the gear) and says in two to four lines what is there, above all
@@ -1621,10 +1634,12 @@ a WSL terminal of your own, run `skydeck window`:
 #### Starting sessions in the window from a terminal (stage C)
 
 `skydeck resume <ref> --window` and `skydeck new --window` (with `--label`, `--group` and `--
-<claude flags>` as always) ask the window's server to start the session in the window, as the
+<claude flags>` as always; `resume` takes `-- <claude flags>` too, its flags in place of the ones
+it was started with) ask the window's server to start the session in the window, as the
 window's own Resume and New do: through the same checks, with the same refusals and exit codes
 (`skydeck: <short id> is running (pid <n>)` or `skydeck: this session is already open in the
-window`: exit 4; what `skydeck new` refuses: exit 2). The command prints on stderr the lines
+window`: exit 4; what `skydeck new` refuses, and what a resume's flags may not hold: exit 2). The
+command prints on stderr the lines
 `skydeck resume` or `new` would print (such as `skydeck: original flags unknown; resuming with
 defaults`), and exits with its code. `--here`, `--tab` and `--window` exclude each other: two of
 them are a usage error, exit 2 (`skydeck: --here and --window cannot be used together`).
@@ -1918,7 +1933,8 @@ a click on Earlier's header select the row above it before they fold) — no row
 the list's keys act on none: `l`, F2, `g`, `n`, `p` and `d` say `no session selected`. When a
 terminal of the window holds the session, the right side keeps it: the terminal with its header,
 whose controls edit that session as usual (a click on the title, ✎, `Note`, `Done`, `Pull
-requests`), and once its program has ended, the ended bar with Resume and Close. A session
+requests`), and once its program has ended, the ended bar with Resume and Close (and Other
+flags…, which closes nothing here, since no card would show the session). A session
 without a terminal of the window shows nothing on the right then, no card (only the line `The
 selected session shows here.` while the list holds no session at all). `Done` in the header
 of such a session asks first while it runs in a terminal of the window that can end it (as `d`

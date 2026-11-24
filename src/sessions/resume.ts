@@ -7,6 +7,7 @@ import {
   buildNewCommand,
   buildResumeCommand,
   nameFlags,
+  newSessionFlags,
   sessionPickingFlags,
   unknownFlags,
 } from '../claude/launch.ts';
@@ -484,11 +485,23 @@ export function settleFailedLaunch(
  * session that is refused takes no lock. `unknownFlags` is unknownFlags(row.session.launch) ([]
  * without a launch command).
  *
+ * Issue #188: `flags` given (not null) are this resume's flags in place of the recorded ones. They
+ * are checked first (refuseResumeFlags: a UsageError, before the guard, so a refusal takes no
+ * lock), then the guard and the lock as without them, and buildResumeCommand passes them as given;
+ * `flagsKnown` is then true and `unknownFlags` [] (the recorded flags are not this resume's).
+ *
  * The row must come from rows loaded right after a refresh: a start event that is still a file in
  * the spool is not in the row, and the lock's check of the latest event only sees ingested events.
  * Callers go through `prepareResumeById` (resume-by-id.ts), which refreshes and loads first.
  */
-export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch {
+export function prepareResume(
+  deck: Deck,
+  row: ListRow,
+  flags: readonly string[] | null = null,
+): PreparedLaunch {
+  if (flags !== null) {
+    refuseResumeFlags(flags);
+  }
   checkResumable(row, deck.platform.files);
   const cwd = row.session.dir;
   if (cwd === null) {
@@ -502,13 +515,14 @@ export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch {
     launch,
     sessionId: row.id,
     label: row.label,
+    flags,
   });
   return {
     sessionId: row.id,
     cwd,
     argv: command.argv,
     flagsKnown: command.flagsKnown,
-    unknownFlags: launch === null ? [] : unknownFlags(launch),
+    unknownFlags: launch === null || flags !== null ? [] : unknownFlags(launch),
     kind: 'resume',
     preparedAtNs,
     label: row.label,
@@ -524,18 +538,41 @@ export function prepareResume(deck: Deck, row: ListRow): PreparedLaunch {
  * The window's favourite flags (S2 12.6, F15) are refused by the same rule, in the same words.
  */
 export function refuseSessionFlags(extra: readonly string[]): void {
-  const shown = ({ written, spec }: FoundFlag): string =>
-    spec.names.includes(written) ? written : `${written} (${spec.names.at(-1)})`;
   const [picking] = sessionPickingFlags(extra);
   if (picking !== undefined) {
     throw new UsageError(
-      `cannot pass ${shown(picking)} to claude: it picks an existing session; use skydeck resume`,
+      `cannot pass ${shownFlag(picking)} to claude: it picks an existing session; use skydeck resume`,
     );
   }
   const [name] = nameFlags(extra);
   if (name !== undefined) {
     throw new UsageError(
-      `cannot pass ${shown(name)} to claude: the label is given with --label, and skydeck passes it as the name`,
+      `cannot pass ${shownFlag(name)} to claude: the label is given with --label, and skydeck passes it as the name`,
+    );
+  }
+}
+
+/** A flag as written, with the table's last spelling after a cluster (`-pw (--worktree)`). */
+function shownFlag({ written, spec }: FoundFlag): string {
+  return spec.names.includes(written) ? written : `${written} (${spec.names.at(-1)})`;
+}
+
+/**
+ * Issue #188: what a resume with given flags refuses (UsageError naming the flag, exit 2) —
+ * refuseSessionFlags's refusals in its words (a flag that picks a session, `--name` / `-n`),
+ * checked first, then a flag only a new session takes (newSessionFlags: `--worktree`, `--tmux`,
+ * `--bg`, the cloud flags, `--init`, …): "cannot pass <flag> to claude on a resume: it says where
+ * or how a new session starts". A resume removes those from a recorded command (7.6); given by
+ * the user they are refused, since dropping them in silence would mislead. Found as `new` finds
+ * its flags: in a cluster, as `--flag=value`, before an unknown letter; never after `--` or as
+ * another flag's value.
+ */
+export function refuseResumeFlags(flags: readonly string[]): void {
+  refuseSessionFlags(flags);
+  const [only] = newSessionFlags(flags);
+  if (only !== undefined) {
+    throw new UsageError(
+      `cannot pass ${shownFlag(only)} to claude on a resume: it says where or how a new session starts`,
     );
   }
 }

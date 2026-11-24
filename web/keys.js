@@ -35,7 +35,7 @@
  *   | { kind: 'fold' } | { kind: 'unfold' } | { kind: 'enter' } | { kind: 'filter' }
  *   | { kind: 'show-done' } | { kind: 'escape' } | { kind: 'reload' }
  *   | { kind: 'edit', what: EditWhat } | { kind: 'done' } | { kind: 'reorder', by: 1 | -1 }
- *   | { kind: 'carry' }} ListAction
+ *   | { kind: 'carry' } | { kind: 'flags' }} ListAction
  */
 
 /**
@@ -127,7 +127,8 @@ export function terminalKey(e) {
  * Follow-up F37: Shift+↑ and Shift+K move the selected session of Open one place up, Shift+↓ and
  * Shift+J one place down (`reorder`) — Shift alone with the key that types k/K or j/J, so Shift+k
  * under Caps Lock too; Caps Lock alone (`K` without Shift) moves nothing. Follow-up F40: `c` gives
- * the keyboard to the carry-over bar (`carry`).
+ * the keyboard to the carry-over bar (`carry`). Issue #188: `f` opens the resume card's "Other
+ * flags…" (`flags`).
  * @param {KeyLike} e
  * @returns {ListAction | null}
  */
@@ -171,6 +172,8 @@ export function listKey(e) {
       return { kind: 'done' };
     case 'c':
       return { kind: 'carry' };
+    case 'f':
+      return { kind: 'flags' };
   }
   if (e.shiftKey) {
     return null;

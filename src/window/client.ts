@@ -51,8 +51,17 @@ export interface ControlClient {
    * the server still starting when the time is over (it started nothing), an answer that cannot be
    * read. A client made without a clock rejects with a TypeError, and an `answerMs` no timer can
    * wait with a RangeError, before anything is sent (ruled, task 76).
+   *
+   * Issue #188: `flags` given (not null or absent) go in the body as `flags`, the words as they
+   * are; without them the body is `{ sessionId }` alone, as before. A server of a build before
+   * #188 refuses the field (400 `body: unknown field`): that is 'unknown-route' too, an older
+   * server, so that the command says so rather than that it refused the request.
    */
-  resume(sessionId: string, answerMs?: number): Promise<LaunchAnswer | 'unknown-route'>;
+  resume(
+    sessionId: string,
+    answerMs?: number,
+    flags?: readonly string[] | null,
+  ): Promise<LaunchAnswer | 'unknown-route'>;
   /** `POST /new` with the request's four fields, as `resume`. */
   newSession(request: NewRequest, answerMs?: number): Promise<LaunchAnswer | 'unknown-route'>;
   /**
@@ -165,6 +174,15 @@ export function controlClient(net: Net, sockPath: string, clock?: Clock): Contro
       if (value === null) throw unreadable(what);
       return value;
     }
+    // #188: a resume's `flags` is the one field a server before it does not know.
+    if (
+      path === '/resume' &&
+      Object.hasOwn(body, 'flags') &&
+      answer.status === 400 &&
+      refusalKind(answer.body) === 'body: unknown field'
+    ) {
+      return 'unknown-route';
+    }
     return refusedLaunch(answer, what, MAY_HAVE_STARTED);
   };
 
@@ -213,8 +231,8 @@ export function controlClient(net: Net, sockPath: string, clock?: Clock): Contro
     async shutdown() {
       await request({ method: 'POST', path: '/shutdown' }, readOk);
     },
-    resume(sessionId, answerMs = ANSWER_MS) {
-      return launch('/resume', { sessionId }, answerMs);
+    resume(sessionId, answerMs = ANSWER_MS, flags = null) {
+      return launch('/resume', flags === null ? { sessionId } : { sessionId, flags }, answerMs);
     },
     newSession({ dir, label, group, flags }, answerMs = ANSWER_MS) {
       return launch('/new', { dir, label, group, flags }, answerMs);

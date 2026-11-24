@@ -708,6 +708,20 @@ export function nameFlags(args: readonly string[]): FoundFlag[] {
   return flagsIn(args).filter((found) => found.spec.names.includes('--name'));
 }
 
+/**
+ * The flags in `args` (WITHOUT the program name) that only a new session takes, found the way
+ * `sessionPickingFlags` finds its flags: the removed flags (7.6) that neither pick a session nor
+ * name it — `--worktree`, `--tmux`, `--bg`, the cloud flags, `--init`, … They only say where or how
+ * a NEW session starts: `skydeck new` passes them on, a resume with given flags refuses them
+ * (issue #188), since a session that exists already must not start somewhere else or a second time.
+ */
+export function newSessionFlags(args: readonly string[]): FoundFlag[] {
+  return flagsIn(args).filter(
+    (found) =>
+      found.spec.remove && !found.spec.picksSession && !found.spec.names.includes('--name'),
+  );
+}
+
 export interface ResumeCommand {
   argv: string[];
   flagsKnown: boolean;
@@ -736,18 +750,26 @@ function labelArgs(label: string | null): string[] {
  * Removed: flags with remove: true (with their values), positionals, and flags that are in no table
  * (with what follows them; `unknownFlags` names them). flagsKnown is false when launch is null. No
  * permission flag is ever added. Throws RangeError when sessionId is not a lowercase UUID.
+ *
+ * Issue #188, "Other flags": `flags` given (not null or absent) are the flags of this resume IN
+ * PLACE OF the recorded ones — after the session id and the label exactly as given, in their order
+ * (a prompt and a flag the table does not know too, as `buildNewCommand` passes its `extra`), the
+ * recorded launch unused; flagsKnown is then true. The caller has refused what a resume must not
+ * take (`refuseResumeFlags`). Still no permission flag is added.
  */
 export function buildResumeCommand(input: {
   claudeCommand: string;
   launch: readonly string[] | null;
   sessionId: string;
   label: string | null;
+  flags?: readonly string[] | null;
 }): ResumeCommand {
   assertSessionId(input.sessionId);
-  const kept = input.launch === null ? [] : passedOnFlags(input.launch);
+  const given = input.flags ?? null;
+  const kept = given ?? (input.launch === null ? [] : passedOnFlags(input.launch));
   return {
     argv: [input.claudeCommand, '--resume', input.sessionId, ...labelArgs(input.label), ...kept],
-    flagsKnown: input.launch !== null,
+    flagsKnown: given !== null || input.launch !== null,
   };
 }
 

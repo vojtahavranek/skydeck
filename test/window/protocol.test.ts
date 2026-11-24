@@ -105,6 +105,25 @@ const VALID: Record<string, PageMessage> = {
   'input, binary': { t: 'input', term: TERM, data: '\x1b[M #!\xff', binary: true },
   resize: { t: 'resize', term: TERM, cols: 100, rows: 30 },
   'act resume': { t: 'act', id: 1, kind: 'resume', sessionId: S1, cols: 120, rows: 40 },
+  // Issue #188: the flags field's text, as `act new` sends its flags.
+  'act resume, with flags': {
+    t: 'act',
+    id: 1,
+    kind: 'resume',
+    sessionId: S1,
+    cols: 120,
+    rows: 40,
+    flags: "--model example --append-system-prompt 'be brief'",
+  },
+  'act resume, with no flags': {
+    t: 'act',
+    id: 1,
+    kind: 'resume',
+    sessionId: S1,
+    cols: 120,
+    rows: 40,
+    flags: '',
+  },
   'act new': {
     t: 'act',
     id: 2,
@@ -196,7 +215,11 @@ describe('parsePageMessage: every page message of stages A and D', () => {
     });
 
     for (const field of Object.keys(message)) {
-      if (field !== 'binary') {
+      // The optional fields: `input.binary`, and act resume's `flags` (#188; without it: 'act resume').
+      const optional =
+        field === 'binary' ||
+        ((message as Record<string, unknown>)['kind'] === 'resume' && field === 'flags');
+      if (!optional) {
         test(`${name} without ${field} → refused`, () => {
           const copy: Record<string, unknown> = { ...message };
           delete copy[field];
@@ -358,6 +381,21 @@ describe('parsePageMessage: what is refused', () => {
     }
   });
 
+  test("act resume's flags (#188): text as act new's flags, at most 1,024 bytes, nothing else", () => {
+    const at = '€'.repeat(341) + 'a'; // 1,024 bytes
+    assert.equal(page({ ...VALID['act resume'], flags: at }).ok, true);
+    refused(page({ ...VALID['act resume'], flags: `${at}a` }));
+    for (const flags of [null, 5, true, ['--model', 'x'], { text: 'x' }]) {
+      refused(page({ ...VALID['act resume'], flags }));
+    }
+    const lone = JSON.stringify({ ...VALID['act resume'], flags: 'LONE' }).replace(
+      '"LONE"',
+      '"a\\ud800b"',
+    );
+    assert.equal(parsePageMessage(lone).ok, false);
+    refused(page({ ...VALID['act resume'], flag: '--model x' }));
+  });
+
   test('sizes are whole numbers 1–65535', () => {
     for (const cols of [0, -1, 1.5, 65536]) {
       refused(page({ ...VALID['attach'], cols }));
@@ -378,7 +416,7 @@ describe('parsePageMessage: what is refused', () => {
 
   test("every act's id is a whole number from 0 (stage A's, stage D's and F18's kinds alike)", () => {
     const acts = Object.entries(VALID).filter(([, message]) => message.t === 'act');
-    assert.equal(acts.length, 16);
+    assert.equal(acts.length, 18); // #188's two act resume with flags among them
     for (const [name, message] of acts) {
       for (const id of [-1, 1.5, 2 ** 53]) {
         refused(page({ ...message, id }));
@@ -651,6 +689,7 @@ describe('types (checked by npm run typecheck)', () => {
       flagsKnown: true,
       unknownFlags: [],
       launchFlags: ['--model', 'opus'],
+      resumeFlags: ['--model', 'opus'],
       ended: 'exited',
       expiring: false,
       expired: false,
@@ -996,6 +1035,26 @@ describe("parseControlRequest: stage C's routes (plan C3)", () => {
       ok: true,
       value: { route: 'resume', sessionId: S1 },
     });
+  });
+
+  test('POST /resume { sessionId, flags } (#188) → resume with the words as given, not split; held to /new’s flags rules', () => {
+    const flags = ['--model', 'example', "be brief, 'really'", '', '--worktree'];
+    assert.deepEqual(post('/resume', { ...RESUME, flags }), {
+      ok: true,
+      value: { route: 'resume', sessionId: S1, flags },
+    });
+    assert.deepEqual(post('/resume', { ...RESUME, flags: [] }), {
+      ok: true,
+      value: { route: 'resume', sessionId: S1, flags: [] },
+    });
+    const many = Array.from({ length: 1000 }, (_, at) => `--f${at}`);
+    assert.equal(post('/resume', { ...RESUME, flags: many }).ok, true);
+    for (const bad of [[...many, '--one-more'], '--model x', null, [1], ['op\u0000us']]) {
+      assert.match(refused(post('/resume', { ...RESUME, flags: bad })), /^body\b/);
+    }
+    const lone = JSON.stringify({ ...RESUME, flags: ['LONE'] }).replace('"LONE"', '"a\\ud800b"');
+    assert.match(refused(parseControlRequest('POST', '/resume', lone)), /^body\b/);
+    assert.match(refused(post('/resume', { ...RESUME, flag: [] })), /^body\b/);
   });
 
   test('POST /new { dir, label, group, flags } → new, every field as given: the flags not split, a repeated word kept, a blank or padded label and group kept', () => {

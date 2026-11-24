@@ -32,7 +32,8 @@ const STREAM_TYPE = 'application/x-ndjson; charset=utf-8';
 
 /** What the server does for stage C's routes (plan C 2.3; task 74 supplies it). */
 export interface ControlLaunch {
-  resume(sessionId: string): Promise<LaunchAnswer>;
+  /** `flags`: a `POST /resume`'s words after `--` (issue #188); null when the body has none. */
+  resume(sessionId: string, flags: string[] | null): Promise<LaunchAnswer>;
   newSession(request: NewRequest): Promise<LaunchAnswer>;
   /** Calls `write` for each line, the outcome last; the answer ends when it resolves. `closed`
    *  fires when the asker's connection closes before the answer ended (C22) — also after the
@@ -179,7 +180,7 @@ export function controlHandler(
     }
     attempt(() =>
       request.route === 'resume'
-        ? launch.resume(request.sessionId)
+        ? launch.resume(request.sessionId, request.flags ?? null)
         : launch.newSession({
             dir: request.dir,
             label: request.label,

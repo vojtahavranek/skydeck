@@ -908,6 +908,7 @@ test('the right side', async (t) => {
       await showsText(s.page, '#cards .card-ended', /^claude is not running in this terminal$/);
       assert.deepEqual(await s.page.locator('#cards .card-bar button').allTextContents(), [
         'Resume',
+        'Other flags…', // issue #188
         'Close',
       ]);
       s.serve(ended('ended'));

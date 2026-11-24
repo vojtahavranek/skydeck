@@ -38,6 +38,7 @@ describe('parseCommandArgs', () => {
       flags: { all: true, json: true },
       positionals: [],
       rest: [],
+      restGiven: false,
     });
   });
 
@@ -73,6 +74,7 @@ describe('parseCommandArgs', () => {
         flags: {},
         positionals: [],
         rest: [],
+        restGiven: false,
       });
     });
   }
@@ -125,6 +127,7 @@ describe('parseCommandArgs', () => {
       flags: { label: 'x' },
       positionals: [],
       rest: ['--model', 'opus'],
+      restGiven: true,
     });
     assert.deepEqual(parseCommandArgs(['--', '--label', 'y'], REST_SPEC).rest, ['--label', 'y']);
   });
@@ -135,7 +138,21 @@ describe('parseCommandArgs', () => {
       flags: {},
       positionals: [],
       rest: ['--help'],
+      restGiven: true,
     });
+  });
+
+  test('allowRest: a "--" with nothing after it is told apart from none (restGiven)', () => {
+    const spec: ArgSpec = { ...REST_SPEC, max: 1 };
+    assert.deepEqual(parseCommandArgs(['x', '--'], spec), {
+      help: false,
+      flags: {},
+      positionals: ['x'],
+      rest: [],
+      restGiven: true,
+    });
+    assert.equal(parseCommandArgs(['x'], spec).restGiven, false);
+    assert.equal(parseCommandArgs(['--', '--help'], SPEC).restGiven, false, 'without allowRest');
   });
 
   test('allowRest: only the first "--" ends the flags', () => {
@@ -152,6 +169,7 @@ describe('parseCommandArgs', () => {
       flags: {},
       positionals: ['x'],
       rest: [],
+      restGiven: false,
     });
     assert.deepEqual(parseCommandArgs(['--', '--all'], SPEC).positionals, ['--all']);
   });

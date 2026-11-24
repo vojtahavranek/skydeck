@@ -1,7 +1,9 @@
 // The favourite flags of the new form (S2 12.6, follow-up F15): the page's split of the flags
 // field, whether a favourite's words stand in it, the field with a favourite added or taken out,
 // which texts may be saved as one, and a chip's words; web/favourites.js draws the chips and the
-// ★. Pure: no DOM and no clock, so that node:test and the root type check load it
+// ★. Issue #188: `flagsText`, the field's text for given words (the resume card's "Other flags…"
+// fills it with the flags a plain resume passes on), which splits back to exactly those words.
+// Pure: no DOM and no clock, so that node:test and the root type check load it
 // (test/web/favourite-text.test.ts).
 //
 // `flagWords` is a copy of src/window/flags.ts's `splitFlags` (web/ never imports code from src/)
@@ -228,6 +230,43 @@ export function favouriteRefusal(text, favourites) {
     return FAVOURITE_REFUSALS.known;
   }
   return favourites.length >= MAX_FAVOURITES ? FAVOURITE_REFUSALS.full : null;
+}
+
+/**
+ * One word as the flags field writes it (flagsText): as it is when it is not empty and holds no
+ * white space (the separator) and no quote; else in '…' when it holds no `'`; else in "…" when it
+ * holds no `"`; else as touching pieces — its runs without `'` in '…', each `'` in "…" — which
+ * flagWords reads as one word.
+ * @param {string} word
+ * @returns {string}
+ */
+function quotedWord(word) {
+  const plain = [...word].every((char) => char !== "'" && char !== '"' && !SEPARATOR.test(char));
+  if (word !== '' && plain) {
+    return word;
+  }
+  if (!word.includes("'")) {
+    return `'${word}'`;
+  }
+  if (!word.includes('"')) {
+    return `"${word}"`;
+  }
+  return word
+    .split("'")
+    .map((run) => (run === '' ? '' : `'${run}'`))
+    .join(`"'"`);
+}
+
+/**
+ * Issue #188: the flags field's text for `words` — the resume card's "Other flags…" fills it with
+ * the flags a plain resume passes on —, written so that flagWords (and the server's splitFlags)
+ * give back exactly those words, in order: each as quotedWord writes it, one space between. A
+ * word must hold no NUL (no program can be given one; splitFlags refuses it).
+ * @param {readonly string[]} words
+ * @returns {string}
+ */
+export function flagsText(words) {
+  return words.map(quotedWord).join(' ');
 }
 
 /**

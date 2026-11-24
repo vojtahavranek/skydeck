@@ -1239,6 +1239,142 @@ test('prepareResume names the flags it cannot pass on', (t) => {
   assert.equal(prepared.flagsKnown, true);
 });
 
+// --- issue #188: a resume with other flags ----------------------------------------------------
+
+test('prepareResume with given flags: those flags after the id and the label, in place of the recorded ones; the lock taken', (t) => {
+  const d = testDeck(t);
+  const launch = ['claude', '--frob', 'x', '--model', 'opus', '--dangerously-skip-permissions'];
+  const row = rowWith(d, dead(d, { launch }), 'fix retry');
+  const flags = ['--mcp-config', '/tmp/example.json', '--model', 'example', 'go on'];
+  const prepared = prepareResume(d.deck, row, flags);
+  assert.deepEqual(prepared.argv, ['claude', '--resume', S1, '-n', 'fix retry', ...flags]);
+  // the recorded flags are not this resume's: nothing about them is said
+  assert.equal(prepared.flagsKnown, true);
+  assert.deepEqual(prepared.unknownFlags, []);
+  assert.deepEqual(flagWarnings(prepared), []);
+  assert.equal(prepared.kind, 'resume');
+  assert.equal(prepared.label, 'fix retry');
+  assert.notEqual(lockOf(d, S1), null);
+});
+
+test('prepareResume with an empty list of flags resumes with none at all; without a recorded launch too', (t) => {
+  const d = testDeck(t);
+  const recorded = prepareResume(
+    d.deck,
+    rowWith(d, dead(d, { launch: ['claude', '--permission-mode', 'plan'] })),
+    [],
+  );
+  assert.deepEqual(recorded.argv, ['claude', '--resume', S1]);
+  d.clock.setNs(T0 + 61n * SEC);
+  const none = prepareResume(d.deck, rowWith(d, dead(d, { launch: null })), ['--model', 'x']);
+  assert.deepEqual(none.argv, ['claude', '--resume', S1, '--model', 'x']);
+  assert.equal(none.flagsKnown, true, 'no "original flags unknown": they are not used');
+});
+
+test('prepareResume keeps a permission flag the user gives, and adds none', (t) => {
+  const d = testDeck(t);
+  const prepared = prepareResume(d.deck, rowWith(d, dead(d, { launch: ['claude'] })), [
+    '--permission-mode',
+    'acceptEdits',
+  ]);
+  assert.deepEqual(prepared.argv, ['claude', '--resume', S1, '--permission-mode', 'acceptEdits']);
+});
+
+/** The UsageError prepareResume throws for these flags; no lock may be taken. */
+function refusedFlags(d: TestDeck, flags: string[]): string {
+  try {
+    prepareResume(d.deck, rowWith(d, dead(d, { launch: ['claude', '--model', 'opus'] })), flags);
+  } catch (error) {
+    assert.ok(error instanceof UsageError, `not a UsageError: ${String(error)}`);
+    assert.equal(error.exitCode, 2);
+    assert.equal(lockOf(d, S1), null, `${JSON.stringify(flags)}: no lock`);
+    return error.message;
+  }
+  throw new assert.AssertionError({ message: `${JSON.stringify(flags)} was not refused` });
+}
+
+test("prepareResume refuses the flags new refuses, in new's words: one that picks a session, --name", (t) => {
+  const d = testDeck(t);
+  assert.equal(
+    refusedFlags(d, ['--model', 'x', '--fork-session']),
+    'cannot pass --fork-session to claude: it picks an existing session; use skydeck resume',
+  );
+  assert.equal(
+    refusedFlags(d, ['-n', 'x']),
+    'cannot pass -n to claude: the label is given with --label, and skydeck passes it as the name',
+  );
+  assert.match(refusedFlags(d, ['-cp']), /^cannot pass -cp \(--continue\) to claude: it picks/);
+  assert.match(refusedFlags(d, [`--resume=${S2}`]), /^cannot pass --resume to claude: /);
+  assert.match(refusedFlags(d, ['-cZ']), /^cannot pass -cZ \(--continue\) to claude: /);
+  for (const spec of FLAGS.filter((one) => one.picksSession)) {
+    for (const name of spec.names) {
+      const flags = spec.shape === 'none' ? [name] : [name, 'v'];
+      assert.match(refusedFlags(d, flags), new RegExp(`^cannot pass ${name} to claude: it picks`));
+    }
+  }
+});
+
+test('prepareResume refuses, naming it, every flag only a new session takes: alone, as --flag=value, in a cluster', (t) => {
+  const d = testDeck(t);
+  assert.equal(
+    refusedFlags(d, ['--model', 'x', '--worktree']),
+    'cannot pass --worktree to claude on a resume: it says where or how a new session starts',
+  );
+  assert.equal(
+    refusedFlags(d, ['-pw', 'feat']),
+    'cannot pass -pw (--worktree) to claude on a resume: it says where or how a new session starts',
+  );
+  const only = FLAGS.filter(
+    (spec) => spec.remove && !spec.picksSession && !spec.names.includes('--name'),
+  );
+  assert.equal(only.length, 13);
+  for (const spec of only) {
+    for (const name of spec.names) {
+      const flags = spec.shape === 'none' ? [name] : [name, 'v'];
+      assert.equal(
+        refusedFlags(d, flags),
+        `cannot pass ${name} to claude on a resume: it says where or how a new session starts`,
+      );
+      if (name.startsWith('--') && spec.shape !== 'none') {
+        assert.match(refusedFlags(d, [`${name}=v`]), new RegExp(`^cannot pass ${name} to claude`));
+      }
+    }
+  }
+  // after `--`, or as another flag's value, it is no flag: passed on
+  const passed = prepareResume(d.deck, rowWith(d, dead(d)), ['--model', '--tmux', '--', '-w']);
+  assert.deepEqual(passed.argv.slice(3), ['--model', '--tmux', '--', '-w']);
+});
+
+test("prepareResume checks new's refusals first, then the flags only a new session takes", (t) => {
+  const d = testDeck(t);
+  assert.match(refusedFlags(d, ['--worktree', '-c']), /^cannot pass -c to claude: it picks/);
+  assert.match(refusedFlags(d, ['--tmux', '-n', 'x']), /^cannot pass -n to claude: the label/);
+});
+
+test('prepareResume refuses the flags before the guard: a running session with a refused flag is a usage error, no lock', (t) => {
+  const d = testDeck(t);
+  assert.throws(
+    () => prepareResume(d.deck, rowWith(d, running(d, [4242])), ['--worktree']),
+    (error: unknown) => error instanceof UsageError,
+  );
+  assert.equal(lockOf(d, S1), null);
+});
+
+test('the guard still refuses a running session when good flags are given, and takes no lock', (t) => {
+  const d = testDeck(t);
+  assert.equal(
+    refusal(() => prepareResume(d.deck, rowWith(d, running(d, [4242])), ['--model', 'x'])),
+    '0b5f3c1e is running (pid 4242)',
+  );
+  assert.equal(lockOf(d, S1), null);
+  // and the lock: a second resume with flags within 60 s
+  prepareResume(d.deck, rowWith(d, dead(d)), ['--model', 'x']);
+  assert.match(
+    refusal(() => prepareResume(d.deck, rowWith(d, dead(d)), ['--model', 'y'])),
+    /^0b5f3c1e is being resumed \(0 s ago\); try again in 60 s$/,
+  );
+});
+
 test('prepareResume of a session without a launch command: flags unknown, none named', (t) => {
   const d = testDeck(t);
   const prepared = prepareResume(d.deck, rowWith(d, dead(d, { launch: null })));
