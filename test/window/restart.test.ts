@@ -37,7 +37,7 @@ const START = 51234567;
 const CLAUDE = '/opt/skydeck-test/claude';
 const RECORDED = ['--model', 'opus'];
 const RESTARTING = 'skydeck is restarting this session';
-const NOT_ENDED = 'claude has not ended within 10 seconds, so it runs on';
+const NOT_ENDED = 'it has not ended within 10 seconds; if it ends later, resume it from its bar';
 
 /** A terminal of the window running S1's program, which can be ended. */
 function info(over: Partial<TerminalInfo> = {}): TerminalInfo {

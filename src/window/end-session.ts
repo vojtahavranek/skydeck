@@ -98,7 +98,7 @@ const NOT_AN_ACTION = 'skydeck cannot do that action';
 /** Issue #166: a restart holds the terminal (R7). */
 export const RESTARTING = 'skydeck is restarting this session';
 /** Issue #166: why a restart's hang-up did not end the program. */
-const NOT_ENDED = 'claude has not ended within 10 seconds, so it runs on';
+const NOT_ENDED = 'it has not ended within 10 seconds; if it ends later, resume it from its bar';
 const KEEPER_LOST = "its terminal's keeper ended unexpectedly";
 const NOT_SENT = 'skydeck could not ask it to end';
 

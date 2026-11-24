@@ -99,12 +99,13 @@ async function resume(page: TestPage, sessionId: string): Promise<void> {
 async function started(
   t: TestContext,
   sessions: readonly string[],
-  options: ServerSandboxOptions = {},
+  options: ServerSandboxOptions & { focused?: boolean } = {},
 ): Promise<{ d: ServerSandbox; server: TestServer; page: TestPage; list: ListMessage }> {
-  const d = serverSandbox(t, options);
+  const { focused, ...sandbox } = options;
+  const d = serverSandbox(t, sandbox);
   for (const id of [S1, S2, S3, ...MORE]) d.resumable(id);
   const server = await d.start();
-  const page = await connectTestPage(t, d, server.server);
+  const page = await connectTestPage(t, d, server.server, focused === undefined ? {} : { focused });
   for (const sessionId of sessions) await resume(page, sessionId);
   const order = sessions.map((id, at) => `${NAMES.get(id)}:${at < 9 ? at + 1 : '-'}`);
   const list = await page.list(
@@ -256,6 +257,37 @@ describe('restarting a session from the window (#166)', () => {
   });
 });
 
+describe('restarting a session makes no noise (#166)', () => {
+  test('a session restarted in the middle of a turn: no notification, no attention mark, before or after; a program that crashes beside it does notify (the check is not vacuous)', async (t) => {
+    // No page has focus: a session that starts to need you is notified to this one (S2 13).
+    const { page, list } = await started(t, [S1, S2], { focused: false });
+    const old = termOf(list, S1);
+    page.send({ t: 'input', term: old, data: '/busy\r' });
+    await page.list((candidate) => rowOf(candidate, S1)?.state === 'working', 'S1 working');
+    const result = await page.act({ kind: 'restart', term: old, sessionId: S1 }, 20_000);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const again = await runsAgain(page, S1, old);
+    // Several looks of attention (one a second) and refreshes after the restart.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    page.view({});
+    const later = await page.list(() => true, 'a list after the looks');
+    for (const seen of [again, later]) {
+      assert.equal(rowOf(seen, S1)?.attention, null, 'S1 needs nothing');
+      assert.equal(seen.needYou.count, 0);
+    }
+    const notifies = (): string[] =>
+      page.all.flatMap((one) =>
+        'text' in one && one.text.t === 'notify' ? [one.text.sessionId] : [],
+      );
+    assert.deepEqual(notifies(), [], 'no notification');
+    // The control: S2's program crashes (no end of its own): it needs you, and this page hears it.
+    page.send({ t: 'input', term: termOf(list, S2), data: '/fail 1\r' });
+    const notified = await page.next('notify', 'the crash of S2 notified', 20_000);
+    assert.equal(notified.sessionId, S2);
+    assert.deepEqual(notifies(), [S2], 'nothing for S1');
+  });
+});
+
 describe('restarting a session: when it does not work (#166)', () => {
   test('not ended within the wait: given up and said so; the session runs on with its number; its later end is an ordinary one, nothing resumed', async (t) => {
     const { d, page, list } = await started(t, [S1, S2], {
@@ -266,7 +298,11 @@ describe('restarting a session: when it does not work (#166)', () => {
     const result = await page.act({ kind: 'restart', term: old, sessionId: S1 }, 20_000);
     assert.deepEqual(
       [result.ok, result.ended, result.error],
-      [false, false, 'claude has not ended within 10 seconds, so it runs on'],
+      [
+        false,
+        false,
+        'it has not ended within 10 seconds; if it ends later, resume it from its bar',
+      ],
     );
     const running = await page.list(
       (candidate) => !candidate.terminals.some((one) => one.restarting === true),
