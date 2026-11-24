@@ -4357,9 +4357,10 @@ there the row shows it, and a window that showed the session shows the new termi
 it if it was in the terminal before (12.9's rule for a terminal that comes to be shown). The end
 made by a restart is never `ended-unexpectedly`, needs no attention and raises no notification
 (13); the start it makes raises nothing a plain resume would not. A server that stops meanwhile
-(5.5) leaves nothing to finish: after its next start the terminal is an ordinary ended one without a
-number (or, when the new one was already open, that one is found as any), and nothing resumes the
-session by surprise. There is no `skydeck restart` command, and nothing new is stored for the
+(5.5) leaves nothing to finish: the dialog closes with `Restart: skydeck's server stopped answering;
+the action may or may not have been done`, and after its next start the terminal is an ordinary
+ended one without a number (or, when the new one was already open, that one is found as any), and
+nothing resumes the session by surprise. There is no `skydeck restart` command, and nothing new is stored for the
 session.
 
 ### 12.11 The nine picks

@@ -41,6 +41,11 @@ export const RESTART_TEXTS = {
   restarting: 'skydeck is restarting this session',
 };
 
+/** What every pending action of the page answers when the connection is lost (app.js): for a
+ *  restart nothing is known of what was done, so the dialog closes and the toast says so. */
+export const ACTION_LOST =
+  "skydeck's server stopped answering; the action may or may not have been done";
+
 /** The tooltip of the header's Restart (S2 12.5). */
 export const RESTART_TIP = 'end claude and resume this session (r)';
 
@@ -85,6 +90,10 @@ export function noRestartText(row, restarting) {
  */
 export function restartOutcome(result) {
   const why = result.error ?? result.lines.join(' ');
+  if (result.ended === undefined && why === ACTION_LOST) {
+    // The connection was lost: the session's terminal tells, once the window is back.
+    return { toast: `Restart: ${why}`, bar: null };
+  }
   if (result.ended === undefined) {
     return { stay: why === '' ? 'skydeck could not restart it' : why };
   }

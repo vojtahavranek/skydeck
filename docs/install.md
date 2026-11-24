@@ -1136,7 +1136,9 @@ selection or the keyboard when it is done. If `claude` has not ended within 10 s
 restarted (`Not restarted: it has not ended within 10 seconds; if it ends later, resume it from its
 bar.`): when it ends later, its terminal shows the ordinary bar with Resume, Other flags… and Close.
 If it ended but could not be resumed, its terminal shows that bar, and the bar's line and the toast
-say why (`Restart: it ended, but was not resumed: …`). A restart is not shown as ended unexpectedly
+say why (`Restart: it ended, but was not resumed: …`). If skydeck's server stops meanwhile, the
+toast says so; once the window is back, the session's terminal shows where it got to: ended with
+its bar, or running again. A restart is not shown as ended unexpectedly
 and makes no notification. `r` on any other session says in a toast why it cannot be restarted
 (not running in this window, marked done, a terminal skydeck cannot end). There is no `skydeck
 restart` command: in a terminal of your own, end `claude` and run `skydeck resume`.

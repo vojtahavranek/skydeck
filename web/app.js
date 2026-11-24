@@ -86,7 +86,7 @@ import { newFormDefaults } from './new-form-text.js';
 import { createNotifications } from './notify.js';
 import { blockInfo, movedMru, movedWith, paneFor, sessionRow } from './pane.js';
 import { createRestartDialog } from './restart-dialog.js';
-import { noRestartText, offersRestart } from './restart-text.js';
+import { ACTION_LOST, noRestartText, offersRestart } from './restart-text.js';
 import { cutWords } from './search-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
@@ -1900,7 +1900,7 @@ function dropPending() {
       id,
       ok: false,
       lines: [],
-      error: "skydeck's server stopped answering; the action may or may not have been done",
+      error: ACTION_LOST,
       sessionId: null,
     });
   }

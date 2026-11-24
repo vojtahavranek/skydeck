@@ -149,6 +149,12 @@ describe('restart-text', () => {
       restartOutcome(result({ ended: true, error: '0b5f3c1e: directory /w no longer exists' })),
       { toast: said, bar: said },
     );
+    // The connection lost while it waited: nothing is known, the dialog closes.
+    const lost = "skydeck's server stopped answering; the action may or may not have been done";
+    assert.deepEqual(restartOutcome(result({ error: lost })), {
+      toast: `Restart: ${lost}`,
+      bar: null,
+    });
     // Without an error, its lines.
     assert.deepEqual(
       restartOutcome(result({ ended: true, lines: ['skydeck: not started: the deadline passed'] })),
