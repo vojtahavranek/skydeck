@@ -4185,12 +4185,16 @@ the page asks for a list with a `view` and that list decides; a list that still 
 section is older than the write, and only the row's place in it is kept. So the list stays where it
 was: the next row is the one beside the cursor, and the parked row is never scrolled to under
 Parked. A refused `w` moves nothing; when the user moved meanwhile, the selection stays. **Moving**
-means, for `w` and for `d`'s exception above alike, any of these before that list came: selecting
-another row, going to the terminal (Enter, Esc, a click there, the zone chord), opening the new
-session's form; or a dialog shown when it comes. The list moves the selection on only while the session is
-still the selected one, the list has the keyboard's zone, no form is open and no dialog is shown;
-otherwise a key pressed in that moment would hand the keyboard to the next row's terminal and type
-into a session the user never chose. So `w` followed at once by Enter or Esc leaves the selection,
+is, for `w` and for `d`'s exception above alike, decided by where the user is WHEN that list comes,
+not by where they went meanwhile (there and back again still moves on): the list moves the
+selection on only while the session is still the selected one and was not chosen again since (by
+Enter, which shows or resumes it, a click or a double click on its row, or a chord), the list has
+the keyboard's zone, the new session's form is not open and no dialog is shown (the switcher
+included). Anything else counts as the user having moved: another row selected, the terminal
+(Enter, Esc, a click there, the zone chord), the form, a dialog, or the same session chosen again.
+Otherwise a key pressed in that moment would hand the keyboard to the next row's terminal, or the
+next key to the next row (`w` then Enter on a stopped row resumes it; the next letter belongs to
+it), acting on a session the user never chose. So `w` followed at once by Enter or Esc leaves the selection,
 and the keyboard, with the parked session's own terminal (a prompt typed there brings it back, as
 any prompt does). The
 keyboard stays in the list, so a run of `w` parks one row each and types nothing into the next
@@ -4203,9 +4207,10 @@ selection is still where that `w` left it (that row, or none); moved meanwhile, 
 header's Park and Unpark leave the selection to the main rule (it stays with the session), and the
 list then scrolls to the row in its new section by that same rule. **One guard** for `w`, `d` and
 the end dialog: while this page's own `w`, `d` or end of a session has not been decided by its list
-yet, a `w`, a `d` and the dialog's two marking buttons on that session do nothing, so a second key
-on the row just marked never un-parks what `w` parked, marks done what `w` parked, or parks what `d`
-marked. The second click of
+yet, a `w` and a `d` on that session do nothing (the header's Park and Done too), so a second key on
+the row just marked never un-parks what `w` parked, marks done what `w` parked, or parks what `d`
+marked. The end dialog needs no check of its own: it opens only past `d`'s, and while it is shown it
+is modal, so no list key and no header control is reachable. The second click of
 a double click on a button of the header, or on a pull request's × in its dialog, does nothing
 (ruled for plan D task 38), nor does it on a block's caption, wherever the list has moved under
 it: such a double click opens or closes the block once, and its second click selects no row, takes

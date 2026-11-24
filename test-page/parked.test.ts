@@ -1323,3 +1323,101 @@ test('F44: the one guard, and the Undo that gives back what was there', async (t
     },
   );
 });
+
+// ---------------------------------------------------------------------------------------------
+// Where the user is when the list that decides comes (S2 12.9): choosing the session again, the
+// new session's form and a dialog each count as having moved.
+
+test('F44: the list that decides moves nothing once the user moved, wherever to', async (t) => {
+  const chromium = await browser(t);
+
+  for (const first of ['w', 'd'] as const) {
+    await t.test(
+      `${first} then Enter on a stopped row (its resume not answered), then d: the selection stays with it and no act names the next row`,
+      async (t) => {
+        const before =
+          first === 'w'
+            ? listRows({ week: [row(S1), row(S2), row(S3)] })
+            : listRows({ parked: [S1, S2, S3].map((id) => row(id, PARKED_FIELDS)) });
+        const after =
+          first === 'w'
+            ? listRows({ week: [row(S2), row(S3)], parked: [row(S1, PARKED_FIELDS)] })
+            : listRows({ parked: [S2, S3].map((id) => row(id, PARKED_FIELDS)) });
+        const { page, w } = await scripted(t, chromium, before, 3);
+        await pick(page, S1);
+        w.holdViews(true);
+        await page.keyboard.press(first);
+        const act = await w.act(1);
+        await page.keyboard.press('Enter'); // resumes S1: its answer does not come
+        assert.equal((await w.act(2))['kind'], 'resume');
+        w.list(after);
+        w.answer(act, { ok: true });
+        await sleep(300);
+        assert.equal((await selectedRow(page)) ?? w.selected(), S1, 'the selection stays');
+        await toZone(page, 'list');
+        await page.keyboard.press('d');
+        await sleep(300);
+        assert.deepEqual(
+          w.acts().filter((one) => one['sessionId'] !== undefined && one['sessionId'] !== S1),
+          [],
+          'no act names another session',
+        );
+      },
+    );
+  }
+
+  await t.test(
+    'w, Ctrl+Shift+N, the zone chord back to the list, then the list comes: the selection stays and the form stays open',
+    async (t) => {
+      const { page, w } = await scriptedWorld(t, chromium);
+      await pick(page, S2);
+      w.holdViews(true);
+      await page.keyboard.press('w');
+      const act = await w.act(1);
+      await page.keyboard.press('Control+Shift+N');
+      await until(async () => (await pane(page)) === 'new', 'the form');
+      await page.keyboard.press('Control+Shift+L');
+      await until(async () => (await zone(page)) === 'Focus: list', 'the list zone');
+      w.list(listOf([S1, S3], [S2]));
+      w.answer(act, { ok: true });
+      await sleep(300);
+      assert.equal(await pane(page), 'new', 'the form stays open');
+      assert.equal(w.selected(), S2, 'the selection stays');
+    },
+  );
+
+  for (const [what, open, shown] of [
+    [
+      'the switcher',
+      async (page: Page) => page.keyboard.press('Control+Shift+P'),
+      (page: Page) =>
+        readPage(page, () => document.getElementById('switcher')?.hidden === false, null),
+    ],
+    [
+      'the label dialog',
+      async (page: Page) => page.keyboard.press('l'),
+      (page: Page) =>
+        readPage(
+          page,
+          () =>
+            [...document.querySelectorAll('.editor')].some((one) => !(one as HTMLElement).hidden),
+          null,
+        ),
+    ],
+  ] as [string, (page: Page) => Promise<void>, (page: Page) => Promise<boolean>][]) {
+    await t.test(`w, then ${what} open when the list comes: the selection stays`, async (t) => {
+      const { page, w } = await scriptedWorld(t, chromium);
+      await pick(page, S2);
+      w.holdViews(true);
+      await page.keyboard.press('w');
+      const act = await w.act(1);
+      await open(page);
+      await until(() => shown(page), `${what} shown`);
+      w.list(listOf([S1, S3], [S2]));
+      w.answer(act, { ok: true });
+      await sleep(300);
+      assert.equal(await shown(page), true, `${what} still shown`);
+      assert.equal(w.selected(), S2, 'the selection stays');
+    });
+  }
+});

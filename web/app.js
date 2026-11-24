@@ -246,9 +246,10 @@ const state = {
    * This page's own `d` (or end) in the list (S2 12.9's exception, D15), or from follow-up F44 its
    * own `w` that parks (`mark` says which): the session, the section it was last listed in and
    * that section's order then, whether a list came since its act was sent, and whether the answer
-   * came. While it names a session, a `w`, a `d` and the end dialog's marking buttons on that
-   * session do nothing (F44's one guard).
-   * @type {{ sessionId: string, section: SectionPayload['name'], order: string[], mark: 'done' | 'park', listed: boolean, answered: boolean } | null}
+   * came; `chosen` once the user chose that session again (Enter, a click, a chord: `select` with
+   * another `how` than 'key'), which counts as having moved. While it names a session, a `w` and a
+   * `d` on that session do nothing (F44's one guard; the end dialog is behind `d`'s).
+   * @type {{ sessionId: string, section: SectionPayload['name'], order: string[], mark: 'done' | 'park', listed: boolean, answered: boolean, chosen?: boolean } | null}
    */
   leaving: null,
   /**
@@ -920,6 +921,9 @@ function overLimit(action) {
  * @param {{ closed?: ClosedBlock[] }} [change]
  */
 function select(id, how, change) {
+  if (how !== 'key' && state.leaving?.sessionId === id) {
+    state.leaving.chosen = true; // F44: the user chose it again, so its list moves nothing
+  }
   state.newOpen = false;
   if (state.bringing !== id) {
     state.bringing = null; // the user chose another session: the resume's mark ends (Z1)
@@ -1546,7 +1550,7 @@ function markDone(sessionId, fromList) {
  */
 function sendDone(sessionId, fromList, runningText) {
   const row = sessionRow(state.list, sessionId);
-  if (row === null || state.marking.has(sessionId) || state.leaving?.sessionId === sessionId) {
+  if (row === null || state.marking.has(sessionId)) {
     return;
   }
   const kind = row.done ? 'undone' : 'done';
@@ -1658,6 +1662,9 @@ function openEnder(row, fromList) {
   if (modal()) {
     return;
   }
+  // F44's one guard needs no check in the dialog's buttons (`keepRunning` → `sendDone`,
+  // `endSession`): the dialog opens only past `markDone`'s guard, and while it is shown it is
+  // modal, so no list key and no header control can make this page's `w` or `d` leave meanwhile.
   // The key help lies over every dialog: it goes, so that nothing hides this one (as for the
   // switcher), and while it is shown Ctrl+Shift+H is refused (`windowChordGate`).
   help.hide();
@@ -1722,7 +1729,7 @@ function keepRunning(sessionId, fromList) {
  * @param {boolean} fromList
  */
 function endSession(sessionId, term, fromList) {
-  if (state.marking.has(sessionId) || state.leaving?.sessionId === sessionId) {
+  if (state.marking.has(sessionId)) {
     return;
   }
   // F44: the Undo gives back what was there: a parked session is parked again.
@@ -1847,7 +1854,7 @@ function leaveDone() {
   if (rowOf(leaving.sessionId) !== undefined) {
     return;
   }
-  if (!stayedFor(leaving.sessionId)) {
+  if (!stayedFor(leaving)) {
     return; // the user moved meanwhile: the selection stays
   }
   const section = state.list?.sections.find((candidate) => candidate.name === leaving.section);
@@ -1873,17 +1880,25 @@ function leaveDone() {
 }
 
 /**
- * Whether the user stayed where this page's own `d` or `w` in the list left them, so that its list
- * may move the selection on (`leaveDone`, `leavePark`): the session is still the selected one, the
- * list still has the keyboard's zone, the new session's form is not open and no dialog is shown.
- * Going to the terminal (Enter, Esc, a click there, the zone chord) or opening the form counts as
- * the user having moved: a selection moved then would hand the next row's terminal the keyboard
- * (since F44 the next row can run, under Open after `w`, under Parked after `d`).
- * @param {string} sessionId
+ * Whether the user is, when the list that decides comes, where this page's own `d` or `w` in the
+ * list left them, so that the list may move the selection on (`leaveDone`, `leavePark`): the
+ * session is still the selected one and was not chosen again (Enter, a click, a chord), the list
+ * has the keyboard's zone, the new session's form is not open and no dialog is shown. Going to the
+ * terminal (Enter, Esc, a click there, the zone chord), opening the form or choosing the session
+ * again counts as the user having moved: a selection moved then would hand the next row the next
+ * key, or its terminal the keyboard (since F44 the next row can run, under Open after `w`, under
+ * Parked after `d`).
+ * @param {NonNullable<typeof state.leaving>} leaving
  * @returns {boolean}
  */
-function stayedFor(sessionId) {
-  return state.selected === sessionId && state.zone === 'list' && !state.newOpen && !modal();
+function stayedFor(leaving) {
+  return (
+    leaving.chosen !== true &&
+    state.selected === leaving.sessionId &&
+    state.zone === 'list' &&
+    !state.newOpen &&
+    !modal()
+  );
 }
 
 /**
@@ -1896,7 +1911,7 @@ function stayedFor(sessionId) {
  */
 function leavePark(leaving) {
   state.leaving = null;
-  if (!stayedFor(leaving.sessionId)) {
+  if (!stayedFor(leaving)) {
     return; // the user moved meanwhile: the selection stays
   }
   const section = state.list?.sections.find((candidate) => candidate.name === leaving.section);
