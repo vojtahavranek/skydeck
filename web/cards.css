@@ -15,17 +15,17 @@
      moves it, #192), below. */
   container: card-header / inline-size;
 }
-/* Issue #166: Restart is the first button to give way when the first line is short of room: below
-   this width Note and Done would be cut with it, and the title squeezed to nothing; `r` in the list
-   remains. */
-@container card-header (max-width: 300px) {
+/* Issue #166: the buttons give way when the first line is short of room, none is cut (ruled):
+   Restart first — below this width (measured: 366 px with Unpark, 16 px of slack for other fonts)
+   another button would be cut with it or the state would lie under Note; `r` in the list remains. */
+@container card-header (max-width: 382px) {
   .header-restart {
     display: none;
   }
 }
-/* Then Park (F44), whose first line was already short of room for it at a window of 640 px with
-   the list 400 px wide: below this width it gives way too, and `w` in the list remains. */
-@container card-header (max-width: 220px) {
+/* Then Park / Unpark (F44), which was cut at a window of 640 px with the list 400 px wide: below
+   this width (measured: 258 px with Unpark, and 16 px of slack) it gives way too; `w` remains. */
+@container card-header (max-width: 274px) {
   .header-park {
     display: none;
   }

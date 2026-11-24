@@ -1750,6 +1750,11 @@ function askRestart(sessionId, fromList) {
   if (modal()) {
     return;
   }
+  // F44's one guard, for `r` and Restart too: nothing on the session this page's own `w`, `d` or
+  // end just marked, before its list decided where the selection goes.
+  if (state.marking.has(sessionId) || state.leaving?.sessionId === sessionId) {
+    return;
+  }
   if (!offersRestart(row)) {
     const held = state.list?.terminals.some(
       (term) => term.id === row.terminal && term.restarting === true,

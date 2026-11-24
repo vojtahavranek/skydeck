@@ -1728,7 +1728,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
           // this one's, and never comes back to it (F43). Announced by that spawn.
           term.info.slot = null;
           term.slotFreed = true;
-          if (moved.delete(term.info.id)) saveSlots();
+          // As F43 frees it: its moved entry and (F44) its withheld one go.
+          const hadMoved = moved.delete(term.info.id);
+          if (withheld.delete(term.info.id) || hadMoved) saveSlots();
           placed.set(newId, term.info.placeNs ?? term.info.openedNs);
           return slot;
         },

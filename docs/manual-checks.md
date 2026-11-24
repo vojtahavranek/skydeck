@@ -30,7 +30,8 @@ window (follow-up F41), at "The tour of the window"; W46 checks copy on select i
 terminal (issue #184), at "Copy on select"; W47 checks the carry over after `/clear` (follow-up
 F40), at "Carry over after /clear"; W48 checks the list's width set by a drag (issue #192), at "The
 list's width"; W49 checks resuming a session with other flags (issue #188), at "Resuming with other
-flags"; W50 checks parking a session (follow-up F44), at "Parked".
+flags"; W50 checks parking a session (follow-up F44), at "Parked"; W51 checks restarting a session
+from the window (issue #166), at "Restarting a session from the window".
 
 Setup:
 
@@ -3390,6 +3391,8 @@ done, `l`, `n` and `t` open a dialog.
 Write down: for each step whether it went as expected, and the words where they differ; your Edge
 version and your two layouts; whether Windows showed any notification in step 7.
 
+Not tried before this check was written: all of it, in Edge and with real Claude Code.
+
 ## Restarting a session from the window
 
 The check of restarting a session (issue #166, with part 2 of #188; design.md 7.6 "Other flags";
@@ -3408,7 +3411,8 @@ terminal shows Claude Code's prompt and the key bar says `Focus: terminal` (else
 until it does), type `Reply with the single word ok, in this chat, with no tool and no file.` and
 Enter, and wait for the answer. Note the number before its row in Open. Throughout: type a word
 only where the step says the keyboard is (the key bar names the zone; a field shows its caret). In
-the list a letter is a key: `d` marks the session done, `l`, `n` and `t` open a dialog on it.
+the list a letter is a key: `d` marks the session done, `w` parks it at once, `l`, `n` and `t` open
+a dialog on it.
 
 1. **The dialog.** Click the throwaway's row, then press `Restart` in the header. Expected: a
    dialog over the window, `Restart: restart check`, `It ends claude and resumes this session

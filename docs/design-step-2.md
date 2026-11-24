@@ -3296,11 +3296,14 @@ For the selected session: the title (a click edits the label, stage D), the grou
 it), the state pill, the project directory, "opened <time> · last active <age>", the short id (a
 click copies the whole id), where the title comes from, from follow-up F16 the flags the session
 was started with (below), and buttons Note, from issue #166 Restart (12.10: only while the row is
-`endable` and not marked done, and while the header is at least 300 px wide inside: in a narrower
-one it is the first to give way, so that no other button is cut, and `r` remains), Done / Undone
-and, from follow-up F44, Park / Unpark (12.15: tooltips `park it: it waits under Parked (w)` and
-`back under Open (w)`; below 220 px of the header's width inside it gives way next — at a window of
-640 px with the list 400 px wide it was cut — and `w` remains). Then
+`endable` and not marked done), Done / Undone and, from follow-up F44, Park / Unpark (12.15:
+tooltips `park it: it waits under Parked (w)` and `back under Open (w)`). The buttons give way, none
+is cut (ruled for #166): Restart is not shown while the header is 382 px wide inside or less, and
+Park / Unpark while it is 274 px or less (measured: the first line needs 366 px with Restart and
+Unpark, and 258 px with Unpark, before the state would lie under Note; 16 px of slack each for
+other fonts). With the list 400 px wide a window up to about 810 px wide shows no Restart and one up
+to about 700 px no Park / Unpark (at 640 px Park was cut before); `r`, `w` and `skydeck park`
+remain. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
 F18 the session's ticket first (below, with its status from F19), then the window's chip (12.3),
@@ -4312,7 +4315,8 @@ selection is still where that `w` left it (that row, or none); moved meanwhile, 
 header's Park and Unpark leave the selection to the main rule (it stays with the session), and the
 list then scrolls to the row in its new section by that same rule. **One guard** for `w`, `d` and
 the end dialog: while this page's own `w`, `d` or end of a session has not been decided by its list
-yet, a `w` and a `d` on that session do nothing (the header's Park and Done too), so a second key on
+yet, a `w` and a `d` on that session do nothing (the header's Park and Done too), and from issue
+#166 an `r` (and the header's Restart) opens no dialog "Restart" for it, so a second key on
 the row just marked never un-parks what `w` parked, marks done what `w` parked, or parks what `d`
 marked. The end dialog needs no check of its own: it opens only past `d`'s, and while it is shown it
 is modal, so no list key and no header control is reachable. The second click of
@@ -4323,8 +4327,9 @@ no keyboard and resumes nothing (ruled for plan E task 97; the caption since fol
 the `+n more` line and `×n`). A held
 `d` or `w` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
-`R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
-closed as any window. The focused zone has a
+`R` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
+closed as any window; `r` is the window's own key here: it restarts a session (issue #166,
+12.10). The focused zone has a
 coloured top edge, and the key bar says `Focus: list` or `Focus: terminal`. The keyboard follows
 the zone: where what had it goes away, or a click selects nothing, the page gives it to the zone's
 holder (the terminal, else a form's first field, else the zone itself; never a button). But the
@@ -4936,7 +4941,7 @@ none: no made-up data.
   | the list | The list | every session, one row each, of this window and of any terminal; Open, Recent (the last 7 days) and Earlier; the number 1–9 is the slot |
   | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it, also with other flags (issue #188) |
   | the key bar | Where the keyboard is | `Focus: list` or `Focus: terminal`; Ctrl+Shift+L moves it; with `Focus: terminal` a letter goes to Claude Code |
-  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park (the version is not raised for it: the tour is not shown again); `/` filter, `a` show done |
+  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park and from issue #166 `r` restart (the version is not raised for them: the tour is not shown again); `/` filter, `a` show done |
   | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+J the next session that needs you; Ctrl+Shift+N a new one |
   | the list | After a restart | a restart of the PC or of WSL ends the running sessions; run `skydeck window` again, and the top of the list offers the ones that were open (the banner, 12.7); `Restore` brings the ticked ones back, and after `Not now` `> restore` in `Switch…` offers it again |
   | the gear | Settings and every key (step 7) | the gear opens Settings; Ctrl+Shift+H shows every key; the tour again: `Take the tour` in the key help, or `> tour` in `Switch…` |
@@ -5006,8 +5011,8 @@ Where the selection goes after `w`, and the one guard for `w`, `d` and the end d
 the selection moves on only while the user stayed in the list, so going to the terminal or opening
 the new session's form before the list that decides counts as having moved, and no key reaches the
 next row's session.
-The key help names `w` after `d`, and the tour's line of the list's keys ends `d done · w park`
-(12.14).
+The key help names `w` after `d`, and the tour's line of the list's keys has `d done · w park`,
+then from issue #166 `r restart` (12.14).
 
 **The numbers** (the owner's decision of 2026-11-24, "parking frees it"). Parking a session that
 runs in a terminal of the window frees its number 1-9 at once: the terminal holds none, and the

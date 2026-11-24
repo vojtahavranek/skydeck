@@ -51,11 +51,11 @@ function row(id: string, more: Row = {}): Row {
 }
 
 /** A row of a session waiting in the window's terminal `term`, which can end it. */
-function endable(id: string, term: string, slot: number, more: Row = {}): Row {
+function endable(id: string, term: string, slot: number | null, more: Row = {}): Row {
   return row(id, { state: 'waiting', terminal: term, slot, endable: true, ...more });
 }
 
-function terminal(id: string, sessionId: string, slot: number, more: Row = {}): Row {
+function terminal(id: string, sessionId: string, slot: number | null, more: Row = {}): Row {
   return {
     id,
     slot,
@@ -93,13 +93,14 @@ function selectedOf(more: Row = {}): Row {
 
 interface Sections {
   open?: Row[];
+  parked?: Row[];
   week?: Row[];
 }
 
 function listOf(sections: Sections, terminals: Row[], selected: string | null): Row {
   return {
     ...scriptedList([], []),
-    sections: (['open', 'week', 'earlier'] as const).map((name) => ({
+    sections: (['open', 'parked', 'week', 'earlier'] as const).map((name) => ({
       name,
       folded: false,
       firstNs: null,
@@ -452,60 +453,129 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
   );
 
   await t.test(
-    'the header’s Restart is the first button to give way in a narrow header, then Park (F44): no button is cut at any width from 640 px, each shown once there is room, `r` still there',
+    'the header’s buttons give way, none is cut (ruled): Restart first, then Park / Unpark; every 2 px from 640 to 1,100 px, for a plain row, a parked one, a done one and a parked running one, no button is cut and nothing lies over another; `r` still there',
     async (t) => {
-      const { page } = await one(t, chromium, {}, { width: 640, height: 500 });
-      await clickRow(page, S1);
+      const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
+      const d = await deck(
+        t,
+        chromium,
+        {
+          sections: {
+            open: [endable(S1, TERM_A, 1)],
+            parked: [
+              endable(S2, TERM_B, null, { parked: true, slot: null }),
+              row(S3, { parked: true }),
+            ],
+            week: [row(S4, { done: true })],
+          },
+          terminals: [terminal(TERM_A, S1, 1), terminal(TERM_B, S2, null)],
+        },
+        { width: 640, height: 500 },
+      );
+      const { page } = d;
+      // The first line of the header: each button, whether it is inside, and any two of its parts
+      // that lie over each other.
       const header = () =>
         page.evaluate(() => {
           const head = document.querySelector('#cards .card-header') as HTMLElement;
           const box = head.getBoundingClientRect();
           const right = box.right - parseFloat(getComputedStyle(head).paddingRight);
-          const buttons = [...head.querySelectorAll<HTMLElement>('.header-top .header-button')]
-            .filter(
-              (one) => getComputedStyle(one).display !== 'none' && one.closest('[hidden]') === null,
-            )
+          const shown = (one: Element): boolean =>
+            getComputedStyle(one).display !== 'none' && one.closest('[hidden]') === null;
+          const top = head.querySelector('.header-top') as HTMLElement;
+          const parts = [
+            ...top.querySelectorAll<HTMLElement>(
+              '.header-title, .header-group, .header-group-edit, .header-group-add, .header-state, .header-button',
+            ),
+          ].filter((one) => shown(one) && one.getBoundingClientRect().width > 0);
+          const buttons = parts
+            .filter((one) => one.classList.contains('header-button'))
             .map((one) => ({
               text: one.textContent ?? '',
               inside: one.getBoundingClientRect().right <= right + 0.5,
             }));
-          return buttons;
+          const over: string[] = [];
+          for (const [at, a] of parts.entries()) {
+            for (const b of parts.slice(at + 1)) {
+              if (a.contains(b) || b.contains(a)) continue;
+              const ra = a.getBoundingClientRect();
+              const rb = b.getBoundingClientRect();
+              const overlap = Math.min(ra.right, rb.right) - Math.max(ra.left, rb.left);
+              if (overlap > 0.5) over.push(`${a.className} / ${b.className}`);
+            }
+          }
+          return { buttons, over };
         });
-      const at640 = await header();
-      assert.deepEqual(
-        at640.filter((one) => ['Note', 'Restart', 'Done', 'Park'].includes(one.text)),
-        [
-          { text: 'Note', inside: true },
-          { text: 'Done', inside: true },
-        ],
-        'at 640 px: Restart gives way, then Park; Note and Done whole',
-      );
-      let shownAt: number | null = null;
-      for (let width = 640; width <= 1100; width += 20) {
-        await page.setViewportSize({ width, height: 500 });
-        await sleep(50);
-        const now = await header();
-        assert.deepEqual(
-          now.filter((one) => !one.inside).map((one) => one.text),
-          [],
-          `nothing cut at ${width} px`,
-        );
-        if (shownAt === null && now.some((one) => one.text === 'Restart')) shownAt = width;
+      const kinds: [string, string][] = [
+        ['a plain row', S1],
+        ['a parked running row', S2],
+        ['a parked row', S3],
+        ['a done row', S4],
+      ];
+      for (const [kind, id] of kinds) {
+        await page.setViewportSize({ width: 640, height: 500 });
+        await clickRow(page, id);
+        const seen = new Set<string>();
+        for (let width = 640; width <= 1100; width += 2) {
+          await page.setViewportSize({ width, height: 500 });
+          await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+          const now = await header();
+          assert.deepEqual(
+            now.buttons.filter((one) => !one.inside).map((one) => one.text),
+            [],
+            `${kind}: nothing cut at ${width} px`,
+          );
+          assert.deepEqual(now.over, [], `${kind}: nothing lies over another at ${width} px`);
+          for (const one of now.buttons) seen.add(one.text);
+        }
+        // Each button comes back once there is room.
+        assert.ok(seen.has('Park') || seen.has('Unpark'), `${kind}: Park or Unpark shown`);
+        if (kind === 'a plain row' || kind === 'a parked running row') {
+          assert.ok(seen.has('Restart'), `${kind}: Restart shown`);
+        }
       }
-      assert.ok(shownAt !== null && shownAt <= 900, `Restart shown from ${shownAt} px`);
-      // Park (F44) is back as soon as it has room, and `w` remains at any width.
-      await page.setViewportSize({ width: 660, height: 500 });
-      await sleep(50);
-      assert.ok(
-        (await header()).some((one) => one.text === 'Park' && one.inside),
-        'Park at 660 px',
-      );
       // Narrow again: `r` restarts as before.
       await page.setViewportSize({ width: 640, height: 500 });
+      await clickRow(page, S1);
       await toZone(page, 'list');
       await page.keyboard.press('r');
       await shown(page, true);
       await page.keyboard.press('Escape');
+    },
+  );
+
+  await t.test(
+    'F44’s one guard: `w` and then `r` at once, before the list that shows the park, open no dialog for the session just parked; once that list came, `r` on it asks as for any',
+    async (t) => {
+      const d = await one(t, chromium);
+      const { page, w } = d;
+      await clickRow(page, S1);
+      await toZone(page, 'list');
+      await page.keyboard.press('w');
+      const park = await w.act(1);
+      assert.deepEqual(actsAfter(w), [{ kind: 'park', sessionId: S1 }]);
+      await page.keyboard.press('r');
+      await sleep(300);
+      assert.equal((await restarter(page)).shown, false, 'no dialog for the session just parked');
+      assert.equal(w.acts().length, 1);
+      // The park answered and listed: the session runs under Parked, and `r` on it asks.
+      w.answer(park, { ok: true });
+      d.set({
+        sections: {
+          open: [],
+          parked: [endable(S1, TERM_A, null, { parked: true })],
+          week: [row(S2)],
+        },
+        terminals: [terminal(TERM_A, S1, null)],
+      });
+      await sleep(500);
+      await clickRow(page, S1);
+      await toZone(page, 'list');
+      await page.keyboard.press('r');
+      await shown(page, true);
+      await page.keyboard.press('Escape');
+      await shown(page, false);
+      assert.equal(w.acts().length, 1, 'nothing restarted');
     },
   );
 
@@ -957,6 +1027,54 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
       );
       assert.deepEqual(form, [true, true, true], 'Other flags…: all of it inside');
       assert.equal((await restarter(page)).focus, 'field:flags');
+    },
+  );
+
+  await t.test(
+    'a real server: a parked session that runs in the window, restarted from the header, stays under Parked without a number, and the keyboard is in its new terminal as it was in the old one',
+    async (t) => {
+      const l = await launched(t, chromium);
+      l.d.resumable(S1);
+      await clickRow(l.page, S1);
+      await l.page.locator('#cards .card-actions button', { hasText: 'Resume here' }).click();
+      const first = await untilTerminalOf(l.page, S1);
+      await untilScreen(l.page, promptOf(S1));
+      await l.page.locator('#cards .header-park').click();
+      const sectionOf = () =>
+        l.page.evaluate((id) => {
+          let section = '';
+          for (const one of document.querySelectorAll('#list .list-section, #list [data-id]')) {
+            if (one.classList.contains('list-section')) {
+              section = (one as HTMLElement).dataset['section'] ?? '';
+            } else if (one.getAttribute('data-id') === id) {
+              return section;
+            }
+          }
+          return null;
+        }, S1);
+      await eventually(async () => (await sectionOf()) === 'parked', 'S1 under Parked');
+      await eventually(() => headerRestart(l.page), 'the header offers Restart for it');
+      assert.equal(await untilTerminalOf(l.page, S1), first, 'the keyboard in its terminal');
+      await l.page.locator('#cards .header-restart').click();
+      await shown(l.page, true);
+      await l.page.keyboard.press('ArrowLeft');
+      await l.page.keyboard.press('ArrowLeft');
+      await l.page.keyboard.press('Enter');
+      await shown(l.page, false);
+      await toastIs(l.page, 'Restarted.');
+      // The new terminal, shown in the old one's place with the keyboard in it.
+      const next = await eventually(async () => {
+        const now = await untilTerminalOf(l.page, S1);
+        return now !== first ? now : null;
+      }, 'the keyboard in the new terminal');
+      assert.notEqual(next, first);
+      await untilScreen(l.page, promptOf(S1));
+      assert.equal(await sectionOf(), 'parked', 'still under Parked');
+      const slot = await l.page.evaluate(
+        (id) => document.querySelector(`#list [data-id="${id}"] .row-slot`)?.textContent ?? '',
+        S1,
+      );
+      assert.equal(slot.trim(), '', 'no number');
     },
   );
 

@@ -148,17 +148,25 @@ describe('registry: a restart holds its terminal’s number (#166)', () => {
 
   test('F44: a withheld terminal (its session parked) holds no number through a restart, and its next terminal gets none; a terminal withheld while held gives the held number up', async (t) => {
     const box = await registrySandbox(t);
-    const r = box.registry();
+    const writes: Set<string>[] = [];
+    const r = box.registry({
+      persistSlots: (_moved, withheld) => {
+        writes.push(new Set(withheld));
+      },
+    });
     const id = await running(box, r, 1);
     const other = await running(box, r, 2);
     assert.equal(r.registry.withholdSlots(new Set([id])), 'ok');
     assert.equal(info(r.registry, id).slot, null);
+    assert.equal(writes.at(-1)?.has(id), true, 'withheld, written');
     const hold = r.registry.holdSlot(id);
     assert.ok(hold !== null);
     await endIt(r, id);
     assert.equal(r.registry.nextSlot(), 1, 'nothing held: number 1 is free');
     const next = box.spec();
     assert.equal(hold.take(next.id), null, 'no number to pass on');
+    // As F43 frees an ended terminal's: it is in no stored set any more (neither moved nor withheld).
+    assert.equal(writes.at(-1)?.has(id), false, 'its withheld entry went at the take');
     await r.registry.spawn({ ...next, meta: { ...next.meta, slot: null } });
     hold.release();
     assert.equal(r.registry.withholdSlots(new Set([next.id])), 'ok', 'withheld as its session’s');
