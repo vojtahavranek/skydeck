@@ -1165,10 +1165,13 @@ says the program exited, a lost terminal's program that may no longer run, the c
 terminal that still held one — and after every refresh that worked, so that the gaps a start finds
 are filled at its first refresh. It gives none while a keeper of terms/ is still being found (7.3):
 that keeper's slot is known only at its `hello`, so a slot that looks free may be its own; once
-every keeper has answered or was given up, the true gaps are filled. Free is `nextSlot`'s rule, so a
-slot held for another terminal (moved to a keeper being found, or held otherwise) is never given;
-never to a terminal whose program ended, never started or was lost (F43), and never away from one
-whose keeper only stopped answering. A terminal on no row of Open waits until it has one: the second
+every keeper has answered or was given up, the true gaps are filled. The server's log says once
+`freed numbers: none given while a keeper is still being found` while that holds a free slot back
+(a limit: a keeper that is never given up and never answers holds it back for as long as it is
+being found). Never to a terminal whose program has its exit, applied or still waiting to be
+(ended, not started, lost), or whose `hello` said it exited (F43). Free is `nextSlot`'s rule, so a
+slot held for another terminal (moved to a keeper being found, or held otherwise) is never given,
+and none is taken away from a terminal whose keeper only stopped answering. A terminal on no row of Open waits until it has one: the second
 terminal of the window that shows a session the first one has the row of (a `/resume` inside it),
 and a running terminal whose row is under Recent (its session ended a moment before its program).
 The row of the terminal that got a slot goes to its slot's place, exactly as a new terminal with

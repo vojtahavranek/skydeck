@@ -7,7 +7,13 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { NS_PER_DAY } from '../../src/platform/time.ts';
-import { createFill, orderAfterFill, waitingTerminals } from '../../src/window/freed-numbers.ts';
+import {
+  createFill,
+  HELD_LINE,
+  orderAfterFill,
+  persistFill,
+  waitingTerminals,
+} from '../../src/window/freed-numbers.ts';
 import type { FillDeps, FillInput } from '../../src/window/freed-numbers.ts';
 import type { TerminalInfo } from '../../src/window/hub.ts';
 import type { Registry } from '../../src/window/terminals.ts';
@@ -185,6 +191,8 @@ function glue(
   inputs: () => number;
   failWith: (error: unknown) => void;
   inside: (run: (() => void) | null) => void;
+  setFree: (slot: number | null) => void;
+  setFinding: (on: boolean) => void;
 } {
   const calls: string[][] = [];
   const events: string[] = [];
@@ -194,12 +202,14 @@ function glue(
   let failure: unknown = null;
   let nested: (() => void) | null = null;
   let read = 0;
-  const free = options.free === undefined ? 6 : options.free;
+  let free = options.free === undefined ? 6 : options.free;
+  let finding = false;
   const registry: Pick<Registry, 'list' | 'nextSlot' | 'giveSlots'> = {
     list: () => input?.terminals ?? [],
     nextSlot: () => free,
     giveSlots(candidates, write) {
       calls.push([...candidates]);
+      if (finding) return 'finding';
       const first = candidates[0];
       if (first === undefined || free === null) return 'ok';
       const given = new Map([[first, free]]);
@@ -249,6 +259,12 @@ function glue(
     },
     inside: (run) => {
       nested = run;
+    },
+    setFree: (slot) => {
+      free = slot;
+    },
+    setFinding: (on) => {
+      finding = on;
     },
   };
 }
@@ -328,5 +344,64 @@ describe("the fill's glue on the server (#189)", () => {
     const stopped = createFill({ ...deps, stopping: () => true });
     stopped.run();
     assert.equal(calls.length, 1);
+  });
+});
+
+describe('the fill: what it says in the log, and its writes (#189)', () => {
+  test('held back while a keeper is being found: said once, and again only after a run that gave or had nothing to give', () => {
+    const { fill, logs, setFinding, setFree, events } = glue(issue(12, { ended: [6] }));
+    setFinding(true);
+    fill.run();
+    fill.run();
+    assert.deepEqual(logs, [HELD_LINE]);
+    assert.deepEqual(events, [], 'nothing given meanwhile');
+    setFinding(false);
+    fill.run();
+    assert.deepEqual(events, ['persist', 'changed', 'remember'], 'given once the finding is over');
+    setFinding(true);
+    fill.run();
+    assert.deepEqual(logs, [HELD_LINE, HELD_LINE], 'held again after a give: said again');
+    setFree(null);
+    fill.run(); // nothing to give
+    setFree(6);
+    fill.run();
+    assert.equal(logs.length, 3, 'and after a run with nothing to give');
+  });
+
+  test('a write that fails, then nothing to give (the waiting terminal ended): a later failure of the same kind is logged again', () => {
+    const { fill, logs, failWith, setFree } = glue(issue(12, { ended: [6] }));
+    failWith(busy());
+    fill.run();
+    setFree(null);
+    fill.run();
+    setFree(6);
+    fill.run();
+    assert.deepEqual(logs, [
+      'freed numbers: a free number was not given (the database is busy)',
+      'freed numbers: a free number was not given (the database is busy)',
+    ]);
+  });
+
+  test('persistFill: the numbers alone without a kept order; with one, both in one transaction', () => {
+    const events: string[] = [];
+    const store = {
+      transaction<T>(run: () => T): T {
+        events.push('begin');
+        const result = run();
+        events.push('commit');
+        return result;
+      },
+      setKv: (key: string) => {
+        events.push(`set ${key}`);
+      },
+      deleteKv: (key: string) => {
+        events.push(`delete ${key}`);
+      },
+    };
+    persistFill(store, new Map([[term(10), 6]]), null);
+    assert.deepEqual(events, ['set window_slots'], 'no kept order: nothing of one is written');
+    events.length = 0;
+    persistFill(store, new Map([[term(10), 6]]), [nth(1), nth(10)]);
+    assert.deepEqual(events, ['begin', 'set window_slots', 'set window_open_order', 'commit']);
   });
 });

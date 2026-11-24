@@ -14,7 +14,7 @@ import type { TestContext } from 'node:test';
 
 import { procStartFromStat } from '../../src/claude/procstat.ts';
 import type { Platform } from '../../src/platform/types.ts';
-import { createFill } from '../../src/window/freed-numbers.ts';
+import { createFill, HELD_LINE } from '../../src/window/freed-numbers.ts';
 import { encodeFrame, frameReader } from '../../src/window/frames.ts';
 import type { KeeperSpec } from '../../src/window/frames.ts';
 import { SESSION, sleep, until } from '../helpers/keeper.ts';
@@ -135,6 +135,20 @@ async function openAll(
 
 const ONE_TO_NINE = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
+/**
+ * Waits until the wall clock, which a keeper's start deadline is read on, is a second past
+ * `startBy`, and a second more: the keeper has then ended its program as not started. (A fixed
+ * sleep is not enough where that clock runs slow or steps back.)
+ */
+async function pastOnTheWallClock(box: RegistryBox, startBy: bigint): Promise<void> {
+  await until(
+    () => box.tp.platform.clock.nowNs() > startBy + 1_000_000_000n,
+    'past the deadline on the wall clock',
+    20_000,
+  );
+  await sleep(1000);
+}
+
 describe('registry: giveSlots (#189)', () => {
   test("the lowest free numbers to the first candidates that may take one, in the caller's order; written before applied, announced once; the others keep theirs", async (t) => {
     const box = await registrySandbox(t);
@@ -231,10 +245,10 @@ describe('registry: giveSlots (#189)', () => {
     const [waiting] = waits as [string];
     // Number 7's keeper ends its program by itself (not started by its deadline) once r1 is gone:
     // 7 is a true gap at the next start.
-    const startBy = String(box.tp.platform.clock.nowNs() + 2_000_000_000n);
-    const seven = await open(box, r1, 7, { startBy });
+    const startBy = box.tp.platform.clock.nowNs() + 2_000_000_000n;
+    const seven = await open(box, r1, 7, { startBy: String(startBy) });
     r1.drop();
-    await sleep(3000);
+    await pastOnTheWallClock(box, startBy);
     // Number 4's keeper does not answer: the new registry goes on finding it.
     const slow = held.get(4) ?? '';
     const keeper = box.keeperOf(slow);
@@ -255,9 +269,14 @@ describe('registry: giveSlots (#189)', () => {
         }),
         'finding',
       );
+      // Said in the log (also by the runs at the hellos, while some had not come yet), and not
+      // again while it holds.
+      const said = fill.logs.length;
+      assert.ok(said >= 1 && fill.logs.every((line) => line === HELD_LINE), fill.logs.join('\n'));
       await sleep(1500);
       fill.run();
       assert.equal(slotOf(r2, waiting), null, 'the waiting terminal took nothing');
+      assert.equal(fill.logs.length, said, 'said once while it holds');
     } finally {
       box.signalKeeper(keeper, 'SIGCONT');
     }
@@ -308,11 +327,15 @@ describe('registry: each moment a number becomes free, with the fill wired as th
     const { held, waits } = await openAll(box, r1, [1, 2, 4, 5, 6, 8, 9], 3);
     // Numbers 7 and 3: keepers that end their programs by themselves (not started by their
     // deadlines) once r1 is gone; the next start finds both with their exits.
-    const deadline = (): string => String(box.tp.platform.clock.nowNs() + 2_000_000_000n);
+    let last = 0n;
+    const deadline = (): string => {
+      last = box.tp.platform.clock.nowNs() + 2_000_000_000n;
+      return String(last);
+    };
     const seven = await open(box, r1, 7, { startBy: deadline() });
     const three = await open(box, r1, 3, { startBy: deadline() });
     r1.drop();
-    await sleep(3000);
+    await pastOnTheWallClock(box, last);
     const r2 = box.registry({ movedSlots: kept.latest(), persistSlots: kept.persist });
     const fill = wire(box, r2, kept);
     await r2.registry.rediscover();
@@ -358,15 +381,20 @@ describe('registry: each moment a number becomes free, with the fill wired as th
 
 /**
  * A keeper played by this test: a socket in terms/ that answers C with a protocol-1 hello (its
- * fields replaced by `over`'s), and a pid line naming this test process (alive; killKeepersIn
- * never signals it).
+ * fields replaced by `over`'s), then, a second later, the frames of `then`, and a pid line naming
+ * this test process (alive; killKeepersIn never signals it).
  */
 async function fakeKeeper(
   t: TestContext,
   box: RegistryBox,
   id: string,
   over: Record<string, unknown> = {},
+  then: readonly (readonly ['D' | 'X', string])[] = [],
 ): Promise<{ stop(): Promise<void> }> {
+  const timers: NodeJS.Timeout[] = [];
+  t.after(() => {
+    for (const timer of timers) clearTimeout(timer);
+  });
   const sockets: Socket[] = [];
   const server: Server = createServer((socket) => {
     sockets.push(socket);
@@ -403,6 +431,13 @@ async function fakeKeeper(
         ...over,
       };
       socket.write(encodeFrame('H', utf8(JSON.stringify(hello))));
+      if (then.length > 0) {
+        timers.push(
+          setTimeout(() => {
+            for (const [type, payload] of then) socket.write(encodeFrame(type, utf8(payload)));
+          }, 1000),
+        );
+      }
     });
   });
   await new Promise<void>((resolve) => server.listen(box.files.termSock(id), resolve));
@@ -511,4 +546,77 @@ describe('registry: a lost terminal and Close, with the fill wired (#189)', () =
       assert.equal(kept.latest().get(waits[0] ?? ''), 1, 'written');
     });
   }
+});
+
+/** A `giveSlots` write that must not happen. */
+const noWrite = (): void => {
+  assert.fail('nothing to give: nothing is written');
+};
+
+const META_NONE = {
+  sessionId: SESSION,
+  kind: 'resume',
+  slot: null,
+  openedNs: '1',
+  build: 'test',
+  label: null,
+};
+
+describe('registry: the terminals giveSlots passes over, each by its own guard (#189)', () => {
+  test('a terminal whose hello said its program exited, its exit not applied yet: still drawn as one that may run, it takes none', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'e5e5e5e5e5e5';
+    // A hello that says the program exited, and no exit frame after it.
+    const exited = { code: 0, signal: null, atNs: '1', notStarted: null };
+    await fakeKeeper(t, box, id, { meta: { ...META_NONE, dir: box.s.home }, exited });
+    const r = box.registry();
+    await r.registry.rediscover();
+    assert.equal(info(r.registry, id).state, 'running', 'drawn as one whose program may run');
+    assert.equal(info(r.registry, id).exit, null, 'its exit is not applied');
+    assert.equal(r.registry.nextSlot(), 1);
+    assert.equal(r.registry.giveSlots([id], noWrite), 'ok');
+    assert.equal(slotOf(r, id), null);
+  });
+
+  test('a lost terminal that never had a number, while its program may still run: it takes none', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'f6f6f6f6f6f6';
+    const keeper = await fakeKeeper(t, box, id, { meta: { ...META_NONE, dir: box.s.home } });
+    const clock = shifted(box);
+    const r = box.registry({ platform: clock.platform });
+    await r.registry.rediscover();
+    assert.equal(slotOf(r, id), null);
+    await keeper.stop();
+    const sock = box.files.termSock(id);
+    if (!existsSync(sock)) writeFileSync(sock, ''); // connecting to a file is refused
+    await until(() => info(r.registry, id).state === 'lost', 'lost', 10_000);
+    assert.equal(r.registry.giveSlots([id], noWrite), 'ok');
+    assert.equal(slotOf(r, id), null);
+  });
+
+  test('a terminal whose exit came but is not applied yet (its screen side behind): it takes none', async (t) => {
+    const box = await registrySandbox(t);
+    const id = 'a7a7a7a7a7a7';
+    // Found and settled first (no keeper is being found then); a second later one record and
+    // the exit: the exit waits for the record's slow write to the screen side.
+    const exit = { code: 0, signal: null, atNs: '2', notStarted: null };
+    await fakeKeeper(t, box, id, { meta: { ...META_NONE, dir: box.s.home } }, [
+      ['D', 'output'],
+      ['X', JSON.stringify(exit)],
+    ]);
+    const r = box.registry({ slowWriteMs: 3000 });
+    await r.registry.rediscover();
+    await until(
+      () =>
+        r.registry
+          .list()
+          .some((one) => one.id === id && one.exit !== null && one.state === 'running'),
+      'the exit stored, not applied',
+      10_000,
+    );
+    assert.equal(r.registry.giveSlots([id], noWrite), 'ok');
+    assert.equal(slotOf(r, id), null);
+    await until(() => info(r.registry, id).state === 'ended', 'the exit applied', 10_000);
+    assert.equal(slotOf(r, id), null);
+  });
 });

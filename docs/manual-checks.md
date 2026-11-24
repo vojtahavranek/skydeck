@@ -2882,8 +2882,10 @@ as the ones after them.
 7. **A restart.** Write down the order and the numbers. In W: `skydeck window --restart`. Expected:
    once the window is back, the same order (the session of W included) and the same numbers, and
    each Ctrl+Shift+1…3 shows the terminal of the row that has that number.
-8. **An ended session gives its number up (follow-up F43).** Type `/exit` in the terminal of the
-   row numbered 1. Expected: its row goes to Recent with no number, its last screen stays on the
+8. **An ended session gives its number up (follow-up F43).** First look under Open: every row of a
+   terminal of the window must have a number (from issue #189 a row without one takes a freed
+   number at once, and this step would read otherwise), so end such sessions first (`/exit`).
+   Type `/exit` in the terminal of the row numbered 1. Expected: its row goes to Recent with no number, its last screen stays on the
    right under `claude exited (status 0)` with Resume and Close; the other rows keep their numbers;
    Ctrl+Shift+1 says `no session in slot 1`. Then Ctrl+Shift+N, the throwaway folder, label
    `move-4`, Enter: `move-4` takes the number 1 and Ctrl+Shift+1 shows its terminal. Then select
@@ -2892,8 +2894,10 @@ as the ones after them.
    takes it.
 9. **A freed number reaches a session that waits for one (issue #189).** Only on a commit that has
    it, and only when nine terminals of the window hold the numbers 1–9 anyway (or open throwaway
-   sessions in the throwaway folder until they do). Ctrl+Shift+N one more time, label `move-10`,
-   Enter. Expected: `move-10` shows under Open below the window's terminals, with no number. Type
+   sessions in the throwaway folder until they do) and every row of a terminal of the window under
+   Open has a number (else the first row without one takes the number below, not `move-10`: read
+   the step with that row). Ctrl+Shift+N one more time, label `move-10`, Enter. Expected:
+   `move-10` shows under Open below the window's terminals, with no number. Type
    `/exit` in the terminal of a throwaway row whose number is lower than 9 (read 4 below as that
    number). Expected: at once, with no message, `move-10` shows the number 4 and stands where 4
    stood (after the row numbered 3, before the one numbered 5), Ctrl+Shift+4 shows its terminal,

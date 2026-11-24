@@ -97,8 +97,8 @@ export interface Registry extends TerminalHub {
   /**
    * #189 (S2 7.6): gives the free slots, lowest first, one each to the first of `candidates`
    * (terminal ids in the caller's order: Open's) that may take one — listed, without a slot, its
-   * program may run (not ended, lost or not started) and its slot never freed (F43) —, until none
-   * is free. Free is `nextSlot`'s rule (`takenSlots`), so whatever that counts as held is never
+   * program may run (not ended, lost or not started, no exit waiting to be applied) and its slot
+   * never freed (F43) —, until none is free. Free is `nextSlot`'s rule (`takenSlots`), so whatever that counts as held is never
    * given. Never takes a slot from a terminal. Nothing while a keeper is still being found (its
    * slot is known only at its hello, so a slot that looks free may be its own): 'finding'; nothing
    * once `stopAll` ran: 'stopping'. The moved slots, and the slots given, are written by `write`
@@ -1657,7 +1657,11 @@ export function createRegistry(deps: RegistryDeps): Registry {
       for (const id of candidates) {
         const term = terms.get(id);
         if (term === undefined || given.has(id) || term.info.slot !== null) continue;
-        if (term.slotFreed || isOver(term.info.state)) continue;
+        // Its program is over: its slot was freed (also by a hello that said it exited, before its
+        // exit frame), or it has its exit — ended, not started, lost (also one in its 60 s that never
+        // had a slot), or an exit that came and waits to be applied (every one of those is stored
+        // before its state is set).
+        if (term.slotFreed || term.info.exit !== null) continue;
         const slot = lowestFree(taken);
         if (slot === null) break;
         taken.add(slot);

@@ -10,7 +10,7 @@ import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
 import type { ListMessage } from '../../src/window/protocol.ts';
-import { until } from '../helpers/keeper.ts';
+import { stillRuns, until } from '../helpers/keeper.ts';
 import { connectTestPage, serverSandbox } from '../helpers/window.ts';
 import type { ServerSandbox, TestPage, TestServer } from '../helpers/window.ts';
 
@@ -165,20 +165,19 @@ describe('a freed number goes to a running terminal without one (#189)', () => {
     const programs = [6, 8].map((slot) => {
       const term = server.server.hub.list().find((one) => one.id === termWith(list, slot));
       assert.ok(term?.program !== null && term?.program !== undefined, `number ${slot} runs`);
-      return term.program.pid;
+      return { ...term.program };
     });
     await server.server.stop('the test ends two programs while no server runs');
-    for (const pid of programs) process.kill(pid, 'SIGKILL');
+    for (const { pid, procStart } of programs) {
+      // The stand-in this sandbox's server started, and still that process (its process start),
+      // checked right before the signal, with no await between.
+      assert.ok(Number.isSafeInteger(pid) && pid > 1, `not a pid to signal: ${pid}`);
+      assert.ok(pid !== process.pid && pid !== process.ppid, 'never this process or its parent');
+      assert.ok(stillRuns(pid, procStart), `program ${pid} no longer runs`);
+      process.kill(pid, 'SIGKILL');
+    }
     await until(
-      () =>
-        programs.every((pid) => {
-          try {
-            process.kill(pid, 0);
-            return false;
-          } catch {
-            return true;
-          }
-        }),
+      () => programs.every(({ pid, procStart }) => !stillRuns(pid, procStart)),
       'the two programs are gone',
       10_000,
     );

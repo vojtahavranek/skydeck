@@ -79,7 +79,7 @@ import type { Seen } from './seen.ts';
 import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
 import { readMovedSlots, writeMovedSlots } from './moved-slots.ts';
-import { createFill } from './freed-numbers.ts';
+import { createFill, persistFill } from './freed-numbers.ts';
 import { createReorder, persistMove } from './reorder.ts';
 import { createOpenOrder } from './open-order.ts';
 import { createRestoreMemory } from './restore-memory.ts';
@@ -669,8 +669,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       openOrder,
       // The numbers alone without a kept order; with one, both or neither, as a move's.
       persist: (moved, order) => {
-        if (order === null) writeMovedSlots(deck.store, moved);
-        else persistMove(deck.store, moved, order);
+        persistFill(deck.store, moved, order);
       },
       remember: () => {
         tookOpen(false);
