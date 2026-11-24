@@ -786,7 +786,15 @@ describe('registry: the number of a terminal whose program is over (F43)', () =>
       ]),
     );
     r1.drop();
-    await sleep(3000);
+    // a's deadline is wall-clock time and its keeper reads the wall clock itself: it has passed
+    // there once Date.now(), the same clock, is past it, however far the clock stepped back
+    // meanwhile (#202); then a second for the keeper to end the terminal.
+    await until(
+      () => BigInt(Date.now()) * 1_000_000n > BigInt(startBy),
+      "a's deadline passed on the wall clock",
+      30_000,
+    );
+    await sleep(1000);
     const r2 = box.registry({ movedSlots: kept.latest(), persistSlots: kept.persist });
     await r2.registry.rediscover();
     await until(() => info(r2.registry, a).state === 'not-started', "a's exit applied", 10_000);

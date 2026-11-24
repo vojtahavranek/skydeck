@@ -7,11 +7,14 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import type { Stats } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
+
+import { clockStepSeam } from './clock-step.ts';
 
 export interface Sandbox {
   /** The temporary directory everything below lives in. Its real path, with no symlinks. */
@@ -23,12 +26,18 @@ export interface Sandbox {
   claudeHome: string;
   /** The only directory on the sandbox's `PATH`; empty until a test links programs into it. */
   bin: string;
-  /** Links system programs (found in /usr/bin or /bin) into `bin`; one already there is kept. */
+  /**
+   * Links system programs (found in /usr/bin or /bin) into `bin`; one already there is kept. While
+   * SKYDECK_TEST_CLOCK_STEP is set (test/helpers/clock-step.ts) `python3` and `date` are written as
+   * wrappers that see the stepped wall clock instead.
+   */
   link: (...programs: string[]) => void;
   /**
    * The complete environment for a child process. Nothing is inherited from the developer's
    * shell. Extra entries override the defaults; an entry set to `undefined` removes one. It
    * carries SKYDECK_TEST_NO_WINDOWS=1, so a skydeck started with it refuses Windows programs (A32).
+   * While SKYDECK_TEST_CLOCK_STEP is set it also carries that variable and the `NODE_OPTIONS` that
+   * give a Node.js child the stepped wall clock (test/helpers/clock-step.ts).
    */
   env: (extra?: Record<string, string | undefined>) => Record<string, string>;
 }
@@ -54,6 +63,7 @@ export function sandbox(t: TestContext): Sandbox {
   for (const dir of [home, skydeckHome, claudeHome, bin]) {
     mkdirSync(dir);
   }
+  const clockSteps = clockStepSeam();
   return {
     root,
     home,
@@ -67,6 +77,11 @@ export function sandbox(t: TestContext): Sandbox {
         }
         const real = ['/usr/bin', '/bin'].map((d) => join(d, program)).find((p) => existsSync(p));
         assert.ok(real, `${program} not found on this machine`);
+        const stepped = clockSteps?.script(program) ?? null;
+        if (stepped !== null) {
+          writeFileSync(join(bin, program), stepped, { mode: 0o755 });
+          continue;
+        }
         symlinkSync(real, join(bin, program));
       }
     },
@@ -77,6 +92,7 @@ export function sandbox(t: TestContext): Sandbox {
         CLAUDE_CONFIG_DIR: claudeHome,
         PATH: bin,
         SKYDECK_TEST_NO_WINDOWS: '1',
+        ...clockSteps?.env,
         ...extra,
       };
       return Object.fromEntries(
