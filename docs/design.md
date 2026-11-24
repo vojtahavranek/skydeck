@@ -444,8 +444,9 @@ Marks are shown next to the state.
   that prompt. A limit: a prompt sent within such a step back of the clock right after a parking can
   be dated before it and then does not end it; the next prompt does.
 - **First run.** `skydeck install` offers to mark as done every listed session whose last
-  activity is older than `firstRunDoneAfterDays` (default 7) and that is not running. It shows
-  the count and does nothing unless confirmed.
+  activity is older than `firstRunDoneAfterDays` (default 7) and that is not running and not
+  parked (follow-up F44: a parking is a mark the user set on purpose, which a bulk yes must not
+  end). It shows the count and does nothing unless confirmed.
 - **Carry over after `/clear`** (follow-up F40). Only the window asks, on the new session
   (design-step-2.md 12.6); the commands, `show` and the interactive list neither ask nor copy.
   - *Which link.* The new session's latest link of kind `clear` (5.3); `switch`, `fork` and
@@ -486,15 +487,16 @@ Marks are shown next to the state.
 Every session known from events or transcripts, except: sessions whose transcript has an
 `entrypoint` other than `cli`; sessions hidden by done (shown with `--all`); and sessions that are
 `expired` and have nothing the user attached: no label, no group set by the user, no note, no
-attached pull request and no ticket (a group that `groupPattern` takes from the title does not
+attached pull request, no ticket and no parking (follow-up F44: a parked session is listed whatever
+its age; it is not hidden, so it needs no `--all`) (a group that `groupPattern` takes from the title does not
 count, or an expired session with a ticket key in its title would stay in the list for ever). A
 session that is not running and has no transcript is never listed, not even with `--all`: there is
 nothing to resume, and one that never received a prompt has no transcript (14). Follow-up F33: a
 session marked `empty-copy` (6.3) — a copy Claude Code made that has had no message yet and neither
 works nor asks — that the user did not keep (by setting what only the user can set: a label, a
-group, a note, a ticket, or a pull request attached by hand; one skydeck attached by itself from a
-`pr-link` record does not count, since Claude Code may have copied that record with the title) is
-listed only where done ones are (`--all`, the interactive list's `a`), running or not, and so is in
+group, a note, a ticket, a pull request attached by hand, or a parking (F44); one skydeck attached
+by itself from a `pr-link` record does not count, since Claude Code may have copied that record with
+the title) is listed only where done ones are (`--all`, the interactive list's `a`), running or not, and so is in
 no count of the list; the window lists it too while a terminal of the window shows it
 (design-step-2.md 12.1). A copy started by hand with `--fork-session` is the same: skydeck cannot
 tell the two apart, and what it would have to remember does not outlive the process. Its first turn
@@ -908,8 +910,9 @@ they stay.
 
 ### 7.8 Restore
 
-**The set.** By default: the sessions marked `ended-unexpectedly`, not done, not expired and not
-`empty-copy` (follow-up F33: it has nothing to restore; also not with `--all`),
+**The set.** By default: the sessions marked `ended-unexpectedly`, not done, not parked (follow-up
+F44: a restore leaves a parked session ended, to be resumed from its row; also not with `--all`),
+not expired and not `empty-copy` (follow-up F33: it has nothing to restore; also not with `--all`),
 whose last holder belongs to the **latest earlier boot** in which any session was held: of the
 boots other than the current one that have a `start` or `observed` event, the one whose last
 event is the latest. A `scripted` event (5.3) counts for neither: a scripted run is not what the

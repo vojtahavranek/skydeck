@@ -8,6 +8,7 @@ import {
   buildList,
   buildRows,
   flatRows,
+  isHiddenCopy,
   isListed,
   matchesFilter,
 } from '../../src/sessions/list.ts';
@@ -325,6 +326,17 @@ test('shortId is the first 8 characters; hasNote is true iff there is a note; do
   assert.equal(plain.done, false);
 });
 
+test("F44: parked is the derived session's parked; the time stays on the session", () => {
+  const row = rowOf(ds({ id: S1, parked: true, parkedAtNs: T0 }));
+  assert.equal(row.parked, true);
+  assert.equal(row.done, false);
+  assert.equal(row.session.parkedAtNs, T0);
+  // A stored time whose parking ended (input after it) is no parking.
+  const ended = rowOf(ds({ id: S1, parked: false, parkedAtNs: T0 }));
+  assert.equal(ended.parked, false);
+  assert.equal(rowOf(ds({ id: S1 })).parked, false);
+});
+
 test('a row carries the state, times, marks, continuation and the derived session itself', () => {
   const session = ds({
     id: S1,
@@ -423,6 +435,28 @@ test('isListed: an expired session with only a ticket (F18) is listed: something
   assert.equal(isListed(row, false), true);
   assert.equal(isListed(row, true), true);
   assert.equal(isListed(rowOf(expired, { metas: [meta(S1)] }), false), false, 'a row without it');
+});
+
+test('isListed: an expired parked session with nothing else attached (F44) is listed, whatever its age', () => {
+  const expired = { id: S1, marks: ['expired' as const], transcript: { missingSinceNs: T0 } };
+  const row = rowOf(ds({ ...expired, parked: true, parkedAtNs: T0 - 400n * 24n * 3600n * SEC }));
+  assert.equal(isListed(row, false), true);
+  assert.equal(isListed(row, true), true);
+  const ended = rowOf(ds({ ...expired, parked: false, parkedAtNs: T0 - SEC }));
+  assert.equal(isListed(ended, false), false, 'a parking that ended attaches nothing');
+});
+
+test('isListed: a parked empty copy (F44) is kept by the user, so listed', () => {
+  const copy = { id: S2, copyOf: S1, marks: ['empty-copy' as const] };
+  const parked = rows([ds({ id: S1 }), ds({ ...copy, parked: true, parkedAtNs: T0 })])[1];
+  assert.ok(parked);
+  assert.equal(parked.copyOf?.keptByUser, true);
+  assert.equal(isHiddenCopy(parked), false);
+  assert.equal(isListed(parked, false), true);
+  const plain = rows([ds({ id: S1 }), ds(copy)])[1];
+  assert.ok(plain);
+  assert.equal(plain.copyOf?.keptByUser, false);
+  assert.equal(isListed(plain, false), false);
 });
 
 test('buildRows: the ticket (F18) is its address and the name ticketText gives with the configured ticketUrl', () => {

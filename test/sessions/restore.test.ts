@@ -10,6 +10,7 @@ import { refresh } from '../../src/sessions/refresh.ts';
 import {
   latestEarlierBoot,
   planRestore,
+  restorable,
   restorePlan,
   runRestore,
 } from '../../src/sessions/restore.ts';
@@ -159,6 +160,26 @@ test('--all adds what ended unexpectedly in any other boot, the current one incl
     S6_ENTRY,
     S9_ENTRY,
   ]);
+});
+
+test('F44: a parked session that ended unexpectedly is no entry, with and without --all; its parking is not ended', (t) => {
+  const d = restartedMachine(t);
+  d.deck.store.updateMeta(sid(1), { parkedAtNs: NOW }, NOW); // the latest earlier boot
+  d.deck.store.updateMeta(sid(6), { parkedAtNs: NOW }, NOW); // the current boot (--all)
+  refresh(d.deck);
+  const rows = loadRows(d.deck);
+  for (const id of [sid(1), sid(6)]) {
+    const row = rows.find((candidate) => candidate.id === id);
+    assert.equal(row?.parked, true, id);
+    assert.ok(row?.marks.includes('ended-unexpectedly'), id);
+    assert.equal(row !== undefined && restorable(row), false, id);
+  }
+
+  const entries = planRestore(rows, d.deck.store.events(), BOOT_B, false);
+  assert.deepEqual(entries.map(shape), [S2_ENTRY, S3_ENTRY, S9_ENTRY]);
+  const all = planRestore(rows, d.deck.store.events(), BOOT_B, true);
+  assert.deepEqual(all.map(shape), [S2_ENTRY, S3_ENTRY, S5_ENTRY, S9_ENTRY]);
+  assert.equal(d.deck.store.meta(sid(1))?.parkedAtNs, NOW);
 });
 
 test('entries come out in the order of the given rows', (t) => {

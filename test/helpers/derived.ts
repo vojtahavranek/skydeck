@@ -59,6 +59,8 @@ export function ds(
     bootId: BOOT_A,
     doneAtNs: null,
     hidden: false,
+    parkedAtNs: null,
+    parked: false,
     ...rest,
   };
 }

@@ -103,6 +103,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
     );
     const transcript = transcriptOf.get(id) ?? null;
     const doneAtNs = metaOf.get(id)?.doneAtNs ?? null;
+    const parkedAtNs = metaOf.get(id)?.parkedAtNs ?? null;
 
     const holders: Holder[] = (holdingEvents.get(id) ?? [])
       .filter(isAlive)
@@ -152,6 +153,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
           (file) => isFileOf(file, lastHolding.process) && file.status === 'busy',
         ));
     const continuedBy = continuation.get(id);
+    const hidden = doneAtNs !== null && !activityAfter(doneAtNs, transcript, sessionEvents);
     const copyOf = copied.get(id)?.fromSession;
     // F33 (ruled): a copy whose process works, or waits for an answer to a question (a dialog), is
     // in use whatever its transcript says yet; only one idle at its first prompt, or not running, is
@@ -199,7 +201,11 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
       ),
       bootId: input.bootId,
       doneAtNs,
-      hidden: doneAtNs !== null && !activityAfter(doneAtNs, transcript, sessionEvents),
+      hidden,
+      parkedAtNs,
+      // F44 (7.1): only the user's own input ends a parking, never a start. Done wins when a
+      // database changed by other means holds both marks.
+      parked: parkedAtNs !== null && !hidden && !inputAfter(parkedAtNs, transcript),
       ...(copyOf === undefined ? {} : { copyOf }),
     };
   });
@@ -340,13 +346,18 @@ function compareRanks(a: HoldingRank, b: HoldingRank): number {
   return Number(a.goesOn) - Number(b.goesOn) || compareNs(a.atNs, b.atNs) || a.eventId - b.eventId;
 }
 
+/** 7.1: the user's own input (5.6) in the transcript later than `ns` (F44: what ends a parking). */
+function inputAfter(ns: Ns, transcript: TranscriptRow | null): boolean {
+  return transcript?.lastUserNs != null && transcript.lastUserNs > ns;
+}
+
 /** 7.1: user input in the transcript, or a start by `startup` or `resume`, after the done time. */
 function activityAfter(
   doneAtNs: Ns,
   transcript: TranscriptRow | null,
   sessionEvents: readonly EventRow[],
 ): boolean {
-  if (transcript?.lastUserNs != null && transcript.lastUserNs > doneAtNs) {
+  if (inputAfter(doneAtNs, transcript)) {
     return true;
   }
   return sessionEvents.some(

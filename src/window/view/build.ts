@@ -165,6 +165,8 @@ function newSessionRow(terminal: TerminalInfo): ListRow {
     bootId: null,
     doneAtNs: null,
     hidden: false,
+    parkedAtNs: null,
+    parked: false,
   };
   return {
     id,
@@ -184,6 +186,7 @@ function newSessionRow(terminal: TerminalInfo): ListRow {
     note: null,
     continuedFrom: null,
     done: false,
+    parked: false,
     prs: [],
     chip: null,
     ticket: null,

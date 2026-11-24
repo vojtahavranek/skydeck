@@ -2426,7 +2426,8 @@ gives them back when its program never started (7.8).
   failed unexpectedly (<kind>)" on the card), never its message (ruled by the plan owner, review of
   plan task 32).
 - **Restore.** The banner (12.7) → the shared restore planning (11.1: design 7.8's set and preselection, on rows
-  refreshed just before, in the set's order: from follow-up F37 that of the slots the sessions
+  refreshed just before, which never holds a parked session (follow-up F44: it stays ended, and is
+  resumed from its row like any other, still parked), in the set's order: from follow-up F37 that of the slots the sessions
   last had in the window in their boot, from follow-up F42 the order they last had under Open
   there, then list order, design 7.8) → `runRestore` with the
   window terminal, the entries in that order, so that their new slots, each the lowest free one,
@@ -3687,7 +3688,8 @@ The banner is the view model's (4.3: the page decides no rule). It offers design
 of the latest earlier boot, in its order (from follow-up F37 that of the slots the sessions last
 had in the window in that boot, from follow-up F42 the order they last had under Open there, then
 list order: design 7.8), each session once, every text sanitised as the list's
-are; the last activity is that boot's last event (11.1). An earlier boot whose id is not of the
+are; a parked session is never in it (follow-up F44, design 7.8), nor in the switcher's offer,
+which is the banner's; the last activity is that boot's last event (11.1). An earlier boot whose id is not of the
 form of `/proc/sys/kernel/random/boot_id` (a lower-case UUID) gets no offer: "Not now" could not
 name it. "Not now" names the boot the banner offers and is stored only when that is still the one
 offered (otherwise `this offer to restore is no longer shown`, nothing stored); while it is, the

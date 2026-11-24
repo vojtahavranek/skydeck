@@ -193,11 +193,12 @@ describe('markDone, markUndone', () => {
 });
 
 describe('markParked, markUnparked, parkTime (follow-up F44)', () => {
-  /** The session's row as `markParked` reads it, `parked` as given. */
+  /** The session's row as the list reads it now, which `markParked` is given. */
   function target(d: TestDeck, sessionId: string, parked: boolean) {
     const row = loadRows(d.deck).find((candidate) => candidate.id === sessionId);
     assert.ok(row, `a row of ${sessionId}`);
-    return { ...row, parked };
+    assert.equal(row.parked, parked);
+    return row;
   }
 
   /** Every patch `updateMeta` is called with from now on. */
@@ -293,8 +294,10 @@ describe('markParked, markUnparked, parkTime (follow-up F44)', () => {
     const first = meta(d, S1);
     d.clock.setNs(T0 + 60n * SEC);
     const seen = patches(d);
+    const row = loadRows(d.deck).find((candidate) => candidate.id === S1);
+    assert.equal(row?.parked, true, 'derived as parked');
 
-    assert.equal(markParked(d.deck, target(d, S1, true)), false);
+    assert.equal(row !== undefined && markParked(d.deck, row), false);
 
     assert.deepEqual(seen, []);
     assert.deepEqual(meta(d, S1), first);

@@ -130,7 +130,7 @@ export function parkTime(nowNs: Ns, lastUserNs: Ns | null): Ns {
 }
 
 /** What `markParked` reads of a row: its id, whether it is parked now, its transcript. */
-export type ParkTarget = Pick<ListRow, 'id' | 'session'> & { readonly parked: boolean };
+export type ParkTarget = Pick<ListRow, 'id' | 'parked' | 'session'>;
 
 /**
  * Follow-up F44 (design 7.1): parks the session, and ends its done mark in the same statement.
