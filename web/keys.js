@@ -35,7 +35,7 @@
  *   | { kind: 'fold' } | { kind: 'unfold' } | { kind: 'enter' } | { kind: 'filter' }
  *   | { kind: 'show-done' } | { kind: 'escape' } | { kind: 'reload' }
  *   | { kind: 'edit', what: EditWhat } | { kind: 'done' } | { kind: 'reorder', by: 1 | -1 }
- *   | { kind: 'carry' } | { kind: 'flags' } | { kind: 'park' }} ListAction
+ *   | { kind: 'carry' } | { kind: 'flags' } | { kind: 'park' } | { kind: 'restart' }} ListAction
  */
 
 /**
@@ -129,7 +129,7 @@ export function terminalKey(e) {
  * under Caps Lock too; Caps Lock alone (`K` without Shift) moves nothing. Follow-up F40: `c` gives
  * the keyboard to the carry-over bar (`carry`). Issue #188: `f` opens the resume card's "Other
  * flags…" (`flags`). Follow-up F44: `w` ("waits") parks the selected session, or un-parks a
- * parked one (`park`; app.js decides which).
+ * parked one (`park`; app.js decides which). Issue #166: `r` opens the dialog "Restart" (`restart`).
  * @param {KeyLike} e
  * @returns {ListAction | null}
  */
@@ -177,6 +177,8 @@ export function listKey(e) {
       return { kind: 'flags' };
     case 'w':
       return { kind: 'park' };
+    case 'r':
+      return { kind: 'restart' };
   }
   if (e.shiftKey) {
     return null;

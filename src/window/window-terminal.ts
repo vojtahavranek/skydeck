@@ -11,6 +11,7 @@ import type { LaunchSpec, OpenResult, Terminal } from '../terminals/types.ts';
 import { programEnvironment } from './env.ts';
 import type { KeeperExit, KeeperSpec } from './frames.ts';
 import { KEEPER_PROTOCOL } from './frames.ts';
+import type { SlotHold } from './hub.ts';
 import type { RuntimeFiles } from './runtime.ts';
 import { KeeperStartError } from './terminals.ts';
 import type { Registry } from './terminals.ts';
@@ -118,10 +119,15 @@ function startAndWait(deps: WindowTerminalDeps, id: string): Promise<OpenResult>
  * protected by no lock of its own: it is answered { ok: false, timedOut: false } without spawning
  * (contract 2.6, ruled in #39). Any other throw (a spec the registry cannot take) rejects, which
  * `openSafely` turns into a failed open.
+ *
+ * Issue #166: with a restart's `hold` the terminal is opened with the held number (`hold.take`,
+ * right before the spawn, in the same step) in place of the lowest free one, and takes the held
+ * terminal's place in Open's order.
  */
 export function windowTerminal(
   deps: WindowTerminalDeps,
   size: { cols: number; rows: number },
+  hold?: SlotHold,
 ): Terminal {
   return {
     name: 'window',
@@ -154,7 +160,7 @@ export function windowTerminal(
         meta: {
           sessionId: spec.sessionId,
           kind: spec.kind,
-          slot: registry.nextSlot(),
+          slot: hold === undefined ? registry.nextSlot() : hold.take(id),
           openedNs: String(platform.clock.nowNs()),
           build: deps.build,
           label: spec.label,

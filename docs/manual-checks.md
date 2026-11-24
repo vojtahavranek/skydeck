@@ -30,8 +30,10 @@ window (follow-up F41), at "The tour of the window"; W46 checks copy on select i
 terminal (issue #184), at "Copy on select"; W47 checks the carry over after `/clear` (follow-up
 F40), at "Carry over after /clear"; W48 checks the list's width set by a drag (issue #192), at "The
 list's width"; W49 checks resuming a session with other flags (issue #188), at "Resuming with other
-flags"; W50 checks parking a session (follow-up F44), at "Parked"; W51 checks how often the window
-checks for a newer skydeck by itself (follow-up F38's choice), at "How often updates are checked".
+flags"; W50 checks parking a session (follow-up F44), at "Parked"; W51 checks restarting a session
+from the window (issue #166), at "Restarting a session from the window"; W52 checks how often the
+window checks for a newer skydeck by itself (follow-up F38's choice), at "How often updates are
+checked".
 
 Setup:
 
@@ -3409,18 +3411,76 @@ version and your two layouts; whether Windows showed any notification in step 7.
 
 Not tried before this check was written: all of it, in Edge and with real Claude Code.
 
+## Restarting a session from the window
+
+The check of restarting a session (issue #166, with part 2 of #188; design.md 7.6 "Other flags";
+design-step-2.md 12.5, 12.10; [install.md](install.md), "Restarting a session"): W51, in your
+window, with real Claude Code, on one throwaway session in a scratch folder. Commands are typed in
+W, a WSL terminal of your own (never a `!` command inside Claude Code). The tests run it against the
+stand-in program, which ends at once on its hang-up and shows no model; only here does Claude Code
+end on the window's hang-up, start again on the same conversation and run with the flags.
+
+## W51. A throwaway session restarted, then restarted with another model
+
+Setup: skydeck updated to a commit that has issue #166 (`skydeck update`, W32); the window open.
+Start a throwaway session from the New form (`+ New`, or Ctrl+Shift+N) in a scratch folder: the
+field `Flags for claude` empty, the field `Label` holding `restart check`, then `Start`. Once its
+terminal shows Claude Code's prompt and the key bar says `Focus: terminal` (else press Ctrl+Shift+L
+until it does), type `Reply with the single word ok, in this chat, with no tool and no file.` and
+Enter, and wait for the answer. Note the number before its row in Open. Throughout: type a word
+only where the step says the keyboard is (the key bar names the zone; a field shows its caret). In
+the list a letter is a key: `d` marks the session done, `w` parks it at once, `l`, `n` and `t` open
+a dialog on it.
+
+1. **The dialog.** Click the throwaway's row, then press `Restart` in the header. Expected: a
+   dialog over the window, `Restart: restart check`, `It ends claude and resumes this session
+   here, with the same flags.`, the buttons `Restart`, `Other flags…` and `Cancel`, the last one
+   outlined (it has the keyboard). Press Tab: `Cancel` stays outlined (Tab stops there). Press ←:
+   `Other flags…` is outlined; type `x`: `Cancel` is outlined again, and ← now moves nothing.
+   Press Enter: the dialog closes, nothing happened (the session still answers as before). In each
+   step below, a dialog whose heading names another session is not this check's: press Esc, click
+   the throwaway's row, and start the step again.
+2. **A plain restart.** In W, `skydeck show <its short id>` and note its `holder:` line (its pid).
+   Press Ctrl+Shift+L until the key bar says `Focus: list`, then `r`. Expected: the dialog,
+   headed `Restart: restart check`. Press ←, ← (`Restart` is outlined) and Enter. Expected:
+   `Restarting…` in the dialog, then the dialog closes and the toast says `Restarted.`; the
+   terminal shows Claude Code starting again on the same conversation (ask `What did I ask you
+   before?` once the keyboard is in the terminal: it names the earlier question); the row has the
+   same number and the same place in Open; it is not marked done; the header shows no flags;
+   nothing asked for your attention and no desktop notification came. In W, `skydeck show <its
+   short id>` again: its `holder:` line names another pid.
+3. **Another model.** Press Ctrl+Shift+L until the key bar says `Focus: list`, then `r`
+   (expected: the dialog headed `Restart: restart check`), ← and Enter (`Other flags…`).
+   Expected: the field `Flags for claude`, empty (it was started with none), its caret in it, the
+   button `Restart` and `restarts with these flags · Esc goes back`. Press Esc: the three buttons
+   again, `Other flags…` outlined; Enter: the field again. Only while the caret is in the field:
+   type `--model` and a model you can use other than the one the session ran with (`sonnet`, say),
+   and Enter. Expected: as in step 2, and once Claude Code has started, the header's second line
+   ends in `--model sonnet`. Once the key bar says `Focus: terminal` (else Ctrl+Shift+L), type
+   `/model` and Enter: Claude Code's model picker marks that model; leave it with Esc.
+4. **The flags passed on.** Press Ctrl+Shift+L until the key bar says `Focus: list`, then `r`
+   (expected: the dialog headed `Restart: restart check`), ←, ← and Enter. Expected: as in step 2;
+   the header still ends in `--model sonnet`; once the key bar says `Focus: terminal` (else
+   Ctrl+Shift+L), `/model` and Enter mark the same model (leave with Esc).
+5. **The end.** Type `/exit` and Enter in its terminal, press `Close`, then `Done` in the header.
+
+Write down: for each step whether it went as expected, and the words where they differ; how long a
+restart took; the model the picker marked in steps 3 and 4.
+
+Not tried before this check was written: all of it, in Edge and with real Claude Code.
+
 ## How often updates are checked
 
 The check of how often the window's server looks for a newer skydeck by itself (follow-up F38's
 choice; design-step-2.md 10.1, 12.13, 16.5; [install.md](install.md), "Updating", its part "The
-window says when there is one"): W51, in your window, on your own checkout and `config.json`. It
+window says when there is one"): W52, in your window, on your own checkout and `config.json`. It
 applies nothing: it picks each value of `Check for updates` in Settings' group `Updates`, waits
 for one check that the clock makes, and puts the setting back. The tests run the waits with a fake
 clock against a test server; only here does the check meet the real clock, your remote and your
 network for a quarter of an hour. Commands are typed in W, a WSL terminal of your own (never a `!`
 command inside Claude Code).
 
-## W51. Every 15 minutes, every hour, every day
+## W52. Every 15 minutes, every hour, every day
 
 Setup: skydeck updated to a commit that has this choice (`skydeck update`, W32), then the window
 open; in W, `grep -n updateCheck ~/.config/skydeck/config.json` (write down the line, or that there

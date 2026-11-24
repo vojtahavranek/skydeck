@@ -94,7 +94,9 @@ export function paneFor(selected, rows, terminals, newOpen, selectedRow = null) 
       : (terminals.find((term) => term.sessionId === selected)?.id ?? null);
   const term = termId === null ? undefined : terminals.find((candidate) => candidate.id === termId);
   if (term !== undefined) {
-    return { kind: 'terminal', row, term, ended: isEnded(term) };
+    // Issue #166: a terminal a restart holds shows its screen without the ended bar: the session
+    // comes back in its place.
+    return { kind: 'terminal', row, term, ended: isEnded(term) && term.restarting !== true };
   }
   if (listed === null) {
     return { kind: 'none' };
