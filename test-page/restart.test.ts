@@ -452,7 +452,7 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
   );
 
   await t.test(
-    'the header’s Restart is the first button to give way in a narrow header: no button is cut at any width from 640 px, Restart shown once there is room, `r` still there',
+    'the header’s Restart is the first button to give way in a narrow header, then Park (F44): no button is cut at any width from 640 px, each shown once there is room, `r` still there',
     async (t) => {
       const { page } = await one(t, chromium, {}, { width: 640, height: 500 });
       await clickRow(page, S1);
@@ -473,12 +473,12 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
         });
       const at640 = await header();
       assert.deepEqual(
-        at640.filter((one) => ['Note', 'Restart', 'Done'].includes(one.text)),
+        at640.filter((one) => ['Note', 'Restart', 'Done', 'Park'].includes(one.text)),
         [
           { text: 'Note', inside: true },
           { text: 'Done', inside: true },
         ],
-        'at 640 px: Restart gives way, Note and Done whole',
+        'at 640 px: Restart gives way, then Park; Note and Done whole',
       );
       let shownAt: number | null = null;
       for (let width = 640; width <= 1100; width += 20) {
@@ -493,6 +493,13 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
         if (shownAt === null && now.some((one) => one.text === 'Restart')) shownAt = width;
       }
       assert.ok(shownAt !== null && shownAt <= 900, `Restart shown from ${shownAt} px`);
+      // Park (F44) is back as soon as it has room, and `w` remains at any width.
+      await page.setViewportSize({ width: 660, height: 500 });
+      await sleep(50);
+      assert.ok(
+        (await header()).some((one) => one.text === 'Park' && one.inside),
+        'Park at 660 px',
+      );
       // Narrow again: `r` restarts as before.
       await page.setViewportSize({ width: 640, height: 500 });
       await toZone(page, 'list');

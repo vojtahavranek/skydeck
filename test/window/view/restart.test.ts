@@ -182,3 +182,31 @@ test('without a kept order, among the terminals without a number, the next termi
     [S2, S3, S1],
   );
 });
+
+test('F44: a parked session’s held terminal stays with its row under Parked, with no number', () => {
+  const parked = { ...ds({ id: S1 }), parked: true, parkedAtNs: T0 - 60n * SEC };
+  const message = buildListMessage(
+    input({
+      rows: rows([parked, runningIn(S2, 2)]),
+      terminals: [
+        term(1, {
+          expectedSessionId: S1,
+          slot: null,
+          state: 'ended',
+          exit: EXIT,
+          endable: false,
+          restarting: true,
+        }),
+        term(2, { expectedSessionId: S2, slot: 1 }),
+      ],
+    }),
+  );
+  assert.deepEqual(
+    section(message, 'parked').map((row) => [row.id, row.slot, row.terminal]),
+    [[S1, null, termId(1)]],
+  );
+  assert.deepEqual(
+    section(message, 'open').map((row) => row.id),
+    [S2],
+  );
+});

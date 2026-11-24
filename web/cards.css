@@ -23,6 +23,13 @@
     display: none;
   }
 }
+/* Then Park (F44), whose first line was already short of room for it at a window of 640 px with
+   the list 400 px wide: below this width it gives way too, and `w` in the list remains. */
+@container card-header (max-width: 220px) {
+  .header-park {
+    display: none;
+  }
+}
 .card-header [hidden] {
   display: none;
 }

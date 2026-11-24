@@ -1014,7 +1014,7 @@ is one line, cut with an ellipsis when it is long:
 1. the title, the group chip with its ✎ (or `+ group`), the state, `Note`, `Restart` (only for a
    session running in a terminal of the window that is not marked done, and only while the line
    has room for it: in a narrow right side it is the first to go, and `r` remains; see below),
-   `Done` and `Park`;
+   `Done` and `Park` (in a still narrower one it goes next, and `w` remains);
 2. the directory (whole in its tooltip), `opened today at 14:02 · last active 3m` (`opened` while
    the window shows the session's terminal), where the title comes from (`title: your label`,
    `title: Claude Code's name`, `title: Claude Code's summary` or `title: start time and
@@ -1173,7 +1173,9 @@ restart is not shown as ended unexpectedly and makes no notification. If skydeck
 meanwhile, the toast says so; once the window is back, the session's terminal shows where it got
 to: ended with its bar, or running again. A server stopped while `claude` was still ending did not
 record that end, so the session then reads as ended unexpectedly, as after any end the server did
-not see, and asks for your attention. `r` on any other session says in a toast why it cannot be restarted
+not see, and asks for your attention. A parked session that runs in the window can be restarted
+too: it stays parked and without a number (only a prompt brings a parked session back, not a
+start). `r` on any other session says in a toast why it cannot be restarted
 (not running in this window, marked done, a terminal skydeck cannot end). There is no `skydeck
 restart` command: in a terminal of your own, end `claude` and run `skydeck resume`.
 

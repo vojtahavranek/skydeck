@@ -145,4 +145,34 @@ describe('registry: a restart holds its terminal’s number (#166)', () => {
     hold.release();
     assert.equal(r.registry.nextSlot(), 1);
   });
+
+  test('F44: a withheld terminal (its session parked) holds no number through a restart, and its next terminal gets none; a terminal withheld while held gives the held number up', async (t) => {
+    const box = await registrySandbox(t);
+    const r = box.registry();
+    const id = await running(box, r, 1);
+    const other = await running(box, r, 2);
+    assert.equal(r.registry.withholdSlots(new Set([id])), 'ok');
+    assert.equal(info(r.registry, id).slot, null);
+    const hold = r.registry.holdSlot(id);
+    assert.ok(hold !== null);
+    await endIt(r, id);
+    assert.equal(r.registry.nextSlot(), 1, 'nothing held: number 1 is free');
+    const next = box.spec();
+    assert.equal(hold.take(next.id), null, 'no number to pass on');
+    await r.registry.spawn({ ...next, meta: { ...next.meta, slot: null } });
+    hold.release();
+    assert.equal(r.registry.withholdSlots(new Set([next.id])), 'ok', 'withheld as its session’s');
+    assert.equal(info(r.registry, next.id).slot, null);
+    assert.equal(info(r.registry, other).slot, 2);
+    // Parked while a restart holds it: the held number goes, as any withheld terminal's.
+    const held = r.registry.holdSlot(other);
+    assert.ok(held !== null);
+    assert.equal(r.registry.withholdSlots(new Set([next.id, other])), 'ok');
+    assert.equal(info(r.registry, other).slot, null);
+    await endIt(r, other);
+    const after = box.spec();
+    assert.equal(held.take(after.id), null);
+    held.release();
+    assert.equal(r.registry.nextSlot(), 1);
+  });
 });

@@ -306,10 +306,11 @@ function claimOf(
   }
   const elsewhere = row.state === 'not-running' ? null : (input.elsewhere.get(row.id) ?? null);
   const shown = rowPayload(row, { terminal, elsewhere });
-  const runs = shown.starting || row.state !== 'not-running';
-  // F44: a parked session is under Parked, also while it runs. Issue #166: under Open, with its
-  // number, while a restart holds its terminal (a parked one stays under Parked, with none).
-  const open = (runs || restarting) && !row.parked;
+  // Issue #166: while a restart holds its terminal the session counts as running (under Open, with
+  // its number; a parked one stays under Parked, with none).
+  const runs = shown.starting || row.state !== 'not-running' || restarting;
+  // F44: a parked session is under Parked, also while it runs.
+  const open = runs && !row.parked;
   // F43 (S2 7.6, 12.1): a row under Recent or Earlier never shows a number, also while its
   // terminal still holds one (a lost keeper's program may still run; a session that ended a
   // moment before its program): a number names a session under Open. F44: nor one under Parked.

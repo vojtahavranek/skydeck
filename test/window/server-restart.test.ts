@@ -33,7 +33,7 @@ const MORE = Array.from(
 );
 const NAMES = new Map([S1, S2, S3, ...MORE].map((id, at) => [id, `S${at + 1}`]));
 
-function drawn(list: ListMessage, name: 'open' | 'week' = 'open'): string[] {
+function drawn(list: ListMessage, name: 'open' | 'parked' | 'week' = 'open'): string[] {
   return (list.sections.find((section) => section.name === name)?.rows ?? []).map(
     (row) => `${NAMES.get(row.id) ?? row.id}:${row.slot ?? '-'}`,
   );
@@ -254,6 +254,51 @@ describe('restarting a session from the window (#166)', () => {
     await new Promise((resolve) => setTimeout(resolve, 500));
     assert.equal(hups(d), 1);
     assert.equal(startsOf(d, S1).length, 2, 'one resume');
+  });
+});
+
+describe('restarting a parked session (#166 with F44)', () => {
+  test('a parked session that runs in a terminal of the window is restarted as any other: it stays parked (a start brings no session back, as after an end and a plain resume), its terminals hold no number through the restart, and the other numbers are untouched; unparked, it takes the lowest free number', async (t) => {
+    const { d, page, list } = await started(t, [S1, S2]);
+    const old = termOf(list, S1);
+    const parked = await page.act({ kind: 'park', sessionId: S1 });
+    assert.equal(parked.ok, true, JSON.stringify(parked));
+    const before = await page.list(
+      (candidate) =>
+        JSON.stringify(drawn(candidate, 'parked')) === JSON.stringify(['S1:-']) &&
+        candidate.terminals.some((one) => one.id === old && one.slot === null),
+      'S1 under Parked, its terminal without a number',
+    );
+    assert.deepEqual(drawn(before), ['S2:2']);
+    assert.equal(rowOf(before, S1)?.endable, true, 'it can be ended, so restarted');
+    const parkedAt = d.deck.store.meta(S1)?.parkedAtNs ?? null;
+    assert.notEqual(parkedAt, null);
+    const result = await page.act({ kind: 'restart', term: old, sessionId: S1 }, 20_000);
+    assert.deepEqual([result.ok, result.ended], [true, true], JSON.stringify(result));
+    const after = await page.list((candidate) => {
+      const row = rowOf(candidate, S1);
+      return (
+        row !== undefined &&
+        row.terminal !== null &&
+        row.terminal !== old &&
+        row.state !== 'not-running' &&
+        !candidate.terminals.some((one) => one.id === old)
+      );
+    }, 'S1 running again in a new terminal');
+    assert.deepEqual(drawn(after, 'parked'), ['S1:-'], 'still parked, no number');
+    assert.deepEqual(drawn(after), ['S2:2']);
+    const next = termOf(after, S1);
+    assert.equal(after.terminals.find((one) => one.id === next)?.slot, null);
+    assert.equal(d.deck.store.meta(S1)?.parkedAtNs ?? null, parkedAt, 'the mark untouched');
+    assert.equal(rowOf(after, S1)?.parked, true);
+    // Unparked, it takes the lowest free number, as any terminal leaving the withheld ones.
+    const unparked = await page.act({ kind: 'unpark', sessionId: S1 });
+    assert.equal(unparked.ok, true, JSON.stringify(unparked));
+    const back = await page.list(
+      (candidate) => drawn(candidate).includes('S1:1'),
+      'S1 back under Open with number 1',
+    );
+    assertNoNumberTwice(back);
   });
 });
 

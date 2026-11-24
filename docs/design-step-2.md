@@ -3299,7 +3299,8 @@ was started with (below), and buttons Note, from issue #166 Restart (12.10: only
 `endable` and not marked done, and while the header is at least 300 px wide inside: in a narrower
 one it is the first to give way, so that no other button is cut, and `r` remains), Done / Undone
 and, from follow-up F44, Park / Unpark (12.15: tooltips `park it: it waits under Parked (w)` and
-`back under Open (w)`). Then
+`back under Open (w)`; below 220 px of the header's width inside it gives way next — at a window of
+640 px with the list 400 px wide it was cut — and `w` remains). Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
 F18 the session's ticket first (below, with its status from F19), then the window's chip (12.3),
@@ -4565,7 +4566,10 @@ ordinary ended one without a number (or, when the new one was already open, that
 any). The known limit of an end above holds for it too: a server stopped while the program it hung
 up is still ending has not recorded that end, which reads as Claude Code's own hook reports it
 (`other`): the session is then `ended-unexpectedly` (in the middle of a turn also `was-working`),
-needs you as an ended terminal and is notified, and restore offers it. There is no `skydeck
+needs you as an ended terminal and is notified, and restore offers it. A parked session (12.15)
+that runs in a terminal of the window is restarted as any other, and towards its mark the restart
+is what an end and a plain resume are: a start is no prompt, so it stays parked, its terminals
+hold no number through the restart (7.6), and its row stays under Parked. There is no `skydeck
 restart` command, and nothing new is stored for the session.
 
 ### 12.11 The nine picks
