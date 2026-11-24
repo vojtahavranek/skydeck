@@ -971,9 +971,13 @@ effect.
   and `skydeck window --restart`. A session whose program ends gives its number up at once — also
   one marked done that you let keep running, and with its ended terminal still on screen; a row
   under Recent or Earlier never shows a number, and Ctrl+Shift+1…9 never go to an ended session.
-  That leaves a gap (nothing is renumbered), and a new terminal takes the lowest free number, at
-  that number's place: after the terminals with lower numbers, before the next one with a higher
-  number, also when a block shows a terminal out of its
+  A terminal of the window that has no number (the tenth and later ones) takes a number as soon as
+  one is free: the first such row under Open takes the lowest free number, and its row goes to that
+  number's place; the others keep theirs. So with more than nine terminals an ended session's
+  number is taken at once, and a later resume of that session gets another free number, or none.
+  Without such a terminal the free number leaves a gap (nothing is renumbered), and a new terminal
+  takes the lowest free number, at that number's place: after the terminals with lower numbers,
+  before the next one with a higher number, also when a block shows a terminal out of its
   number's order; once you moved something, a session that opens or ends moves no other row. A block moves as one, and inside a block a session
   trades places with its neighbour; when a block puts a terminal without a number above numbered
   ones, the next move — also of another session — gives that terminal a number and takes one from

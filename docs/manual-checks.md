@@ -2849,8 +2849,8 @@ only where W16's drill runs anyway.
 
 ## W42. Three throwaway sessions moved up and down (real claude)
 
-Setup: skydeck updated to a commit that has follow-up F42 (and F43 for step 8; `skydeck update`,
-W32), then the window open (`skydeck window`); the throwaway folder there
+Setup: skydeck updated to a commit that has follow-up F42 (F43 for step 8, issue #189 for step 9;
+`skydeck update`, W32), then the window open (`skydeck window`); the throwaway folder there
 (`mkdir -p ~/skydeck-try`). Close every other terminal of the window first, or read the slots below
 as the ones after them.
 
@@ -2890,8 +2890,17 @@ as the ones after them.
    `move-4`, press `d`, choose `Mark done, keep it running`, and type `/exit` in its terminal: the
    number 1 is free again without `Show done`, Close or a restart; the next Ctrl+Shift+N session
    takes it.
-9. **The end.** For each throwaway session: type `/exit` in its terminal (in W too), then `d` in the
-   list to mark it done.
+9. **A freed number reaches a session that waits for one (issue #189).** Only on a commit that has
+   it, and only when nine terminals of the window hold the numbers 1–9 anyway (or open throwaway
+   sessions in the throwaway folder until they do). Ctrl+Shift+N one more time, label `move-10`,
+   Enter. Expected: `move-10` shows under Open below the window's terminals, with no number. Type
+   `/exit` in the terminal of a throwaway row whose number is lower than 9 (read 4 below as that
+   number). Expected: at once, with no message, `move-10` shows the number 4 and stands where 4
+   stood (after the row numbered 3, before the one numbered 5), Ctrl+Shift+4 shows its terminal,
+   and every other row keeps its number and its place. Then `skydeck window --restart`: the same
+   order and numbers.
+10. **The end.** For each throwaway session: type `/exit` in its terminal (in W too), then `d` in
+    the list to mark it done.
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge
 version and your two layouts.
