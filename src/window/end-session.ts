@@ -75,13 +75,18 @@ export interface Endings {
   /**
    * Issue #166: `end`'s hang-up for a restart, after its `check`: no done mark, and the terminal
    * is not closed. Resolves once the program ended (its end recorded, as `end` records it) or why
-   * not; after the wait the end is followed on and recorded when it comes, nothing closed.
+   * not; after the wait the end is followed on and recorded when it comes, nothing closed — but
+   * only for 60 seconds from the hang-up: an end after that is an ordinary one (ruled), which
+   * reads as Claude Code's hook reports it, with its attention and notification.
    */
   hangUp(termId: string, sessionId: string, holders: readonly Holder[]): Promise<HangUpOutcome>;
 }
 
 /** How long the answer waits for the program to end after its hang-up. */
 const END_WAIT_MS = 10_000;
+/** Issue #166: how long after its hang-up a restart's end is still followed and recorded as the
+ *  user's (a restart given up): a later end is an ordinary one, with its attention. */
+const RESTART_FOLLOW_MS = 60_000;
 /** A record of the end that met a busy store is tried again this often, at most RECORD_TRIES times. */
 const RECORD_RETRY_MS = 1000;
 const RECORD_TRIES = 10;
@@ -131,6 +136,7 @@ export function createEndings(deps: EndingDeps): Endings {
   const { deck, hub, log } = deps;
   const { clock, proc } = deck.platform;
   const waitMs = testNumber(deck.platform.env, 'END_WAIT_MS', END_WAIT_MS);
+  const restartFollowMs = testNumber(deck.platform.env, 'RESTART_FOLLOW_MS', RESTART_FOLLOW_MS);
   const ending = new Map<string, Ending>();
 
   const tell = (): void => {
@@ -298,14 +304,16 @@ export function createEndings(deps: EndingDeps): Endings {
     holders: readonly Holder[],
     close: boolean,
     answer: (why: string | null) => void,
+    followMs: number | null = null,
   ): void {
     const before = ending.get(termId);
     if (before !== undefined) finish(termId, before, false, 'asked again');
     const entry: Ending = { sessionId, holders, answer, cancel: () => {}, close };
     ending.set(termId, entry);
     watch();
-    // The answer after the wait; the end is followed on until the program exits.
-    entry.cancel = clock.after(waitMs, () => {
+    // The answer after the wait; the end is followed on until the program exits — for a restart
+    // (#166) only until `followMs` after the hang-up: a later end is no longer the user's.
+    const stopWait = clock.after(waitMs, () => {
       const answered = entry.answer;
       entry.answer = null;
       if (answered !== null && ending.get(termId) === entry) {
@@ -313,6 +321,16 @@ export function createEndings(deps: EndingDeps): Endings {
         answered(NOT_ENDED);
       }
     });
+    const stopFollow =
+      followMs === null
+        ? () => {}
+        : clock.after(followMs, () => {
+            finish(termId, entry, false, "the restart's end is followed no more");
+          });
+    entry.cancel = () => {
+      stopWait();
+      stopFollow();
+    };
     if (hub.end?.(termId) !== 'ok') {
       finish(termId, entry, false, 'the hang-up could not be sent', NOT_SENT);
     }
@@ -334,9 +352,16 @@ export function createEndings(deps: EndingDeps): Endings {
     check,
     hangUp(termId, sessionId, holders) {
       return new Promise<HangUpOutcome>((resolve) => {
-        follow(termId, sessionId, holders, false, (why) => {
-          resolve(why === null ? { ended: true } : { ended: false, why });
-        });
+        follow(
+          termId,
+          sessionId,
+          holders,
+          false,
+          (why) => {
+            resolve(why === null ? { ended: true } : { ended: false, why });
+          },
+          restartFollowMs,
+        );
       });
     },
   };

@@ -11,6 +11,17 @@
   /* A line that frames the terminal under it (F2, style.css). */
   border-bottom: 1px solid var(--edge);
   min-width: 0;
+  /* Issue #166: what the header's first line can hold is asked of its own width (the list's width
+     moves it, #192), below. */
+  container: card-header / inline-size;
+}
+/* Issue #166: Restart is the first button to give way when the first line is short of room: below
+   this width Note and Done would be cut with it, and the title squeezed to nothing; `r` in the list
+   remains. */
+@container card-header (max-width: 300px) {
+  .header-restart {
+    display: none;
+  }
 }
 .card-header [hidden] {
   display: none;

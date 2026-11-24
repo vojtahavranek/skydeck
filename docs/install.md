@@ -1009,7 +1009,9 @@ With no session selected, a key says `no session selected`.
 is one line, cut with an ellipsis when it is long:
 
 1. the title, the group chip with its ✎ (or `+ group`), the state, `Note`, `Restart` (only for a
-   session running in a terminal of the window that is not marked done; see below) and `Done`;
+   session running in a terminal of the window that is not marked done, and only while the line
+   has room for it: in a narrow right side it is the first to go, and `r` remains; see below) and
+   `Done`;
 2. the directory (whole in its tooltip), `opened today at 14:02 · last active 3m` (`opened` while
    the window shows the session's terminal), where the title comes from (`title: your label`,
    `title: Claude Code's name`, `title: Claude Code's summary` or `title: start time and
@@ -1120,9 +1122,12 @@ Code —: `r` in the list or `Restart` in the header asks first, in a dialog ove
 `Restart: <its title>` and `It ends claude and resumes this session here, with the same flags.`,
 with `Restart`, `Other flags…` and `Cancel`; while it is working the dialog also says `It is
 working: ending it now stops the current turn.` The keyboard is always on `Cancel` when it opens,
-so that an `r` and an Enter typed by mistake never restart a session: `r`, Tab, Enter (or `r`, ←,
-←, Enter) restarts it. Esc is Cancel; Tab and → move to the next button, Shift+Tab and ← to the one
-before, staying among the three. `Other flags…` puts the `Flags for claude` field in the dialog,
+so that an `r` and an Enter typed by mistake never restart a session. Shift+Tab and ← move towards
+`Restart` and stop there, Tab and → towards `Cancel` and stop there, so `r`, ←, ←, Enter restarts
+it (and `r`, ←, Enter opens `Other flags…`). Esc is Cancel. Once you type a letter (or any
+character) while the dialog asks, the keyboard stays on `Cancel` until it closes: the arrows and
+Tab move nothing, and Enter or Space cancel; so a command typed into the list by mistake and then
+corrected with the arrows never restarts anything. A click still presses any button. `Other flags…` puts the `Flags for claude` field in the dialog,
 with your favourite flags under it, filled with the flags a plain resume would pass on; its
 `Restart` (or Enter in the field) restarts the session with exactly the flags in the field, checked
 as `Other flags…` on a resume card checks them, and Esc goes back with nothing changed. skydeck
@@ -1134,7 +1139,9 @@ row, the same place in Open, the same terminal size; the dialog says `Restarting
 the toast `Restarted.` Esc meanwhile closes the dialog: the restart goes on, and nothing moves your
 selection or the keyboard when it is done. If `claude` has not ended within 10 seconds, nothing is
 restarted (`Not restarted: it has not ended within 10 seconds; if it ends later, resume it from its
-bar.`): when it ends later, its terminal shows the ordinary bar with Resume, Other flags… and Close.
+bar.`): when it ends later, its terminal shows the ordinary bar with Resume, Other flags… and Close;
+an end within a minute of the restart counts as yours, a later one as an end you did not ask for
+(ended unexpectedly, and it asks for your attention).
 If it ended but could not be resumed, its terminal shows that bar, and the bar's line and the toast
 say why (`Restart: it ended, but was not resumed: …`). The dialog warns, as the resume card does,
 of flags it was started with that skydeck does not know: a restart does not pass them on. A

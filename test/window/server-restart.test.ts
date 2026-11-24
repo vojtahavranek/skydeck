@@ -292,6 +292,7 @@ describe('restarting a session: when it does not work (#166)', () => {
   test('not ended within the wait: given up and said so; the session runs on with its number; its later end is an ordinary one, nothing resumed', async (t) => {
     const { d, page, list } = await started(t, [S1, S2], {
       env: { SKYDECK_TEST_END_WAIT_MS: '1000' },
+      focused: false,
     });
     const old = termOf(list, S1);
     page.send({ t: 'input', term: old, data: '/hup-late 3\r' });
@@ -329,6 +330,38 @@ describe('restarting a session: when it does not work (#166)', () => {
       assert.ok(performance.now() < deadline, 'its end recorded as one the user asked for');
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
+    // Within 60 s of the hang-up its end is the user's: it needs nothing, and nobody is told.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+    page.view({});
+    const later = await page.list(() => true, 'a list after the looks');
+    assert.equal(rowOf(later, S1)?.attention ?? null, null);
+    assert.equal(
+      page.all.some((one) => 'text' in one && one.text.t === 'notify'),
+      false,
+      'no notification',
+    );
+  });
+
+  test('a given-up restart is followed for a time only: an end after it is an ordinary one, which needs you and is notified', async (t) => {
+    // The 60 s of the product, shortened to 2 s; the program ends 4 s after its hang-up.
+    const { d, page, list } = await started(t, [S1, S2], {
+      env: { SKYDECK_TEST_END_WAIT_MS: '1000', SKYDECK_TEST_RESTART_FOLLOW_MS: '2000' },
+      focused: false,
+    });
+    const old = termOf(list, S1);
+    page.send({ t: 'input', term: old, data: '/hup-late 4\r' });
+    const result = await page.act({ kind: 'restart', term: old, sessionId: S1 }, 20_000);
+    assert.deepEqual([result.ok, result.ended], [false, false]);
+    const notified = await page.next('notify', 'the late end notified', 30_000);
+    assert.equal(notified.sessionId, S1);
+    assert.equal(
+      d.deck.store
+        .events()
+        .some((event) => event.sessionId === S1 && event.rawDetail === ENDED_IN_WINDOW),
+      false,
+      'not recorded as the user’s end',
+    );
+    assert.equal(startsOf(d, S1).length, 1, 'never resumed');
   });
 
   test('the server stops while the program ends: after its next start the terminal is an ordinary ended one without a number, and nothing resumes the session', async (t) => {

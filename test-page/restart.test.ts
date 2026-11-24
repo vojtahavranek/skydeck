@@ -371,18 +371,164 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
   );
 
   await t.test(
-    'Restart by the keyboard (r, Tab, Enter): one `act restart` for its session and terminal; `Restarting…` until the answer; then the toast, the keyboard back on the list, nothing selected anew',
+    'no wrap, and a typed character keeps the keyboard on Cancel: `r` letters Tab Enter, `r` letters ← ← Enter, `r` Tab Enter, `r` letters Shift+Tab Shift+Tab Enter restart nothing and the letters reach nothing in the list; a click on Restart still works; `r` ← ← Enter and `r` Shift+Tab Shift+Tab Enter restart',
+    async (t) => {
+      const { page, w } = await one(t, chromium);
+      await clickRow(page, S1);
+      const letters = ['d', 'l', 'n', 't'];
+      const nothing: [string, string[]][] = [
+        ['r letters Tab Enter', ['r', ...letters, 'Tab', 'Enter']],
+        ['r letters ← ← Enter', ['r', ...letters, 'ArrowLeft', 'ArrowLeft', 'Enter']],
+        ['r Tab Enter', ['r', 'Tab', 'Tab', 'ArrowRight', 'Enter']],
+        [
+          'r letters Shift+Tab Shift+Tab Enter',
+          ['r', ...letters, 'Shift+Tab', 'Shift+Tab', 'Enter'],
+        ],
+      ];
+      for (const [name, keys] of nothing) {
+        await toZone(page, 'list');
+        for (const key of keys) await page.keyboard.press(key);
+        await shown(page, false);
+        await sleep(300);
+        assert.deepEqual(w.acts(), [], `${name}: nothing sent`);
+        const open = await page.evaluate(() =>
+          ['editor', 'end-dialog', 'restart-dialog'].map(
+            (id) => !(document.getElementById(id) as HTMLElement).hidden,
+          ),
+        );
+        assert.deepEqual(open, [false, false, false], `${name}: no dialog opened`);
+        assert.equal(await selectedRow(page), S1, name);
+        assert.equal(await active(page), '#list', `${name}: the keyboard back on the list`);
+      }
+      // Typed text, then the keyboard stays on Cancel, but a click on Restart presses it.
+      await toZone(page, 'list');
+      await page.keyboard.press('r');
+      await shown(page, true);
+      await page.keyboard.press('x');
+      await page.keyboard.press('ArrowLeft');
+      assert.equal((await restarter(page)).focus, CANCEL, 'the arrows move nothing after typing');
+      await page.click('#restart-dialog .restart-restart');
+      const clicked = await w.act(1);
+      assert.deepEqual(actsAfter(w), [{ kind: 'restart', term: TERM_A, sessionId: S1 }]);
+      w.answer(clicked, { ok: true, ended: true, sessionId: S1 });
+      await shown(page, false);
+      let n = 1;
+      for (const [name, keys] of [
+        ['r ← ← Enter', ['r', 'ArrowLeft', 'ArrowLeft', 'Enter']],
+        ['r Shift+Tab Shift+Tab Enter', ['r', 'Shift+Tab', 'Shift+Tab', 'Enter']],
+      ] as const) {
+        await toZone(page, 'list');
+        for (const key of keys) await page.keyboard.press(key);
+        n += 1;
+        const act = await w.act(n);
+        assert.deepEqual(
+          actsAfter(w, n - 1),
+          [{ kind: 'restart', term: TERM_A, sessionId: S1 }],
+          name,
+        );
+        w.answer(act, { ok: true, ended: true, sessionId: S1 });
+        await shown(page, false);
+      }
+      // ← and Shift+Tab stop at Restart, Tab and → at Cancel.
+      await toZone(page, 'list');
+      await page.keyboard.press('r');
+      await shown(page, true);
+      const walk = async (key: string): Promise<string[]> => {
+        const seen: string[] = [];
+        for (let i = 0; i < 3; i++) {
+          await page.keyboard.press(key);
+          seen.push((await restarter(page)).focus);
+        }
+        return seen;
+      };
+      assert.deepEqual(await walk('ArrowLeft'), [OTHER, RESTART, RESTART]);
+      assert.deepEqual(await walk('Tab'), [OTHER, CANCEL, CANCEL]);
+      assert.deepEqual(await walk('Shift+Tab'), [OTHER, RESTART, RESTART]);
+      assert.deepEqual(await walk('ArrowRight'), [OTHER, CANCEL, CANCEL]);
+      await page.keyboard.press('Escape');
+      await shown(page, false);
+      assert.equal(w.acts().length, 3);
+    },
+  );
+
+  await t.test(
+    'the header’s Restart is the first button to give way in a narrow header: no button is cut at any width from 640 px, Restart shown once there is room, `r` still there',
+    async (t) => {
+      const { page } = await one(t, chromium, {}, { width: 640, height: 500 });
+      await clickRow(page, S1);
+      const header = () =>
+        page.evaluate(() => {
+          const head = document.querySelector('#cards .card-header') as HTMLElement;
+          const box = head.getBoundingClientRect();
+          const right = box.right - parseFloat(getComputedStyle(head).paddingRight);
+          const buttons = [...head.querySelectorAll<HTMLElement>('.header-top .header-button')]
+            .filter(
+              (one) => getComputedStyle(one).display !== 'none' && one.closest('[hidden]') === null,
+            )
+            .map((one) => ({
+              text: one.textContent ?? '',
+              inside: one.getBoundingClientRect().right <= right + 0.5,
+            }));
+          return buttons;
+        });
+      const at640 = await header();
+      assert.deepEqual(
+        at640.filter((one) => ['Note', 'Restart', 'Done'].includes(one.text)),
+        [
+          { text: 'Note', inside: true },
+          { text: 'Done', inside: true },
+        ],
+        'at 640 px: Restart gives way, Note and Done whole',
+      );
+      let shownAt: number | null = null;
+      for (let width = 640; width <= 1100; width += 20) {
+        await page.setViewportSize({ width, height: 500 });
+        await sleep(50);
+        const now = await header();
+        assert.deepEqual(
+          now.filter((one) => !one.inside).map((one) => one.text),
+          [],
+          `nothing cut at ${width} px`,
+        );
+        if (shownAt === null && now.some((one) => one.text === 'Restart')) shownAt = width;
+      }
+      assert.ok(shownAt !== null && shownAt <= 900, `Restart shown from ${shownAt} px`);
+      // Narrow again: `r` restarts as before.
+      await page.setViewportSize({ width: 640, height: 500 });
+      await toZone(page, 'list');
+      await page.keyboard.press('r');
+      await shown(page, true);
+      await page.keyboard.press('Escape');
+    },
+  );
+
+  await t.test(
+    'Restart by the keyboard (r, ←, ←, Enter): one `act restart` for its session and terminal; `Restarting…`, not in a refusal’s colour, until the answer; then the toast, the keyboard back on the list, nothing selected anew',
     async (t) => {
       const { page, w } = await one(t, chromium);
       await rFrom(page, S1);
       await shown(page, true);
-      await page.keyboard.press('Tab');
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('ArrowLeft');
       assert.equal((await restarter(page)).focus, RESTART);
       await page.keyboard.press('Enter');
       const restart = await w.act(1);
       assert.deepEqual(actsAfter(w), [{ kind: 'restart', term: TERM_A, sessionId: S1 }]);
       const waiting = await restarter(page);
       assert.deepEqual([waiting.shown, waiting.said], [true, 'Restarting…']);
+      const colours = await page.evaluate(() => {
+        const line = document.querySelector('#restart-dialog .restart-lines') as HTMLElement;
+        const probe = document.createElement('div');
+        probe.style.color = 'var(--dim)';
+        document.body.append(probe);
+        const dim = getComputedStyle(probe).color;
+        probe.style.color = 'var(--crash)';
+        const crash = getComputedStyle(probe).color;
+        probe.remove();
+        return { line: getComputedStyle(line).color, dim, crash };
+      });
+      assert.equal(colours.line, colours.dim, 'Restarting… is no refusal');
+      assert.notEqual(colours.line, colours.crash);
       await page.keyboard.press('Enter'); // pressed again while it waits: nothing more is sent
       await sleep(200);
       assert.equal(w.acts().length, 1);
@@ -469,7 +615,8 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
       const { page, w } = d;
       await rFrom(page, S1);
       await shown(page, true);
-      await page.keyboard.press('Tab');
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('ArrowLeft');
       await page.keyboard.press('Enter');
       const waited = 'it has not ended within 10 seconds; if it ends later, resume it from its bar';
       w.answer(await w.act(1), { ok: false, ended: false, error: waited });
@@ -477,7 +624,8 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
       await toastIs(page, `Not restarted: ${waited}.`);
       await rFrom(page, S1);
       await shown(page, true);
-      await page.keyboard.press('Tab');
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('ArrowLeft');
       await page.keyboard.press('Enter');
       const why = '0b5f3c1e: directory /w no longer exists';
       w.answer(await w.act(2), { ok: false, ended: true, error: why });
@@ -504,7 +652,8 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
       const { page, w } = await one(t, chromium);
       await rFrom(page, S1);
       await shown(page, true);
-      await page.keyboard.press('Tab');
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('ArrowLeft');
       await page.keyboard.press('Enter');
       const restart = await w.act(1);
       await page.keyboard.press('Escape');
@@ -519,7 +668,8 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
       // A refusal that comes after an Esc is a toast too.
       await rFrom(page, S1);
       await shown(page, true);
-      await page.keyboard.press('Tab');
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('ArrowLeft');
       await page.keyboard.press('Enter');
       const second = await w.act(2);
       await page.keyboard.press('Escape');

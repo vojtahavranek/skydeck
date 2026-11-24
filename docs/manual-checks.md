@@ -3333,8 +3333,9 @@ the list a letter is a key: `d` marks the session done, `l`, `n` and `t` open a 
 1. **The dialog.** Click the throwaway's row, then press `Restart` in the header. Expected: a
    dialog over the window, `Restart: restart check`, `It ends claude and resumes this session
    here, with the same flags.`, the buttons `Restart`, `Other flags…` and `Cancel`, the last one
-   outlined (it has the keyboard). Press Enter: the dialog closes, nothing happened (the session
-   still answers as before). In each step below, a dialog whose heading names another session is
+   outlined (it has the keyboard). Press Tab: `Cancel` stays outlined (Tab stops there). Press ←:
+   `Other flags…` is outlined; type `x`: `Cancel` is outlined again, and ← now moves nothing.
+   Press Enter: the dialog closes, nothing happened (the session still answers as before). In each step below, a dialog whose heading names another session is
    not this check's: press Esc, click the throwaway's row, and start the step again.
 2. **A plain restart.** In W, `skydeck show <its short id>` and note its `holder:` line (its pid).
    Press Ctrl+Shift+L until the key bar says `Focus: list`, then `r`. Expected: the dialog,

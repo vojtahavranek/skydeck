@@ -7,10 +7,14 @@
 // Three buttons: `Restart` (the primary one), `Other flags…`, `Cancel`.
 //
 // The keyboard always starts on `Cancel` (ruled: a word typed into the list by mistake — an `r` and
-// then Enter or Space, or any letters before them — must never restart a session); Tab and
-// Shift+Tab, and Right and Left, walk the three buttons and stay inside; Enter or Space press the
-// one that has the keyboard, at a fresh press only. Esc is Cancel. `Other flags…` puts the shared
-// flags line (cards.js `flagsControls`: `Flags for claude`, the field, the ★, the favourites)
+// then Enter or Space, or any letters before them — must never restart a session). Tab and →
+// walk towards Cancel and stop there, Shift+Tab and ← towards Restart and stop there (no wrap,
+// ruled), so Restart is r, ←, ←, Enter; Enter or Space press the one that has the keyboard, at a
+// fresh press only. Esc is Cancel. A key that types a character is the dialog's, and from then on
+// the keyboard stays on Cancel: Tab and the arrows move nothing, Enter and Space cancel (ruled: a
+// command typed by mistake and corrected with the arrows never lands on Restart); a click still
+// presses any button. `Other flags…` puts the shared
+// flags line (flags-line.js `flagsControls`: `Flags for claude`, the field, the ★, the favourites)
 // in place of the line and the buttons, filled with the flags a plain resume would pass on (the
 // list's `selected.resumeFlags`); its button reads `Restart` (it ends a running program), Enter in
 // the field presses it, Tab stays inside the dialog, and Esc goes back with nothing changed, the
@@ -144,6 +148,8 @@ export function createRestartDialog(root, deps) {
   /** The open Other flags…: its form, field and result line. */
   /** @type {{ form: HTMLFormElement, flags: HTMLInputElement, lines: HTMLElement } | null} */
   let editor = null;
+  /** A key that types a character came while the dialog asks (ruled): the keyboard stays on Cancel. */
+  let typed = false;
 
   /** @param {boolean} working */
   const setWorking = (working) => {
@@ -220,7 +226,9 @@ export function createRestartDialog(root, deps) {
     if (editor !== null) {
       editor.flags.readOnly = true;
     }
-    lineNow().textContent = RESTART_TEXTS.pending;
+    const waiting = lineNow();
+    waiting.textContent = RESTART_TEXTS.pending;
+    waiting.dataset['pending'] = 'true'; // not in a refusal's colour (edit.css)
     const session = { sessionId: shown.sessionId, term: shown.term };
     const action =
       flags === undefined
@@ -237,6 +245,7 @@ export function createRestartDialog(root, deps) {
           if (editor !== null) {
             editor.flags.readOnly = false;
           }
+          delete waiting.dataset['pending'];
           lineNow().textContent = outcome.stay;
         } else {
           deps.finished({ toast: `Restart: ${outcome.stay}`, bar: null }, session);
@@ -388,6 +397,7 @@ export function createRestartDialog(root, deps) {
       warnFlags(selected);
       said.textContent = '';
       root.hidden = false;
+      typed = false;
       cancelButton.focus(); // never on Restart by itself (ruled)
     },
     /**
@@ -453,11 +463,25 @@ export function createRestartDialog(root, deps) {
       }
       const isArrow = (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.shiftKey;
       const isPress = PRESS_KEYS.has(event.key) && !event.shiftKey;
-      if (!isEscape && !isTab && !isArrow && !isPress) {
+      // A key that types a character (ruled): text typed into the list by mistake. The dialog takes
+      // it, so that the rest of a word reaches no list key, and from then on the keyboard stays on
+      // Cancel: Tab and the arrows move nothing, Enter and Space cancel, Esc closes.
+      const isTyped = !isPress && [...event.key].length === 1;
+      if (!isEscape && !isTab && !isArrow && !isPress && !isTyped) {
         return false;
       }
       event.preventDefault();
       event.stopPropagation();
+      if (isTyped) {
+        typed = true;
+      }
+      if (typed) {
+        cancelButton.focus();
+        if (!event.repeat && (isEscape || isPress)) {
+          press('cancel');
+        }
+        return true;
+      }
       const at = buttons.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement));
       if (at === -1) {
         // Something outside took the keyboard (a click on the toast): it comes back to the safe
@@ -473,10 +497,11 @@ export function createRestartDialog(root, deps) {
       if (isEscape) {
         press('cancel');
       } else if (isTab || isArrow) {
+        // No wrap (ruled): Tab and → stop at Cancel, Shift+Tab and ← at Restart, so Restart is
+        // reached only backwards from where the keyboard starts: r, ←, ←, Enter.
         const back = isTab ? event.shiftKey : event.key === 'ArrowLeft';
-        const step = back ? -1 : 1;
         const from = at === -1 ? buttons.indexOf(cancelButton) : at;
-        buttons[(from + step + buttons.length) % buttons.length]?.focus();
+        buttons[Math.max(0, Math.min(buttons.length - 1, from + (back ? -1 : 1)))]?.focus();
       } else {
         const pressed = buttons[at];
         if (pressed !== undefined) {

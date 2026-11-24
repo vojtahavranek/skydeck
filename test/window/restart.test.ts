@@ -577,8 +577,9 @@ describe('act restart: when it does not work', () => {
     assert.deepEqual(h.hub.asked, [`hold ${TERM}`, `end ${TERM}`, `release ${TERM}`]);
     const term = h.hub.terminals[0];
     assert.deepEqual([term?.slot, term?.restarting, term?.state], [3, undefined, 'running']);
-    // It ends later: an ordinary ended terminal — the end recorded, nothing resumed or closed.
-    d.clock.advanceMs(60_000);
+    // It ends later, within 60 s of the hang-up: an ordinary ended terminal, its end recorded as
+    // the user's, nothing resumed or closed.
+    d.clock.advanceMs(49_999);
     h.hub.exitNow();
     await Promise.resolve();
     await Promise.resolve();
@@ -587,6 +588,22 @@ describe('act restart: when it does not work', () => {
     assert.deepEqual(h.hub.asked, [`hold ${TERM}`, `end ${TERM}`, `release ${TERM}`]);
     assert.equal(d.deck.store.getKv(lockKey(S1)), null);
     assert.equal(d.deck.store.meta(S1)?.doneAtNs ?? null, null);
+  });
+
+  test('a given-up restart is followed for 60 s from its hang-up only: an end after that is an ordinary one, not recorded as the user’s', async (t) => {
+    const d = running(t);
+    const h = harness(d);
+    const answer = h.act(restart());
+    await Promise.resolve();
+    d.clock.advanceMs(10_000);
+    assert.equal((await answer).ended, false);
+    d.clock.advanceMs(50_000); // 60 s after the hang-up
+    h.hub.exitNow();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(windowEnds(d), 0, 'not the user’s end: it reads as Claude Code reports it');
+    assert.deepEqual(h.specs, [], 'never resumed');
+    assert.deepEqual(h.hub.asked, [`hold ${TERM}`, `end ${TERM}`, `release ${TERM}`]);
   });
 
   test('its keeper lost meanwhile: given up with that reason, nothing resumed', async (t) => {
