@@ -339,8 +339,9 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
       await shown(page, false);
       assert.equal(await active(page), '#list', 'Cancel: the keyboard back where it was');
       // A sentence typed into the list by mistake: `r`, letters, a space, Enter; and a word with a
-      // `d` after its `r`, then Enter (the `d` reaches no list key while the dialog is shown).
-      for (const typed of ['run the tests', 'worked']) {
+      // `d` after its `r`, then Enter (the `d` reaches no list key while the dialog is shown; no
+      // `w` before it, which would park the session, F44).
+      for (const typed of ['run the tests', 'ordered']) {
         await toZone(page, 'list');
         await page.keyboard.type(typed);
         await page.keyboard.press('Enter');
