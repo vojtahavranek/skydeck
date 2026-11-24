@@ -34,6 +34,15 @@ export interface SpoolFields {
   argv?: readonly string[] | null;
 }
 
+/**
+ * The `uptime` value the hook would write for an uptime of `cs` centiseconds (`119174.07`), ''
+ * for none: for a test that writes an event of a process whose other events the real hook wrote,
+ * so that the process stays ordered by its uptimes (design 5.3 "Order", #207).
+ */
+export function uptimeText(cs: bigint | null): string {
+  return cs === null ? '' : `${cs / 100n}.${String(cs % 100n).padStart(2, '0')}`;
+}
+
 /** `${timeNs}-${pid ?? 0}-${seq}.ev` */
 export function spoolName(fields: SpoolFields, seq: number): string {
   return `${fields.timeNs}-${fields.pid ?? 0}-${seq}.ev`;
