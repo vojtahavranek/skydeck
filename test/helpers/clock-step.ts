@@ -18,7 +18,9 @@
  * set, see `clockStepSeam`), and the sandbox's `date` and `python3` (the hook's time stamps, the
  * keeper's `time.time_ns()`), which `Sandbox.link` then writes as wrappers instead of links. What
  * does not: timers (as with a real step), file times (the kernel's), `performance.now()` and
- * `process.hrtime`. Without the variable nothing changes. Never the machine's own clock.
+ * `process.hrtime`. So a file written a moment ago lies in the future of the stepped clock, by as
+ * much as it was stepped back (a real step moves file times too). Without the variable nothing
+ * changes. Never the machine's own clock.
  */
 import { fileURLToPath } from 'node:url';
 

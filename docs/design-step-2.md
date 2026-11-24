@@ -5465,8 +5465,10 @@ itself, and only after checking that the runtime directory lies inside its sandb
 
 **A wall clock that steps back** (issue #202). On a WSL 2 machine the wall clock was seen to step
 back by 2.1 to 2.7 s every 32 s, while timers and the clock that cannot step (`monotonicNs`,
-`performance.now()`) run on. So a test measures a duration with `performance.now()`, never as two
-`Date.now()` readings; and a deadline that a keeper judges is set and waited for on the clock the
+`performance.now()`) run on. So a test measures a duration it bounds from below with
+`performance.now()`: two `Date.now()` readings would shorten it by the step (an upper bound on two
+such readings is left as it is, since a step back only lengthens what they measure); and a
+deadline that a keeper judges is set and waited for on the clock the
 keeper reads, the wall clock: one that has "already passed" lies a minute back, not a second (the
 real clock's `nowNs()` holds its last value while the wall clock is stepped back, the keeper's
 `time.time_ns()` does not), and a wait for one to pass polls `Date.now()` with a limit that leaves
@@ -5477,7 +5479,9 @@ sees steps back by `<step>` once every `<period>`, timed on the clock that canno
 start they all share; the sandbox (`test/helpers/sandbox.ts`) then passes both variables on to its
 children and writes the `date` and `python3` of its `bin` as wrappers that read the same stepped
 clock (the hook's time stamps, the keeper's deadline). Timers, file times and the machine's own
-clock are left alone; without the variable nothing changes. `npm test` and `npm run test:page` run
+clock are left alone; without the variable nothing changes. So under the tool a file's
+modification time stays real while `Date` falls behind: a file written a moment ago lies in the
+future of the clock the code reads, by as much as that clock was stepped back. `npm test` and `npm run test:page` run
 with a global setup (`test/helpers/clock-watch.ts`) that compares the wall clock with the clock that
 cannot step for the whole run and, when the wall clock fell more than a second behind, says so in
 one line after the summary, so that a red run can be read at once.

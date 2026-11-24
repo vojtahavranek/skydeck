@@ -71,10 +71,19 @@ writeFileSync(join(bin, 'now.py'), 'import time\\nprint(time.time_ns() // 100000
 const env = { ...process.env, PATH: bin };
 const start = BigInt(/@([0-9]+)$/.exec(process.env.SKYDECK_TEST_CLOCK_STEP)[1]);
 const elapsedMs = () => Number((process.hrtime.bigint() - start) / 1000000n);
+// The real wall clock can step too, while a child runs (issue #202): a reading during which it
+// went another way than the clock that cannot step is taken again.
 const behind = (run) => {
-  const before = realNow();
-  const value = run();
-  return [before - value, realNow() - value];
+  for (let tries = 1; ; tries++) {
+    const before = realNow();
+    const monoBefore = process.hrtime.bigint();
+    const value = run();
+    const after = realNow();
+    const monoMs = Number((process.hrtime.bigint() - monoBefore) / 1000000n);
+    if (Math.abs(after - before - monoMs) <= 20 || tries === 5) {
+      return [before - value, after - value];
+    }
+  }
 };
 const sample = () => ({
   at: elapsedMs(),
