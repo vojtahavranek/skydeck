@@ -79,6 +79,7 @@ import type { Seen } from './seen.ts';
 import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
 import { readMovedSlots, writeMovedSlots } from './moved-slots.ts';
+import { createFill } from './freed-numbers.ts';
 import { createReorder, persistMove } from './reorder.ts';
 import { createOpenOrder } from './open-order.ts';
 import { createRestoreMemory } from './restore-memory.ts';
@@ -650,6 +651,44 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         tookOpen(false);
       },
     });
+    /** #189: a refresh has worked since the start, so that Open's order is known (its rows). */
+    let refreshedOnce = false;
+    // #189 (S2 7.6, 12.1): the free numbers to the terminals that wait (freed-numbers.ts).
+    const fill = createFill({
+      registry: created,
+      input: () =>
+        !refreshedOnce || tick === null
+          ? null
+          : {
+              rows: tick.rows(),
+              terminals: created.list(),
+              elsewhere: tick.elsewhere(),
+              nowNs: clock.nowNs(),
+              openOrder: openOrder.ids(),
+            },
+      openOrder,
+      // The numbers alone without a kept order; with one, both or neither, as a move's.
+      persist: (moved, order) => {
+        if (order === null) writeMovedSlots(deck.store, moved);
+        else persistMove(deck.store, moved, order);
+      },
+      remember: () => {
+        tookOpen(false);
+      },
+      log: quietLog,
+      stopping: () => stopBegun,
+    });
+    /**
+     * #189: WHEN the free numbers are given, in this one place. It is called at every change of the
+     * registry (before the pages' lists are pushed), so at each moment a number becomes free — an
+     * exit applied, a hello that says the program exited, a lost terminal's program that may no
+     * longer run, the close of a lost terminal that still held one —, and after every refresh that
+     * worked: the first after the start (the gaps a start finds), the end of a keeper's finding
+     * (the registry gives nothing meanwhile), and a write that failed. It never throws.
+     */
+    const fillFreedNumbers = (): void => {
+      fill.run();
+    };
     const acting = createActions({
       deck,
       hub: created,
@@ -835,6 +874,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       update: () => updates.payload(),
     });
     created.onChange(() => {
+      fillFreedNumbers(); // #189: a number freed by this change goes to a waiting terminal first
       pages.pushList();
     });
     const notices = keepAliveNotices();
@@ -871,9 +911,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       keepersLog,
       log,
       afterRefresh: () => {
+        refreshedOnce = true;
         pageMark.update(pages.count()); // plan C20; it never throws
         decidePostponed();
         created.flushSlots(); // F37: a write of the moved slots that failed; it never throws
+        fillFreedNumbers(); // #189: before the freeze, which then keeps the rows where they went
         tookOpen(true); // F42: the kept order and the restore's order take Open; it never throws
       },
       storeNewer,

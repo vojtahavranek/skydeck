@@ -92,8 +92,23 @@ export interface Registry extends TerminalHub {
    *  program may run; it is free once its exit is applied (ended, not started), a hello says it
    *  exited, or a lost keeper's program may no longer run — the ended terminal stays listed
    *  without one. A terminal is opened with it in its keeper's meta; a slot moved later
-   *  (`setSlots`), or none, wins over the meta's. */
+   *  (`setSlots`, `giveSlots`), or none, wins over the meta's. */
   nextSlot(): number | null;
+  /**
+   * #189 (S2 7.6): gives the free slots, lowest first, one each to the first of `candidates`
+   * (terminal ids in the caller's order: Open's) that may take one — listed, without a slot, its
+   * program may run (not ended, lost or not started) and its slot never freed (F43) —, until none
+   * is free. Free is `nextSlot`'s rule (`takenSlots`), so whatever that counts as held is never
+   * given. Never takes a slot from a terminal. Nothing while a keeper is still being found (its
+   * slot is known only at its hello, so a slot that looks free may be its own): 'finding'; nothing
+   * once `stopAll` ran: 'stopping'. The moved slots, and the slots given, are written by `write`
+   * before any is applied: a write that throws is thrown from here, nothing changed. Nothing to
+   * give: nothing written, nothing announced.
+   */
+  giveSlots(
+    candidates: readonly string[],
+    write: (moved: ReadonlyMap<string, number | null>, given: ReadonlyMap<string, number>) => void,
+  ): 'ok' | 'finding' | 'stopping';
   /**
    * F37, F42 (S2 7.6, 12.9): gives listed terminals other slots, all at once; null takes a
    * terminal's slot away, and a terminal without one can gain one. Refused, nothing changed:
@@ -1633,6 +1648,35 @@ export function createRegistry(deps: RegistryDeps): Registry {
     },
     nextSlot() {
       return lowestFree(takenSlots(null));
+    },
+    giveSlots(candidates, write) {
+      if (stopped) return 'stopping';
+      if (finding.size > 0) return 'finding';
+      const taken = takenSlots(null);
+      const given = new Map<string, number>();
+      for (const id of candidates) {
+        const term = terms.get(id);
+        if (term === undefined || given.has(id) || term.info.slot !== null) continue;
+        if (term.slotFreed || isOver(term.info.state)) continue;
+        const slot = lowestFree(taken);
+        if (slot === null) break;
+        taken.add(slot);
+        given.set(id, slot);
+      }
+      if (given.size === 0) return 'ok';
+      const next = new Map(moved);
+      for (const [id, slot] of given) next.set(id, slot);
+      const pruned = prunedSlots(next); // a slot equal to the meta's is left out there
+      write(pruned, given); // a throw gives nothing: nothing is applied
+      for (const [id, slot] of given) {
+        const term = terms.get(id);
+        if (term !== undefined) term.info.slot = slot;
+      }
+      moved = pruned;
+      movedDirty = false;
+      movedFailure = null;
+      changed();
+      return 'ok';
     },
     setSlots(changes, write) {
       if (stopped) return 'stopping';
