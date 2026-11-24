@@ -4163,6 +4163,9 @@ longer shows the row as not done in its section, since one that still does is ol
 else the next one, which the page asks for with a `view`) no longer has the row, while that session is
 still the selected one (moved away meanwhile, the selection stays where the user put it) — the row after it in the
 same section is selected, else the one before it in that section, else none; never a row of Open.
+From follow-up F44 that row can still run: under Parked a running session sits beside stopped ones,
+so "never a row of Open" no longer means "never a running row". It is selected with the keyboard
+kept in the list, as after `w`, and only while the user stayed in the list (below).
 The Undo of that `d` selects the session again once it is back in the list, if the selection is
 still where that `d` left it (the row it selected, or none); if the user moved it meanwhile, it
 stays (ruled for plan D task 37). That list decides once: a row it still has (running, under
@@ -4181,7 +4184,15 @@ write), before that list is drawn and without waiting for the answer; when the a
 the page asks for a list with a `view` and that list decides; a list that still has the row in its
 section is older than the write, and only the row's place in it is kept. So the list stays where it
 was: the next row is the one beside the cursor, and the parked row is never scrolled to under
-Parked. A refused `w` moves nothing; when the user moved the selection meanwhile, it stays. The
+Parked. A refused `w` moves nothing; when the user moved meanwhile, the selection stays. **Moving**
+means, for `w` and for `d`'s exception above alike, any of these before that list came: selecting
+another row, going to the terminal (Enter, Esc, a click there, the zone chord), opening the new
+session's form; or a dialog shown when it comes. The list moves the selection on only while the session is
+still the selected one, the list has the keyboard's zone, no form is open and no dialog is shown;
+otherwise a key pressed in that moment would hand the keyboard to the next row's terminal and type
+into a session the user never chose. So `w` followed at once by Enter or Esc leaves the selection,
+and the keyboard, with the parked session's own terminal (a prompt typed there brings it back, as
+any prompt does). The
 keyboard stays in the list, so a run of `w` parks one row each and types nothing into the next
 session, also when that one runs. **`w` on a row under Parked** un-parks it and keeps the selection
 with the session: it goes back under Open (or Recent, Earlier), stays selected, and the list follows
@@ -4809,7 +4820,10 @@ starting session `Parked: listed under Parked, and it keeps running. It comes ba
 a prompt.` — with Undo, which gives back what was there: `unpark`, or `done` for a session that was
 done. Both ways: the Undo after `d` on a parked session parks it again (its age starts again, a named
 limit). An un-park shows no toast and has no Undo: `w` on its row, still selected, parks it again.
-Where the selection goes after `w`, and the one guard for `w`, `d` and the end dialog, are 12.9's.
+Where the selection goes after `w`, and the one guard for `w`, `d` and the end dialog, are 12.9's:
+the selection moves on only while the user stayed in the list, so going to the terminal or opening
+the new session's form before the list that decides counts as having moved, and no key reaches the
+next row's session.
 The key help names `w` after `d`, and the tour's line of the list's keys ends `d done · w park`
 (12.14).
 

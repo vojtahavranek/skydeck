@@ -16,6 +16,7 @@ import type { Browser, Page } from 'playwright';
 import { isoFromNs, NS_PER_MINUTE } from '../src/platform/time.ts';
 import { controlClient } from '../src/window/client.ts';
 import { sleep } from '../test/helpers/keeper.ts';
+import { readRecords } from '../test/helpers/standin.ts';
 import { S1, S2, S3 } from '../test/helpers/platform.ts';
 import { connectTestPage, startTestServer } from '../test/helpers/window.ts';
 import type { ServerSandbox, StartedServer, TestPage } from '../test/helpers/window.ts';
@@ -332,6 +333,50 @@ async function aRefresh(w: World): Promise<void> {
   await untilDrawn(w.page, (rows) => rows.some((row) => row.id === probe), `${probe} listed`);
 }
 
+/** Keys dispatched on the list in one task, before any list or answer can come. */
+async function inOneTask(page: Page, keys: KeyboardEventInit[]): Promise<void> {
+  const sent = JSON.stringify(keys);
+  await page.evaluate((all: string) => {
+    const list = document.getElementById('list') as HTMLElement;
+    for (const init of JSON.parse(all) as KeyboardEventInit[]) {
+      list.dispatchEvent(
+        new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true }),
+      );
+    }
+  }, sent);
+}
+
+const KEY_W = { key: 'w', code: 'KeyW' };
+const KEY_D = { key: 'd', code: 'KeyD' };
+
+/**
+ * Types `text` on the page and returns the sessions whose programs (the stand-ins of the window's
+ * terminals) received it, from the stand-ins' records of their input.
+ */
+async function typedReaches(w: World, text: string): Promise<string[]> {
+  const from = Date.now();
+  await w.page.keyboard.type(text);
+  await sleep(600);
+  const sessionOf = new Map<number, string>();
+  for (const term of w.server.hub.list()) {
+    if (term.program !== null) {
+      sessionOf.set(term.program.pid, term.sessionId ?? term.expectedSessionId);
+    }
+  }
+  const received = new Map<number, string>();
+  for (const record of readRecords(w.d.record)) {
+    if (record.ev === 'input' && record.ms >= from) {
+      received.set(
+        record.pid,
+        (received.get(record.pid) ?? '') + Buffer.from(record.hex, 'hex').toString('latin1'),
+      );
+    }
+  }
+  return [...received]
+    .filter(([, got]) => got.includes(text))
+    .map(([pid]) => sessionOf.get(pid) ?? `pid ${pid}`);
+}
+
 /** The header's Park / Unpark button: its text. */
 async function headerPark(page: Page): Promise<string> {
   return shownText(page, '#cards .header-park');
@@ -500,6 +545,78 @@ test('F44: parking a session in the window', async (t) => {
         'the parked one is skipped',
       );
       assert.deepEqual(w.problems, []);
+    },
+  );
+
+  for (const [name, key, form] of [
+    ['Enter', { key: 'Enter', code: 'Enter' }, false],
+    ['Esc', { key: 'Escape', code: 'Escape' }, false],
+    ['Ctrl+Shift+N', { key: 'N', code: 'KeyN', ctrlKey: true, shiftKey: true }, true],
+  ] as [string, KeyboardEventInit, boolean][]) {
+    await t.test(
+      `w then ${name} before the list that decides: the selection stays with the parked session (the user moved), and typed text reaches no other session's program${form ? '; the new form stays open' : ''}`,
+      async (t) => {
+        const w = await world(t, chromium, { running: [S1, S2, S3] });
+        await pick(w.page, S1);
+        await inOneTask(w.page, [KEY_W, key]);
+        await under(w.page, S1, 'parked');
+        await aRefresh(w); // the list that decides, and the next
+        assert.equal(await selectedRow(w.page), S1, 'the selection stays');
+        if (form) {
+          assert.equal(await pane(w.page), 'new', 'the form stays open');
+        } else {
+          assert.equal(await zone(w.page), 'Focus: terminal');
+        }
+        const reached = await typedReaches(w, 'zqzq');
+        assert.deepEqual(
+          reached.filter((id) => id !== S1),
+          [],
+          'no other session got the text',
+        );
+        if (form) assert.deepEqual(reached, [], 'the form took it');
+        assert.deepEqual(await acts(w.page), [{ kind: 'park', sessionId: S1 }]);
+        assert.deepEqual(w.problems, []);
+      },
+    );
+  }
+
+  await t.test(
+    "d on a stopped row under Parked whose next row under Parked runs, then Esc before the list that decides: the selection does not move to the running row, and typed text reaches no session's program",
+    async (t) => {
+      const w = await world(t, chromium, { running: [S2, S3], stopped: [S1] });
+      for (const id of [S2, S1]) {
+        const result = await w.api.act({ kind: 'park', sessionId: id });
+        assert.equal(result.ok, true, JSON.stringify(result));
+      }
+      await under(w.page, S2, 'parked');
+      await under(w.page, S1, 'parked');
+      assert.deepEqual(await idsIn(w.page, 'parked'), [S1, S2]);
+      await pick(w.page, S1);
+      await inOneTask(w.page, [KEY_D, { key: 'Escape', code: 'Escape' }]);
+      await untilDrawn(w.page, (rows) => !rows.some((row) => row.id === S1), 'S1 done, hidden');
+      await aRefresh(w);
+      assert.notEqual(await selectedRow(w.page), S2, 'not the running row');
+      assert.deepEqual(await typedReaches(w, 'zqzq'), [], 'no program got the text');
+      assert.deepEqual(w.problems, []);
+    },
+  );
+
+  await t.test(
+    'a held w with rows after the selected one parks one row and sends one act: its auto-repeats do nothing, also once the selection moved on',
+    async (t) => {
+      const w = await world(t, chromium, { stopped: [S1, S2, S3, S4] });
+      await pick(w.page, S1);
+      await w.page.keyboard.down('w');
+      await selectionIs(w.page, S2, 'moved on');
+      for (let i = 0; i < 3; i++) {
+        await w.page.keyboard.down('w'); // an auto-repeat (`repeat` true)
+        await sleep(150);
+      }
+      await w.page.keyboard.up('w');
+      await aRefresh(w);
+      assert.deepEqual(await acts(w.page), [{ kind: 'park', sessionId: S1 }], 'one act');
+      assert.deepEqual((await idsIn(w.page, 'week')).slice(0, 3), [S2, S3, S4]);
+      assert.equal(await selectedRow(w.page), S2);
     },
   );
 
@@ -958,4 +1075,251 @@ test('F44: the selection after w, with the moment of the list held still', async
     const second = await w.act(2);
     assert.equal(second['kind'], 'unpark');
   });
+});
+
+// ---------------------------------------------------------------------------------------------
+// The one guard, the Undo's words both ways and the toast of `d` under Parked, on the scripted
+// stand-in: each act is answered first and the list that decides is held back (its `view` is not
+// answered), so that the second key meets a session whose mark this page's list has not decided.
+
+const TERM = 'aaaaaaaaaaaa';
+const DONE_RUNNING = 'Marked done. Stays under Open while it runs; hidden once it stops.';
+
+type Rows = {
+  open?: Record<string, unknown>[];
+  parked?: Record<string, unknown>[];
+  week?: Record<string, unknown>[];
+};
+
+/** A scripted list of these rows, by section, and `terminals`. */
+function listRows(
+  sections: Rows,
+  terminals: Record<string, unknown>[] = [],
+): Record<string, unknown> {
+  const base = listOf([]) as { sections: { name: string }[] } & Record<string, unknown>;
+  return {
+    ...base,
+    sections: base.sections.map((section) => {
+      const rows =
+        (sections as Record<string, Record<string, unknown>[] | undefined>)[section.name] ?? [];
+      return { ...section, count: rows.length, rows };
+    }),
+    terminals,
+  };
+}
+
+/** A running session in the window's terminal TERM that the window can end. */
+function endableRow(id: string, over: Record<string, unknown> = {}): Record<string, unknown> {
+  return row(id, { state: 'waiting', terminal: TERM, slot: 1, endable: true, ...over });
+}
+
+function termOf(sessionId: string, slot: number | null): Record<string, unknown> {
+  return {
+    id: TERM,
+    slot,
+    sessionId,
+    state: 'running',
+    notReported: false,
+    cols: 80,
+    rows: 24,
+    ownsSize: true,
+    openedNs: '1794470400000000000',
+  };
+}
+
+const PARKED_FIELDS = { parked: true, parkedAtNs: String(1794474000000000000n - 60_000_000_000n) };
+
+/** Whether the end dialog ("Mark done") is shown. */
+async function enderShown(page: Page): Promise<boolean> {
+  return readPage(page, () => document.getElementById('end-dialog')?.hidden === false, null);
+}
+
+async function scripted(
+  t: TestContext,
+  chromium: Browser,
+  first: Record<string, unknown>,
+  count: number,
+): Promise<{ page: Page; w: EditWorld }> {
+  const page = await newPage(t, chromium);
+  const w = await editWorld(t, page, first);
+  await untilDrawn(page, (rows) => rows.length === count, `${count} rows`);
+  return { page, w };
+}
+
+/** The kinds of `w`'s acts so far. */
+const kinds = (w: EditWorld): unknown[] => w.acts().map((one) => one['kind']);
+
+test('F44: the one guard, and the Undo that gives back what was there', async (t) => {
+  const chromium = await browser(t);
+
+  await t.test('w answered, its list held: a second w on the session sends nothing', async (t) => {
+    const { page, w } = await scriptedWorld(t, chromium);
+    await pick(page, S2);
+    await page.keyboard.press('w');
+    const act = await w.act(1);
+    w.holdViews(true);
+    w.answer(act, { ok: true });
+    await until(async () => (await toast(page)).text === PARKED, 'the toast');
+    await page.keyboard.press('w');
+    await sleep(300);
+    assert.deepEqual(kinds(w), ['park']);
+  });
+
+  await t.test(
+    'w answered, its list held: d on the session sends nothing, and opens no end dialog on one the window can end',
+    async (t) => {
+      const { page, w } = await scripted(
+        t,
+        chromium,
+        listRows({ open: [endableRow(S2), row(S3, { state: 'running', terminal: null })] }, [
+          termOf(S2, 1),
+        ]),
+        2,
+      );
+      await pick(page, S2);
+      await page.keyboard.press('w');
+      const act = await w.act(1);
+      w.holdViews(true);
+      w.answer(act, { ok: true });
+      await until(async () => (await toast(page)).text === PARKED_RUNNING, 'the toast');
+      await page.keyboard.press('d');
+      await sleep(300);
+      assert.equal(await enderShown(page), false, 'no dialog');
+      assert.deepEqual(kinds(w), ['park']);
+    },
+  );
+
+  await t.test('d answered, its list held: w on the session sends nothing', async (t) => {
+    const { page, w } = await scriptedWorld(t, chromium);
+    await pick(page, S2);
+    await page.keyboard.press('d');
+    const act = await w.act(1);
+    assert.equal(act['kind'], 'done');
+    w.holdViews(true);
+    w.answer(act, { ok: true });
+    await until(async () => (await toast(page)).text !== '', 'the toast');
+    await page.keyboard.press('w');
+    await sleep(300);
+    assert.deepEqual(kinds(w), ['done']);
+  });
+
+  for (const [button, keys, kind] of [
+    ['Mark done, keep it running', ['Enter'], 'done'],
+    ['End session and mark done', ['ArrowLeft', 'Enter'], 'end-session'],
+  ] as [string, string[], string][]) {
+    await t.test(
+      `the end dialog's ${button}, answered, its list held: w and d on the session send nothing, and no dialog opens again`,
+      async (t) => {
+        const { page, w } = await scripted(
+          t,
+          chromium,
+          listRows({ week: [row(S1)], open: [endableRow(S2)] }, [termOf(S2, 1)]),
+          2,
+        );
+        await pick(page, S2);
+        await page.keyboard.press('d');
+        await until(() => enderShown(page), 'the dialog');
+        for (const key of keys) await page.keyboard.press(key);
+        const act = await w.act(1);
+        assert.equal(act['kind'], kind);
+        w.holdViews(true);
+        w.answer(act, { ok: true, ...(kind === 'end-session' ? { ended: false } : {}) });
+        await until(async () => (await toast(page)).undo, 'the toast');
+        await toZone(page, 'list');
+        await page.keyboard.press('w');
+        await page.keyboard.press('d');
+        await sleep(300);
+        assert.equal(await enderShown(page), false, 'no dialog again');
+        assert.deepEqual(kinds(w), [kind]);
+      },
+    );
+  }
+
+  await t.test('the Undo after parking a session marked done marks it done again', async (t) => {
+    const { page, w } = await scripted(
+      t,
+      chromium,
+      listRows({ week: [row(S1), row(S2, { done: true }), row(S3)] }),
+      3,
+    );
+    await pick(page, S2);
+    await page.keyboard.press('w');
+    const act = await w.act(1);
+    w.list(listRows({ week: [row(S1), row(S3)], parked: [row(S2, PARKED_FIELDS)] }));
+    w.answer(act, { ok: true });
+    await until(async () => (await toast(page)).undo, 'the Undo');
+    await page.locator('#toast .toast-undo').click();
+    assert.equal((await w.act(2))['kind'], 'done');
+  });
+
+  for (const [button, keys, kind, words] of [
+    ['Mark done, keep it running', ['Enter'], 'done', DONE_RUNNING],
+    ['End session and mark done', ['ArrowLeft', 'Enter'], 'end-session', ''],
+  ] as [string, string[], string, string][]) {
+    await t.test(
+      `a parked running session marked done through ${button}: the toast ${words === '' ? 'of the end' : 'of a running session'}, and its Undo parks it again`,
+      async (t) => {
+        const { page, w } = await scripted(
+          t,
+          chromium,
+          listRows(
+            { week: [row(S1)], parked: [endableRow(S2, { slot: null, ...PARKED_FIELDS })] },
+            [termOf(S2, null)],
+          ),
+          2,
+        );
+        await pick(page, S2);
+        await page.keyboard.press('d');
+        await until(() => enderShown(page), 'the dialog');
+        for (const key of keys) await page.keyboard.press(key);
+        const act = await w.act(1);
+        assert.equal(act['kind'], kind);
+        w.list(
+          listRows({ week: [row(S1)], open: [endableRow(S2, { slot: 1, done: true })] }, [
+            termOf(S2, 1),
+          ]),
+        );
+        w.answer(act, { ok: true, ...(kind === 'end-session' ? { ended: false } : {}) });
+        await until(async () => (await toast(page)).undo, 'the Undo');
+        if (words !== '')
+          assert.equal((await toast(page)).text, words, 'it runs: the running words');
+        await page.locator('#toast .toast-undo').click();
+        assert.equal((await w.act(2))['kind'], 'park');
+      },
+    );
+  }
+
+  await t.test(
+    'an Undo whose session the next list does not list (a done running row that stopped meanwhile) selects it no more, also when a later list lists it',
+    async (t) => {
+      const running = { state: 'running', terminal: null };
+      const { page, w } = await scripted(
+        t,
+        chromium,
+        listRows({ open: [row(S2, { ...running, done: true }), row(S4, running)] }),
+        2,
+      );
+      await pick(page, S2);
+      await page.keyboard.press('w');
+      const act = await w.act(1);
+      w.list(
+        listRows({ open: [row(S4, running)], parked: [row(S2, { ...running, ...PARKED_FIELDS })] }),
+      );
+      await selectionIs(page, S4, 'the next row');
+      w.answer(act, { ok: true });
+      await until(async () => (await toast(page)).undo, 'the Undo');
+      w.holdViews(true);
+      await page.locator('#toast .toast-undo').click();
+      const undo = await w.act(2);
+      assert.equal(undo['kind'], 'done');
+      w.answer(undo, { ok: true });
+      // S2 stopped meanwhile: done and stopped, it is hidden.
+      w.list(listRows({ open: [row(S4, running)] }));
+      await sleep(200);
+      // Later (done sessions shown, say) it is listed again: the Undo is long over.
+      w.list(listRows({ open: [row(S4, running)], week: [row(S2, { done: true })] }));
+      await sleep(300);
+      assert.equal(await selectedRow(page), S4);
+    },
+  );
 });

@@ -445,3 +445,44 @@ test('the switcher: a parked row is ranked `parked`, never `need`, after Open an
     [S1, S2, S3],
   );
 });
+
+// --- what reads "runs" and what reads "under Open" ---------------------------------------------
+
+test('the chip Running lists a parked session that runs, under Parked, and not a stopped one', () => {
+  const list = rows([
+    session(S1, { title: 'parked running', runs: true, pid: 9001, parkedAgo: MIN }),
+    session(S4, { title: 'open one', runs: true, pid: 9004 }),
+    session(S2, { title: 'parked stopped', parkedAgo: MIN }),
+  ]);
+  const terminals = [term(1, S1, 1), term(2, S4, 2)];
+  const message = buildListMessage(
+    input({ rows: list, terminals, view: { chips: ['running'] as SearchChip[] } }),
+  );
+  assert.deepEqual(ids(message, 'open'), [S4]);
+  assert.deepEqual(ids(message, 'parked'), [S1]);
+});
+
+test('a parked row still in the kept order places no row of Open: Open is as if it were not there', () => {
+  // Kept: S4 (window, 1), S5 (another terminal), S1 (window, 2; parked since), S6 (another
+  // terminal); S3 is a window terminal with number 3, not kept yet.
+  const others = [
+    session(S4, { title: 'a', runs: true, pid: 9004 }),
+    session(S5, { title: 'e', runs: true, pid: 9005 }),
+    session(S6, { title: 'e2', runs: true, pid: 9006 }),
+    session(S3, { title: 'u', runs: true, pid: 9003 }),
+  ];
+  const parked = session(S1, { title: 'p', runs: true, pid: 9001, parkedAgo: MIN });
+  const kept = [S4, S5, S1, S6];
+  const withParked = buildListMessage(
+    input({
+      rows: rows([...others, parked]),
+      terminals: [term(1, S4, 1), term(2, S1, 2), term(3, S3, 3)],
+      openOrder: kept,
+    }),
+  );
+  const without = buildListMessage(
+    input({ rows: rows(others), terminals: [term(1, S4, 1), term(3, S3, 3)], openOrder: kept }),
+  );
+  assert.deepEqual(ids(withParked, 'open'), ids(without, 'open'));
+  assert.deepEqual(ids(withParked, 'parked'), [S1]);
+});

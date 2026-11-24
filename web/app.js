@@ -1779,7 +1779,7 @@ function undoMark(sessionId, kind) {
     }
     if (back !== null && state.undoTo === back) {
       back.answered = true;
-      followUndo();
+      followUndo(false);
     }
   });
   keepKeyboard(); // pressed from the keyboard, the toast's Undo is gone
@@ -1847,8 +1847,8 @@ function leaveDone() {
   if (rowOf(leaving.sessionId) !== undefined) {
     return;
   }
-  if (state.selected !== leaving.sessionId) {
-    return; // the user moved the selection meanwhile: it stays
+  if (!stayedFor(leaving.sessionId)) {
+    return; // the user moved meanwhile: the selection stays
   }
   const section = state.list?.sections.find((candidate) => candidate.name === leaving.section);
   const listed = new Set(section?.rows.map((row) => row.id) ?? []);
@@ -1873,6 +1873,20 @@ function leaveDone() {
 }
 
 /**
+ * Whether the user stayed where this page's own `d` or `w` in the list left them, so that its list
+ * may move the selection on (`leaveDone`, `leavePark`): the session is still the selected one, the
+ * list still has the keyboard's zone, the new session's form is not open and no dialog is shown.
+ * Going to the terminal (Enter, Esc, a click there, the zone chord) or opening the form counts as
+ * the user having moved: a selection moved then would hand the next row's terminal the keyboard
+ * (since F44 the next row can run, under Open after `w`, under Parked after `d`).
+ * @param {string} sessionId
+ * @returns {boolean}
+ */
+function stayedFor(sessionId) {
+  return state.selected === sessionId && state.zone === 'list' && !state.newOpen && !modal();
+}
+
+/**
  * F44 (S2 12.9, 12.15; the owner's decision): this page's `w` in the list parked the selected
  * session, and `state.list` is the first list that shows its row out of the section it left. When
  * the selection is still that session, it moves to the row after it in that section, else the one
@@ -1882,8 +1896,8 @@ function leaveDone() {
  */
 function leavePark(leaving) {
   state.leaving = null;
-  if (state.selected !== leaving.sessionId) {
-    return; // the user moved the selection meanwhile: it stays
+  if (!stayedFor(leaving.sessionId)) {
+    return; // the user moved meanwhile: the selection stays
   }
   const section = state.list?.sections.find((candidate) => candidate.name === leaving.section);
   const listed = new Set(section?.rows.map((row) => row.id) ?? []);
@@ -1922,11 +1936,22 @@ function selectNone() {
   render();
 }
 
-/** At each list, once the Undo's answer came: the session back, selected again (ruled); F44: after
- *  a `w`, once its row is no longer under Parked (so the list is never sent there and back). */
-function followUndo() {
+/**
+ * At the Undo's answer and at each list after it: the session back, selected again (ruled); F44:
+ * after a `w`, once its row is no longer under Parked (so the list is never sent there and back).
+ * A list after the answer that does not list the session (a done row that stopped meanwhile) ends
+ * it: nothing selects the session again later.
+ * @param {boolean} atList whether a list just came (else the answer did)
+ */
+function followUndo(atList) {
   const back = state.undoTo;
-  if (back === null || !back.answered || rowOf(back.sessionId) === undefined) {
+  if (back === null || !back.answered) {
+    return;
+  }
+  if (rowOf(back.sessionId) === undefined) {
+    if (atList) {
+      state.undoTo = null; // not listed after the Undo's answer: nothing to select again, ever
+    }
     return;
   }
   if (back.away !== null && placeOf(back.sessionId)?.section === back.away) {
@@ -2052,7 +2077,7 @@ function received(message) {
         }
       }
       followDone();
-      followUndo();
+      followUndo(true);
       // Stage C: before the render, whose keepKeyboard gives the zone the keyboard when a control
       // of the banner that had it went away (a restore began: Restore is gone).
       banner.render(message.banner ?? null);
