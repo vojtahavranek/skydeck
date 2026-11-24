@@ -407,6 +407,9 @@ test("the resume card's Other flags… (#188)", async (t) => {
       assert.equal(first['sessionId'], S1);
       assert.equal(typeof first['cols'], 'number');
       assert.equal(typeof first['rows'], 'number');
+      // Start again once the refusal is shown: while a start waits for its answer the form starts
+      // nothing again.
+      await showsText(w.page, `${EDITOR} .card-lines`, /^not now$/);
 
       w.answer.refuse = null;
       await w.page.fill(FIELD, `--model example  'go on'`);
