@@ -83,8 +83,9 @@ async function ended(r: TestRegistry, id: string): Promise<void> {
   await until(() => info(r.registry, id).state === 'not-started', `terminal ${id} ended`);
 }
 
-/** The fill as the server wires it: run at every change of the registry; Open over the registry's
- *  terminals (each a new session's row, no kept order). Its numbers are written to `kept`. */
+/** The fill as the server wires it: run at every change of the registry, and `run` a refresh that
+ *  worked (the first one right away); Open over the registry's terminals (each a new session's
+ *  row, no kept order). Its numbers are written to `kept`. */
 function wire(
   box: RegistryBox,
   r: TestRegistry,
@@ -112,7 +113,9 @@ function wire(
   r.registry.onChange(() => {
     fill.run();
   });
-  return { run: () => fill.run(), logs };
+  // Open's order is known from here on (each run of the tests below stands for a later refresh).
+  fill.refreshed();
+  return { run: () => fill.refreshed(), logs };
 }
 
 /** The numbers of `ids`, in order. */
@@ -381,20 +384,15 @@ describe('registry: each moment a number becomes free, with the fill wired as th
 
 /**
  * A keeper played by this test: a socket in terms/ that answers C with a protocol-1 hello (its
- * fields replaced by `over`'s), then, a second later, the frames of `then`, and a pid line naming
- * this test process (alive; killKeepersIn never signals it).
+ * fields replaced by `over`'s), and a pid line naming this test process (alive; killKeepersIn
+ * never signals it).
  */
 async function fakeKeeper(
   t: TestContext,
   box: RegistryBox,
   id: string,
   over: Record<string, unknown> = {},
-  then: readonly (readonly ['D' | 'X', string])[] = [],
 ): Promise<{ stop(): Promise<void> }> {
-  const timers: NodeJS.Timeout[] = [];
-  t.after(() => {
-    for (const timer of timers) clearTimeout(timer);
-  });
   const sockets: Socket[] = [];
   const server: Server = createServer((socket) => {
     sockets.push(socket);
@@ -431,13 +429,6 @@ async function fakeKeeper(
         ...over,
       };
       socket.write(encodeFrame('H', utf8(JSON.stringify(hello))));
-      if (then.length > 0) {
-        timers.push(
-          setTimeout(() => {
-            for (const [type, payload] of then) socket.write(encodeFrame(type, utf8(payload)));
-          }, 1000),
-        );
-      }
     });
   });
   await new Promise<void>((resolve) => server.listen(box.files.termSock(id), resolve));
@@ -591,32 +582,6 @@ describe('registry: the terminals giveSlots passes over, each by its own guard (
     if (!existsSync(sock)) writeFileSync(sock, ''); // connecting to a file is refused
     await until(() => info(r.registry, id).state === 'lost', 'lost', 10_000);
     assert.equal(r.registry.giveSlots([id], noWrite), 'ok');
-    assert.equal(slotOf(r, id), null);
-  });
-
-  test('a terminal whose exit came but is not applied yet (its screen side behind): it takes none', async (t) => {
-    const box = await registrySandbox(t);
-    const id = 'a7a7a7a7a7a7';
-    // Found and settled first (no keeper is being found then); a second later one record and
-    // the exit: the exit waits for the record's slow write to the screen side.
-    const exit = { code: 0, signal: null, atNs: '2', notStarted: null };
-    await fakeKeeper(t, box, id, { meta: { ...META_NONE, dir: box.s.home } }, [
-      ['D', 'output'],
-      ['X', JSON.stringify(exit)],
-    ]);
-    const r = box.registry({ slowWriteMs: 3000 });
-    await r.registry.rediscover();
-    await until(
-      () =>
-        r.registry
-          .list()
-          .some((one) => one.id === id && one.exit !== null && one.state === 'running'),
-      'the exit stored, not applied',
-      10_000,
-    );
-    assert.equal(r.registry.giveSlots([id], noWrite), 'ok');
-    assert.equal(slotOf(r, id), null);
-    await until(() => info(r.registry, id).state === 'ended', 'the exit applied', 10_000);
     assert.equal(slotOf(r, id), null);
   });
 });

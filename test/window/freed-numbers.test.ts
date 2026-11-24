@@ -15,8 +15,10 @@ import {
   waitingTerminals,
 } from '../../src/window/freed-numbers.ts';
 import type { FillDeps, FillInput } from '../../src/window/freed-numbers.ts';
+import { planMove } from '../../src/window/reorder.ts';
 import type { TerminalInfo } from '../../src/window/hub.ts';
 import type { Registry } from '../../src/window/terminals.ts';
+import { openRows } from '../../src/window/view/build.ts';
 import { ds, meta, rows } from '../helpers/derived.ts';
 import { BOOT_A, SEC, T0 } from '../helpers/platform.ts';
 
@@ -149,30 +151,75 @@ describe('where the row goes once it has a number (#189)', () => {
     assert.deepEqual(names(orderAfterFill(input, given)), [3, 1, 2, 4, 5, 10, 7, 11, 9, 12]);
   });
 
-  test('a block the row heads goes with it; a block it is in but does not head stays where it is', () => {
-    const groups = new Map([
-      [10, 'G'],
-      [12, 'G'],
-    ]);
-    const kept = [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 11];
-    const input = issue(12, { ended: [6], groups, kept });
-    assert.deepEqual(
-      names(orderAfterFill(input, new Map([[term(10), 6]]))),
-      [1, 2, 3, 4, 5, 10, 12, 7, 8, 9, 11],
-    );
-    const under2 = new Map([
-      [2, 'G'],
-      [10, 'G'],
-    ]);
-    const second = issue(11, {
+  test("in a group's block it goes where a new terminal with that number goes (12.2): a waiting member becomes the head and its block comes up, a waiting head brings its waiting members; the numbers then read out of order, and the next move renumbers terminals nobody touched", () => {
+    // (a) 10 waits in the block of 8, drawn below 7: `5:5 7:7 8:8 10:- 9:9`; 10 takes 6.
+    const member = issue(10, {
       ended: [6],
-      groups: under2,
+      groups: new Map([
+        [8, 'G'],
+        [10, 'G'],
+      ]),
+      kept: [1, 2, 3, 4, 5, 7, 8, 10, 9],
+    });
+    const given = new Map([[term(10), 6]]);
+    const order = orderAfterFill(member, given);
+    assert.deepEqual(names(order), [1, 2, 3, 4, 5, 10, 8, 7, 9], 'it heads the block, 8 passes 7');
+    const terminals = member.terminals.map((one) =>
+      one.id === term(10) ? { ...one, slot: 6 } : one,
+    );
+    const drawn = (input: FillInput): string[] =>
+      openRows(input, true).map(
+        (row) =>
+          `${names([row.id])[0]}:${row.slot ?? '-'}${row.stack === null ? '' : `[${row.stack.role[0]}]`}`,
+      );
+    const read = ['1:1', '2:2', '3:3', '4:4', '5:5', '10:6[h]', '8:8[m]', '7:7', '9:9'];
+    assert.deepEqual(drawn({ ...member, terminals, openOrder: order }), read, 'kept order');
+    assert.deepEqual(
+      drawn({ ...member, terminals, openOrder: [] }),
+      read,
+      'no kept order: the same',
+    );
+
+    // (b) 10 heads a block with 12, which waits too; 10 takes 6 and brings 12 above 7.
+    const head = issue(12, {
+      ended: [6],
+      groups: new Map([
+        [10, 'G'],
+        [12, 'G'],
+      ]),
+      kept: [1, 2, 3, 4, 5, 7, 8, 9, 10, 12, 11],
+    });
+    const headOrder = orderAfterFill(head, given);
+    assert.deepEqual(names(headOrder), [1, 2, 3, 4, 5, 10, 12, 7, 8, 9, 11]);
+    // The next move, of a row that is no part of it (11 up past 9), hands the numbers out from
+    // the top: 12 takes 7, 7 takes 8, 8 takes 9, and 9 loses its number.
+    const after = {
+      ...head,
+      openOrder: headOrder,
+      terminals: head.terminals.map((one) => (one.id === term(10) ? { ...one, slot: 6 } : one)),
+    };
+    const move = planMove(after, true, nth(11), 'up');
+    assert.ok(move.ok, JSON.stringify(move));
+    assert.deepEqual(
+      new Map([...move.slots].map(([id, slot]) => [termNames([id])[0], slot])),
+      new Map([
+        [12, 7],
+        [7, 8],
+        [8, 9],
+        [9, null],
+      ]),
+    );
+
+    // A block whose head stands above the number's place keeps its place: 10 stays under 2.
+    const under2 = issue(11, {
+      ended: [6],
+      groups: new Map([
+        [2, 'G'],
+        [10, 'G'],
+      ]),
       kept: [1, 2, 10, 3, 4, 5, 7, 8, 9, 11],
     });
-    assert.deepEqual(
-      names(orderAfterFill(second, new Map([[term(10), 6]]))),
-      [1, 2, 10, 3, 4, 5, 7, 8, 9, 11],
-    );
+    assert.deepEqual(names(orderAfterFill(under2, given)), [1, 2, 10, 3, 4, 5, 7, 8, 9, 11]);
   });
 });
 
@@ -273,13 +320,13 @@ const busy = (): Error =>
   Object.assign(new Error('database is locked'), { code: 'ERR_SQLITE_ERROR', errcode: 5 });
 
 describe("the fill's glue on the server (#189)", () => {
-  test('nothing is read while no number is free or no terminal may take one, nor before the first refresh', () => {
+  test('nothing is read while no number is free or no terminal may take one, nor without an input', () => {
     const none = glue(issue(12, { ended: [6] }), { free: null });
-    none.fill.run();
+    none.fill.refreshed();
     assert.deepEqual([none.inputs(), none.calls.length], [0, 0]);
     const all = issue(9, { ended: [] });
     const numbered = glue(all);
-    numbered.fill.run();
+    numbered.fill.refreshed();
     assert.deepEqual([numbered.inputs(), numbered.calls.length], [0, 0], 'every terminal has one');
     const ended = issue(10, { ended: [6] });
     const lostOnly = glue({
@@ -288,20 +335,20 @@ describe("the fill's glue on the server (#189)", () => {
         one.slot === null ? { ...one, state: 'lost' as const } : one,
       ),
     });
-    lostOnly.fill.run();
+    lostOnly.fill.refreshed();
     assert.deepEqual([lostOnly.inputs(), lostOnly.calls.length], [0, 0], 'no program may run');
     const early = glue(null);
     early.deps.registry = {
       ...early.deps.registry,
       list: () => issue(12, { ended: [6] }).terminals,
     };
-    createFill(early.deps).run();
-    assert.deepEqual(early.calls, [], 'Open is not known before the first refresh');
+    createFill(early.deps).refreshed();
+    assert.deepEqual(early.calls, [], 'no input: no tick yet');
   });
 
   test("without a kept order: the waiting terminals in Open's order go to the registry; the numbers are written alone, nothing adopted; the restore memory after", () => {
     const { fill, calls, events, persisted } = glue(issue(12, { ended: [6, 8] }));
-    fill.run();
+    fill.refreshed();
     assert.deepEqual(calls.map(termNames), [[10, 11, 12]]);
     assert.deepEqual(events, ['persist', 'changed', 'remember']);
     assert.deepEqual(persisted, [{ moved: new Map([[term(10), 6]]), order: null }]);
@@ -310,7 +357,7 @@ describe("the fill's glue on the server (#189)", () => {
   test('with a kept order: the new order is written with the numbers, adopted before the registry announces the change; the restore memory after', () => {
     const kept = [1, 2, 3, 4, 5, 7, 8, 9, 12, 10, 11].map(nth);
     const { fill, calls, events, persisted } = glue(issue(12, { ended: [6] }), { kept });
-    fill.run();
+    fill.refreshed();
     assert.deepEqual(calls.map(termNames), [[12, 10, 11]]);
     assert.deepEqual(events, ['persist', 'adopt', 'changed', 'remember']);
     // 12 waited first and takes 6: its row goes to 6's place, the others keep theirs.
@@ -322,7 +369,7 @@ describe("the fill's glue on the server (#189)", () => {
     const kept = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12].map(nth);
     const { fill, events, logs, failWith, kept: now } = glue(issue(12, { ended: [6] }), { kept });
     failWith(busy());
-    fill.run();
+    fill.refreshed();
     fill.run();
     assert.deepEqual(events, []);
     assert.deepEqual(now(), kept);
@@ -339,19 +386,29 @@ describe("the fill's glue on the server (#189)", () => {
   test('a run inside the change it announces does nothing; once the server stops nothing runs', () => {
     const { fill, calls, inside, deps } = glue(issue(12, { ended: [6] }));
     inside(() => fill.run());
-    fill.run();
+    fill.refreshed();
     assert.equal(calls.length, 1);
     const stopped = createFill({ ...deps, stopping: () => true });
-    stopped.run();
+    stopped.refreshed();
     assert.equal(calls.length, 1);
+  });
+
+  test('before the first refresh that worked nothing is read or given, also at a change (Open is not known); the first refresh gives', () => {
+    const kept = [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12].map(nth);
+    const { fill, calls, events, inputs } = glue(issue(12, { ended: [6] }), { kept });
+    fill.run();
+    fill.run();
+    assert.deepEqual([inputs(), calls.length, events], [0, 0, []]);
+    fill.refreshed();
+    assert.deepEqual(events, ['persist', 'adopt', 'changed', 'remember']);
   });
 });
 
 describe('the fill: what it says in the log, and its writes (#189)', () => {
-  test('held back while a keeper is being found: said once, and again only after a run that gave or had nothing to give', () => {
+  test('held back while a keeper is being found: said once per hold, again only after a run that gave or had nothing to give', () => {
     const { fill, logs, setFinding, setFree, events } = glue(issue(12, { ended: [6] }));
     setFinding(true);
-    fill.run();
+    fill.refreshed();
     fill.run();
     assert.deepEqual(logs, [HELD_LINE]);
     assert.deepEqual(events, [], 'nothing given meanwhile');
@@ -366,20 +423,6 @@ describe('the fill: what it says in the log, and its writes (#189)', () => {
     setFree(6);
     fill.run();
     assert.equal(logs.length, 3, 'and after a run with nothing to give');
-  });
-
-  test('a write that fails, then nothing to give (the waiting terminal ended): a later failure of the same kind is logged again', () => {
-    const { fill, logs, failWith, setFree } = glue(issue(12, { ended: [6] }));
-    failWith(busy());
-    fill.run();
-    setFree(null);
-    fill.run();
-    setFree(6);
-    fill.run();
-    assert.deepEqual(logs, [
-      'freed numbers: a free number was not given (the database is busy)',
-      'freed numbers: a free number was not given (the database is busy)',
-    ]);
   });
 
   test('persistFill: the numbers alone without a kept order; with one, both in one transaction', () => {

@@ -651,13 +651,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         tookOpen(false);
       },
     });
-    /** #189: a refresh has worked since the start, so that Open's order is known (its rows). */
-    let refreshedOnce = false;
     // #189 (S2 7.6, 12.1): the free numbers to the terminals that wait (freed-numbers.ts).
     const fill = createFill({
       registry: created,
       input: () =>
-        !refreshedOnce || tick === null
+        tick === null
           ? null
           : {
               rows: tick.rows(),
@@ -682,11 +680,13 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
      * registry (before the pages' lists are pushed), so at each moment a number becomes free — an
      * exit applied, a hello that says the program exited, a lost terminal's program that may no
      * longer run, the close of a lost terminal that still held one —, and after every refresh that
-     * worked: the first after the start (the gaps a start finds), the end of a keeper's finding
-     * (the registry gives nothing meanwhile), and a write that failed. It never throws.
+     * worked: the first after the start (the gaps a start finds; nothing is given before it, Open's
+     * order is not known yet), the end of a keeper's finding (the registry gives nothing
+     * meanwhile), and a write that failed. It never throws.
      */
-    const fillFreedNumbers = (): void => {
-      fill.run();
+    const fillFreedNumbers = (after: 'change' | 'refresh'): void => {
+      if (after === 'refresh') fill.refreshed();
+      else fill.run();
     };
     const acting = createActions({
       deck,
@@ -873,7 +873,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       update: () => updates.payload(),
     });
     created.onChange(() => {
-      fillFreedNumbers(); // #189: a number freed by this change goes to a waiting terminal first
+      fillFreedNumbers('change'); // #189: a number this change freed goes to one that waits first
       pages.pushList();
     });
     const notices = keepAliveNotices();
@@ -910,11 +910,10 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       keepersLog,
       log,
       afterRefresh: () => {
-        refreshedOnce = true;
         pageMark.update(pages.count()); // plan C20; it never throws
         decidePostponed();
         created.flushSlots(); // F37: a write of the moved slots that failed; it never throws
-        fillFreedNumbers(); // #189: before the freeze, which then keeps the rows where they went
+        fillFreedNumbers('refresh'); // #189: before the freeze, which then keeps the rows there
         tookOpen(true); // F42: the kept order and the restore's order take Open; it never throws
       },
       storeNewer,
