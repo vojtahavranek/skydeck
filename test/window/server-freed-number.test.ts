@@ -26,15 +26,18 @@ function openOf(list: ListMessage): string[] {
   );
 }
 
-/** The first list whose Open reads `order`; on a timeout the last Open seen is in the message. */
+/** The first list whose Open reads `order` (`each` sees every list until then); on a timeout the
+ *  last Open seen is in the message. */
 async function openReads(
   page: TestPage,
   order: readonly string[],
   what: string,
+  each: (list: ListMessage) => void = () => {},
 ): Promise<ListMessage> {
   let last: string[] = [];
   try {
     return await page.list((list) => {
+      each(list);
       last = openOf(list);
       return JSON.stringify(last) === JSON.stringify(order);
     }, what);
@@ -84,21 +87,23 @@ describe('a freed number goes to a running terminal without one (#189)', () => {
   test("the report's case, live: two programs of twelve end, the first two waiting terminals take their numbers, at their numbers' places, on every page, after a reload and a restart", async (t) => {
     const { d, server, page, list } = await resumedMany(t, 12);
     const other = await connectTestPage(t, d, server.server);
-    for (const slot of [6, 8]) {
-      page.send({ t: 'input', term: termWith(list, slot), data: '/exit\r' });
-    }
-    const filled = ['1:1', '2:2', '3:3', '4:4', '5:5', '10:6', '7:7', '11:8', '9:9', '12:-'];
     // At the change that frees it, not a refresh later: no list shows a free number while a
     // running terminal has none.
     const seen: string[] = [];
-    const first = await page.list((candidate) => {
+    const watch = (candidate: ListMessage): void => {
       const held = new Set(
         candidate.terminals.flatMap((one) => (one.slot === null ? [] : [one.slot])),
       );
       const waits = candidate.terminals.some((one) => one.slot === null && one.state === 'running');
       if (held.size < 9 && waits) seen.push(openOf(candidate).join(' '));
-      return JSON.stringify(openOf(candidate)) === JSON.stringify(filled);
-    }, 'the gaps filled');
+    };
+    // One after the other: the number freed first goes to the first that waits.
+    page.send({ t: 'input', term: termWith(list, 6), data: '/exit\r' });
+    const six = ['1:1', '2:2', '3:3', '4:4', '5:5', '10:6', '7:7', '8:8', '9:9', '11:-', '12:-'];
+    await openReads(page, six, '10 takes 6', watch);
+    page.send({ t: 'input', term: termWith(list, 8), data: '/exit\r' });
+    const filled = ['1:1', '2:2', '3:3', '4:4', '5:5', '10:6', '7:7', '11:8', '9:9', '12:-'];
+    const first = await openReads(page, filled, 'the gaps filled', watch);
     assert.deepEqual(seen, [], 'a list with a free number and a waiting terminal');
     assertNumbersSound(first);
     assertNumbersSound(await openReads(other, filled, 'the other page'));
