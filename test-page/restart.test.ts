@@ -337,15 +337,24 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
       await page.keyboard.press('Enter');
       await shown(page, false);
       assert.equal(await active(page), '#list', 'Cancel: the keyboard back where it was');
-      // A sentence typed into the list by mistake: `r`, letters, a space, Enter.
-      await toZone(page, 'list');
-      await page.keyboard.type('run the tests');
-      await page.keyboard.press('Enter');
-      await sleep(300);
+      // A sentence typed into the list by mistake: `r`, letters, a space, Enter; and a word with a
+      // `d` after its `r`, then Enter (the `d` reaches no list key while the dialog is shown).
+      for (const typed of ['run the tests', 'worked']) {
+        await toZone(page, 'list');
+        await page.keyboard.type(typed);
+        await page.keyboard.press('Enter');
+        await sleep(300);
+        assert.equal((await restarter(page)).shown, false, typed);
+        // (A Space in a sentence presses Cancel; a letter after it is a list key again, which
+        // can open another dialog: Esc closes it.)
+        await page.keyboard.press('Escape');
+      }
       assert.deepEqual(
-        actsAfter(w).filter((one) => one['kind'] === 'restart'),
+        actsAfter(w).filter((one) =>
+          ['restart', 'end-session', 'done'].includes(String(one['kind'])),
+        ),
         [],
-        'nothing restarted',
+        'nothing restarted, ended or marked done',
       );
       // Working: the end dialog's warning.
       await page.keyboard.press('Escape');
@@ -646,6 +655,8 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
       const first = await untilTerminalOf(l.page, S1);
       await untilScreen(l.page, promptOf(S1));
       await toZone(l.page, 'list');
+      // Once the session runs in its terminal and can be ended, the header offers Restart.
+      await eventually(() => headerRestart(l.page), 'the header’s Restart');
       await sleep(500); // the list with S1's payload
       await l.page.keyboard.press('r');
       await shown(l.page, true);

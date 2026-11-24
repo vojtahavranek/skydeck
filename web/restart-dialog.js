@@ -26,7 +26,7 @@
 // `deps.gone` gets the toast's words. Every text reaches the DOM as text.
 
 /** @import { ListMessage, ResultMessage, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
-import { flagsControls } from './cards.js';
+import { flagsControls } from './flags-line.js';
 import { cutTitle } from './end-text.js';
 import { flagsText as flagsFieldText } from './favourite-text.js';
 import { sessionRow } from './pane.js';

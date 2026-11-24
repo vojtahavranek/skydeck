@@ -637,7 +637,9 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
       await clickRow(page, S1);
       await toZone(page, 'list');
       let n = 0;
-      for (const typed of ['do not touch the tests', 'done\n', 'd ', 'worked\n', 'fixed\n']) {
+      // (A word with an `r` before its `d`, `worked`, opens the dialog "Restart" first, which its
+      // Enter cancels: issue #166, test-page/restart.test.ts.)
+      for (const typed of ['do not touch the tests', 'done\n', 'd ', 'used\n', 'fixed\n']) {
         await page.waitForSelector('#toast[hidden]', { state: 'attached', timeout: 15_000 });
         await toZone(page, 'list');
         for (const character of typed) {
