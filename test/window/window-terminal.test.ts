@@ -365,7 +365,9 @@ describe('window terminal: starts that fail', () => {
     const prepared = prepareResumeById(w.deck, S1);
     const spec = {
       ...launchSpec(prepared, readLock(w.deck, S1)),
-      startByNs: w.tp.platform.clock.nowNs() - 1_000_000_000n,
+      // A minute past: nowNs() holds its last value while the wall clock steps back, and the
+      // keeper reads the wall clock itself, so a second past may still lie in its future (#202).
+      startByNs: w.tp.platform.clock.nowNs() - 60_000_000_000n,
     };
     const result = await windowTerminal(deps, SIZE).open(spec);
     assert.deepEqual(result, {
@@ -381,7 +383,8 @@ describe('window terminal: starts that fail', () => {
     w.resumable(S1);
     const r = w.registry();
     const { deps, record } = w.deps(r);
-    const past = w.tp.platform.clock.nowNs() - 1_000_000_000n;
+    // A minute past, so that it has passed on the keeper's wall clock too (see the case above).
+    const past = w.tp.platform.clock.nowNs() - 60_000_000_000n;
     const window = windowTerminal(deps, SIZE);
     const tooLate: Terminal = {
       ...window,
