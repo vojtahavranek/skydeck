@@ -45,7 +45,7 @@ describe('loadConfig', () => {
       profileDir: null,
       keepAlive: 'wsl',
       links: 'default',
-      updateCheck: 'daily',
+      updateCheck: 'hourly',
       copyOnSelect: true,
     });
   });
@@ -91,22 +91,37 @@ describe('loadConfig', () => {
     assert.equal(parseConfig('{"window":{"links":"edge"}}', 'x').window.links, 'edge');
   });
 
-  test('window.updateCheck is "daily" unless set, and takes "daily" or "off" (F38, S2 16.4)', () => {
-    assert.equal(parseConfig('{}', 'x').window.updateCheck, 'daily');
-    assert.equal(parseConfig('{"window":{"links":"edge"}}', 'x').window.updateCheck, 'daily');
-    assert.equal(
-      parseConfig('{"window":{"updateCheck":"daily"}}', 'x').window.updateCheck,
-      'daily',
-    );
-    assert.equal(parseConfig('{"window":{"updateCheck":"off"}}', 'x').window.updateCheck, 'off');
-    for (const value of ['"weekly"', '"Off"', 'false', 'true', 'null', '0']) {
+  test('window.updateCheck is "hourly" unless set, and takes "off", "15min", "hourly" or "daily" (F38, S2 16.4)', () => {
+    assert.equal(parseConfig('{}', 'x').window.updateCheck, 'hourly');
+    assert.equal(parseConfig('{"window":{"links":"edge"}}', 'x').window.updateCheck, 'hourly');
+    // A file that says "daily" or "off" keeps exactly that.
+    for (const value of ['off', '15min', 'hourly', 'daily']) {
+      assert.equal(
+        parseConfig(`{"window":{"updateCheck":"${value}"}}`, 'x').window.updateCheck,
+        value,
+      );
+    }
+    for (const value of [
+      '"weekly"',
+      '"Off"',
+      '"15"',
+      '"15 min"',
+      '"Hourly"',
+      '""',
+      'false',
+      'true',
+      'null',
+      '0',
+      '60',
+      '["hourly"]',
+    ]) {
       assert.throws(
         () => parseConfig(`{"window":{"updateCheck":${value}}}`, '/c/config.json'),
         (error: unknown) => {
           assert.ok(error instanceof ConfigError, String(error));
           assert.equal(
             error.message,
-            '/c/config.json: "window.updateCheck" must be "daily" or "off"',
+            '/c/config.json: "window.updateCheck" must be "off", "15min", "hourly" or "daily"',
             value,
           );
           return true;
@@ -276,7 +291,7 @@ describe('parseConfig', () => {
         profileDir: null,
         keepAlive: 'wsl',
         links: 'default',
-        updateCheck: 'daily',
+        updateCheck: 'hourly',
         copyOnSelect: true,
       },
     });

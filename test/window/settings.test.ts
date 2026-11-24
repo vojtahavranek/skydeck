@@ -237,7 +237,7 @@ describe('the table (G1): one row for every key of Config', () => {
     assert.deepEqual(SETTINGS.terminal.choices, ['here', 'wezterm', 'window']);
     assert.deepEqual(SETTINGS['window.links'].choices, ['default', 'edge']);
     assert.deepEqual(SETTINGS['window.keepAlive'].choices, ['wsl', 'off']);
-    assert.deepEqual(SETTINGS['window.updateCheck'].choices, ['daily', 'off']);
+    assert.deepEqual(SETTINGS['window.updateCheck'].choices, ['off', '15min', 'hourly', 'daily']);
     assert.equal(SETTINGS['window.updateCheck'].group, 'The window');
     assert.deepEqual(
       Object.keys(SETTINGS).filter((key) => SETTINGS[key as SettingKey].control === 'switch'),
@@ -342,7 +342,11 @@ describe('what a page may send (G2): every refusal changes nothing', () => {
       ['terminal', 'tab', '"terminal" must be "here", "wezterm" or "window"'],
       ['window.links', 'firefox', '"window.links" must be "default" or "edge"'],
       ['window.keepAlive', null, '"window.keepAlive" must be "wsl" or "off"'],
-      ['window.updateCheck', 'weekly', '"window.updateCheck" must be "daily" or "off"'],
+      [
+        'window.updateCheck',
+        'weekly',
+        '"window.updateCheck" must be "off", "15min", "hourly" or "daily"',
+      ],
       ['wezterm.domain', '', '"wezterm.domain" must be a non-empty string or null'],
       // Issue #184: true or false, nothing else; and no other key takes either.
       ['window.copyOnSelect', 'false', '"window.copyOnSelect" must be true or false'],
@@ -357,7 +361,11 @@ describe('what a page may send (G2): every refusal changes nothing', () => {
         true,
         '"ticketUrl" must be null or an http or https address with {key} once, after its host',
       ],
-      ['window.updateCheck', false, '"window.updateCheck" must be "daily" or "off"'],
+      [
+        'window.updateCheck',
+        false,
+        '"window.updateCheck" must be "off", "15min", "hourly" or "daily"',
+      ],
       ['window.keepAlive', true, '"window.keepAlive" must be "wsl" or "off"'],
     ];
     for (const [key, value, message] of cases) {
@@ -820,7 +828,24 @@ describe('the screen (payload) and what the running server uses (G4)', () => {
     assert.equal(w.d.deck.config.window.copyOnSelect, true);
   });
 
-  test('a key read at the start (window.keepAlive) is written to the file only: the running server keeps its value, and the screen says it applies after the window restarts', (t) => {
+  test('window.updateCheck: the four values, "hourly" by default; each is saved to the file and applies at once', (t) => {
+    const w = world(t, { prRefreshMinutes: 7 });
+    const shown = setting(w.settings.payload(), 'window.updateCheck');
+    assert.deepEqual(
+      [shown.value, shown.inFile, shown.choices],
+      ['hourly', false, ['off', '15min', 'hourly', 'daily']],
+    );
+    for (const value of ['off', '15min', 'hourly', 'daily'] as const) {
+      assert.equal(w.settings.set('window.updateCheck', value).ok, true, value);
+      assert.deepEqual(w.json(), { prRefreshMinutes: 7, window: { updateCheck: value } });
+      assert.equal(w.d.deck.config.window.updateCheck, value);
+      assert.equal(setting(w.settings.payload(), 'window.updateCheck').pending, false, value);
+    }
+    assert.equal(w.settings.reset('window.updateCheck').ok, true);
+    assert.equal(w.d.deck.config.window.updateCheck, 'hourly');
+  });
+
+  test('a key read at the start (window.keepAlive) is written to the file only:the running server keeps its value, and the screen says it applies after the window restarts', (t) => {
     const w = world(t, {});
     const window = w.d.deck.config.window;
     assert.equal(w.settings.set('window.keepAlive', 'off').ok, true);

@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
+import type { UpdateCheck } from '../../src/platform/config.ts';
 import type { Detached, RunResult } from '../../src/platform/types.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
 import { report } from '../../src/update/look.ts';
@@ -32,6 +33,7 @@ import {
   NO_CHECKOUT_LINE,
   PYTHON3,
   RETRY_AFTER_FAILURE_NS,
+  retryAfterNs,
 } from '../../src/window/updates.ts';
 import type { Updates } from '../../src/window/updates.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
@@ -75,12 +77,13 @@ interface World {
   fetches(): number;
   /** The stored entry of this checkout. */
   stored(): CheckRecord | null;
-  setSwitch(value: 'daily' | 'off'): void;
+  setUpdateCheck(value: UpdateCheck): void;
 }
 
 interface WorldOptions {
   repo?: Partial<ScriptedRepo>;
-  updateCheck?: 'daily' | 'off';
+  /** The setting (default "daily": the tests that wait a day; those of each value name it). */
+  updateCheck?: UpdateCheck;
   /** false: the seam variable is not set (a marked sandbox without it). */
   seam?: boolean;
   /** Changes the deck before the checker is made (a store that fails). */
@@ -148,7 +151,7 @@ function world(t: TestContext, options: WorldOptions = {}): World {
     logs,
     fetches: () => runner.calls.filter((call) => gitArgs(call, seam).includes('fetch')).length,
     stored: () => readCheck(d.deck.store, root),
-    setSwitch: (value) => {
+    setUpdateCheck: (value) => {
       config.window.updateCheck = value;
     },
   };
@@ -177,11 +180,11 @@ describe('when a check runs', () => {
     for (let i = 0; i < 5; i++) w.updates.tick();
     await flush();
     assert.equal(w.fetches(), 1);
-    w.d.clock.setNs(T0 + CHECK_EVERY_NS - 1n);
+    w.d.clock.setNs(T0 + CHECK_EVERY_NS.daily - 1n);
     w.updates.tick();
     await flush();
     assert.equal(w.fetches(), 1);
-    w.d.clock.setNs(T0 + CHECK_EVERY_NS);
+    w.d.clock.setNs(T0 + CHECK_EVERY_NS.daily);
     w.updates.tick();
     await flush();
     assert.equal(w.fetches(), 2);
@@ -215,7 +218,7 @@ describe('when a check runs', () => {
     assert.equal(w.fetches(), 2);
   });
 
-  test('switch off: no check at any tick; check() still runs one', async (t) => {
+  test('"off": no check at any tick; check() still runs one', async (t) => {
     const w = world(t, { updateCheck: 'off' });
 
     for (let i = 0; i < 3; i++) w.updates.tick();
@@ -235,11 +238,139 @@ describe('when a check runs', () => {
     await flush();
     assert.equal(w.fetches(), 0);
 
-    w.setSwitch('daily');
+    w.setUpdateCheck('daily');
     w.updates.tick();
     await flush();
 
     assert.equal(w.fetches(), 1);
+  });
+
+  const MINUTE = 60_000_000_000n;
+  /** Each value but "off": its wait after a check, and after one that failed. */
+  const EVERY = [
+    { value: '15min', wait: 15n * MINUTE, afterFailure: 15n * MINUTE },
+    { value: 'hourly', wait: 60n * MINUTE, afterFailure: 60n * MINUTE },
+    { value: 'daily', wait: 24n * 60n * MINUTE, afterFailure: 60n * MINUTE },
+  ] as const;
+
+  for (const { value, wait, afterFailure } of EVERY) {
+    test(`"${value}": a check at start, none before the wait, one exactly at it, and so on`, async (t) => {
+      const w = world(t, { updateCheck: value });
+
+      w.updates.tick();
+      await flush();
+      assert.equal(w.fetches(), 1, 'at start');
+      for (const [at, fetches] of [
+        [wait - 1n, 1],
+        [wait, 2],
+        [wait + 1n, 2],
+        [2n * wait - 1n, 2],
+        [2n * wait, 3],
+      ] as const) {
+        w.d.clock.setNs(T0 + at);
+        w.updates.tick();
+        await flush();
+        assert.equal(w.fetches(), fetches, `${value} at +${at} ns`);
+      }
+    });
+
+    test(`"${value}": after a check that failed the next comes after ${afterFailure / MINUTE} minutes, then the wait again`, async (t) => {
+      const w = world(t, {
+        updateCheck: value,
+        repo: { quietFetch: { code: 128, stderr: 'fatal: gone\n' } },
+      });
+
+      w.updates.tick();
+      await flush();
+      assert.equal(w.fetches(), 1);
+      assert.notEqual(w.updates.payload().failure, null);
+      w.d.clock.setNs(T0 + afterFailure - 1n);
+      w.updates.tick();
+      await flush();
+      assert.equal(w.fetches(), 1);
+      // The remote answers again: the check after the failure works, and the wait is the value's.
+      w.repo.quietFetch = {};
+      w.d.clock.setNs(T0 + afterFailure);
+      w.updates.tick();
+      await flush();
+      assert.equal(w.fetches(), 2);
+      assert.equal(w.updates.payload().failure, null);
+      w.d.clock.setNs(T0 + afterFailure + wait - 1n);
+      w.updates.tick();
+      await flush();
+      assert.equal(w.fetches(), 2);
+      w.d.clock.setNs(T0 + afterFailure + wait);
+      w.updates.tick();
+      await flush();
+      assert.equal(w.fetches(), 3);
+    });
+
+    test(`"${value}": a clock stepped back behind the last check checks`, async (t) => {
+      const w = world(t, { updateCheck: value });
+      w.updates.tick();
+      await flush();
+
+      w.d.clock.setNs(T0 - 1n);
+      w.updates.tick();
+      await flush();
+
+      assert.equal(w.fetches(), 2);
+    });
+  }
+
+  test('a change while the server runs applies at the next tick: to a shorter wait, a check due by it is made at once', async (t) => {
+    const w = world(t, { updateCheck: 'daily' });
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 1);
+
+    // 20 minutes on: due by "15min", not by "hourly".
+    w.d.clock.setNs(T0 + 20n * MINUTE);
+    w.setUpdateCheck('hourly');
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 1, 'not an hour yet');
+    w.setUpdateCheck('15min');
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 2, 'due by the new wait: at the next tick');
+
+    // To a longer wait: the next check waits for it, from the last check.
+    w.setUpdateCheck('daily');
+    w.d.clock.setNs(T0 + 20n * MINUTE + 60n * MINUTE);
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 2, 'a day is not over');
+    w.setUpdateCheck('hourly');
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 3, 'an hour is');
+
+    // Off: none at any tick, whatever the time.
+    w.setUpdateCheck('off');
+    w.d.clock.setNs(T0 + 3n * 24n * 60n * MINUTE);
+    for (let i = 0; i < 3; i++) w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 3);
+  });
+
+  test("a change after a failed check: the wait after the failure is the new value's", async (t) => {
+    const w = world(t, {
+      updateCheck: 'hourly',
+      repo: { quietFetch: { code: 128, stderr: 'fatal: gone\n' } },
+    });
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 1);
+
+    w.d.clock.setNs(T0 + 15n * MINUTE);
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 1, 'an hour after a failure with "hourly"');
+    w.setUpdateCheck('15min');
+    w.updates.tick();
+    await flush();
+    assert.equal(w.fetches(), 2, '15 minutes with "15min"');
   });
 
   test('two check() calls while one runs: one fetch, the same answer', async (t) => {
@@ -531,7 +662,7 @@ describe('the store and the server', () => {
     assert.equal(w.updates.payload().check?.state, 'current');
   });
 
-  test('with the switch off and a stored outcome the first tick looks once, without a fetch', async (t) => {
+  test('with "off" and a stored outcome the first tick looks once, without a fetch', async (t) => {
     const w = world(t, {
       updateCheck: 'off',
       before: (deck, root) => {
@@ -635,9 +766,16 @@ describe('the store and the server', () => {
 });
 
 describe('a check that fails (review of milestone 1)', () => {
-  test('the waits: a day after a check, an hour after one that failed', () => {
-    assert.equal(CHECK_EVERY_NS, 24n * 3_600_000_000_000n);
+  test('the waits: 15 minutes, an hour or a day after a check; an hour after one that failed, 15 minutes with "15min"', () => {
+    assert.deepEqual(CHECK_EVERY_NS, {
+      '15min': 15n * 60_000_000_000n,
+      hourly: 3_600_000_000_000n,
+      daily: 24n * 3_600_000_000_000n,
+    });
     assert.equal(RETRY_AFTER_FAILURE_NS, 3_600_000_000_000n);
+    assert.equal(retryAfterNs('15min'), 15n * 60_000_000_000n);
+    assert.equal(retryAfterNs('hourly'), 3_600_000_000_000n);
+    assert.equal(retryAfterNs('daily'), 3_600_000_000_000n);
   });
 
   test('a check that throws (a git that cannot be started) is a failed check: said, and tried again an hour later, not at every tick', async (t) => {
@@ -1143,7 +1281,7 @@ describe('Update now: refused, nothing started', () => {
     await flush();
     assert.equal(w.fetches(), 1);
     assert.equal((await w.updates.apply(NEW)).ok, true);
-    w.d.clock.setNs(T0 + CHECK_EVERY_NS * 2n);
+    w.d.clock.setNs(T0 + CHECK_EVERY_NS.daily * 2n);
     for (let i = 0; i < 3; i++) w.updates.tick();
     await flush();
     assert.equal(w.fetches(), 1);
@@ -1577,7 +1715,7 @@ describe('Update now: the guards of review 2', () => {
     const w = world(t);
     await w.updates.check();
     const fetches = w.fetches();
-    w.d.clock.setNs(T0 + CHECK_EVERY_NS * 2n);
+    w.d.clock.setNs(T0 + CHECK_EVERY_NS.daily * 2n);
     const applying = w.updates.apply(NEW);
     w.updates.tick();
     await applying;

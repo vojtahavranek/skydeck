@@ -163,7 +163,7 @@ export interface ResizeMessage {
  *  server's table and config.json's own rules (src/window/settings.ts).
  *
  *  F38 (S2 16.5): `update-check` is Check now (a check for a newer skydeck, with the network,
- *  whatever the switch says; answered when it has ended), `update-look` the dialog's look without
+ *  whatever the setting says; answered when it has ended), `update-look` the dialog's look without
  *  the network. Neither carries a field: the checkout, its remote and the program are the
  *  server's. The result's `update` is the state. Milestone 2: `update-apply` is Update now for
  *  the commit `to` (a full id) the dialog listed — compared with what the server's own look
