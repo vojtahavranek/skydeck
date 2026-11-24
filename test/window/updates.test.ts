@@ -348,6 +348,10 @@ describe('what a check gives', () => {
         count: 1,
         ahead: 0,
         commits: [{ id: NEW, subject: 'the new commit' }],
+        notes: [],
+        moreNotes: 0,
+        others: [{ id: NEW, subject: 'the new commit' }],
+        otherCount: 1,
         upgradesDatabase: true,
       }),
     );

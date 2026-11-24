@@ -210,7 +210,7 @@ Added to design 11:
 | `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses; from follow-up F19 the reads of a ticket's status (`ticket-fetches.ts`); from follow-up F36 the settings screen's table of every key of `config.json` and the change of one of them (`settings.ts`, 12.13); from follow-up F38 the check for a newer skydeck (`updates.ts`, 16.5). | platform, text, store, claude, sessions, terminals, github, ticket-status (F19), update (F38) |
 | `src/window/carry-over.ts` | Follow-up F40 (design 7.1, 12.6): the offer to carry fields over after `/clear` — the lookups it is computed with from the store (the `clear` link and the mark of the first start, the pull requests attached by hand, the resume lock), its `rev`, the two acts in one transaction each, the kv entries and their removal. | platform, store, sessions, `view/carry-over.ts`, `protocol.ts`'s types, and `auth.ts`'s `failureKind` |
 | `src/window/updates.ts` | Follow-up F38 (16.5): the server's check for a newer skydeck — when it runs, the state every page is told, the stored outcome; it decides everything the page shows of it. Milestone 2: Update now — its refusals, the start of `skydeck update --from-window` (through python3 for the core limit), the run entry, the result. | platform, sessions (the deck), update, text, `log.ts`'s `serverLog`, and `auth.ts`'s `failureKind` |
-| `src/update/` | Follow-up F38: the look for a newer skydeck, one copy for three callers — `skydeck update`, the window's server and `doctor` (the server may not import `src/cli/`): `git.ts` (how skydeck runs git on its own checkout, and the window's fetch that never asks; moved from `src/cli/update-git.ts`), `look.ts` (the look in the command's order and in the window's tolerant one, and `--check`'s lines), `record.ts` (the stored outcome, `kv window_update_check`, and the run entry of an update from the window, `kv window_update_run`). | platform, text, store (types), and `protocol.ts`'s types |
+| `src/update/` | Follow-up F38: the look for a newer skydeck, one copy for three callers — `skydeck update`, the window's server and `doctor` (the server may not import `src/cli/`): `git.ts` (how skydeck runs git on its own checkout, and the window's fetch that never asks; moved from `src/cli/update-git.ts`), `look.ts` (the look in the command's order and in the window's tolerant one, the notes and the other changes an update brings, and `--check`'s lines), `news.ts` (a note of what is new: its name, its parse, its limits, its code runs), `record.ts` (the stored outcome, `kv window_update_check`, and the run entry of an update from the window, `kv window_update_run`). | platform, text, store (types), and `protocol.ts`'s types |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12); from follow-up F37 the move of a session of Open by hand and the slots it gives out (`slot-moves.ts`, 12.9, 7.6); from follow-up F42 Open's order once a move made it the server's, the freeze and the places held after `/clear` (`open-sequence.ts`, 12.1); from follow-up F40 the parts of the offer to carry fields over after `/clear` (`carry-over.ts`, design 7.1: it imports no value). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
@@ -5425,8 +5425,10 @@ database before it migrates it, design 9.2; install.md, "Going back", gives the 
    first (design 9.2), and that install.md ("Going back") says how to return to HEAD's commit,
    which it names (`SCHEMA_VERSION` is computed, so
    the file's change is the fact that can be known without running the new code; no file of the
-   new commit is run or imported to learn more). `--check` ends with `run skydeck update to apply
-   it`.
+   new commit is run or imported to learn more). Between the commits and that line, when the update
+   brings notes of what is new ("What an update brings" below), `what is new:` and their titles,
+   one per line, indented two spaces, newest first (past 20, `… and <m> more`); nothing else of the
+   output changes. `--check` ends with `run skydeck update to apply it`.
 3. **It applies**, in exactly this order. First two looks that change nothing: the index lock
    (`rev-parse --git-path index.lock`, against the root) must not exist — else `this checkout's
    git index is locked (<path>): …; nothing was changed`, before the server is looked at, so that
@@ -5518,8 +5520,27 @@ user's second click.
   with what the remote-tracking ref already says; the branch and HEAD are read again after the
   fetch (`this checkout changed while git fetch ran …`); and the two refusals that only stop an
   apply — a changed tracked file, commits the upstream does not have — are kept as why it cannot
-  be applied as it is (`blocked`; the changes line first), the commits and the database line read
-  all the same. A checkout only ahead of its upstream is up to date for the notice (`nothing new on
+  be applied as it is (`blocked`; the changes line first), the commits, the notes and the database
+  line read all the same.
+- **What an update brings** (the owner's decision of 2026-11-24). The repository keeps one small
+  note per change a user can see, `docs/news/<yyyy-mm-dd>-<name>.md` (its README says the format;
+  AGENTS.md part 2 says when one is written; the suite's `test/news.test.ts` holds every note of the
+  checkout to it): a title line `# <title>`, a blank line, a few plain sentences in paragraphs; a
+  run between two backticks is code, nothing else of Markdown means anything
+  (`src/update/news.ts`). The notes an update brings are the note files the upstream's commit has
+  and HEAD's does not, by path — one both have, one changed or removed between them, a file of
+  another name or in another folder are none —, newest first by file name. They are read from git's
+  objects of the two commits, never from the work tree, through `src/update/git.ts`: `ls-tree -l -z
+  --full-tree <commit> -- docs/news/` of each (regular files only), then `cat-file blob` for each
+  new one, at most 40 files read, none larger than 8 KiB and no more than 8 KiB kept of any; `log
+  --diff-filter=A --no-renames -z --format=%H <old>..<new> -- <their paths>` names the commits that
+  add them. A note comes from a fetched commit that is not applied: it is foreign text, treated as
+  the subjects are — sanitised, its title clipped to 120 characters and its text (all its
+  paragraphs) to 600, each with `…`; a file that is not a well-formed note (no title line, an empty
+  title or text, binary: a NUL or a byte that is not UTF-8) is not shown and breaks nothing. At
+  most 20 are shown (`… and <n> more`, the files not read counted among them). The other changes
+  are the update's commits that add none of its notes, by their subjects as `--check` lists them
+  (newest first, at most 20, then their count), without the ids. A checkout only ahead of its upstream is up to date for the notice (`nothing new on
   <upstream>: this checkout has <n> commits that it does not have`).
 - **The fetch that never asks.** `git -C <root> -c core.askPass= fetch --quiet -- <remote>` through
   the runner, with git's environment of step 1 and `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS`

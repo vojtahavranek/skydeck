@@ -193,6 +193,8 @@ describe("lookForUpdate, the window's order (tolerant)", () => {
       'rev-parse',
       'merge-base',
       'rev-list',
+      'ls-tree',
+      'ls-tree',
       'log',
       'ls-tree',
       'ls-tree',

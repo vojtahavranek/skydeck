@@ -78,8 +78,17 @@ function updater(
 
 /** The checks before the fetch, in their order (U2 2–6), and HEAD's id. */
 const BEFORE_FETCH = ['rev-parse', 'symbolic-ref', 'for-each-ref', 'status', 'rev-parse'];
-/** What a look at one commit on the upstream calls, after the fetch (U4). */
-const LOOK = ['rev-parse', 'merge-base', 'rev-list', 'log', 'ls-tree', 'ls-tree'];
+/** What a look at one commit on the upstream calls, after the fetch (U4): the notes of each commit, the commits, the upgrade steps of each. */
+const LOOK = [
+  'rev-parse',
+  'merge-base',
+  'rev-list',
+  'ls-tree',
+  'ls-tree',
+  'log',
+  'ls-tree',
+  'ls-tree',
+];
 
 /** A fetch that succeeded, and the look again at the branch, HEAD and the status after it (C3). */
 const FETCHED = ['fetch', 'symbolic-ref', 'rev-parse', 'status'];
@@ -439,6 +448,8 @@ describe('skydeck update: how git is run (U3)', () => {
         ['rev-parse', '--verify', 'refs/remotes/origin/main^{commit}'],
         ['merge-base', '--is-ancestor', OLD, NEW],
         ['rev-list', '--count', `${OLD}..${NEW}`],
+        ['ls-tree', '-l', '-z', '--full-tree', OLD, '--', 'docs/news/'],
+        ['ls-tree', '-l', '-z', '--full-tree', NEW, '--', 'docs/news/'],
         [
           'log',
           '--no-show-signature',

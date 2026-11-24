@@ -118,8 +118,12 @@ export interface Git {
    * neither the merge nor a look after it can be cut by a signal (ruled by the plan owner, S2).
    */
   ownSessions(): void;
-  /** run(), and its standard output; any failure is gitFailure's SkydeckError. */
-  output(args: readonly string[]): Promise<string>;
+  /**
+   * run(), and its standard output; any failure is gitFailure's SkydeckError. With `maxBytes` only
+   * the first that many bytes of each output are kept (RunOptions.maxOutputBytes): a blob of a
+   * fetched commit, which can be of any size.
+   */
+  output(args: readonly string[], maxBytes?: number): Promise<string>;
   /** `git -C <root> <args>` with the terminal and no timeout: its exit code, null when it did not end by itself. */
   interactive(args: readonly string[]): Promise<number | null>;
   /**
@@ -146,10 +150,15 @@ export function gitOn(platform: Platform, root: string, gitOptions: GitOptions =
   const { signal } = gitOptions;
   const stoppable = signal === undefined ? {} : { signal, killGraceMs: FETCH_GRACE_MS };
   let ownSessions = false;
-  const run = async (args: readonly string[], timeoutMs = GIT_MS): Promise<RunResult> => {
+  const run = async (
+    args: readonly string[],
+    timeoutMs = GIT_MS,
+    maxBytes?: number,
+  ): Promise<RunResult> => {
     const result = await platform.runner.run('git', ['-C', root, ...args], {
       env,
       timeoutMs,
+      ...(maxBytes === undefined ? {} : { maxOutputBytes: maxBytes }),
       ...(ownSessions ? { newSession: true } : {}),
       ...stoppable,
     });
@@ -158,12 +167,12 @@ export function gitOn(platform: Platform, root: string, gitOptions: GitOptions =
   };
   return {
     root,
-    run,
+    run: (args, timeoutMs) => run(args, timeoutMs),
     ownSessions() {
       ownSessions = true;
     },
-    async output(args) {
-      const result = await run(args);
+    async output(args, maxBytes) {
+      const result = await run(args, GIT_MS, maxBytes);
       if (result.code !== 0 || result.timedOut) throw gitFailure(args, result, GIT_MS);
       return result.stdout;
     },

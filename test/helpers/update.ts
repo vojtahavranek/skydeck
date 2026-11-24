@@ -26,6 +26,14 @@ export function migrationsEntry(blob: string): string {
   return `100644 blob ${blob}\tsrc/store/migrations.ts\0`;
 }
 
+/**
+ * The ls-tree -l line of a note `docs/news/<name>` with blob `blob` of `size` bytes, as `ls-tree
+ * -l -z` prints it.
+ */
+export function noteEntry(name: string, blob: string, size = 100): string {
+  return `100644 blob ${blob} ${String(size).padStart(7)}\tdocs/news/${name}\0`;
+}
+
 /** What the scripted git answers; every field has a default (scriptedRepo). */
 export interface ScriptedRepo {
   root: string;
@@ -54,6 +62,12 @@ export interface ScriptedRepo {
   ahead: number;
   /** The new commits, newest first: what `log` lists (at most its --max-count). */
   commits: { id: string; subject: string }[];
+  /** `ls-tree -l` of docs/news/ per commit id: its output (default none: no notes). */
+  news: Record<string, string>;
+  /** `cat-file blob <id>`: the blob's content, per id. */
+  blobs: Record<string, string>;
+  /** The commits `log --diff-filter=A` names for the notes' paths, newest first. */
+  noteAdders: string[];
   /** `ls-tree` of src/store/migrations.ts per commit id: its output (default the same blob). */
   migrations: Record<string, string>;
   /** What `merge --ff-only` answers. */
@@ -93,6 +107,9 @@ export function scriptedRepo(root: string, over: Partial<ScriptedRepo> = {}): Sc
     behind: 1,
     ahead: 0,
     commits: [{ id: NEW, subject: 'the new commit' }],
+    news: {},
+    blobs: {},
+    noteAdders: [],
     migrations: {},
     merge: {},
     afterFailedMerge: { head: OLD, status: '' },
@@ -216,6 +233,17 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
             .join(''),
         });
       }
+      case 'ls-tree -l': {
+        const id = rest[3] ?? '';
+        return runResult({ stdout: repo.news[id] ?? '' });
+      }
+      case 'cat-file blob': {
+        const blob = repo.blobs[rest[1] ?? ''];
+        if (blob !== undefined) return runResult({ stdout: blob });
+        break;
+      }
+      case 'log --diff-filter=A':
+        return runResult({ stdout: repo.noteAdders.map((id) => `${id}\0`).join('') });
       case 'ls-tree --full-tree': {
         const id = rest[2] ?? '';
         return runResult({ stdout: repo.migrations[id] ?? DEFAULT_MIGRATIONS });

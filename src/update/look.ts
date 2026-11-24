@@ -1,6 +1,6 @@
 // The look for a newer skydeck (F8's U2–U4; F38): whether the checkout skydeck runs from is behind
-// the branch of a remote it follows, which commits would come, and whether they change the
-// database's upgrade steps. One look, three callers: `skydeck update` (the command's order, every
+// the branch of a remote it follows, which commits would come, which notes of what is new they
+// bring (src/update/news.ts), and whether they change the database's upgrade steps. One look, three callers: `skydeck update` (the command's order, every
 // refusal a line), the window's server (its check and the dialog's look) and, through what the
 // server stored, doctor. It changes nothing but what a fetch writes (the remote-tracking refs and
 // FETCH_HEAD), and throws no error of its own: what cannot be told is a `cannot` with its line.
@@ -10,6 +10,8 @@ import { clip } from '../text/clip.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { changedFiles, commitOf, gitFailure, GIT_MS } from './git.ts';
 import type { Git, QuietFetchOptions } from './git.ts';
+import { NEWS_DIR, NOTE_BYTES, NOTE_FILE, NOTES_SHOWN, parseNote } from './news.ts';
+import type { Note } from './news.ts';
 
 /** The file whose change says that the new code may upgrade the database (U4). */
 export const MIGRATIONS = 'src/store/migrations.ts';
@@ -17,6 +19,8 @@ export const MIGRATIONS = 'src/store/migrations.ts';
 export const LISTED = 20;
 /** The longest subject the report shows, in UTF-16 units (review 2 C2). */
 const SUBJECT_MAX = 200;
+/** The most note files a look reads (newest first); the rest count as notes unread. */
+export const NOTES_READ = 40;
 
 /** What the look found: HEAD's commit and the upstream's, and (when they differ) the rest. */
 export interface Update {
@@ -31,6 +35,18 @@ export interface Update {
   ahead: number;
   /** The newest of them (at most LISTED), newest first. */
   commits: { id: string; subject: string }[];
+  /**
+   * The notes the update brings — the note files the new commit has and HEAD's does not (by
+   * path), read from git's objects — newest first (by file name, descending), at most
+   * NOTES_SHOWN: sanitised and clipped. A file that is not a well-formed note is left out.
+   */
+  notes: Note[];
+  /** How many more notes it brings than `notes` holds (those not read count too). */
+  moreNotes: number;
+  /** The newest commits (at most LISTED) that add none of those notes, newest first. */
+  others: { id: string; subject: string }[];
+  /** How many commits of the update add none of its notes. */
+  otherCount: number;
   /** Whether MIGRATIONS differs between the two commits, or is gone. */
   upgradesDatabase: boolean;
 }
@@ -253,6 +269,10 @@ async function look(
     count: 0,
     ahead: 0,
     commits: [],
+    notes: [],
+    moreNotes: 0,
+    others: [],
+    otherCount: 0,
     upgradesDatabase: false,
   };
   const known = (): Looked => ({ kind: 'known', update, blocked, fetchFailed });
@@ -270,16 +290,30 @@ async function look(
   }
   update.count = await countOf(git, ['rev-list', '--count', `${oldId}..${newId}`]);
   if (update.count === 0 && update.ahead > 0) return known(); // ahead only: nothing would come
-  update.commits = await newCommits(git, oldId, newId);
+  // The notes first: the commits that add them are not among the other changes.
+  const { notes, unread } = await newNotes(git, oldId, newId);
+  const adders = await noteCommits(
+    git,
+    oldId,
+    newId,
+    notes.map((n) => n.path),
+  );
+  const listed = await newCommits(git, oldId, newId, LISTED + adders.size);
+  update.commits = listed.slice(0, LISTED);
+  update.notes = notes.slice(0, NOTES_SHOWN).map((n) => n.note);
+  update.moreNotes = notes.length - update.notes.length + unread;
+  update.others = listed.filter((c) => !adders.has(c.id)).slice(0, LISTED);
+  update.otherCount = Math.max(0, update.count - adders.size);
   update.upgradesDatabase = (await migrationsOf(git, oldId)) !== (await migrationsOf(git, newId));
   return known();
 }
 
-/** The newest LISTED commits of `old..new`, newest first: full id and subject. */
+/** The newest `max` commits of `old..new`, newest first: full id and subject. */
 async function newCommits(
   git: Git,
   oldId: string,
   newId: string,
+  max: number,
 ): Promise<{ id: string; subject: string }[]> {
   const out = await git.output([
     'log',
@@ -287,7 +321,7 @@ async function newCommits(
     '--no-color',
     '--encoding=UTF-8', // i18n.logOutputEncoding would recode the subjects
     '-z',
-    `--max-count=${LISTED}`,
+    `--max-count=${max}`,
     '--format=%H%x00%s',
     `${oldId}..${newId}`,
     '--',
@@ -300,6 +334,93 @@ async function newCommits(
   return commits;
 }
 
+/** A note file of a commit: its blob and its size in bytes. */
+interface NoteFile {
+  blob: string;
+  size: number;
+}
+
+/**
+ * The note files `commit` has (`ls-tree -l` of NEWS_DIR, from git's objects, never the work tree):
+ * regular files of NEWS_DIR itself whose name is a note's, by path.
+ */
+async function noteFiles(git: Git, commit: string): Promise<Map<string, NoteFile>> {
+  const out = await git.output([
+    'ls-tree',
+    '-l',
+    '-z',
+    '--full-tree',
+    commit,
+    '--',
+    `${NEWS_DIR}/`,
+  ]);
+  const files = new Map<string, NoteFile>();
+  // `<mode> SP <type> SP <object> SP+ <size> TAB <path> NUL`
+  for (const entry of out.split('\0')) {
+    const found = /^(100644|100755) blob ([0-9a-f]+) +([0-9]+)\t([^]*)$/.exec(entry);
+    if (found === null) continue;
+    const [, , blob = '', size = '', path = ''] = found;
+    const name = path.slice(NEWS_DIR.length + 1);
+    if (!path.startsWith(`${NEWS_DIR}/`) || !NOTE_FILE.test(name)) continue;
+    files.set(path, { blob, size: Number(size) });
+  }
+  return files;
+}
+
+/**
+ * The notes `newId` brings over `oldId`, newest first, each with its path: of the files only the
+ * new commit has, the first NOTES_READ are read (one larger than NOTE_BYTES is not), and the ones
+ * that are well-formed notes kept; `unread`: how many were not read for that limit.
+ */
+async function newNotes(
+  git: Git,
+  oldId: string,
+  newId: string,
+): Promise<{ notes: { path: string; note: Note }[]; unread: number }> {
+  const before = await noteFiles(git, oldId);
+  const after = await noteFiles(git, newId);
+  const added = [...after.keys()]
+    .filter((path) => !before.has(path))
+    .sort()
+    .reverse();
+  const notes: { path: string; note: Note }[] = [];
+  for (const path of added.slice(0, NOTES_READ)) {
+    const file = after.get(path);
+    if (file === undefined || file.size > NOTE_BYTES) continue;
+    const note = parseNote(await git.output(['cat-file', 'blob', file.blob], NOTE_BYTES));
+    if (note !== null) notes.push({ path, note });
+  }
+  return { notes, unread: Math.max(0, added.length - NOTES_READ) };
+}
+
+/** The commits of `old..new` that add one of `paths` (none: no git call). */
+async function noteCommits(
+  git: Git,
+  oldId: string,
+  newId: string,
+  paths: readonly string[],
+): Promise<Set<string>> {
+  if (paths.length === 0) return new Set();
+  const out = await git.output([
+    'log',
+    '--diff-filter=A',
+    '--no-renames', // a note moved from another name is added here
+    '--no-show-signature',
+    '--no-color',
+    '-z',
+    '--format=%H',
+    `${oldId}..${newId}`,
+    '--',
+    ...paths,
+  ]);
+  return new Set(
+    out
+      .split('\0')
+      .map((id) => id.trim())
+      .filter((id) => id !== ''),
+  );
+}
+
 /** The blob MIGRATIONS has in `commit`; '' when the commit has no such file. */
 async function migrationsOf(git: Git, commit: string): Promise<string> {
   const out = await git.output(['ls-tree', '--full-tree', '-z', commit, '--', MIGRATIONS]);
@@ -309,7 +430,7 @@ async function migrationsOf(git: Git, commit: string): Promise<string> {
 }
 
 /** A commit's subject as the report shows it: sanitised, and clipped with `…` past SUBJECT_MAX. */
-function subjectLine(subject: string): string {
+export function subjectLine(subject: string): string {
   const text = sanitize(subject);
   return text.length > SUBJECT_MAX ? `${clip(text, SUBJECT_MAX - 1)}…` : text;
 }
@@ -322,6 +443,10 @@ export function report(update: Update): string[] {
   ];
   if (update.count > update.commits.length) {
     lines.push(`  … and ${update.count - update.commits.length} more`);
+  }
+  if (update.notes.length > 0) {
+    lines.push('what is new:', ...update.notes.map((note) => `  ${note.title}`));
+    if (update.moreNotes > 0) lines.push(`  … and ${update.moreNotes} more`);
   }
   if (update.upgradesDatabase) {
     // F21: the store keeps a copy of the database before it upgrades it; the guide says how to go
