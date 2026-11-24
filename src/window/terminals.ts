@@ -65,9 +65,14 @@ export interface RegistryDeps {
    *  (`window_slots`); null is "no slot although its meta has one", which only a move writes;
    *  absent: none. Applied at each terminal's hello, over the slot of its keeper's meta. */
   movedSlots?: ReadonlyMap<string, number | null>;
-  /** F37: writes the moved slots, the whole map (empty: none); absent, nothing is written. A throw
-   *  of it refuses a move (`setSlots`); elsewhere it is logged and tried again (`flushSlots`). */
-  persistSlots?: (moved: ReadonlyMap<string, number | null>) => void;
+  /** F44 (S2 7.6): the terminals whose slot the server withholds that the store kept
+   *  (`window_slots_withheld`); absent: none. Applied at each terminal's hello: it takes no slot. */
+  withheldSlots?: ReadonlySet<string>;
+  /** F37: writes the moved slots, the whole map (empty: none), and (F44) the withheld terminals,
+   *  the whole set (empty: none), both in one write; absent, nothing is written. A throw of it
+   *  refuses a move (`setSlots`) and a withholding (`withholdSlots`); elsewhere it is logged and
+   *  tried again (`flushSlots`). */
+  persistSlots?: (moved: ReadonlyMap<string, number | null>, withheld: ReadonlySet<string>) => void;
 }
 
 export interface Registry extends TerminalHub {
@@ -108,6 +113,19 @@ export interface Registry extends TerminalHub {
     changes: ReadonlyMap<string, number | null>,
     write?: (moved: ReadonlyMap<string, number | null>) => void,
   ): 'ok' | 'changed' | 'stopping';
+  /**
+   * F44 (S2 7.6): the listed terminals whose slot is withheld are from now on exactly `termIds` (a
+   * terminal whose slot the server withholds: its session is parked; the registry knows no
+   * session). Ids not listed, and terminals whose program is over, are ignored. One that enters
+   * gives its slot up at once (it holds none, and its moved entry goes); one that leaves takes the
+   * lowest free slot, or none while all nine are held (several: by opening time, then id), and its
+   * moved entry is that slot when it is not its meta's (null when it has none and its meta has
+   * one). Written (`persistSlots`, the moved slots and the withheld set) before anything is
+   * applied: a write that throws changes nothing ('failed'), is logged once by kind, and the next
+   * call tries again. 'unchanged': nothing enters or leaves, nothing written. 'stopping' once
+   * `stopAll` ran. Synchronous: no terminal opens between the reading of the slots and the change.
+   */
+  withholdSlots(termIds: ReadonlySet<string>): 'ok' | 'unchanged' | 'failed' | 'stopping';
   /** F37: writes the moved slots again when a write outside `setSlots` failed (the server calls it
    *  after every refresh); nothing once stopped. Never throws. */
   flushSlots(): void;
@@ -297,10 +315,15 @@ export function createRegistry(deps: RegistryDeps): Registry {
    *  meta's, and those the store kept for keepers still being found. F42: null is a slot a move
    *  took away (only a move writes one). */
   let moved = new Map<string, number | null>(deps.movedSlots ?? []);
+  /** F44: the terminals whose slot is withheld (`withholdSlots`): each holds no slot, has no moved
+   *  entry and takes none at its hello; also those the store kept for keepers still being found. */
+  let withheld = new Set<string>(deps.withheldSlots ?? []);
   /** A write of `moved` outside `setSlots` failed: `flushSlots` tries again. */
   let movedDirty = false;
   /** The kind of the last failed write, so that a failure that repeats is logged once. */
   let movedFailure: string | null = null;
+  /** F44: the kind of the last failed write of a withholding, logged once while it repeats. */
+  let withholdFailure: string | null = null;
 
   const log = (id: string, kind: string): void => {
     deps.log(`terminal ${id}: ${kind}`);
@@ -319,16 +342,25 @@ export function createRegistry(deps: RegistryDeps): Registry {
     return kept;
   }
 
-  /** Writes `moved` (pruned) outside a move: a failure of any kind is logged once by kind and left
-   *  for `flushSlots`; nothing is written once stopped. Never throws. */
+  /** F44: `next` without the ids of terminals neither listed nor being found. */
+  function prunedWithheld(next: ReadonlySet<string>): Set<string> {
+    return new Set([...next].filter((id) => terms.has(id) || finding.has(id)));
+  }
+
+  const failureOf = (error: unknown): string =>
+    isBusy(error) ? 'the database is busy' : ((error as Error)?.name ?? 'error');
+
+  /** Writes `moved` (pruned) and the withheld set (pruned) outside a move: a failure of any kind is
+   *  logged once by kind and left for `flushSlots`; nothing is written once stopped. Never throws. */
   function saveSlots(): void {
     if (stopped || deps.persistSlots === undefined) return;
     const next = prunedSlots(moved);
+    const nextWithheld = prunedWithheld(withheld);
     try {
-      deps.persistSlots(next);
+      deps.persistSlots(next, nextWithheld);
     } catch (error) {
       movedDirty = true;
-      const kind = isBusy(error) ? 'the database is busy' : ((error as Error)?.name ?? 'error');
+      const kind = failureOf(error);
       if (movedFailure !== kind) {
         movedFailure = kind;
         deps.log(`terminal registry: the moved slots were not saved (${kind})`);
@@ -336,6 +368,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       return;
     }
     moved = next;
+    withheld = nextWithheld;
     movedDirty = false;
     movedFailure = null;
   }
@@ -368,7 +401,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
    * differs from what `moved` said is kept in `moved` and written; none, or the meta's, is left out
    * (so a terminal that found all nine taken gets its meta's back at a later hello). F43: a
    * terminal whose hello says its program exited (`over`) takes none (`freeSlot`); no hello comes
-   * after an applied exit or a loss (no reconnect then). Once stopped the slot is left as it is.
+   * after an applied exit or a loss (no reconnect then). F44: a withheld terminal takes none,
+   * whatever `moved` or its meta say, and nothing is written. Once stopped the slot is left as it
+   * is.
    */
   function slotAtHello(term: Term, metaSlot: number | null, over: boolean): void {
     term.metaSlot = metaSlot;
@@ -378,6 +413,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
       return;
     }
     const id = term.info.id;
+    if (withheld.has(id)) {
+      term.info.slot = null;
+      return;
+    }
     const wanted = moved.has(id) ? (moved.get(id) ?? null) : metaSlot;
     let slot = wanted;
     if (wanted !== null) {
@@ -400,8 +439,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
 
   /**
    * F43 (S2 7.6): the terminal's program is over, so its slot is free at once and for good: no
-   * slot, none from a later move (`slotFreed`, read by `setSlots`), and its moved entry gone,
-   * written, so that no later server applies it. No null is written for it: a hello of its keeper says its program exited.
+   * slot, none from a later move (`slotFreed`, read by `setSlots`), and its moved entry gone (F44:
+   * and its withheld one), written, so that no later server applies it. No null is written for it:
+   * a hello of its keeper says its program exited.
    * True when the terminal had a slot (the caller announces the change). Once stopped nothing
    * changes.
    */
@@ -410,7 +450,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
     term.slotFreed = true;
     const had = term.info.slot !== null;
     term.info.slot = null;
-    if (moved.delete(term.info.id)) saveSlots();
+    const hadMoved = moved.delete(term.info.id);
+    if (withheld.delete(term.info.id) || hadMoved) saveSlots();
     return had;
   }
 
@@ -1313,6 +1354,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
       if (terms.get(spec.id) === term) {
         term.forgotten = true;
         terms.delete(spec.id);
+        // F44: a terminal can be withheld before its keeper started (the server withholds the slot
+        // of a parked session's terminal in the step that spawns it): no id of a terminal that
+        // never came to be stays in the set or in the store.
+        if (withheld.delete(spec.id)) saveSlots();
         changed();
       }
     };
@@ -1468,8 +1513,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
     term.sinks.clear();
     if (terms.get(term.info.id) === term) {
       terms.delete(term.info.id);
-      // F37: its moved slot goes with it, from the store too, so that no later server applies it.
-      if (moved.delete(term.info.id)) saveSlots();
+      // F37: its moved slot goes with it, from the store too, so that no later server applies it;
+      // F44: its withheld entry too.
+      const hadMoved = moved.delete(term.info.id);
+      if (withheld.delete(term.info.id) || hadMoved) saveSlots();
       changed();
     }
   }
@@ -1644,6 +1691,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
         // F43: a terminal whose program is over never gains a slot again (one whose hello said its
         // program exited is still drawn under Open until its exit frame is applied).
         if (term.slotFreed && slot !== null) return 'changed';
+        // F44: nor does a terminal whose slot is withheld.
+        if (withheld.has(id) && slot !== null) return 'changed';
         before.push(term.info.slot);
         after.push(slot);
       }
@@ -1664,12 +1713,80 @@ export function createRegistry(deps: RegistryDeps): Registry {
       const next = new Map(moved);
       for (const [id, slot] of changes) next.set(id, slot);
       const pruned = prunedSlots(next); // entries equal to their meta slot are left out there
-      (write ?? deps.persistSlots)?.(pruned); // a throw refuses the move: nothing is applied
+      // A throw refuses the move: nothing is applied. A move's own write (`write`) leaves the
+      // withheld set alone; `persistSlots` writes it as it is.
+      const nextWithheld = write === undefined ? prunedWithheld(withheld) : withheld;
+      if (write !== undefined) write(pruned);
+      else deps.persistSlots?.(pruned, nextWithheld);
+      withheld = nextWithheld;
       for (const [id, slot] of changes) {
         const term = terms.get(id);
         if (term !== undefined) term.info.slot = slot;
       }
       moved = pruned;
+      movedDirty = false;
+      movedFailure = null;
+      changed();
+      return 'ok';
+    },
+    withholdSlots(termIds) {
+      if (stopped) return 'stopping';
+      const entering: Term[] = [];
+      const leaving: Term[] = [];
+      for (const [id, term] of terms) {
+        if (term.slotFreed) continue; // its program is over: it never gains a slot again
+        if (termIds.has(id) && !withheld.has(id)) entering.push(term);
+        else if (!termIds.has(id) && withheld.has(id)) leaving.push(term);
+      }
+      if (entering.length === 0 && leaving.length === 0) return 'unchanged';
+      const nextMoved = new Map(moved);
+      const nextWithheld = new Set(withheld);
+      const slots = new Map<string, number | null>();
+      const taken = takenSlots(null);
+      for (const term of entering) {
+        if (term.info.slot !== null) taken.delete(term.info.slot);
+        nextMoved.delete(term.info.id);
+        nextWithheld.add(term.info.id);
+        slots.set(term.info.id, null);
+      }
+      leaving.sort((a, b) =>
+        a.info.openedNs !== b.info.openedNs
+          ? a.info.openedNs < b.info.openedNs
+            ? -1
+            : 1
+          : a.info.id < b.info.id
+            ? -1
+            : 1,
+      );
+      for (const term of leaving) {
+        const slot = lowestFree(taken);
+        if (slot !== null) taken.add(slot);
+        const id = term.info.id;
+        nextWithheld.delete(id);
+        slots.set(id, slot);
+        // F42's meaning of an entry: a slot that is not the meta's, or none although it has one.
+        if (slot === term.metaSlot) nextMoved.delete(id);
+        else nextMoved.set(id, slot);
+      }
+      const prunedMoved = prunedSlots(nextMoved);
+      const prunedSet = prunedWithheld(nextWithheld);
+      try {
+        deps.persistSlots?.(prunedMoved, prunedSet);
+      } catch (error) {
+        const kind = failureOf(error);
+        if (withholdFailure !== kind) {
+          withholdFailure = kind;
+          deps.log(`terminal registry: the withheld slots were not saved (${kind})`);
+        }
+        return 'failed';
+      }
+      withholdFailure = null;
+      for (const [id, slot] of slots) {
+        const term = terms.get(id);
+        if (term !== undefined) term.info.slot = slot;
+      }
+      moved = prunedMoved;
+      withheld = prunedSet;
       movedDirty = false;
       movedFailure = null;
       changed();
