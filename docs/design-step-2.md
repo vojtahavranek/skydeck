@@ -2204,6 +2204,22 @@ nothing removes the table; the way back is the copy kept before the migration (d
 install.md "Going back").
 `test/store/migration-4.test.ts` migrates a filled schema-3 database and compares every value.
 
+**Migration 5** (issue #207, the order of one process's events, design 5.2 and 5.3):
+
+```sql
+ALTER TABLE events ADD COLUMN uptime_cs INTEGER;  -- #207: /proc/uptime at the event in centiseconds, which orders one process's events; NULL for none
+```
+
+It adds one nullable column and nothing else, as migration 3 did: every row keeps its values (the
+column is NULL in each; nothing is filled in afterwards) and a reader of schema 4 still reads
+`events`. The column holds the machine's uptime when the event was stamped: the hook's `uptime`
+key (design 5.2), and for the server's own events (the window's end, 12.10; reconcile's
+`observed`, design 5.4) its own read of /proc/uptime. It is never shown: it only orders the events
+of one process (design 5.3 "Order"), whose stamps a wall clock that stepped back can invert. **An
+older skydeck refuses it**, as for migrations 3 and 4, and the way back is the copy kept before the
+migration (design 9.2, install.md "Going back"). A spool file with the new key, read by an older
+skydeck still running, parses as before: the key is not one it knows, and those are ignored.
+
 `kv` entries (no migration; `kv` is free text):
 
 | Key | Value |

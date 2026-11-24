@@ -270,6 +270,34 @@ export function withoutTicketStatus(after: DatabaseDump): DatabaseDump {
   return { schema: after.schema.filter((entry) => !isTicketStatusEntry(entry)), tables };
 }
 
+/** events' entry of sqlite_master as SQLite writes it after migration 5's ALTER TABLE (#207). */
+export function withUptimeColumn(sql: string | null): string | null {
+  return sql === null ? null : sql.replace(/\n\)$/, '\n, uptime_cs INTEGER)');
+}
+
+/**
+ * `after` without what migration 5 added (#207: the nullable column uptime_cs of events), for the
+ * tests of an older migration, after which an open goes on to the newest schema. Throws when a row
+ * has an uptime: a migration adds none.
+ */
+export function withoutUptime(after: DatabaseDump): DatabaseDump {
+  const events = (after.tables['events'] ?? []).map((row) => {
+    const { uptime_cs: uptime, ...rest } = row;
+    if (uptime !== null) {
+      throw new Error(`an event with an uptime after a migration: ${String(uptime)}`);
+    }
+    return rest;
+  });
+  return {
+    schema: after.schema.map((entry) =>
+      entry.type === 'table' && entry.name === 'events' && entry.sql !== null
+        ? { ...entry, sql: entry.sql.replace(/\n, uptime_cs INTEGER\)$/, '\n)') }
+        : entry,
+    ),
+    tables: after.tables['events'] === undefined ? after.tables : { ...after.tables, events },
+  };
+}
+
 export interface DatabaseDump {
   schema: { type: string; name: string; sql: string | null }[];
   tables: Record<string, Record<string, unknown>[]>;

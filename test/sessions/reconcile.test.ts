@@ -363,7 +363,9 @@ function switchByHook(d: TestDeck, how: 'resume' | 'clear', atNs: Ns): void {
 
 /** The session the process 4242 holds by its latest event (null after an end). */
 function heldBy4242(d: TestDeck): string | null {
-  const latest = d.deck.store.latestEventOfProcess(BOOT_A, 4242, START, T0 + 3600n * SEC);
+  const latest = d.deck.store.latestEventOfProcess(BOOT_A, 4242, START, {
+    timeNs: T0 + 3600n * SEC,
+  });
   return latest === null || latest.kind === 'end' ? null : latest.sessionId;
 }
 

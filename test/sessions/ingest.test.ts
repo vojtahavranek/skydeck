@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { describe, test } from 'node:test';
 
 import { parseSpoolFile } from '../../src/claude/hookinput.ts';
 import { NS_PER_DAY, NS_PER_MINUTE, NS_PER_SECOND } from '../../src/platform/time.ts';
@@ -9,7 +9,7 @@ import type { Ns } from '../../src/platform/types.ts';
 import { ingestSpool } from '../../src/sessions/ingest.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
-import { BOOT_B, S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
+import { BOOT_A, BOOT_B, S1, S2, S3, SEC, T0 } from '../helpers/platform.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
 import type { SpoolFields } from '../helpers/spool.ts';
 
@@ -794,4 +794,155 @@ test('a failure of the database itself ends the ingest at once, and the file sta
   assert.throws(() => ingestSpool(deck), /database is locked/);
   assert.equal(attempts, 1);
   assert.deepEqual(spool(d).sort(), [first, second].sort());
+});
+
+describe('one process recorded in its order (#207, design 5.3 "Order")', () => {
+  // A wall clock 2.7 s back: the stamps of later events are earlier, their uptimes are not.
+  const STEP = 2_700_000_000n;
+  const up = (cs: number): string => `${Math.floor(cs / 100)}.${String(cs % 100).padStart(2, '0')}`;
+
+  test('the two hooks of one /clear with a step back between them, in one pass: the end, then the start, and the clear link', (t) => {
+    const d = testDeck(t);
+    put(d, start(S1, 'resume', T0, { uptime: up(100_000) }), 1);
+    ingestSpool(d.deck);
+    // The end stamped before the step, the start after it: in name order the start comes first.
+    const endName = put(d, end(S1, 'clear', T0 + SEC, { uptime: up(100_100) }), 2);
+    const startName = put(
+      d,
+      start(S2, 'clear', T0 + SEC - STEP + 10_000_000n, { uptime: up(100_101) }),
+      3,
+    );
+    assert.ok(startName < endName, 'the start is first in name order');
+    assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 2 });
+    const events = d.deck.store.events().filter((one) => one.id > 1);
+    assert.deepEqual(
+      [...events].sort((a, b) => a.id - b.id).map((one) => [one.id, one.kind, one.sessionId]),
+      [
+        [2, 'end', S1],
+        [3, 'start', S2],
+      ],
+    );
+    assert.deepEqual(d.deck.store.links(), [
+      {
+        eventId: 3,
+        fromSession: S1,
+        toSession: S2,
+        kind: 'clear',
+        timeNs: T0 + SEC - STEP + 10_000_000n,
+      },
+    ]);
+    assert.equal(d.deck.store.latestEventOfProcess(BOOT_A, 4242, 51234567, null)?.sessionId, S2);
+  });
+
+  test('a /clear typed less than a step after the resume, stamped before it: the clear link, and the process holds the new session', (t) => {
+    const d = testDeck(t);
+    put(d, start(S1, 'resume', T0, { uptime: up(100_000) }), 1);
+    ingestSpool(d.deck);
+    put(d, end(S1, 'clear', T0 + SEC - STEP, { uptime: up(100_100) }), 2);
+    put(d, start(S2, 'clear', T0 + SEC - STEP + 10_000_000n, { uptime: up(100_101) }), 3);
+    ingestSpool(d.deck);
+    assert.equal(d.deck.store.links()[0]?.fromSession, S1);
+    const latest = d.deck.store.latestEventOfProcess(BOOT_A, 4242, 51234567, null);
+    assert.deepEqual([latest?.kind, latest?.sessionId], ['start', S2]);
+  });
+
+  test('the same files of an older hook (no uptime): name order, as before #207', (t) => {
+    const d = testDeck(t);
+    put(d, start(S1, 'resume', T0), 1);
+    ingestSpool(d.deck);
+    put(d, end(S1, 'clear', T0 + SEC), 2);
+    put(d, start(S2, 'clear', T0 + SEC - STEP + 10_000_000n), 3);
+    ingestSpool(d.deck);
+    const events = d.deck.store.events().filter((one) => one.id > 1);
+    assert.deepEqual(
+      [...events].sort((a, b) => a.id - b.id).map((one) => one.kind),
+      ['start', 'end'],
+      'recorded in name order',
+    );
+    assert.deepEqual(d.deck.store.links(), [], 'the limit of a stamp order: no earlier event');
+  });
+
+  test('a process whose first event came from an older hook stays on its stamps for its life, also in one pass', (t) => {
+    const d = testDeck(t);
+    put(d, start(S1, 'resume', T0), 1); // no uptime: an older hook
+    ingestSpool(d.deck);
+    put(d, end(S1, 'clear', T0 + 2n * SEC, { uptime: up(100_100) }), 2);
+    put(d, start(S2, 'clear', T0 + SEC, { uptime: up(100_101) }), 3);
+    ingestSpool(d.deck);
+    const recorded = d.deck.store
+      .events()
+      .filter((one) => one.id > 1)
+      .sort((a, b) => a.id - b.id)
+      .map((one) => one.kind);
+    assert.deepEqual(recorded, ['start', 'end'], 'name order: the stamps decide');
+    assert.equal(d.deck.store.processOrderedByUptime(BOOT_A, 4242, 51234567), false);
+  });
+
+  test('a file that fails and is recorded a pass later takes its place by its uptime', (t) => {
+    const d = testDeck(t);
+    put(d, start(S1, 'resume', T0, { uptime: up(100_000) }), 1);
+    ingestSpool(d.deck);
+    const failing = put(d, end(S1, 'clear', T0 + SEC, { uptime: up(100_100) }), 2);
+    put(d, start(S2, 'clear', T0 + SEC + 10_000_000n, { uptime: up(100_101) }), 3);
+    const deck = deckWith(d.deck, {
+      store: {
+        insertEvent: (event) => {
+          if (event.spoolName === failing) throw new RangeError('cannot bind');
+          return d.deck.store.insertEvent(event);
+        },
+      },
+    });
+    assert.deepEqual(ingestSpool(deck), { ...NONE, ingested: 1 });
+    assert.equal(d.deck.store.links()[0]?.fromSession, S1, 'the link from the start before it');
+    assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 1 });
+    // Recorded last, the end lies before the start in the process's order.
+    const latest = d.deck.store.latestEventOfProcess(BOOT_A, 4242, 51234567, null);
+    assert.deepEqual([latest?.kind, latest?.sessionId], ['start', S2]);
+  });
+
+  test("a scripted run's end stamped before its kept start, in one pass: kept as scripted-end", (t) => {
+    const d = testDeck(t);
+    const sdk = { pid: 5555, entrypointEnv: 'sdk-ts', argv: ['claude', '--model', 'opus'] };
+    put(d, start(S1, 'startup', T0), 1);
+    ingestSpool(d.deck);
+    put(d, start(S1, 'resume', T60, { ...sdk, uptime: up(200_000) }), 2);
+    put(
+      d,
+      end(S1, 'clear', T60 - STEP, { pid: 5555, entrypointEnv: 'sdk-ts', uptime: up(200_050) }),
+      3,
+    );
+    assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 2 });
+    const kept = d.deck.store.latestEventOfProcess(BOOT_A, 5555, 51234567, null);
+    assert.deepEqual([kept?.kind, kept?.sessionId], ['scripted-end', S1]);
+  });
+
+  test('a later start stamped before the first one still gets the launch command its first start stored', (t) => {
+    const d = testDeck(t);
+    put(
+      d,
+      start(S1, 'startup', T0, { argv: ['claude', '--model', 'opus'], uptime: up(300_000) }),
+      1,
+    );
+    put(
+      d,
+      start(S2, 'clear', T0 - STEP, { argv: ['claude', '--model', 'haiku'], uptime: up(300_400) }),
+      2,
+    );
+    ingestSpool(d.deck);
+    const later = d.deck.store.events().find((one) => one.sessionId === S2);
+    assert.deepEqual(later?.argv, ['claude', '--model', 'opus']);
+  });
+
+  test('the uptime is stored with the event; an empty or odd one, and none, store nothing', (t) => {
+    const d = testDeck(t);
+    put(d, start(S1, 'startup', T0, { uptime: '119174.07' }), 1);
+    put(d, start(S2, 'startup', T0 + SEC, { uptime: '', pid: 6001 }), 2);
+    put(d, start(S3, 'startup', T0 + 2n * SEC, { uptime: '119174.7', pid: 6002 }), 3);
+    put(d, end(S3, 'other', T0 + 3n * SEC, { pid: 6003 }), 4);
+    assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 4 });
+    assert.deepEqual(
+      d.deck.store.events().map((one) => one.uptimeCs),
+      [11_917_407n, undefined, undefined, undefined],
+    );
+  });
 });

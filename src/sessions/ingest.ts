@@ -9,11 +9,12 @@ import { join } from 'node:path';
 import { SpoolParseError, parseSpoolFile } from '../claude/hookinput.ts';
 import type { SpoolEvent } from '../claude/hookinput.ts';
 import { NS_PER_DAY, NS_PER_MINUTE } from '../platform/time.ts';
-import type { Files, Ns } from '../platform/types.ts';
+import type { Files, Ns, UptimeCs } from '../platform/types.ts';
 import { isDatabaseFailure } from '../store/store.ts';
-import type { LinkKind } from '../store/types.ts';
+import type { LinkKind, ProcessPlace } from '../store/types.ts';
 import { linkCopy } from './copies.ts';
 import type { Deck } from './deck.ts';
+import { processOrder } from './process-order.ts';
 import { describeError, recordProblems } from './problems.ts';
 
 export interface IngestResult {
@@ -36,7 +37,10 @@ const LINK_KINDS: Readonly<Partial<Record<SpoolEvent['detail'], LinkKind>>> = {
 };
 
 /**
- * 5.3 step 1. Reads <spoolDir>/*.ev in name order (dot files and bad/ ignored). Afterwards removes
+ * 5.3 step 1. Reads <spoolDir>/*.ev in name order (dot files and bad/ ignored), and records them
+ * in that order but for the files of one process, which are recorded in the process's order
+ * (design 5.3 "Order", #207: names are in stamp order, and a wall clock that stepped back between
+ * two hooks of one process puts the later first). Afterwards removes
  * the files in <badDir> older than seven days and the leftover `.<name>.tmp` files in <spoolDir>
  * older than one hour (age = modification time against the platform clock; a younger temporary
  * file may belong to a running hook). The removals are not counted in the result.
@@ -58,25 +62,27 @@ export function ingestSpool(deck: Deck): IngestResult {
   const movedToBad = new Set<string>();
   const known: KnownSessions = { fromTranscripts: null };
 
+  const parsed: { name: string; path: string; event: SpoolEvent }[] = [];
   for (const name of names) {
     if (name.startsWith('.') || !name.endsWith('.ev')) {
       continue;
     }
     const path = join(spoolDir, name);
-    let event: SpoolEvent;
     try {
       const read = readSpoolFile(files, path);
       if (read === null) {
         continue; // gone: another skydeck took it
       }
-      event = parseSpoolFile(name, read, (p) => files.stat(p) !== null);
+      parsed.push({ name, path, event: parseSpoolFile(name, read, (p) => files.stat(p) !== null) });
     } catch (error) {
       result.bad++;
       if (moveToBad(deck, name, describeError(error), problems)) {
         movedToBad.add(name);
       }
-      continue;
     }
+  }
+
+  for (const { name, path, event } of inProcessOrder(deck, parsed)) {
     try {
       if (event.scripted && !holdsKnownSession(deck, event, known)) {
         // Counted once the file is gone, so that a file that cannot be removed is not counted again.
@@ -137,7 +143,12 @@ function holdsKnownSession(deck: Deck, event: SpoolEvent, known: KnownSessions):
   }
   const { store } = deck;
   if (event.kind === 'end') {
-    const held = store.latestEventOfProcess(event.bootId, event.pid, event.procStart, event.timeNs);
+    const held = store.latestEventOfProcess(
+      event.bootId,
+      event.pid,
+      event.procStart,
+      placeOf(event),
+    );
     return held?.kind === 'scripted' && held.sessionId === event.sessionId;
   }
   if (store.latestEventIdOfSession(event.sessionId) !== null) {
@@ -179,6 +190,7 @@ function insert(deck: Deck, event: SpoolEvent): number | null {
       argv: null,
       name: null,
       payload: event.payload,
+      uptimeCs: event.uptimeCs,
     });
   }
   const linkKind = event.kind === 'start' ? LINK_KINDS[event.detail] : undefined;
@@ -186,7 +198,7 @@ function insert(deck: Deck, event: SpoolEvent): number | null {
     // Before inserting, so that the new event is not its own predecessor. pid 0: no process (D7).
     const previous =
       linkKind !== undefined && event.pid !== 0
-        ? store.latestEventOfProcess(event.bootId, event.pid, event.procStart, event.timeNs)
+        ? store.latestEventOfProcess(event.bootId, event.pid, event.procStart, placeOf(event))
         : null;
     const argv = (event.kind === 'start' ? storedLaunch(deck, event) : null) ?? event.argv;
     const id = store.insertEvent({
@@ -203,6 +215,7 @@ function insert(deck: Deck, event: SpoolEvent): number | null {
       argv,
       name: event.name,
       payload: event.payload,
+      uptimeCs: event.uptimeCs,
     });
     if (
       id !== null &&
@@ -237,26 +250,57 @@ function storedLaunch(deck: Deck, event: SpoolEvent): string[] | null {
   if (event.pid === 0 || event.procStart === null) {
     return null;
   }
-  // Walks the process's events back to its first, keeping the earliest start with a command.
-  let first: string[] | null = null;
-  let beforeNs = event.timeNs;
-  for (;;) {
-    const earlier = deck.store.latestEventOfProcess(
-      event.bootId,
-      event.pid,
-      event.procStart,
-      beforeNs,
-    );
-    if (earlier === null) {
-      return first;
-    }
-    if (earlier.kind === 'start' && earlier.argv !== null) {
-      first = earlier.argv;
-    }
-    // Two events of one process in the same nanosecond are not told apart here: at worst the one
-    // skipped is not considered.
-    beforeNs = earlier.timeNs - 1n;
+  return (
+    deck.store.firstEventOfProcess(event.bootId, event.pid, event.procStart, {
+      before: placeOf(event),
+      startWithLaunch: true,
+    })?.argv ?? null
+  );
+}
+
+/** Where `event` lies in its process's order: its time and, when it has one, its uptime (#207). */
+function placeOf(event: { timeNs: Ns; uptimeCs?: UptimeCs }): ProcessPlace {
+  return event.uptimeCs === undefined
+    ? { timeNs: event.timeNs }
+    : { timeNs: event.timeNs, uptimeCs: event.uptimeCs };
+}
+
+/**
+ * The files of one pass in the order they are recorded: name order (stamp order), except that the
+ * files of one process take the places its files hold in that order in the process's order
+ * (`processOrder`): by (uptime, time, name) when every one of them and every event stored for the
+ * process has an uptime, else by (time, name), which is name order. Files of no process (pid 0)
+ * keep their places.
+ */
+function inProcessOrder<T extends { name: string; event: SpoolEvent }>(
+  deck: Deck,
+  files: readonly T[],
+): T[] {
+  const places = new Map<string, number[]>(); // process → its files' places, in name order
+  files.forEach((file, place) => {
+    const { event } = file;
+    if (event.pid === 0) return;
+    const key = JSON.stringify([event.bootId, event.pid, event.procStart]);
+    const list = places.get(key);
+    if (list === undefined) places.set(key, [place]);
+    else list.push(place);
+  });
+  const ordered = [...files];
+  for (const list of places.values()) {
+    if (list.length < 2) continue;
+    const { event } = files[list[0]!]!;
+    const stored = deck.store.processOrderedByUptime(event.bootId, event.pid, event.procStart);
+    const own = list.map((place) => ({
+      place,
+      id: place,
+      ...placeOf(files[place]!.event),
+    }));
+    const sorted = stored ? processOrder(own) : own; // without: (time, name), the name order
+    list.forEach((place, i) => {
+      ordered[place] = files[sorted[i]!.place]!;
+    });
   }
+  return ordered;
 }
 
 /** Moves <spoolDir>/<name> to <badDir>/<name> (creating badDir), noting what happened. */

@@ -16,7 +16,13 @@ import { openStore } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import { testPlatform } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
-import { SCHEMA1, dumpDatabase, schema1Database, withoutTicketStatus } from '../helpers/schema1.ts';
+import {
+  SCHEMA1,
+  dumpDatabase,
+  schema1Database,
+  withoutTicketStatus,
+  withoutUptime,
+} from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
 
 /** The attention row the fixture adds to its schema-2 database. */
@@ -83,7 +89,8 @@ function withTicketColumn(sql: string | null): string | null {
  */
 function assertMigrated(before: DatabaseDump, newest: DatabaseDump): void {
   // F19: the open goes on with migration 4, which only adds the table ticket_status, empty.
-  const after = withoutTicketStatus(newest);
+  // #207: and with migration 5, which only adds the nullable column uptime_cs to events.
+  const after = withoutUptime(withoutTicketStatus(newest));
   assert.deepEqual(
     after.schema,
     before.schema.map((entry) =>

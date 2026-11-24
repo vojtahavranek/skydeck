@@ -10,6 +10,7 @@ import { SkydeckError, UsageError } from '../platform/errors.ts';
 import { sanitize } from '../text/sanitize.ts';
 import type { MetaPatch } from '../store/types.ts';
 import type { Deck } from './deck.ts';
+import { ACTIVITY_STARTS } from './derive.ts';
 import { readTicket } from './ticket.ts';
 
 /** Sets the label; null clears it. The caller has cleaned the text with `cleanLabel`. */
@@ -98,10 +99,21 @@ export function discardKeptNote(deck: Deck, sessionId: string): void {
   }
 }
 
-/** Hides the session from now on (7.1). The session itself is not touched. */
+/**
+ * Hides the session from now on (7.1). The session itself is not touched. The done time is the
+ * clock now, but never below what would make the session active again (a start, a transcript's
+ * input): the wall clock can be behind such a stamp after it stepped back, and the session would
+ * then never be hidden (#207). A stamp from a clock that was far ahead keeps it hidden until the
+ * clock passes it.
+ */
 export function markDone(deck: Deck, sessionId: string): void {
   const now = deck.platform.clock.nowNs();
-  deck.store.updateMeta(sessionId, { doneAtNs: now }, now);
+  const latest = deck.store.latestActivityNs(sessionId, ACTIVITY_STARTS);
+  deck.store.updateMeta(
+    sessionId,
+    { doneAtNs: latest !== null && latest > now ? latest : now },
+    now,
+  );
 }
 
 /** Shows a hidden session again. */

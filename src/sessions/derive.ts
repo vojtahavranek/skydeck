@@ -5,6 +5,7 @@ import { NS_PER_DAY } from '../platform/time.ts';
 import type { Ns } from '../platform/types.ts';
 import { ENDED_IN_WINDOW } from '../store/types.ts';
 import type { EndDetail, EventRow, LinkRow, SessionMeta, TranscriptRow } from '../store/types.ts';
+import { processOrder } from './process-order.ts';
 import { MARK_ORDER } from './types.ts';
 import type { DerivedSession, Holder, LastHolding, Mark, State } from './types.ts';
 
@@ -43,6 +44,11 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
     if (event.pid !== 0) {
       push(eventsOfProcess, processId(event), event);
     }
+  }
+  // #207: one process's events in the process's order (5.3 "Order"), not in time order: its
+  // stamps can be inverted by a wall clock that stepped back between two of them.
+  for (const [id, processEvents] of eventsOfProcess) {
+    eventsOfProcess.set(id, processOrder(processEvents));
   }
   // A process holds the session of its latest event unless that event is an `end` or a `scripted-end`.
   const holdingEvents = new Map<string, EventRow[]>(); // session id → latest events of its processes
@@ -122,7 +128,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
       (liveFilesOfPid.get(process.pid) ?? [])
         .filter((file) => isFileOf(file, process) && file.sessionId === id)
         .reduce<Ns | null>((seen, file) => latest(seen, file.mtimeNs), null);
-    const lastHolding = lastHoldingOf(ownEvents, eventsOfProcess, isAlive, lastWriteNs);
+    const lastHolding = lastHoldingOf(id, ownEvents, eventsOfProcess, isAlive, lastWriteNs);
     const lastActivityNs =
       latest(transcript?.lastRecordNs ?? null, sessionEvents.at(-1)?.timeNs ?? null) ??
       transcript?.mtimeNs ??
@@ -135,7 +141,7 @@ export function deriveSessions(input: DeriveInput): DerivedSession[] {
     const { state, stateDetail, sinceNs } = stateOf(
       holders,
       lastActivityNs,
-      holder === undefined ? null : holdingBeganNs(sessionEvents, holder.process),
+      holder === undefined ? null : holdingBeganNs(id, eventsOfProcess, holder.process),
     );
 
     const endedUnexpectedly =
@@ -244,14 +250,14 @@ function stateOf(
  * (the session id stays). null when it has none: a session found by reconcile (`observed`) is
  * not known to have begun anywhere.
  */
-function holdingBeganNs(sessionEvents: readonly EventRow[], process: ProcessKey): Ns | null {
-  const began = sessionEvents.findLast(
+function holdingBeganNs(
+  sessionId: string,
+  eventsOfProcess: ReadonlyMap<string, readonly EventRow[]>,
+  process: ProcessKey,
+): Ns | null {
+  const began = (eventsOfProcess.get(processId(process)) ?? []).findLast(
     (event) =>
-      event.kind === 'start' &&
-      event.detail !== 'compact' &&
-      event.bootId === process.bootId &&
-      event.pid === process.pid &&
-      event.procStart === process.procStart,
+      event.sessionId === sessionId && event.kind === 'start' && event.detail !== 'compact',
   );
   return began?.timeNs ?? null;
 }
@@ -277,15 +283,22 @@ interface HoldingRank {
  * is `observed`) is ranked at the process's last event for the session.
  */
 function lastHoldingOf(
+  sessionId: string,
   sessionEvents: readonly EventRow[],
   eventsOfProcess: ReadonlyMap<string, readonly EventRow[]>,
   isAlive: (event: EventRow) => boolean,
   lastWriteNs: (process: ProcessKey) => Ns | null,
 ): LastHolding | null {
-  const lastOfProcess = new Map<string, EventRow>(); // process id → its latest event naming the session
+  // Process id → its latest event naming the session, in the process's order (5.3 "Order").
+  const lastOfProcess = new Map<string, EventRow>();
   for (const event of sessionEvents) {
-    if (event.pid !== 0) {
-      lastOfProcess.set(processId(event), event);
+    const id = processId(event);
+    if (event.pid !== 0 && !lastOfProcess.has(id)) {
+      const last = (eventsOfProcess.get(id) ?? []).findLast(
+        (one) =>
+          one.sessionId === sessionId && one.kind !== 'scripted' && one.kind !== 'scripted-end',
+      );
+      if (last !== undefined) lastOfProcess.set(id, last);
     }
   }
   let chosen: { holding: LastHolding; rank: HoldingRank } | null = null;
@@ -340,6 +353,9 @@ function compareRanks(a: HoldingRank, b: HoldingRank): number {
   return Number(a.goesOn) - Number(b.goesOn) || compareNs(a.atNs, b.atNs) || a.eventId - b.eventId;
 }
 
+/** 7.1: the start details that make a done session active again (with a transcript's input). */
+export const ACTIVITY_STARTS: readonly string[] = ['startup', 'resume'];
+
 /** 7.1: user input in the transcript, or a start by `startup` or `resume`, after the done time. */
 function activityAfter(
   doneAtNs: Ns,
@@ -351,9 +367,7 @@ function activityAfter(
   }
   return sessionEvents.some(
     (event) =>
-      event.kind === 'start' &&
-      (event.detail === 'startup' || event.detail === 'resume') &&
-      event.timeNs > doneAtNs,
+      event.kind === 'start' && ACTIVITY_STARTS.includes(event.detail) && event.timeNs > doneAtNs,
   );
 }
 
@@ -383,8 +397,8 @@ function processOf(event: EventRow): ProcessKey {
   return { bootId: event.bootId, pid: event.pid, procStart: event.procStart };
 }
 
-function processId(event: EventRow): string {
-  return JSON.stringify([event.bootId, event.pid, event.procStart]);
+function processId(process: ProcessKey): string {
+  return JSON.stringify([process.bootId, process.pid, process.procStart]);
 }
 
 /** Whether a live-session file is the one of this process; an unknown start never matches. */

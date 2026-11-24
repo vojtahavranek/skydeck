@@ -107,6 +107,10 @@ CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
   tried_at_ns  INTEGER NOT NULL,  -- the last attempt
   error        TEXT               -- the last attempt's failure; NULL after a success
 );`,
+  // Migration 5 (#207): the SQL of design-step-2.md 10.2, character for character. It only adds a
+  // nullable column, so a reader of schema 4 still reads correctly; an older skydeck refuses the
+  // database at its open.
+  "ALTER TABLE events ADD COLUMN uptime_cs INTEGER;  -- #207: /proc/uptime at the event in centiseconds, which orders one process's events; NULL for none",
 ];
 
 export const SCHEMA_VERSION: number = MIGRATIONS.length;

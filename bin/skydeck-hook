@@ -57,6 +57,10 @@ resolve_state() {
 main() {
   # First, so that the time is as close to the event as it can be.
   time_ns=$(date +%s%N)
+  # The machine's uptime beside it (a builtin read, no program): it never steps back as the wall
+  # clock can, and orders one process's events (design 5.3 "Order"). Empty when it cannot be read.
+  uptime=
+  read -r uptime _ </proc/uptime || uptime=
 
   cr=$(printf '\r') # $(...) strips only trailing newlines
   event=${1-}
@@ -67,6 +71,7 @@ main() {
   case $session_env in *"$nl"* | *"$cr"*) session_env= ;; esac
   case $entrypoint_env in *"$nl"* | *"$cr"*) entrypoint_env= ;; esac
   case $cwd in *"$nl"* | *"$cr"*) cwd= ;; esac
+  case $uptime in *"$nl"* | *"$cr"*) uptime= ;; esac
 
   resolve_state
   if [ -z "$state" ]; then
@@ -113,8 +118,8 @@ main() {
   # The standard error of the group goes to $err, its standard output to the file.
   if ! err=$(
     {
-      printf 'v=1\nevent=%s\ntime_ns=%s\nclaude_pid=%s\nsession_env=%s\nentrypoint_env=%s\nboot_id=%s\nstat=%s\npwd=%s\n' \
-        "$event" "$time_ns" "$pid" "$session_env" "$entrypoint_env" \
+      printf 'v=1\nevent=%s\ntime_ns=%s\nuptime=%s\nclaude_pid=%s\nsession_env=%s\nentrypoint_env=%s\nboot_id=%s\nstat=%s\npwd=%s\n' \
+        "$event" "$time_ns" "$uptime" "$pid" "$session_env" "$entrypoint_env" \
         "$boot_id" "$stat" "$cwd" &&
         if [ "$event" = SessionStart ]; then printf 'argv_b64=%s\n' "$argv"; fi &&
         printf -- '--\n' &&

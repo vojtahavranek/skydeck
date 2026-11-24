@@ -34,7 +34,7 @@ import type { Duplex } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 import { SkydeckError } from './errors.ts';
-import { MAX_TIMER_MS, NS_PER_MS } from './time.ts';
+import { MAX_TIMER_MS, NS_PER_MS, uptimeCsFromText } from './time.ts';
 import type {
   Clock,
   Detached,
@@ -408,6 +408,11 @@ function realProc(): Proc {
     kernelRelease() {
       const release = lineOf(read('/proc/sys/kernel/osrelease'));
       return release === '' ? null : release;
+    },
+    uptimeCs() {
+      // Lenient, as for the hook: an uptime that cannot be read leaves the event without one.
+      const fields = read('/proc/uptime')?.toString('utf8').split(' ') ?? [];
+      return uptimeCsFromText(fields[0] ?? '');
     },
     memAvailableMb() {
       const kb = /^MemAvailable:\s+(\d+)\s*kB/m.exec(

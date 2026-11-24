@@ -25,6 +25,7 @@ import {
   schema1Database,
   uncommittedWrite,
   withoutTicketStatus,
+  withoutUptime,
 } from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
 
@@ -123,7 +124,8 @@ function opened(t: TestContext, path: string, options?: { busyTimeoutMs?: number
 function assertMigrated(schema1Dump: DatabaseDump, newest: DatabaseDump): void {
   const before = withMigration3(schema1Dump);
   // F19: the open goes on with migration 4, which only adds the table ticket_status, empty.
-  const after = withoutTicketStatus(newest);
+  // #207: and with migration 5, which only adds the nullable column uptime_cs to events.
+  const after = withoutUptime(withoutTicketStatus(newest));
   assert.deepEqual(
     after.schema.filter((entry) => !isAttention(entry)),
     before.schema,

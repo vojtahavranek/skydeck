@@ -127,12 +127,18 @@ export function createEndings(deps: EndingDeps): Endings {
   /** The end of each holder, as an `end` event of the window's own (tried again on a busy store). */
   function record(termId: string, entry: Ending, tries = 1): void {
     try {
-      const atNs = clock.nowNs();
+      const clockNs = clock.nowNs();
+      const uptimeCs = deck.platform.proc.uptimeCs();
       deck.store.transaction(() => {
         for (const holder of entry.holders) {
+          const { bootId, pid, procStart } = holder.process;
+          // Never below a stamp stored for the process, and with the machine's uptime, which orders
+          // the process's events (#207): the wall clock may have stepped back since its start.
+          const latestNs = deck.store.latestStampOfProcess(bootId, pid, procStart);
           deck.store.insertEvent({
             spoolName: null,
-            timeNs: atNs,
+            timeNs: latestNs !== null && latestNs >= clockNs ? latestNs + 1n : clockNs,
+            ...(uptimeCs === null ? {} : { uptimeCs }),
             kind: 'end',
             detail: 'exit',
             rawDetail: ENDED_IN_WINDOW,
