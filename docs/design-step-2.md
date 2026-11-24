@@ -5467,7 +5467,7 @@ itself, and only after checking that the runtime directory lies inside its sandb
 back by 2.1 to 2.7 s every 32 s, while timers and the clock that cannot step (`monotonicNs`,
 `performance.now()`) run on. So a test measures a duration it bounds from below with
 `performance.now()`: two `Date.now()` readings would shorten it by the step (an upper bound on two
-such readings is left as it is, since a step back only lengthens what they measure); and a
+such readings is left as it is, since a step back only shortens what they measure); and a
 deadline that a keeper judges is set and waited for on the clock the
 keeper reads, the wall clock: one that has "already passed" lies a minute back, not a second (the
 real clock's `nowNs()` holds its last value while the wall clock is stepped back, the keeper's
