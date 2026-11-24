@@ -1206,7 +1206,10 @@ a withheld terminal (`changed`, as for an ended one): withheld means no slot. An
 set is written, at the end of the terminal's program, at its close, and when a terminal withheld
 before its keeper's `hello` is forgotten because its keeper could not start; an id of a keeper still
 being found stays, and one of a keeper never found again goes at the next write. Once the server is
-stopping the operation changes and writes nothing (`stopping`).
+stopping the operation changes and writes nothing (`stopping`). A terminal withheld before its
+`hello` whose spawn ends because the server is stopping leaves the set but not the store (nothing
+is written once stopping): its keeper may live, a later server finds it withheld, and that
+server's first refresh gives it its number when its session is no longer parked.
 
 Who calls it, and when (F44). Whether a session is parked now is derived from the store and the
 transcripts, and the mark can be written by another process (`skydeck park`), so no act owns the
