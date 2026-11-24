@@ -10,7 +10,7 @@
 // body are web/attention-text.js's, plain strings: never markup.
 
 /** @import { ListMessage, NotifyMessage } from '../src/window/protocol.ts' */
-import { notificationText } from './attention-text.js';
+import { needsYou, notificationText } from './attention-text.js';
 
 /**
  * The Notification API as the page reaches it, or null where there is none.
@@ -136,7 +136,9 @@ export function createNotifications(item, deps) {
 
     /**
      * B16 (ruled): closes the notification of each session that no longer needs you — the list
-     * carries that session's row with no attention, or nothing needs you at all (`needYou.count`
+     * carries that session's row and it does not need you (`needsYou`: no attention, or F44 a
+     * parked session, so that a notification shown before the parking closes), or nothing needs
+     * you at all (`needYou.count`
      * 0, or no `needYou`, as in a list of stage A). A session the list merely does not show (a
      * filter, the folded Earlier) keeps its notification. Then the item, as `refresh`.
      * @param {ListMessage} list
@@ -153,7 +155,7 @@ export function createNotifications(item, deps) {
       );
       for (const sessionId of [...shown.keys()]) {
         const row = rows.get(sessionId);
-        if (none || (row !== undefined && (row.attention ?? null) === null)) {
+        if (none || (row !== undefined && !needsYou(row))) {
           close(sessionId);
         }
       }

@@ -7,6 +7,7 @@ import { describe, test } from 'node:test';
 import type { AttentionPayload, NotifyMessage } from '../../src/window/protocol.ts';
 import {
   attentionLine,
+  needsYou,
   needYouText,
   nextNeeding,
   notificationText,
@@ -27,6 +28,22 @@ const A = '11111111-1111-4111-8111-111111111111';
 const B = '22222222-2222-4222-8222-222222222222';
 const C = '33333333-3333-4333-8333-333333333333';
 const D = '44444444-4444-4444-8444-444444444444';
+
+describe('needsYou (F44, S2 12.4): the server says it per row', () => {
+  const asks: AttentionPayload = { reason: 'asks', detail: null, sinceNs: ago(MIN) };
+  test("a row's `needsYou` when it is a boolean, whatever its attention", () => {
+    assert.equal(needsYou({ attention: asks, needsYou: false }), false); // a parked row that asks
+    assert.equal(needsYou({ attention: asks, needsYou: true }), true);
+    assert.equal(needsYou({ attention: null, needsYou: false }), false);
+    assert.equal(needsYou({ attention: null, needsYou: true }), true); // the server's word
+  });
+  test('absent (a scripted row, a server before F44): by `attention`', () => {
+    assert.equal(needsYou({ attention: asks }), true);
+    assert.equal(needsYou({ attention: null }), false);
+    assert.equal(needsYou({} as { attention: null }), false);
+    assert.equal(needsYou({ attention: asks, needsYou: 'yes' as unknown as boolean }), true);
+  });
+});
 
 function attention(over: Partial<AttentionPayload> = {}): AttentionPayload {
   return { reason: 'asks', detail: null, sinceNs: ago(3n * MIN), ...over };

@@ -10,7 +10,7 @@
 // module and list-text.js import each other's functions (rowText words a row's attention here);
 // neither calls the other while it loads.
 
-/** @import { AttentionPayload, NotifyMessage } from '../src/window/protocol.ts' */
+/** @import { AttentionPayload, NotifyMessage, RowPayload } from '../src/window/protocol.ts' */
 import { ageBetween } from './format.js';
 import { sanitize } from './list-text.js';
 
@@ -52,6 +52,18 @@ function wordsOf(reason) {
       return { row: named, body: named };
     }
   }
+}
+
+/**
+ * F44 (S2 12.4): whether a row counts as needing you, as the server says it per row: its
+ * `needsYou` when that is a boolean; absent (a scripted row, a server before F44), whether its
+ * `attention` is set. The page decides nothing of it: a parked row keeps its `attention` (its mark
+ * is drawn) and the server sends `needsYou` false.
+ * @param {Pick<RowPayload, 'attention' | 'needsYou'>} row
+ * @returns {boolean}
+ */
+export function needsYou(row) {
+  return typeof row.needsYou === 'boolean' ? row.needsYou : (row.attention ?? null) !== null;
 }
 
 /**

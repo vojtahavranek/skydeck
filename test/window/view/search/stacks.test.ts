@@ -20,7 +20,8 @@ function entry(id: string, group: string | null, needsYou = false, unreported = 
 }
 
 type Section = SectionPayload['name'];
-const SECTIONS: readonly Section[] = ['open', 'week', 'earlier'];
+// F44: Parked's blocks form and close as every section's.
+const SECTIONS: readonly Section[] = ['open', 'parked', 'week', 'earlier'];
 
 /** `view.closed` of a page that closed nothing. */
 const NONE: readonly ClosedBlock[] = [];
