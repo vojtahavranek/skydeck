@@ -288,7 +288,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
   // Issue #166: the restart, by those two.
   const restarts = createRestarts({ deck, hub, endings, launches, log });
 
-  /** Issue #166: whether a restart holds a terminal of the session (R7: an action on it waits for
+  /** Issue #166: whether a restart holds a terminal of the session (then an action on it waits for
    *  nobody; it is refused). */
   function restarting(sessionId: string): boolean {
     return hub

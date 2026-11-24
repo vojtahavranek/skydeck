@@ -95,7 +95,7 @@ const ALREADY_DONE = 'it was marked done meanwhile';
 const NOT_HERE = 'it does not run in that terminal';
 const ENDING = 'skydeck is ending this session already';
 const NOT_AN_ACTION = 'skydeck cannot do that action';
-/** Issue #166: a restart holds the terminal (R7). */
+/** Issue #166: a restart holds the terminal: what is refused meanwhile. */
 export const RESTARTING = 'skydeck is restarting this session';
 /** Issue #166: why a restart's hang-up did not end the program. */
 const NOT_ENDED = 'it has not ended within 10 seconds; if it ends later, resume it from its bar';
