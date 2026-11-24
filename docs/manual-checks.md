@@ -3431,13 +3431,13 @@ in its line `Last check: <age> ago — …`; close Settings (Esc) and open it ag
    for updates` with `Every hour` when the setup found no line or `"hourly"` (`Every day` for
    `"daily"`, `Off` for `"off"`); its list holds `Off`, `Every 15 minutes`, `Every hour`, `Every
    day`, in that order. With a setup that found no line or a value other than `"off"`, the line's
-   age is about the time since the window's server started (the update restarted it, and every
-   start checks).
+   age is at most the time since the window's server started (the update restarted it, and every
+   start checks), and under an hour with `Every hour`.
 2. **Every 15 minutes.** Choose `Every 15 minutes`. Expected: `Saved.` beside it, no button
-   pressed; the grep prints `"15min"`. When the line's age was 15 minutes or more, it says `Last
-   check: 0s ago` (or `1s`, `2s`) within two seconds, without a click; else leave the window
-   alone until 16 minutes after the age it showed, open Settings again: the age is under a minute
-   or two, and `skydeck doctor`'s `update:` line says `fetched <age> ago` with the same age.
+   pressed; the grep prints `"15min"`. When the line's age was 15 minutes or more, within a few
+   seconds (`Checking…` first) and without a click it says `Last check: <age> ago` with an age of a
+   few seconds; else leave the window alone until 16 minutes after the age it showed, open
+   Settings again: the age is under a minute or two, and `skydeck doctor`'s `update:` line says `fetched <age> ago` with the same age.
 3. **Every day.** Choose `Every day`: `Saved.`, the grep prints `"daily"`. Write down the line's
    age. Twenty minutes later, open Settings again: the age has grown by twenty minutes (no check
    was made by the clock).

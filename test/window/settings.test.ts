@@ -845,7 +845,7 @@ describe('the screen (payload) and what the running server uses (G4)', () => {
     assert.equal(w.d.deck.config.window.updateCheck, 'hourly');
   });
 
-  test('a key read at the start (window.keepAlive) is written to the file only:the running server keeps its value, and the screen says it applies after the window restarts', (t) => {
+  test('a key read at the start (window.keepAlive) is written to the file only: the running server keeps its value, and the screen says it applies after the window restarts', (t) => {
     const w = world(t, {});
     const window = w.d.deck.config.window;
     assert.equal(w.settings.set('window.keepAlive', 'off').ok, true);

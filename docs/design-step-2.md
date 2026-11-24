@@ -5077,7 +5077,7 @@ still parked.
 | **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s and stops reading a keeper whose records its screen side has not applied (7.3), so the keeper closes that connection at its send cap and the server reconnects; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
 | **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. The server's own connection waits at most 250 ms for another process's write lock (the commands wait 5 s), so a lock held for long never freezes the server: the piece of work that met it is given up and tried again — the tick's store work at the next tick, an action answers `skydeck's database is busy; try again`, a `hello` is closed with 1013 and the page tries again, and a found keeper's decision (7.3) is put off to the next refresh while its deadline allows; a start that meets it fails at once (5.2), leaving nothing behind (ruled, plan task 23). |
 | **skydeck is updated** | 16.5. |
-| **The check for a newer skydeck fails** (follow-up F38: no network, a remote that needs a login, a remote gone, git missing) | No notice of its own: after a failed fetch an update an earlier fetch brought stays shown; after a git call that failed or a check that threw none is shown; either way the settings screen's block and `doctor` say that the last check failed, when, and why (12.13, 16.3). It never asks for a password or a passphrase and never waits at a prompt; it ends after 60 seconds at most, and a failed check is tried again an hour later. A check that was cut can leave a ref's `.lock`; 16.5 says what then. |
+| **The check for a newer skydeck fails** (follow-up F38: no network, a remote that needs a login, a remote gone, git missing) | No notice of its own: after a failed fetch an update an earlier fetch brought stays shown; after a git call that failed or a check that threw none is shown; either way the settings screen's block and `doctor` say that the last check failed, when, and why (12.13, 16.3). It never asks for a password or a passphrase and never waits at a prompt; it ends after 60 seconds at most, and a failed check is tried again an hour later (15 minutes later with `"15min"`). A check that was cut can leave a ref's `.lock`; 16.5 says what then. |
 | **An update from the window fails** (follow-up F38, `Update now`) | The updater records the merge's outcome before it brings the window back; the server that comes back shows it in the result bar (`the update could not be applied: …`, or a refusal's line); a server that never stopped shows the refusal at once. An updater that could not record shows `… did not record how it ended; its log says: <log>`. No server comes back: the page's bar names `<stateDir>/update.log` first and `skydeck window` second (6.3). The window comes back later than `skydeck window`'s waits with a dead `WSL_INTEROP`: no second window, the log's last line says to run `skydeck window` though the server runs (16.5's named limit). |
 | **The key is wrong** (after `--new-secret`, a launch address used too late or given up, a stale bookmark) | The page says that its key is not valid and to run `skydeck window` again (8.2.2). |
 | **A launch token is presented twice** | Another program may have the secret: the alarm (8.2.2) — the page, the waiting `skydeck window` and `doctor` all say to run `skydeck window --new-secret`. |
@@ -5568,9 +5568,10 @@ user's second click.
   an earlier check's or an earlier server's outcome is taken up again (the stored entry gives only
   the time of the last fetch that worked) — and the dialog then says why. Either way the failure —
   its line and its time — is kept for the settings screen and `doctor` until a check that ends
-  without one, and the next check comes after the hour; a failed fetch is kept also when the look
-  after it ends `this checkout changed while git fetch ran`. A failure makes no notice of its own,
-  and a look that cannot tell shows none. The dialog's look follows the same rule: one whose git
+  without one, and the next check comes after the wait after a failure (an hour, 15 minutes with
+  `"15min"`); a failed fetch is kept also when the look after it ends `this checkout changed
+  while git fetch ran`. A failure makes no notice of its own, and a look that cannot tell shows
+  none. The dialog's look follows the same rule: one whose git
   call fails is a `cannot` with git's line and replaces what was known. The
   settings screen gives the time the last check ended, whatever it found (`checkedAtNs`), and the
   time of the last fetch that worked for what is known (`fetchedAtNs`).
@@ -5776,7 +5777,7 @@ test/helpers/update.ts), which checks that the path lies inside the sandbox firs
 remote is a bare repository beside it, or an `ssh://…invalid` address whose `ssh` is a sandbox stub
 that connects nowhere. The sandbox's `config.json` has `window.updateCheck` `"off"`
 (test/helpers/window-config.ts, beside `keepAlive` `"off"`), so that no test server checks unless
-its test turns the switch on.
+its test sets another value.
 
 **Two test platforms.** Logic is tested on a platform with a fake clock, a fake `/proc` and fake
 processes. Every test that starts a keeper, the stand-in or a server, or judges a real process

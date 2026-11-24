@@ -822,7 +822,7 @@ A key inside `window` that skydeck does not know is an error, as everywhere in t
 file when it starts: after a change by hand, run `skydeck window --restart`. A change in the
 window's Settings ("Configuration" above) of a key that applies at once needs none (turning
 `window.updateCheck` on, or to a shorter wait, checks at once when the server's last check is
-older than the new wait, or than an hour after a check that failed); one of
+older than the new wait, or than its wait after a check that failed); one of
 `window.keepAlive` applies after the restart (a keep-alive that runs keeps running until then).
 
 ### Keeping WSL running
@@ -2504,7 +2504,7 @@ after your second click (below).
 - **It never asks.** The check runs with no terminal, no askpass program and no credential
   manager's dialog (`GCM_INTERACTIVE=never`), so a remote that needs a passphrase or a login is a
   check that fails (the block and doctor say so), never a prompt; it gives up after 60 seconds and
-  is tried again an hour later. A fetch that fails hides nothing: an update an earlier check found
+  is tried again an hour later (15 minutes later with `"15min"`). A fetch that fails hides nothing: an update an earlier check found
   stays shown. A git call that fails, or a check that cannot run git at all, shows no notice:
   Settings and doctor say why.
 
