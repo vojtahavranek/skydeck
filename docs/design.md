@@ -188,10 +188,10 @@ Parsing (in `src/claude/hookinput.ts`) normalises each event:
   not know is stored as its bare name: what follows it cannot be classified, and may be a prompt.
   Reconcile (5.4) applies the same rule to the command line it reads itself.
 - A file in which a key appears twice before the `--` line cannot be parsed; it goes to `spool/bad/`.
+  An empty `pwd`, `session_env` or `entrypoint_env` means "unknown".
 - An `uptime` that is not seconds with two decimals (empty, when the hook could not read
   `/proc/uptime`, or another form) gives the event no uptime; it never makes a file one that cannot
   be parsed (#207).
-  An empty `pwd`, `session_env` or `entrypoint_env` means "unknown".
 - `SessionStart.source` → kind `start` with detail `startup`, `resume`, `clear`, `compact`,
   `fork`, or `unknown` for anything else.
 - `SessionEnd.reason` → kind `end` with detail `clear` (reason `clear`), `switch` (reason
