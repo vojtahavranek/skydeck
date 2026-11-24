@@ -373,7 +373,7 @@ describe('listKey (S2 12.9)', () => {
     assert.equal(listKey(ev('F5', 'F5', 'alt')), null);
     assert.equal(listKey(ev('F5', 'F5', 'ctrl', 'shift')), null);
     assert.equal(listKey(ev('BrowserRefresh', 'BrowserRefresh', 'alt')), null);
-    assert.equal(listKey(ev('r', 'KeyR')), null);
+    assert.deepEqual(listKey(ev('r', 'KeyR')), { kind: 'restart' }); // issue #166, no reload
     assert.equal(listKey(ev('r', 'KeyR', 'ctrl', 'alt')), null);
   });
 

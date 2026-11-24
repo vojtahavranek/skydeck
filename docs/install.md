@@ -897,7 +897,9 @@ effect.
   exists already. A refusal shows under Start; Esc goes back to the card. Nothing is saved for the
   session: its start is recorded as every start is, so the header shows the new flags, and every
   later Resume uses them. A start that fails before the session reports keeps the old ones.
-- **A running session** of the window: a click shows its terminal. A session that runs in another
+- **A running session** of the window: a click shows its terminal; `r` in the list (or `Restart`
+  in the header) ends `claude` and resumes it in its place, with the same flags or other ones
+  ("Restarting a session" below). A session that runs in another
   terminal shows a card instead: it cannot be shown in the window. Once you `/exit` it there, it
   can be resumed here. A session in Claude Code's background has no terminal at all. For one sent
   there with ←, its row (once it is listed: an empty copy is not, see the next point) says
@@ -999,13 +1001,15 @@ header:
 | the ticket | `t` | `Ticket` (`+ ticket` while none is set), beside `Pull requests` |
 | the pull requests | `p` | `Pull requests` (`+ PR` while none is attached) |
 | done, undone | `d` | `Done` (`Undone` for a session marked done) |
+| restart (below) | `r` | `Restart` |
 
 With no session selected, a key says `no session selected`.
 
 **The header** has four lines, the same height for every session and every window width; each
 is one line, cut with an ellipsis when it is long:
 
-1. the title, the group chip with its ✎ (or `+ group`), the state, `Note` and `Done`;
+1. the title, the group chip with its ✎ (or `+ group`), the state, `Note`, `Restart` (only for a
+   session running in a terminal of the window that is not marked done; see below) and `Done`;
 2. the directory (whole in its tooltip), `opened today at 14:02 · last active 3m` (`opened` while
    the window shows the session's terminal), where the title comes from (`title: your label`,
    `title: Claude Code's name`, `title: Claude Code's summary` or `title: start time and
@@ -1109,6 +1113,33 @@ and the next key acts on it: to take the `d` back, click `Undo` first. `Undo` se
 again, unless you moved the selection meanwhile. `Done` in the header selects nothing in its place.
 `d` on a session marked done (shown with `a`), and `Undone`, mark it undone, without a toast. A held
 `d` acts once, and so does a double click on a button of the header.
+
+**Restarting a session** that runs in a terminal of the window — when `claude` must start again to
+pick something up: another `--mcp-config`, another model, changed settings, an update of Claude
+Code —: `r` in the list or `Restart` in the header asks first, in a dialog over the window:
+`Restart: <its title>` and `It ends claude and resumes this session here, with the same flags.`,
+with `Restart`, `Other flags…` and `Cancel`; while it is working the dialog also says `It is
+working: ending it now stops the current turn.` The keyboard is always on `Cancel` when it opens,
+so that an `r` and an Enter typed by mistake never restart a session: `r`, Tab, Enter (or `r`, ←,
+←, Enter) restarts it. Esc is Cancel; Tab and → move to the next button, Shift+Tab and ← to the one
+before, staying among the three. `Other flags…` puts the `Flags for claude` field in the dialog,
+with your favourite flags under it, filled with the flags a plain resume would pass on; its
+`Restart` (or Enter in the field) restarts the session with exactly the flags in the field, checked
+as `Other flags…` on a resume card checks them, and Esc goes back with nothing changed. skydeck
+checks everything it can before it ends anything: a refusal (a flag a resume cannot take, a session
+marked done — mark it undone first —, one that also runs in another terminal, a directory that is
+gone) shows in the dialog, and nothing was ended. Then it ends `claude` as `End session and mark
+done` ends it, but marks nothing done, and resumes the session at once: the same number before its
+row, the same place in Open, the same terminal size; the dialog says `Restarting…` until then and
+the toast `Restarted.` Esc meanwhile closes the dialog: the restart goes on, and nothing moves your
+selection or the keyboard when it is done. If `claude` has not ended within 10 seconds, nothing is
+restarted (`Not restarted: it has not ended within 10 seconds; if it ends later, resume it from its
+bar.`): when it ends later, its terminal shows the ordinary bar with Resume, Other flags… and Close.
+If it ended but could not be resumed, its terminal shows that bar, and the bar's line and the toast
+say why (`Restart: it ended, but was not resumed: …`). A restart is not shown as ended unexpectedly
+and makes no notification. `r` on any other session says in a toast why it cannot be restarted
+(not running in this window, marked done, a terminal skydeck cannot end). There is no `skydeck
+restart` command: in a terminal of your own, end `claude` and run `skydeck resume`.
 
 **The pull-request dialog** (`p` in the list, `Pull requests` or `+ PR`) lists every attached pull
 request on a line of its own: `acme/web #7 · approved, green · checked 4m ago` (or `checks failing`,

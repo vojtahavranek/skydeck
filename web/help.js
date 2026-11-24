@@ -76,6 +76,10 @@ const SECTIONS = [
       [['t'], 'ticket: a link, or a key when a ticket address is set (Settings)'],
       [['p'], 'pull requests: attach one'],
       [['d'], 'done, or undone for a done session (an Undo follows a done)'],
+      [
+        ['r'],
+        'restart a session running in a terminal of this window: it ends claude and resumes the session there, with the same flags or, with Other flags…, others',
+      ],
       [['c'], 'carry over after /clear: to the offer of the selected session'],
       [
         ['f'],

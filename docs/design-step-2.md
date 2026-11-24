@@ -3160,7 +3160,8 @@ For the selected session: the title (a click edits the label, stage D), the grou
 `+ group` when none; its tooltip says when the group comes from the title; a ✎ beside it edits
 it), the state pill, the project directory, "opened <time> · last active <age>", the short id (a
 click copies the whole id), where the title comes from, from follow-up F16 the flags the session
-was started with (below), and buttons Note and Done / Undone. Then
+was started with (below), and buttons Note, from issue #166 Restart (12.10: only while the row is
+`endable` and not marked done), and Done / Undone. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
 F18 the session's ticket first (below, with its status from F19), then the window's chip (12.3),
@@ -4029,7 +4030,9 @@ F40: the keyboard to the bar of 12.6), `f` (issue #188: the selected session's r
 what that bar's `Other flags…` does (12.6); a held `f` acts once and types nothing into the
 field; with nothing selected it says `no session selected`, while the right side shows neither
 `f resumes with other flags only a session shown on its resume card or its ended bar`, for an
-expired session `its transcript is gone: it cannot be resumed`), Home, End, PgUp,
+expired session `its transcript is gone: it cannot be resumed`), `r` (issue #166: the dialog
+"Restart" of the selected row the list shows, 12.10, at its first keydown; for any other row a
+toast says why), Home, End, PgUp,
 PgDn, ← → (fold, unfold), F2
 (label) and Esc (clear the filter, then back to the terminal). `/` gives the keyboard to the filter's field, where every key but Enter and
 Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also
@@ -4304,6 +4307,60 @@ session in Claude Code's background (7.9, follow-up F34) it says `Marked done. I
 Code's background: end it in claude agents. Hidden once it stops.` A session
 that does not run, `d` on a session marked done, `Undone`, `close-terminal` and every command of the
 command line are unchanged; nothing ends a session from the command line.
+
+**Restarting it (issue #166, with part 2 of #188).** One action ends a session's program and
+resumes the same conversation in its place, with the flags a plain resume passes on or with others
+— for a `claude` that must start again to pick something up (another `--mcp-config`, another model,
+changed settings, an update). It is offered for a row that is `endable` and not marked done: the
+header's `Restart`, between Note and Done (12.5; tooltip `end claude and resume this session (r)`),
+and the list key `r` on the selected row the list shows (12.9). For every other row `r` shows a toast
+that says why: marked done (`r restarts no session marked done: mark it undone first (d)`), not
+running in a terminal of the window (`r restarts only a session that runs in a terminal of this
+window; Enter resumes one`, and for one in another terminal or in Claude Code's background the
+same with `this one runs in another terminal` / `this one runs in Claude Code's background`), a
+terminal skydeck cannot end (`skydeck cannot end this one, so it cannot restart it: end it in its
+terminal`), one a restart holds (`skydeck is restarting this session`). Always a modal dialog first,
+in the manner of the end dialog: `Restart: <title>` (cut to 60 characters with `…`, whole in its
+tooltip), `It ends claude and resumes this session here, with the same flags.`, while it works the
+end dialog's own `It is working: ending it now stops the current turn.`, and `Restart` (the primary
+one), `Other flags…`, `Cancel`. The keyboard always starts on `Cancel` (ruled: an `r` and then
+Enter or Space, or letters before them, typed into the list by mistake must never restart a
+session); Tab and →, Shift+Tab and ←, walk the three and stay inside, so `r`, Tab, Enter restarts;
+Enter or Space press the one that has the keyboard at a fresh press only; Esc is Cancel; the key
+help is refused while it is shown and opening it hides the help. `Other flags…` puts the flags line
+of the New form and the resume card (`Flags for claude`, the field, the ★, the favourites) in place
+of the line and the buttons, filled with what a plain resume passes on (`selected.resumeFlags`, as
+the resume card fills it; before the list brought it the dialog says so on its line and opens
+nothing), with the button `Restart` (it ends a running program, so not `Start`) and `restarts with
+these flags · Esc goes back`; Enter in the field presses it, Tab stays in the dialog, and Esc goes
+back with nothing changed, the keyboard on `Other flags…`. Before a press the dialog follows its
+own session as the end dialog does (`It stopped by itself: nothing was restarted.`, `It was marked
+done in another window: nothing was restarted.`, `It left the list: nothing was restarted.`).
+
+A press sends `restart` (8.2.3; with the field's text as `flags` from `Other flags…`), and the
+dialog stays, its line `Restarting…`, until the answer. A refusal, decided before anything is
+ended, stays in the dialog's line with the field's text and the keyboard. Every other answer closes
+it: `Restarted.` in a toast once the session runs again; given up (the program did not end within
+the 10 seconds, or its keeper was lost) `Not restarted: <why>.` (`it has not ended within 10
+seconds; if it ends later, resume it from its bar`): the session runs on, and if it ends later it is
+an ordinary ended terminal with its bar, its end a deliberate one (as an end of the dialog "Mark
+done" is recorded), and nothing resumes it; ended and not resumed (the resume refused, no terminal
+made) `Restart: it ended, but was not resumed: <why>` in the toast and on the line of the ended
+bar of its terminal (Resume, Other flags…, Close), or the bar of the new terminal whose program did
+not start, which says why itself. Esc while the answer is awaited closes the dialog; the answer then
+comes as a toast (a refusal too, `Restart: <why>`). Nothing is taken from the user meanwhile (ruled):
+the answer selects nothing and moves no keyboard, so a user who selected another row or went to
+another zone or window stays there, and finds the restarted session at its place. While the restart
+holds the terminal (7.6, 7.8) the row stays under Open with its number, the pane shows the terminal's
+screen without the ended bar and the header's state reads `restarting…`; once the new terminal is
+there the row shows it, and a window that showed the session shows the new terminal, the keyboard in
+it if it was in the terminal before (12.9's rule for a terminal that comes to be shown). The end
+made by a restart is never `ended-unexpectedly`, needs no attention and raises no notification
+(13); the start it makes raises nothing a plain resume would not. A server that stops meanwhile
+(5.5) leaves nothing to finish: after its next start the terminal is an ordinary ended one without a
+number (or, when the new one was already open, that one is found as any), and nothing resumes the
+session by surprise. There is no `skydeck restart` command, and nothing new is stored for the
+session.
 
 ### 12.11 The nine picks
 
@@ -5851,6 +5908,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W47 | **Real claude**, follow-up F40: carry over after `/clear` in a window terminal — the bar without a click, a click on it leaves the keyboard in the prompt, `Carry over`, `×`, two clears, `c` from the list with the list changing under it, a session cleared outside the window, and an old cleared session that shows no bar (manual-checks.md, "Carry over after /clear"). | F40 | 12.6, 12.9, design 7.1 |
 | W48 | The list's width in the owner's Edge (issue #192): the handle shows its cursor and tooltip on the border, a drag changes the width live and stops at 240 and 800 px and where the right side keeps 320 px; after a reload and after the window is closed and opened again the width is there with no jump; a narrower window shows less and a wider one the kept width again; a double click gives 400 px back, also one with a slight slip; the list's scroll bar right beside the border scrolls the list and leaves its width; a drag with `Focus: terminal`, over a throwaway session's terminal, leaves the keyboard in the prompt and types nothing into it; the terminal fits its new width; a browser tab (`--print-url`) keeps its own width. At the end a double click puts 400 px back. | #192 | 12.1, 12.9 |
 | W49 | **Real claude**, issue #188 part 1: a throwaway session resumed from its card's `Other flags…` with another `--model` — the field filled with the flags it was started with, `f` from the list, the header showing the new flag once Claude Code has started, a plain `Resume here` keeping it (manual-checks.md, "Resuming with other flags"). | #188 | 12.6, 12.9, design 7.6 |
+| W50 | **Real claude**, issue #166 with part 2 of #188: a throwaway session restarted from the header's `Restart` and with `r` — the keyboard on Cancel, `Restarting…`, the same conversation, the same number and place, not done, no notification —, then with `Other flags…` and another `--model`, the header showing it once Claude Code has started, a plain restart passing it on (manual-checks.md, "Restarting a session from the window"). | #166, #188 | 12.5, 12.10, design 7.6 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

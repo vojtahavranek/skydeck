@@ -46,6 +46,7 @@ import {
   titleSourceText,
 } from './header-text.js';
 import { elsewhereText, rowText } from './list-text.js';
+import { offersRestart, RESTART_TEXTS, RESTART_TIP } from './restart-text.js';
 import { groupCardText } from './search-text.js';
 
 /**
@@ -56,6 +57,8 @@ import { groupCardText } from './search-text.js';
  *   task 38's header controls call it)
  * @property {(sessionId: string) => void} done done, or undone for a done row (D15); the toast is
  *   app.js's
+ * @property {(sessionId: string) => void} restart issue #166: the header's Restart, which app.js
+ *   opens the dialog "Restart" for
  * @property {(text: string) => void} say a line in the key bar
  * @property {(listener: ((favourites: string[]) => void) | null) => void} watchFavourites F15:
  *   the one listener of the favourites every list brings (S2 12.6) — the open new form's, null
@@ -391,6 +394,12 @@ export function createCards(root, deps) {
   const noteButton = headerButton('header-note-button', 'Note', 'the note (n)', () =>
     editHere('note'),
   );
+  // Issue #166: Restart, between Note and Done, while the session can be restarted (S2 12.5).
+  const restartButton = headerButton('header-restart', 'Restart', RESTART_TIP, () => {
+    if (headId !== '') {
+      deps.restart(headId);
+    }
+  });
   // D15: done, or undone for a done row; one act per session at a time is app.js's.
   const doneButton = headerButton('header-done', 'Done', 'mark it done (d)', () => {
     if (headId !== '') {
@@ -398,7 +407,7 @@ export function createCards(root, deps) {
     }
   });
   const actions = element('span', 'header-actions');
-  actions.append(noteButton, doneButton);
+  actions.append(noteButton, restartButton, doneButton);
   const top = element('div', 'header-top');
   top.append(title, group, groupEdit, groupAdd, state, actions);
   title.addEventListener('click', () => {
@@ -1035,11 +1044,20 @@ export function createCards(root, deps) {
     if (term !== null) {
       bar.append(actionButton('Close', '', () => run({ kind: 'close-terminal', term })));
     }
+    /** Issue #166: the line a restart that ended it and did not resume it put on the bar. */
+    let saidNow = '';
     return {
       parts: [bar, lines],
-      /** @param {ExitMessage | null} exit */
-      fill(exit) {
+      /**
+       * @param {ExitMessage | null} exit
+       * @param {string} said
+       */
+      fill(exit, said) {
         setText(text, endedOf(exit));
+        if (said !== saidNow) {
+          saidNow = said;
+          setText(lines, said);
+        }
       },
     };
   }
@@ -1087,7 +1105,9 @@ export function createCards(root, deps) {
       setText(groupArrow, address === null ? '' : ' ↗');
       setData(group, 'link', String(address !== null));
       setTip(group, address ?? (row.groupSource === 'title' ? 'group (from the title)' : 'group'));
-      setText(stateText, stateOf(row));
+      // Issue #166: while a restart holds the shown terminal, the state says so.
+      setText(stateText, term?.restarting === true ? RESTART_TEXTS.state : stateOf(row));
+      setHidden(restartButton, !offersRestart(row));
       setText(doneButton, row.done ? 'Undone' : 'Done');
       setTip(doneButton, row.done ? 'show it again (d)' : 'mark it done (d)');
       setText(dir, row.dir ?? 'directory not known');
@@ -1217,8 +1237,10 @@ export function createCards(root, deps) {
      * @param {ExitMessage | null} exit
      * @param {boolean} [listed] whether the list shows the row (#188: else the bar's Other flags…
      *   closes nothing)
+     * @param {string} [said] issue #166: what a restart that ended the program and did not resume
+     *   the session says on the bar's line ('' for nothing)
      */
-    endedBar(row, exit, listed = true) {
+    endedBar(row, exit, listed = true, said = '') {
       card.dataset['card'] = 'ended';
       const sessionId = row?.id ?? null;
       const term = row?.terminal ?? exit?.term ?? null;
@@ -1228,7 +1250,7 @@ export function createCards(root, deps) {
       showCard(
         `ended:${term}:${sessionId}:${blocked}`,
         () => buildEnded(sessionId, term, blocked),
-        [exit],
+        [exit, said],
       );
     },
     /**
@@ -1290,7 +1312,7 @@ export function createCards(root, deps) {
 
 /**
  * F15's flags line (S2 12.6), the one component of the New form and, issue #188, of the resume
- * card's "Other flags…": the label `Flags for claude`, the field (monospace; its accessible name
+ * card's "Other flags…" (and, part 2 of #188, of the dialog "Restart"'s, web/restart-dialog.js): the label `Flags for claude`, the field (monospace; its accessible name
  * the label's words alone, `id`, not the ★'s too), the ★ at its end, and the line of favourite
  * chips under it (favourites.js), which the caller puts right after `line`. `hint` and `lines` are
  * the form's hint and result lines (the ★'s Undo and a favourite's refusal go there).
@@ -1305,7 +1327,7 @@ export function createCards(root, deps) {
  *   each starts on or off by it)
  * @returns {{ line: HTMLElement, flags: HTMLInputElement, favourites: ReturnType<typeof favouriteControls> }}
  */
-function flagsControls({ form, hint, lines, act, id, placeholder, value }) {
+export function flagsControls({ form, hint, lines, act, id, placeholder, value }) {
   const flags = /** @type {HTMLInputElement} */ (element('input', 'card-field mono'));
   flags.name = 'flags';
   flags.value = value;

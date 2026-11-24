@@ -3309,3 +3309,51 @@ Write down: for each step whether it went as expected, and the words where they 
 the picker marked in steps 3 and 4.
 
 Not tried before this check was written: all of it, in Edge and with real Claude Code.
+
+## Restarting a session from the window
+
+The check of restarting a session (issue #166, with part 2 of #188; design.md 7.6 "Other flags";
+design-step-2.md 12.5, 12.10; [install.md](install.md), "Restarting a session"): W50, in your
+window, with real Claude Code, on one throwaway session in a scratch folder. Commands are typed in
+W, a WSL terminal of your own (never a `!` command inside Claude Code). The tests run it against the
+stand-in program, which ends at once on its hang-up and shows no model; only here does Claude Code
+end on the window's hang-up, start again on the same conversation and run with the flags.
+
+## W50. A throwaway session restarted, then restarted with another model
+
+Setup: skydeck updated to a commit that has issue #166 (`skydeck update`, W32); the window open.
+Start a throwaway session from the New form (`+ New`, or Ctrl+Shift+N) in a scratch folder: the
+field `Flags for claude` empty, the field `Label` holding `restart check`, then `Start`. Once its
+terminal shows Claude Code's prompt and the key bar says `Focus: terminal` (else press Ctrl+Shift+L
+until it does), type `Reply with the single word ok, in this chat, with no tool and no file.` and
+Enter, and wait for the answer. Note the number before its row in Open. Throughout: type a word
+only where the step says the keyboard is (the key bar names the zone; a field shows its caret). In
+the list a letter is a key: `d` marks the session done, `l`, `n` and `t` open a dialog on it.
+
+1. **The dialog.** Press `Restart` in the header. Expected: a dialog over the window, `Restart:
+   restart check`, `It ends claude and resumes this session here, with the same flags.`, the
+   buttons `Restart`, `Other flags…` and `Cancel`, the last one outlined (it has the keyboard).
+   Press Enter: the dialog closes, nothing happened (the session still answers as before).
+2. **A plain restart.** Press Ctrl+Shift+L until the key bar says `Focus: list`, then `r`, Tab
+   (`Restart` is outlined) and Enter. Expected: `Restarting…` in the dialog, then the dialog
+   closes and the toast says `Restarted.`; the terminal shows Claude Code starting again on the same
+   conversation (ask `What did I ask you before?` once the keyboard is in the terminal: it names
+   the earlier question); the row has the same number and the same place in Open; it is not marked
+   done; the header shows no flags; nothing asked for your attention and no desktop notification
+   came. In W, `skydeck show <its short id>` prints one start more than before.
+3. **Another model.** With the list's keyboard (`Focus: list`), `r`, ←, Enter (`Other flags…`).
+   Expected: the field `Flags for claude`, empty (it was started with none), its caret in it, the
+   button `Restart` and `restarts with these flags · Esc goes back`. Press Esc: the three buttons
+   again, `Other flags…` outlined; Enter: the field again. Only while the caret is in the field:
+   type `--model` and a model you can use other than the one the session ran with (`sonnet`, say),
+   and Enter. Expected: as in step 2, and once Claude Code has started, the header's second line
+   ends in `--model sonnet`. Type `/model` and Enter in its terminal: Claude Code's model picker
+   marks that model; leave with Esc.
+4. **The flags passed on.** `r`, Tab, Enter again. Expected: as in step 2; the header still ends in
+   `--model sonnet`, and `/model` marks the same model (leave with Esc).
+5. **The end.** Type `/exit` and Enter in its terminal, press `Close`, then `Done` in the header.
+
+Write down: for each step whether it went as expected, and the words where they differ; how long a
+restart took; the model the picker marked in steps 3 and 4.
+
+Not tried before this check was written: all of it, in Edge and with real Claude Code.

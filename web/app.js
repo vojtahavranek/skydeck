@@ -85,6 +85,8 @@ import { createListWidth } from './list-width.js';
 import { newFormDefaults } from './new-form-text.js';
 import { createNotifications } from './notify.js';
 import { blockInfo, movedMru, movedWith, paneFor, sessionRow } from './pane.js';
+import { createRestartDialog } from './restart-dialog.js';
+import { noRestartText, offersRestart } from './restart-text.js';
 import { cutWords } from './search-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
@@ -143,6 +145,7 @@ const dom = {
   help: byId('help'),
   editor: byId('editor'),
   endDialog: byId('end-dialog'),
+  restartDialog: byId('restart-dialog'),
   settings: byId('settings'),
   settingsButton: byId('settings-button'),
   updateDialog: byId('update-dialog'),
@@ -257,6 +260,11 @@ const state = {
   flagsBy: '',
   /** F30: what had the keyboard when the dialog "Mark done" opened: Cancel gives it back. */
   enderFrom: /** @type {Element | null} */ (null),
+  /** Issue #166: what had the keyboard when the dialog "Restart" opened: it gets it back. */
+  restarterFrom: /** @type {Element | null} */ (null),
+  /** Issue #166: the line a restart that ended a terminal's program and did not resume the
+   *  session puts on that terminal's ended bar, by terminal id. @type {Map<string, string>} */
+  restartSaid: new Map(),
   /** F36: what had the keyboard when the settings screen opened: it gets it back. */
   settingsFrom: /** @type {Element | null} */ (null),
   /** F41: what had the keyboard when the tour opened: it gets it back. */
@@ -337,6 +345,7 @@ const cards = createCards(dom.cards, {
   select: (id) => select(id, 'click'),
   edit: (what, sessionId) => edit(what, sessionId, '', ''),
   done: (sessionId) => markDone(sessionId, false),
+  restart: (sessionId) => askRestart(sessionId, false),
   say: (text) => say(text),
   watchFavourites: (listener) => {
     favouritesListener = listener;
@@ -370,6 +379,26 @@ const ender = createEndDialog(dom.endDialog, {
   },
   gone: (text) => toast.show(text, null),
   closed: (choice) => enderClosed(choice),
+});
+/** Issue #166: the favourites' listener a form had when the dialog "Restart" took it. */
+let favouritesBefore = /** @type {((favourites: string[]) => void) | null} */ (null);
+// Issue #166: the dialog "Restart" of a session the window can end (web/restart-dialog.js). It
+// sends its own `act restart`, for the session and the terminal it was opened for.
+const restarter = createRestartDialog(dom.restartDialog, {
+  act: (action) => act(action),
+  watchFavourites: (listener) => {
+    if (listener !== null) {
+      favouritesBefore = favouritesListener;
+      favouritesListener = listener;
+      listener(favouritesOf(state.list));
+    } else {
+      favouritesListener = favouritesBefore; // a form behind the dialog gets its chips again
+      favouritesBefore = null;
+    }
+  },
+  finished: (outcome, session) => restartFinished(outcome, session.term),
+  gone: (text) => toast.show(text, null),
+  closed: (choice) => restarterClosed(choice),
 });
 // Follow-up F13: the window's theme (web/theme.js), chosen in the settings screen's Appearance
 // (F39). Whenever the page's colours may have changed — a choice, another window's change, the
@@ -523,6 +552,7 @@ function modal() {
     editor.shown() ||
     switcher.shown() ||
     ender.shown() ||
+    restarter.shown() ||
     settingsDialog.shown() ||
     updateDialog.shown() ||
     tour.shown()
@@ -839,8 +869,9 @@ const KEY_OF = { label: 'l', group: 'g', note: 'n', ticket: 't', pr: 'p' };
 
 /** The fields of an action that S2 8.2.3's limits hold, with their names for a refusal. */
 const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
-  // Issue #188: "Other flags…", held as the new form's flags.
+  // Issue #188: "Other flags…", held as the new form's flags; #166: the restart's too.
   resume: [['flags', 'the flags', TEXT_BYTES]],
+  restart: [['flags', 'the flags', TEXT_BYTES]],
   new: [
     ['dir', 'the directory', PATH_BYTES],
     ['label', 'the label', TEXT_BYTES],
@@ -1054,7 +1085,9 @@ function act(action) {
           state.lines.set(action['sessionId'], []);
         }
       }
-      if (result.ok && result.sessionId !== null) {
+      // Issue #166: a restart brings its session back where it was and moves nothing: the
+      // selection and the keyboard stay where the user has them (ruled).
+      if (result.ok && result.sessionId !== null && action.kind !== 'restart') {
         state.bringing = result.sessionId;
         select(result.sessionId, 'chord');
         setZone('terminal');
@@ -1191,6 +1224,7 @@ function applyingShown(applying) {
   // running form takes a key or a click while an update runs.
   if (settingsDialog.shown()) settingsDialog.escape();
   if (ender.shown()) ender.cancel();
+  if (restarter.shown()) restarter.cancel();
   if (switcher.shown()) switcher.close();
   if (editor.shown()) editor.close();
   if (tour.shown()) tour.abort(); // F41: something bigger took the page; seen it is not
@@ -1620,6 +1654,79 @@ function enderClosed(choice) {
 }
 
 /**
+ * Issue #166: `r` in the list (`fromList`: on the row the list shows) and the header's Restart (on
+ * the pane's row, `sessionRow`'s): the dialog "Restart" for a session the window can restart
+ * (`offersRestart`), else a toast that says why. What had the keyboard is kept for the dialog's
+ * close.
+ * @param {string} sessionId
+ * @param {boolean} fromList
+ */
+function askRestart(sessionId, fromList) {
+  const row = fromList ? rowOf(sessionId) : (sessionRow(state.list, sessionId) ?? undefined);
+  if (row === undefined) {
+    say('no session selected');
+    return;
+  }
+  if (modal()) {
+    return;
+  }
+  if (!offersRestart(row)) {
+    const held = state.list?.terminals.some(
+      (term) => term.id === row.terminal && term.restarting === true,
+    );
+    toast.show(noRestartText(row, held === true), null);
+    return;
+  }
+  // The key help lies over every dialog: it goes, as for the dialog "Mark done".
+  help.hide();
+  state.restarterFrom = document.activeElement;
+  const selected = state.list?.selected?.sessionId === row.id ? state.list.selected : null;
+  restarter.open(row, selected);
+  appRoot.inert = true;
+}
+
+/**
+ * Issue #166: the dialog "Restart" closed, whatever closed it: the page is no longer inert, and the
+ * keyboard goes back where it was (also after the answer: a terminal that replaced the one that had
+ * it gets it as the zone's holder), else to the zone's holder.
+ * @param {'cancel' | 'answered' | 'gone'} choice
+ */
+function restarterClosed(choice) {
+  appRoot.inert = modal(); // F38: the running form of an update may stand over it
+  const from = state.restarterFrom;
+  state.restarterFrom = null;
+  if (broughtTakesKeyboard()) {
+    return;
+  }
+  if (
+    choice !== 'gone' &&
+    from instanceof HTMLElement &&
+    from !== document.body &&
+    from.isConnected &&
+    from.checkVisibility()
+  ) {
+    from.focus();
+    return;
+  }
+  giveKeyboard();
+}
+
+/**
+ * Issue #166: the answer of a restart, once the dialog closed or as it closed: the toast in its
+ * words, and for a session that ended and was not resumed, the line of its terminal's ended bar.
+ * Nothing is selected and the keyboard is not moved (ruled): the user may be elsewhere by now.
+ * @param {{ toast: string, bar: string | null }} outcome
+ * @param {string} term the terminal the restart ended
+ */
+function restartFinished(outcome, term) {
+  toast.show(outcome.toast, null);
+  if (outcome.bar !== null) {
+    state.restartSaid.set(term, outcome.bar);
+    render();
+  }
+}
+
+/**
  * F30's `Keep it running`: exactly D15's `d` on a running session — marked done, the Undo toast in
  * its words, the same selection rule.
  * @param {string} sessionId
@@ -1904,6 +2011,12 @@ function received(message) {
         editor.update(message); // the dialog's session's row (task 38's list)
       }
       ender.update(message); // F30: its own session, never the selection's
+      for (const term of state.restartSaid.keys()) {
+        if (!message.terminals.some((one) => one.id === term)) {
+          state.restartSaid.delete(term); // #166: a closed terminal's line goes with it
+        }
+      }
+      restarter.update(message); // #166: its own session too
       // Stage B: the taskbar's count (S2 12.1), and the notifications of sessions that no
       // longer need you closed (B16). A list without `needYou` (stage A's) is none.
       document.title = windowTitle(message.needYou?.count ?? 0);
@@ -2030,7 +2143,9 @@ function render() {
     paneRow !== null && state.list?.selected?.sessionId === paneRow.id ? state.list.selected : null;
   const term = pane.kind === 'terminal' ? pane.term : null;
   const lines = pane.kind === 'resume' ? (state.lines.get(pane.row.id) ?? []) : [];
-  const key = JSON.stringify(pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines]);
+  // Issue #166: the line a restart put on the ended bar of the pane's terminal.
+  const said = pane.kind === 'terminal' ? (state.restartSaid.get(pane.term.id) ?? '') : '';
+  const key = JSON.stringify(pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines, said]);
   state.pane = pane;
   // F22: the right side's line while nothing is shown there and the list holds no session at all.
   const blank = pane.kind === 'none' && holdsNoSession(state.list, state.view.filter);
@@ -2052,7 +2167,7 @@ function render() {
       cards.header(pane.row, selected, term, listNow);
       if (pane.ended) {
         // #188: the bar's Other flags… closes nothing for a row the list hides (E13: no card).
-        cards.endedBar(pane.row, exit, pane.row !== null && rowOf(pane.row.id) !== undefined);
+        cards.endedBar(pane.row, exit, pane.row !== null && rowOf(pane.row.id) !== undefined, said);
       }
       carry.render(pane.row, selected?.carryOver ?? null);
       break;
@@ -2334,8 +2449,12 @@ function windowChordGate(kind) {
     say('close the switcher first (Esc)');
     return false;
   }
-  // F30: the key help would lie over the dialog "Mark done" and hide what Enter presses.
-  if (!modal() || (kind === 'help' && !ender.shown() && !updateDialog.shown())) {
+  // F30: the key help would lie over the dialog "Mark done" and hide what Enter presses (#166:
+  // and over the dialog "Restart").
+  if (
+    !modal() ||
+    (kind === 'help' && !ender.shown() && !restarter.shown() && !updateDialog.shown())
+  ) {
     return true;
   }
   if (kind === 'reload') {
@@ -2346,7 +2465,7 @@ function windowChordGate(kind) {
     return false;
   }
   say(
-    ender.shown() || updateDialog.shown()
+    ender.shown() || restarter.shown() || updateDialog.shown()
       ? 'close the dialog first (Esc)'
       : settingsDialog.shown()
         ? 'close the settings first (Esc)'
@@ -2512,6 +2631,20 @@ function doListKey(action, event) {
         say(state.selected === null ? 'no session selected' : NOTHING_TO_CARRY);
       }
       return true;
+    case 'restart': {
+      // Issue #166 (S2 12.9): the dialog "Restart" of the selected row the list shows, at the
+      // first keydown only; elsewhere a toast says why.
+      if (event.repeat) {
+        return true;
+      }
+      const row = selectedRow();
+      if (row === undefined) {
+        say('no session selected');
+      } else {
+        askRestart(row.id, true);
+      }
+      return true;
+    }
     case 'flags': {
       // Issue #188 (S2 12.6, 12.9): the resume card's Other flags…, the keyboard in its field; a
       // held f acts once and types nothing into it.
@@ -2600,6 +2733,9 @@ function onKeyDown(event) {
   }
   if (ender.shown() && ender.key(event)) {
     return; // F30: Esc, Tab, Enter and Space are the dialog's
+  }
+  if (restarter.shown() && restarter.key(event)) {
+    return; // #166: Esc, Tab, the arrows, Enter and Space are the dialog's
   }
   if (settingsDialog.shown() && settingsKey(event)) {
     return; // F36: Esc, Tab and Enter in a field are the screen's
