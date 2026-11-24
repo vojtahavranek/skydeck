@@ -4,7 +4,7 @@
 // restart is one it can end (`endable`, the server's rule: it runs in its terminal of the window,
 // whose keeper knows how and is connected) that is not marked done; the server decides again.
 
-/** @import { ListMessage, ResultMessage, RowPayload } from '../src/window/protocol.ts' */
+/** @import { ListMessage, ResultMessage, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
 import { END_TEXTS } from './end-text.js';
 
 export const RESTART_TEXTS = {
@@ -79,6 +79,30 @@ export function noRestartText(row, restarting) {
     return RESTART_TEXTS.notRunning;
   }
   return RESTART_TEXTS.cannotEnd;
+}
+
+/**
+ * What a plain restart does not pass on, as the resume card warns of it before its Resume (S2
+ * 12.6): the recorded flags unknown (`flagsKnown` false), and the flags skydeck does not know
+ * (`unknownFlags`), which a resume drops. None before the list brought `selected`.
+ * @param {SelectedPayload | null} selected
+ * @returns {string[]}
+ */
+export function flagWarnings(selected) {
+  if (selected === null) {
+    return [];
+  }
+  /** @type {string[]} */
+  const warned = [];
+  if (!selected.flagsKnown) {
+    warned.push('original flags unknown; resuming with defaults');
+  }
+  if (selected.unknownFlags.length > 0) {
+    warned.push(
+      `started with flags skydeck does not know, not passed on resume: ${selected.unknownFlags.join(' ')}`,
+    );
+  }
+  return warned;
 }
 
 /**

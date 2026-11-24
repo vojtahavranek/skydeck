@@ -30,7 +30,7 @@ import { flagsControls } from './flags-line.js';
 import { cutTitle } from './end-text.js';
 import { flagsText as flagsFieldText } from './favourite-text.js';
 import { sessionRow } from './pane.js';
-import { RESTART_TEXTS, restartFollows, restartOutcome } from './restart-text.js';
+import { flagWarnings, RESTART_TEXTS, restartFollows, restartOutcome } from './restart-text.js';
 
 /**
  * @typedef {object} RestartDialogDeps
@@ -108,7 +108,18 @@ export function createRestartDialog(root, deps) {
   text.setAttribute('aria-live', 'polite');
   const line = element('div', 'end-line', RESTART_TEXTS.line);
   const warning = element('div', 'end-warning', RESTART_TEXTS.working);
-  text.append(line, warning);
+  // The resume card's warnings of what a plain restart does not pass on (unknown flags), in both
+  // views: the dialog's line says "with the same flags", and these say where that is not so.
+  const flagsWarned = element('div', 'card-warnings restart-warnings');
+  text.append(line, warning, flagsWarned);
+  /** Draws the warnings of the session's `selected` (none before the list brought it). */
+  const warnFlags = (/** @type {SelectedPayload | null} */ selected) => {
+    const warned = flagWarnings(selected);
+    const now = [...flagsWarned.children].map((one) => one.textContent).join('\n');
+    if (now !== warned.join('\n')) {
+      flagsWarned.replaceChildren(...warned.map((words) => element('div', 'card-warning', words)));
+    }
+  };
   const restartButton = button('end-end restart-restart', RESTART_TEXTS.restart);
   const otherButton = button('restart-other', RESTART_TEXTS.other);
   const cancelButton = button('end-cancel', RESTART_TEXTS.cancel);
@@ -374,6 +385,7 @@ export function createRestartDialog(root, deps) {
       delete box.dataset['pending'];
       setTitle(row);
       warning.hidden = !working;
+      warnFlags(selected);
       said.textContent = '';
       root.hidden = false;
       cancelButton.focus(); // never on Restart by itself (ruled)
@@ -391,6 +403,7 @@ export function createRestartDialog(root, deps) {
       }
       if (list.selected?.sessionId === current.sessionId) {
         current.selected = list.selected;
+        warnFlags(current.selected);
       }
       if (current.pending) {
         return;

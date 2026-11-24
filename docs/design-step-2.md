@@ -4355,13 +4355,20 @@ holds the terminal (7.6, 7.8) the row stays under Open with its number, the pane
 screen without the ended bar and the header's state reads `restarting…`; once the new terminal is
 there the row shows it, and a window that showed the session shows the new terminal, the keyboard in
 it if it was in the terminal before (12.9's rule for a terminal that comes to be shown). The end
-made by a restart is never `ended-unexpectedly`, needs no attention and raises no notification
-(13); the start it makes raises nothing a plain resume would not. A server that stops meanwhile
-(5.5) leaves nothing to finish: the dialog closes with `Restart: skydeck's server stopped answering;
-the action may or may not have been done`, and after its next start the terminal is an ordinary
-ended one without a number (or, when the new one was already open, that one is found as any), and
-nothing resumes the session by surprise. There is no `skydeck restart` command, and nothing new is stored for the
-session.
+made by a restart is recorded as the dialog "Mark done" records its end (above), so it is never
+`ended-unexpectedly`, needs no attention and raises no notification (13); the start it makes raises
+nothing a plain resume would not. The dialog shows the resume card's warnings of what a plain
+restart does not pass on (12.6: `original flags unknown; resuming with defaults`, `started with
+flags skydeck does not know, not passed on resume: <names>`), so "with the same flags" is never
+taken for more than it is. A server that stops meanwhile (5.5) leaves nothing to finish, and
+nothing resumes the session by surprise: the dialog closes with `Restart: skydeck's server stopped
+answering; the action may or may not have been done`, and after its next start the terminal is an
+ordinary ended one without a number (or, when the new one was already open, that one is found as
+any). The known limit of an end above holds for it too: a server stopped while the program it hung
+up is still ending has not recorded that end, which reads as Claude Code's own hook reports it
+(`other`): the session is then `ended-unexpectedly` (in the middle of a turn also `was-working`),
+needs you as an ended terminal and is notified, and restore offers it. There is no `skydeck
+restart` command, and nothing new is stored for the session.
 
 ### 12.11 The nine picks
 

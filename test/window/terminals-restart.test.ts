@@ -40,6 +40,7 @@ describe('registry: a restart holds its terminal’s number (#166)', () => {
     const box = await registrySandbox(t);
     const r = box.registry();
     const id = await running(box, r, 1);
+    const second = await running(box, r, 3);
     assert.equal(info(r.registry, id).restarting, undefined, 'absent before a hold');
     const hold = r.registry.holdSlot(id);
     assert.ok(hold !== null);
@@ -50,7 +51,18 @@ describe('registry: a restart holds its terminal’s number (#166)', () => {
     assert.deepEqual([ended.slot, ended.restarting], [1, true], 'its number stays on it');
     assert.equal(r.registry.nextSlot(), 2, 'number 1 is not free');
     assert.equal(r.registry.close(id), 'running', 'Close refuses it while held');
-    assert.equal(r.registry.setSlots(new Map([[id, null]])), 'changed', 'no move takes it');
+    // A swap of two numbers, which the move's own rules take for two running terminals: refused.
+    assert.equal(
+      r.registry.setSlots(
+        new Map([
+          [id, 3],
+          [second, 1],
+        ]),
+      ),
+      'changed',
+      'no move gives or takes its number',
+    );
+    assert.deepEqual([info(r.registry, id).slot, info(r.registry, second).slot], [1, 3]);
     // The next terminal takes the number at its spawn.
     const next = box.spec();
     const slot = hold.take(next.id);

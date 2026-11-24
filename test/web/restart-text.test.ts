@@ -9,6 +9,7 @@ import { END_TEXTS } from '../../web/end-text.js';
 import { listKey } from '../../web/keys.js';
 import { sessionRow } from '../../web/pane.js';
 import {
+  flagWarnings,
   noRestartText,
   offersRestart,
   RESTART_TEXTS,
@@ -163,6 +164,21 @@ describe('restart-text', () => {
         bar: 'Restart: it ended, but was not resumed: skydeck: not started: the deadline passed',
       },
     );
+  });
+
+  test('what a plain restart does not pass on: the resume card’s two warnings, none before the list brought them', () => {
+    const selected = (over: Record<string, unknown>) =>
+      ({ flagsKnown: true, unknownFlags: [], ...over }) as unknown as Parameters<
+        typeof flagWarnings
+      >[0];
+    assert.deepEqual(flagWarnings(null), []);
+    assert.deepEqual(flagWarnings(selected({})), []);
+    assert.deepEqual(flagWarnings(selected({ flagsKnown: false })), [
+      'original flags unknown; resuming with defaults',
+    ]);
+    assert.deepEqual(flagWarnings(selected({ unknownFlags: ['--zzz', '--yyy'] })), [
+      'started with flags skydeck does not know, not passed on resume: --zzz --yyy',
+    ]);
   });
 
   test('before a press the dialog follows its session: it closes when it stopped, was marked done, left the list', () => {

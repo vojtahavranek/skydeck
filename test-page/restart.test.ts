@@ -560,6 +560,150 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
   );
 
   await t.test(
+    'held keys: a held Enter, Space, Tab or arrow presses and walks nothing; a held Enter in Other flags… restarts nothing more than its first press',
+    async (t) => {
+      const { page, w } = await one(t, chromium);
+      await clickRow(page, S1);
+      await toZone(page, 'list');
+      await sleep(300); // the list with S1's payload
+      await page.keyboard.press('r');
+      await shown(page, true);
+      const cdp = await page.context().newCDPSession(page);
+      const held = async (key: string, code: string, keyCode: number, text = '') => {
+        for (let i = 0; i < 3; i++) {
+          await cdp.send('Input.dispatchKeyEvent', {
+            type: 'keyDown',
+            key,
+            code,
+            windowsVirtualKeyCode: keyCode,
+            autoRepeat: true,
+            ...(text === '' ? {} : { text }),
+          });
+        }
+        await cdp.send('Input.dispatchKeyEvent', {
+          type: 'keyUp',
+          key,
+          code,
+          windowsVirtualKeyCode: keyCode,
+        });
+      };
+      for (const [key, code, keyCode, text] of [
+        ['Tab', 'Tab', 9, ''],
+        ['ArrowLeft', 'ArrowLeft', 37, ''],
+        ['ArrowRight', 'ArrowRight', 39, ''],
+        ['Enter', 'Enter', 13, '\r'],
+        [' ', 'Space', 32, ' '],
+      ] as const) {
+        await held(key, code, keyCode, text);
+        const state = await restarter(page);
+        assert.deepEqual([state.shown, state.focus], [true, CANCEL], `a held ${code}`);
+      }
+      assert.deepEqual(w.acts(), [], 'nothing pressed');
+      // The Enter that opens Other flags…, held: its repeats reach the field and submit nothing.
+      await page.keyboard.press('ArrowLeft');
+      await cdp.send('Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        key: 'Enter',
+        code: 'Enter',
+        windowsVirtualKeyCode: 13,
+        text: '\r',
+      });
+      await page.waitForSelector(FIELD, { timeout: PAGE_WAIT_MS });
+      await held('Enter', 'Enter', 13, '\r');
+      await sleep(300);
+      assert.deepEqual(w.acts(), [], 'a held Enter restarts nothing');
+      assert.equal((await restarter(page)).focus, 'field:flags');
+      // A fresh Enter restarts once.
+      await page.keyboard.press('Enter');
+      await w.act(1);
+      await sleep(300);
+      assert.equal(w.acts().length, 1, 'one restart');
+    },
+  );
+
+  await t.test(
+    'Other flags… before the list has brought what a plain resume passes on: the dialog says so and opens no field; once the list has, it opens filled',
+    async (t) => {
+      const d = await one(t, chromium);
+      const { page, w } = d;
+      // A list that never carries S1's payload.
+      const bare = listOf(
+        { open: [endable(S1, TERM_A, 1)], week: [row(S2)] },
+        [terminal(TERM_A, S1, 1)],
+        null,
+      );
+      w.list(() => bare);
+      await clickRow(page, S1);
+      await toZone(page, 'list');
+      await page.keyboard.press('r');
+      await shown(page, true);
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('Enter');
+      await eventually(
+        async () =>
+          (await restarter(page)).said ===
+          'the flags it was started with are not here yet; press Other flags… again',
+        'the dialog says the flags are not here yet',
+      );
+      assert.equal(await page.locator(FIELD).count(), 0, 'no field');
+      assert.equal((await restarter(page)).view, 'main');
+      d.set({});
+      await sleep(300);
+      await page.keyboard.press('Enter');
+      await page.waitForSelector(FIELD, { timeout: PAGE_WAIT_MS });
+      assert.equal(await page.inputValue(FIELD), "--model opus --add-dir '/tmp/a b'");
+      assert.deepEqual(w.acts(), []);
+    },
+  );
+
+  await t.test(
+    'flags a plain restart does not pass on: the dialog warns of them as the resume card does, in both views',
+    async (t) => {
+      const d = await one(t, chromium);
+      const { page, w } = d;
+      const warned = listOf(
+        { open: [endable(S1, TERM_A, 1)], week: [row(S2)] },
+        [terminal(TERM_A, S1, 1)],
+        S1,
+      );
+      w.list(() => ({
+        ...warned,
+        selected: selectedOf({ unknownFlags: ['--zzz-example'] }),
+      }));
+      await clickRow(page, S1);
+      await toZone(page, 'list');
+      await sleep(300);
+      await page.keyboard.press('r');
+      await shown(page, true);
+      const words = 'started with flags skydeck does not know, not passed on resume: --zzz-example';
+      const warnings = () =>
+        page.evaluate(() =>
+          [...document.querySelectorAll('#restart-dialog .card-warning')]
+            .filter((one) => one.closest('[hidden]') === null)
+            .map((one) => one.textContent),
+        );
+      await eventually(
+        async () => JSON.stringify(await warnings()) === JSON.stringify([words]),
+        'the warning in the dialog',
+      );
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('Enter');
+      await page.waitForSelector(FIELD, { timeout: PAGE_WAIT_MS });
+      assert.deepEqual(await warnings(), [words], 'also in Other flags…');
+      // A session whose start was never recorded: its flags are unknown.
+      await page.keyboard.press('Escape');
+      w.list(() => ({ ...warned, selected: selectedOf({ flagsKnown: false, resumeFlags: [] }) }));
+      await eventually(
+        async () =>
+          JSON.stringify(await warnings()) ===
+          JSON.stringify(['original flags unknown; resuming with defaults']),
+        'the unknown flags said',
+      );
+      assert.deepEqual(w.acts(), []);
+    },
+  );
+
+  await t.test(
     'every theme at a small window: the dialog in the page’s colours, all of it inside the window, Other flags… too',
     async (t) => {
       const d = await one(t, chromium, { state: 'working' }, { width: 360, height: 300 });
