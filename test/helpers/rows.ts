@@ -33,6 +33,7 @@ export function listRow(over: Partial<ListRow> & { id: string }): ListRow {
     note: null,
     continuedFrom: null,
     done: false,
+    parked: false,
     prs: [],
     chip: null,
     ticket: null,
@@ -45,6 +46,7 @@ export function listRow(over: Partial<ListRow> & { id: string }): ListRow {
       marks,
       dir,
       hidden: over.done ?? false,
+      parked: over.parked ?? false,
     }),
     ...over,
   };

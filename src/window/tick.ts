@@ -58,6 +58,9 @@ export interface TickDeps {
   storeNewer: (reason: string) => void;
   /** Called after each refresh that worked (the server's postponed found-keeper decisions). */
   afterRefresh?: () => void;
+  /** F44 (S2 10.1, 7.6): called in `reloadNow` after the rows were loaded and before the lists are
+   *  pushed (the server's withheld slots follow the rows); not when the load failed. */
+  afterReload?: () => void;
   /** Every second, before the keep-alive: look(); every refresh that worked: refreshed(), after
    *  the mapping. When either says true the pages' lists are pushed (plan B 2.7). */
   attention?: Pick<Attention, 'look' | 'refreshed'>;
@@ -489,6 +492,7 @@ export function createTick(deps: TickDeps): Tick {
       }
       loadedAtNs = clock.nowNs();
       reloadOwed = false;
+      deps.afterReload?.();
       pages.pushList();
     },
     run: once,

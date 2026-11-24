@@ -103,7 +103,8 @@ export function latestEarlierBoot(
 
 /**
  * Whether `row` is a restore's candidate in any boot (planRestore's rule without the boot): a
- * session whose program ended unexpectedly, not done, not expired and no empty copy. F42: the
+ * session whose program ended unexpectedly, not done, not parked (F44), not expired and no empty
+ * copy. F42: the
  * window's restore memory keeps such a session at its place under Open after it left (design 7.8).
  */
 export function restorable(row: ListRow): boolean {
@@ -111,6 +112,7 @@ export function restorable(row: ListRow): boolean {
     row.session.lastHolding !== null &&
     row.marks.includes('ended-unexpectedly') &&
     !row.done &&
+    !row.parked &&
     !row.marks.includes('expired') &&
     !row.marks.includes('empty-copy')
   );
@@ -119,8 +121,8 @@ export function restorable(row: ListRow): boolean {
 /**
  * 7.8 set and preselection, in the order of `rows` (pass list order).
  *
- * The default set is the rows marked `ended-unexpectedly`, not done, not expired and not an empty
- * copy (F33: it has nothing to restore), whose last
+ * The default set is the rows marked `ended-unexpectedly`, not done, not parked (F44: a restore
+ * leaves it ended), not expired and not an empty copy (F33: it has nothing to restore), whose last
  * holding was in the latest earlier boot (latestEarlierBoot); `all` takes such rows from every boot,
  * the current one included. An entry is preselected when no exit was recorded, or when it ended at
  * most two minutes before the last event of its own boot (D17). `scripted` and `scripted-end` events

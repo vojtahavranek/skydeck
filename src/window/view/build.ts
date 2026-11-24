@@ -42,7 +42,7 @@ import type { HeldPlaces, SequenceEntry } from './open-sequence.ts';
 import { stackRows } from './search/stacks.ts';
 import { switcherPayload } from './search/switcher.ts';
 import type { SwitchCandidate } from './search/switcher.ts';
-import { MAY_START, projectDirs, rowPayload, sectionOf } from './sections.ts';
+import { MAY_START, parkedTerminals, projectDirs, rowPayload, sectionOf } from './sections.ts';
 
 export interface ViewInput {
   rows: readonly ListRow[];
@@ -75,7 +75,7 @@ export interface ViewInput {
 const SHORT_ID_LENGTH = 8;
 
 type SectionName = SectionPayload['name'];
-const SECTIONS: readonly SectionName[] = ['open', 'week', 'earlier'];
+const SECTIONS: readonly SectionName[] = ['open', 'parked', 'week', 'earlier'];
 
 /** One row of the message and what places it. */
 interface Entry {
@@ -87,7 +87,10 @@ interface Entry {
 /** A row the switcher may list (every row listed with done ones shown, E9) and what it needs. */
 interface SwitchEntry {
   entry: Entry;
+  /** Under Open (running or starting, not parked). */
   open: boolean;
+  /** F44: under Parked. */
+  parked: boolean;
   hiddenBy: HiddenBy[];
 }
 
@@ -170,6 +173,8 @@ function newSessionRow(terminal: TerminalInfo): ListRow {
     bootId: null,
     doneAtNs: null,
     hidden: false,
+    parkedAtNs: null,
+    parked: false,
   };
   return {
     id,
@@ -189,6 +194,7 @@ function newSessionRow(terminal: TerminalInfo): ListRow {
     note: null,
     continuedFrom: null,
     done: false,
+    parked: false,
     prs: [],
     chip: null,
     ticket: null,
@@ -237,6 +243,14 @@ function compareRecent(a: Entry, b: Entry): number {
   return compareNs(b.row.lastActivityNs, a.row.lastActivityNs) || compareText(a.row.id, b.row.id);
 }
 
+/** F44 (S2 12.1), Parked: the most recently parked first, ties by id. */
+function compareParked(a: Entry, b: Entry): number {
+  return (
+    compareNs(b.row.session.parkedAtNs ?? 0n, a.row.session.parkedAtNs ?? 0n) ||
+    compareText(a.row.id, b.row.id)
+  );
+}
+
 /** The rows a list is built over: step 1's, and the row of each `new` terminal whose session has
  *  none yet (A28); and the terminal each session's row is shown with. */
 function candidatesOf(input: Pick<ViewInput, 'rows' | 'terminals'>): {
@@ -258,14 +272,21 @@ function candidatesOf(input: Pick<ViewInput, 'rows' | 'terminals'>): {
   return { bySession, candidates };
 }
 
-/** A candidate's terminal, payload and whether it is under Open; null when it is not listed even
- *  with done ones shown. */
+/** A candidate's terminal, payload, whether it runs (running, or starting in a terminal of the
+ *  window) and whether it is under Open (it runs and is not parked, F44); null when it is not
+ *  listed even with done ones shown. */
 function claimOf(
   row: ListRow,
   bySession: ReadonlyMap<string, TerminalInfo>,
   input: Pick<ViewInput, 'elsewhere'>,
   facts: AttentionFacts,
-): { terminal: TerminalInfo | null; ownNew: boolean; payload: RowPayload; open: boolean } | null {
+): {
+  terminal: TerminalInfo | null;
+  ownNew: boolean;
+  payload: RowPayload;
+  runs: boolean;
+  open: boolean;
+} | null {
   const claimed = bySession.get(row.id) ?? null;
   // A terminal whose program is gone stays with a session that is not running (the ended bar,
   // S2 7.8), not with one that runs again elsewhere: that row shows the card of 7.9 (S2 12.6).
@@ -285,17 +306,22 @@ function claimOf(
   }
   const elsewhere = row.state === 'not-running' ? null : (input.elsewhere.get(row.id) ?? null);
   const shown = rowPayload(row, { terminal, elsewhere });
-  // Issue #166: under Open, with its number, while a restart holds its terminal.
-  const open = shown.starting || row.state !== 'not-running' || restarting;
+  const runs = shown.starting || row.state !== 'not-running';
+  // F44: a parked session is under Parked, also while it runs. Issue #166: under Open, with its
+  // number, while a restart holds its terminal (a parked one stays under Parked, with none).
+  const open = (runs || restarting) && !row.parked;
   // F43 (S2 7.6, 12.1): a row under Recent or Earlier never shows a number, also while its
   // terminal still holds one (a lost keeper's program may still run; a session that ended a
-  // moment before its program): a number names a session under Open.
+  // moment before its program): a number names a session under Open. F44: nor one under Parked.
+  const attention = attentionOf(row, facts);
   const payload: RowPayload = {
     ...shown,
     slot: open ? shown.slot : null,
-    attention: attentionOf(row, facts),
+    attention,
+    // F44 (S2 12.4): the one rule of "needs you"; a parked session is quiet, its mark still shows.
+    needsYou: attention !== null && !row.parked,
   };
-  return { terminal, ownNew, payload, open };
+  return { terminal, ownNew, payload, runs, open };
 }
 
 function sameProcess(a: ProcessKey, b: ProcessKey): boolean {
@@ -448,7 +474,7 @@ function stacked(
   const stackable = entries.map(({ payload, terminal }) => ({
     id: payload.id,
     group: payload.group,
-    needsYou: payload.attention !== null,
+    needsYou: payload.needsYou === true,
     // Ruled 2026-11-16 (review 2): its row's terminal has not reported a session (S2 7.5), so the
     // terminal's slot names no session for the page: the row stays on screen. THE PAGE COPIES THIS
     // RULE (web/list.js, `unreported`: the same terminal's `sessionId` null in `list.terminals`)
@@ -477,9 +503,11 @@ function stacked(
  *   with `showDone` (or a typed search), in no field of `counts` and no switcher item while hidden; it
  *   is not one of `doneHidden` unless it is done. One a terminal of the window shows is listed by
  *   the rules above, whatever else holds.
- * - Sections (S2 12.1, `sectionOf`): Open, Recent (key `week`), Earlier; Earlier folded unless the
- *   view unfolds it or a word is typed (S2 12.8), a folded one with its count and time span and no
- *   rows.
+ * - Sections (S2 12.1, `sectionOf`): Open, Parked (F44: every row parked now, running or not,
+ *   whatever its age, the most recently parked first; never folded as a whole), Recent (key
+ *   `week`), Earlier; Earlier folded unless the view unfolds it or a word is typed (S2 12.8), a
+ *   folded one with its count and time span and no rows. A row under Parked has no `slot`, and
+ *   neither has its terminal in `terminals` (F44, `parkedTerminals`); Open's order never holds it.
  * - Search (S2 12.8, plan E2–E5, F35): the view's words (`searchWords` of `filter`) and chips
  *   choose the rows of the sections: a row is in them when it matches every word and every chip
  *   (`done`: it is marked done) and, when the list hides it without the filter (done, an empty
@@ -504,7 +532,9 @@ function stacked(
  *   the sections would carry it, its `stack` null, also when they leave it out (a filter, the
  *   chips, done hidden, a folded Earlier); null when nothing is selected or the session is not
  *   listed even with done ones shown.
- * - Attention (S2 12.4, plan B7): a row's `attention` is `attentionOf` over `input.attention`.
+ * - Attention (S2 12.4, plan B7): a row's `attention` is `attentionOf` over `input.attention`, and
+ *   its `needsYou` (F44) is whether it counts as needing you: `attention` set and not parked (a
+ *   parked session is quiet). Every count and order below takes `needsYou`.
  *   `needYou.count` counts the rows listed without the filter that need you, whatever the filter
  *   or the fold, and such a row is in no field of `counts` (the title bar's parts add up);
  *   `needYou.order` holds the ids of the rows of the sections that are not folded that need you —
@@ -554,7 +584,7 @@ export function buildListMessage(
     if (claim === null) {
       continue; // not listed even with done ones shown: no row, no count, no switcher item
     }
-    const { terminal, ownNew, payload, open } = claim;
+    const { terminal, ownNew, payload, runs, open } = claim;
     if (row.id === view.selected) {
       selectedRow = payload;
     }
@@ -566,17 +596,19 @@ export function buildListMessage(
     // or not; one a terminal of the window shows is never hidden.
     const hiddenCopy = payload.copyOf?.hiddenWhileEmpty === true;
     // Listed without the filter (stage A's rule with the view's showDone): the counts' rows.
+    // F44: what "listed" and the chip Running ask is whether the row runs (a parked row is never
+    // done, so it is listed either way).
     const listed =
-      isListed(row, (open && !hiddenCopy) || view.showDone, terminal !== null) ||
-      (ownNew && (open || view.showDone || !row.done));
+      isListed(row, (runs && !hiddenCopy) || view.showDone, terminal !== null) ||
+      (ownNew && (runs || view.showDone || !row.done));
     // No Searchable is made while no word is set (task 90's review).
     const matches =
       (words.length === 0 || matchesWords(searchable(row), words)) &&
-      matchesChips(row, open, chips);
-    const name = sectionOf(row, nowNs, open);
+      matchesChips(row, runs, chips);
+    const name = sectionOf(row, nowNs, runs);
     const entry: Entry = { row, terminal, payload };
     if (listed) {
-      if (payload.attention !== null) {
+      if (payload.needsYou === true) {
         needYouCount += 1;
       } else if (payload.starting) {
         counts.starting += 1;
@@ -612,22 +644,24 @@ export function buildListMessage(
         if (!listed && !(matches && doneChip)) hiddenBy.push('done');
         if (name === 'earlier' && earlierFolded) hiddenBy.push('folded');
       }
-      switchable.push({ entry, open, hiddenBy });
+      switchable.push({ entry, open, parked: name === 'parked', hiddenBy });
     }
   }
 
   const openRank = rankOfOpen(openEntries, input);
+  const parkedNow = parkedTerminals(input.rows, input.terminals);
   const byOpenRank = (a: Entry, b: Entry): number =>
     (openRank.get(a.row.id) ?? 0) - (openRank.get(b.row.id) ?? 0);
   const needing: { id: string; attention: AttentionPayload }[] = [];
   const sections = SECTIONS.map((name) => {
     const entries = shown.get(name) ?? [];
-    entries.sort(name === 'open' ? byOpenRank : compareRecent);
+    entries.sort(name === 'open' ? byOpenRank : name === 'parked' ? compareParked : compareRecent);
+    // Only Earlier folds as a whole (F44: Parked never does; its blocks close as any).
     const folded = name === 'earlier' && !searching && earlierFolded;
     if (!folded) {
       // G5: also a row a closed block hides, so that `needYou` does not move with the blocks.
       for (const { payload } of entries) {
-        if (payload.attention !== null) {
+        if (payload.needsYou === true && payload.attention !== null) {
           needing.push({ id: payload.id, attention: payload.attention });
         }
       }
@@ -649,7 +683,8 @@ export function buildListMessage(
     banner: null,
     terminals: input.terminals.map((terminal) => ({
       id: terminal.id,
-      slot: terminal.slot,
+      // F44 (S2 7.6): a terminal of a parked session shows no number, whatever the registry holds.
+      slot: parkedNow.has(terminal.id) ? null : terminal.slot,
       sessionId: terminal.sessionId,
       state: terminal.state,
       notReported: terminal.notReported,
@@ -715,9 +750,10 @@ export function keptNow(input: Omit<ViewInput, 'view' | 'selected'>): string[] {
 
 /**
  * E9's input: every row listed with done ones shown, Open's in Open's order (F42: the kept one,
- * `byOpenRank`) and then the others
- * most recent first, each once with its payload (the list's, without a stack) and what hides it;
- * `needOrder` is B6's order (`attentionOrder`) over those that need you.
+ * `byOpenRank`), then Parked's most recently parked first (F44, `compareParked`), and then the
+ * others most recent first, each once with its payload (the list's, without a stack) and what hides it;
+ * `needOrder` is B6's order (`attentionOrder`) over those that need you (`needsYou`: never a
+ * parked one).
  */
 function switcher(
   query: string,
@@ -727,19 +763,24 @@ function switcher(
 ): SwitcherPayload {
   const ordered = [
     ...switchable.filter((one) => one.open).sort((a, b) => byOpenRank(a.entry, b.entry)),
-    ...switchable.filter((one) => !one.open).sort((a, b) => compareRecent(a.entry, b.entry)),
+    ...switchable.filter((one) => one.parked).sort((a, b) => compareParked(a.entry, b.entry)),
+    ...switchable
+      .filter((one) => !one.open && !one.parked)
+      .sort((a, b) => compareRecent(a.entry, b.entry)),
   ];
   const needing: { id: string; attention: AttentionPayload }[] = [];
-  const candidates: SwitchCandidate[] = ordered.map(({ entry, open, hiddenBy }) => {
+  const candidates: SwitchCandidate[] = ordered.map(({ entry, open, parked, hiddenBy }) => {
     const { attention } = entry.payload;
-    if (attention !== null) {
+    const need = entry.payload.needsYou === true && attention !== null;
+    if (need) {
       needing.push({ id: entry.payload.id, attention });
     }
     return {
       row: entry.payload,
       searchable: searchable(entry.row),
       open,
-      need: attention !== null,
+      parked,
+      need,
       hiddenBy,
     };
   });

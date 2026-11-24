@@ -1099,6 +1099,9 @@ function everyEdit(sessionId: string): ActMessage[] {
     { t: 'act', id: 48, kind: 'pr-rm', sessionId, url: PR7 },
     // F18.
     { t: 'act', id: 49, kind: 'ticket', sessionId, text: 'https://example.com/browse/ABC-1' },
+    // F44.
+    { t: 'act', id: 50, kind: 'park', sessionId },
+    { t: 'act', id: 51, kind: 'unpark', sessionId },
   ];
 }
 
@@ -1505,6 +1508,81 @@ describe('done and undone (S2 12.10)', () => {
   });
 });
 
+describe('park and unpark (S2 12.15, design 7.1)', () => {
+  test('park writes the parking time and clears done in one write; a second park answers ok and writes nothing; unpark clears it; changed() for each write only', async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const h = harness(d);
+    d.clock.advanceMs(1000);
+    assert.deepEqual(await h.act({ t: 'act', id: 50, kind: 'park', sessionId: S1 }), ok(50));
+    assert.equal(d.deck.store.meta(S1)?.parkedAtNs, T0 + SEC);
+    assert.equal(loadRows(d.deck).find((row) => row.id === S1)?.parked, true);
+    assert.deepEqual(h.told, ['changed']);
+    // A second park (another page's, or the command's): the first time is kept, nothing written.
+    d.clock.advanceMs(1000);
+    const updated = d.deck.store.meta(S1)?.updatedNs;
+    assert.deepEqual(await h.act({ t: 'act', id: 52, kind: 'park', sessionId: S1 }), ok(52));
+    assert.equal(d.deck.store.meta(S1)?.parkedAtNs, T0 + SEC);
+    assert.equal(d.deck.store.meta(S1)?.updatedNs, updated, 'not written');
+    assert.deepEqual(h.told, ['changed'], 'no changed() without a write');
+    assert.deepEqual(await h.act({ t: 'act', id: 51, kind: 'unpark', sessionId: S1 }), ok(51));
+    assert.equal(d.deck.store.meta(S1)?.parkedAtNs, null);
+    assert.equal(loadRows(d.deck).find((row) => row.id === S1)?.parked, false);
+    assert.deepEqual(h.told, ['changed', 'changed']);
+    assert.deepEqual(h.logs, []);
+  });
+
+  test('park of a done session ends its done mark; done of a parked one ends its parking: the three states exclude one another', async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const h = harness(d);
+    assert.deepEqual(await h.act({ t: 'act', id: 44, kind: 'done', sessionId: S1 }), ok(44));
+    d.clock.advanceMs(1000);
+    assert.deepEqual(await h.act({ t: 'act', id: 50, kind: 'park', sessionId: S1 }), ok(50));
+    let row = loadRows(d.deck).find((one) => one.id === S1);
+    assert.equal(d.deck.store.meta(S1)?.doneAtNs, null);
+    assert.equal(row?.parked, true);
+    assert.equal(row?.done, false);
+    d.clock.advanceMs(1000);
+    assert.deepEqual(await h.act({ t: 'act', id: 44, kind: 'done', sessionId: S1 }), ok(44));
+    row = loadRows(d.deck).find((one) => one.id === S1);
+    assert.equal(d.deck.store.meta(S1)?.parkedAtNs, null);
+    assert.equal(row?.parked, false);
+    assert.equal(row?.done, true);
+    // Un-done, it is not parked: Open (or Recent), as before it was parked.
+    assert.deepEqual(await h.act({ t: 'act', id: 45, kind: 'undone', sessionId: S1 }), ok(45));
+    row = loadRows(d.deck).find((one) => one.id === S1);
+    assert.equal(row?.parked, false);
+    assert.equal(row?.done, false);
+  });
+
+  test('a busy store: park and unpark answer that it is busy, nothing written, changed() never', async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const deck = deckWith(d.deck, {
+      store: {
+        updateMeta: () => {
+          throw Object.assign(new Error('database is locked'), {
+            code: 'ERR_SQLITE_ERROR',
+            errcode: 5,
+          });
+        },
+      },
+    });
+    const h = harness(d, { deck });
+    assert.deepEqual(
+      await h.act({ t: 'act', id: 50, kind: 'park', sessionId: S1 }),
+      refused(50, "skydeck's database is busy; try again"),
+    );
+    assert.deepEqual(
+      await h.act({ t: 'act', id: 51, kind: 'unpark', sessionId: S1 }),
+      refused(51, "skydeck's database is busy; try again"),
+    );
+    assert.equal(d.deck.store.meta(S1), null);
+    assert.deepEqual(h.told, []);
+  });
+});
+
 describe('pull requests (S2 12.5, design 7.3; plan D8)', () => {
   test("pr-add attaches with origin manual, clears an earlier detach, answers 'attached <url>' and then asks for the fetch, which it does not wait for", async (t) => {
     const d = testDeck(t);
@@ -1660,6 +1738,9 @@ describe("stage D's actions and what the parser refuses (plan 2.2)", () => {
       { t: 'act', id: 9, kind: 'pr-rm', sessionId: S1, url: `${PR7}/${over(4097)}` },
       { t: 'act', id: 9, kind: 'done', sessionId: 'S1' },
       { t: 'act', id: 9, kind: 'undone', sessionId: S1.toUpperCase() },
+      { t: 'act', id: 9, kind: 'park', sessionId: 'S1' },
+      { t: 'act', id: 9, kind: 'unpark', sessionId: `${S1} ` },
+      { t: 'act', id: 9, kind: 'park', sessionId: S1, text: 'x' },
       { t: 'act', id: 9, kind: 'pr-refresh', sessionId: `${S1} ` },
       { t: 'act', id: 9, kind: 'label', sessionId: S1, text: 'a\ud800b' },
       // F18: the ticket's text is held to the URL limit; it is `text`, a string.

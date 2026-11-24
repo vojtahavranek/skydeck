@@ -59,6 +59,8 @@ export function ds(
     bootId: BOOT_A,
     doneAtNs: null,
     hidden: false,
+    parkedAtNs: null,
+    parked: false,
     ...rest,
   };
 }
@@ -71,6 +73,7 @@ export function meta(sessionId: string, over: Partial<SessionMeta> = {}): Sessio
     note: null,
     doneAtNs: null,
     ticket: null,
+    parkedAtNs: null,
     createdNs: T0,
     updatedNs: T0,
     ...over,

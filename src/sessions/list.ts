@@ -71,7 +71,8 @@ export interface TicketStatusView {
  * as the list shows it (sanitised), null when skydeck has no row for it; and whether the user set
  * on the copy something that only the user can set (ruled: a label, a group, a note, a ticket, or
  * a pull request attached by hand — not one skydeck attached by itself from a `pr-link` record,
- * which Claude Code may have copied with the title), which keeps it listed while it is empty.
+ * which Claude Code may have copied with the title — or, F44, a parking), which keeps it listed
+ * while it is empty.
  */
 export interface CopyView {
   id: string;
@@ -97,6 +98,8 @@ export interface ListRow {
   note: string | null;
   continuedFrom: string | null;
   done: boolean; // = session.hidden
+  /** Follow-up F44: = session.parked (7.1); the time is `session.parkedAtNs`. */
+  parked: boolean;
   prs: PrView[]; // attached and not detached, sorted by url
   chip: { level: ChipLevel; count: number } | null;
   /** F18: the ticket the user set, null for none. */
@@ -324,6 +327,7 @@ export function buildRows(input: {
       note,
       continuedFrom: session.continuedFrom,
       done: session.hidden,
+      parked: session.parked,
       prs: attached.map(prView),
       chip: chipFor(attached),
       ticket,
@@ -342,14 +346,16 @@ export function buildRows(input: {
       row.groupSource === 'meta' ||
       row.hasNote ||
       row.ticket !== null ||
-      attachedByHand.has(row.id);
+      attachedByHand.has(row.id) ||
+      row.parked;
     return { ...row, copyOf: { id: original, title: titles.get(original) ?? null, keptByUser } };
   });
 }
 
 /**
  * Whether the user attached nothing to the row (7.2): no label, no group set by the user, no
- * note, no pull request, no ticket. A group that only `groupPattern` took from the title is not
+ * note, no pull request, no ticket, no parking (F44: a parked session is listed whatever its
+ * age). A group that only `groupPattern` took from the title is not
  * something the user attached.
  */
 function nothingAttached(row: ListRow): boolean {
@@ -358,7 +364,8 @@ function nothingAttached(row: ListRow): boolean {
     row.groupSource !== 'meta' &&
     !row.hasNote &&
     row.prs.length === 0 &&
-    row.ticket === null
+    row.ticket === null &&
+    !row.parked
   );
 }
 

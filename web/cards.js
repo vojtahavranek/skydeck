@@ -59,6 +59,8 @@ import { groupCardText } from './search-text.js';
  *   app.js's
  * @property {(sessionId: string) => void} restart issue #166: the header's Restart, which app.js
  *   opens the dialog "Restart" for
+ * @property {(sessionId: string) => void} park F44: park, or unpark a parked row (S2 12.15); the
+ *   toast is app.js's
  * @property {(text: string) => void} say a line in the key bar
  * @property {(listener: ((favourites: string[]) => void) | null) => void} watchFavourites F15:
  *   the one listener of the favourites every list brings (S2 12.6) — the open new form's, null
@@ -375,7 +377,8 @@ export function createCards(root, deps) {
   };
 
   // Line 1: the title (a click edits the label), the group chip (D14: it opens the ticket when it
-  // is a link, else it is plain text; it never edits), ✎ or `+ group`, the state, Note and Done.
+  // is a link, else it is plain text; it never edits), ✎ or `+ group`, the state, Note, Done and
+  // (F44) Park.
   const title = element('span', 'header-title');
   title.title = 'the label (l)';
   const group = element('span', 'header-group');
@@ -407,8 +410,19 @@ export function createCards(root, deps) {
       deps.done(headId);
     }
   });
+  // F44 (S2 12.15): park, or unpark a parked row; the selection stays with the session.
+  const parkButton = headerButton(
+    'header-park',
+    'Park',
+    'park it: it waits under Parked (w)',
+    () => {
+      if (headId !== '') {
+        deps.park(headId);
+      }
+    },
+  );
   const actions = element('span', 'header-actions');
-  actions.append(noteButton, doneButton);
+  actions.append(noteButton, doneButton, parkButton);
   /** @param {boolean} offered */
   const showRestart = (offered) => {
     if (offered && restartButton.parentElement !== actions) {
@@ -1120,6 +1134,11 @@ export function createCards(root, deps) {
       showRestart(offersRestart(row));
       setText(doneButton, row.done ? 'Undone' : 'Done');
       setTip(doneButton, row.done ? 'show it again (d)' : 'mark it done (d)');
+      setText(parkButton, row.parked === true ? 'Unpark' : 'Park');
+      setTip(
+        parkButton,
+        row.parked === true ? 'back under Open (w)' : 'park it: it waits under Parked (w)',
+      );
       setText(dir, row.dir ?? 'directory not known');
       // One line, cut with an ellipsis (a fixed height; ruled): the whole path in the tooltip.
       setTip(dir, row.dir ?? '');

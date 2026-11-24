@@ -128,6 +128,8 @@ export function tourSteps(mode) {
           ' pull requests · ',
           listKey('d'),
           ' done · ',
+          listKey('w'),
+          ' park · ',
           listKey('r'),
           ' restart',
         ],

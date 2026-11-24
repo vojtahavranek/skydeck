@@ -102,14 +102,14 @@ function rowIn(message: ReturnType<typeof buildListMessage>, id: string): RowPay
 
 // --- the message -------------------------------------------------------------------------------
 
-test('buildListMessage: a list message with the three sections in order, no banner', () => {
+test('buildListMessage: a list message with the four sections in order (F44: Parked second), no banner', () => {
   const message = buildListMessage(input({ rows: rows([ds({ id: S1 })]) }));
   assert.equal(message.t, 'list');
   assert.equal(message.nowNs, String(NOW));
   assert.equal(message.banner, null);
   assert.deepEqual(
     message.sections.map((s) => s.name),
-    ['open', 'week', 'earlier'],
+    ['open', 'parked', 'week', 'earlier'],
   );
   assert.equal(message.selected, null);
 });

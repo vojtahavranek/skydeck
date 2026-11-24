@@ -25,6 +25,12 @@ export interface WindowTerminalDeps {
   coreSoft: string | null;
   interop(): string | null;
   build: string;
+  /** F44 (S2 11.2, 7.6): called right after `registry.spawn` was called, in the same synchronous
+   *  step (the registry lists the terminal, with its slot, before its first await): the server's
+   *  withheld slots follow, so a terminal opened for a parked session gives its number up before
+   *  anything else runs. A throw of it is ignored: the terminal keeps its number until the next
+   *  refresh. */
+  listed?: () => void;
 }
 
 /** S2 11.2: no T within this long after G is a timeout (the keeper may still start the program). */
@@ -137,7 +143,8 @@ export function windowTerminal(
       const { registry, files, platform } = deps;
       const id = terminalId(platform);
       // The slot and the spawn without an await between them: the registry lists the terminal
-      // (and so holds its slot) as soon as spawn is called.
+      // (and so holds its slot) as soon as spawn is called. F44: a terminal of a parked session is
+      // born with this slot too, and gives it up in the same step (`listed`).
       const keeperSpec: KeeperSpec = {
         protocol: KEEPER_PROTOCOL,
         id,
@@ -160,8 +167,15 @@ export function windowTerminal(
           dir: spec.cwd,
         },
       };
+      // Called inside an async function, so a throw of spawn is a rejection, awaited below.
+      const spawning = (async () => registry.spawn(keeperSpec))();
       try {
-        await registry.spawn(keeperSpec);
+        deps.listed?.(); // F44: the server's withheld slots, in the same step as the spawn
+      } catch {
+        // nothing: the terminal keeps its number, and the next refresh withholds it
+      }
+      try {
+        await spawning; // always awaited, so that its rejection is never left unhandled
       } catch (error) {
         if (error instanceof KeeperStartError) {
           // Ruled (M1): once the keeper was started and is not known to have ended, the answer

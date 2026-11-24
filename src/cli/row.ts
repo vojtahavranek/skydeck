@@ -118,9 +118,19 @@ function formatMarks(marks: readonly string[], form: Columns['marks']): string {
     : marks.join(',');
 }
 
+/**
+ * Follow-up F44: "parked <age>" (design 7.4: `parked 6d`, the time since the parking) while the row
+ * is parked; '' otherwise.
+ */
+export function formatParked(row: ListRow, nowNs: Ns): string {
+  const { parkedAtNs } = row.session;
+  return row.parked && parkedAtNs !== null ? `parked ${formatAge(nowNs - parkedAtNs)}` : '';
+}
+
 /** Everything after the title: each part after two spaces. */
 function tailOf(row: ListRow, nowNs: Ns, columns: Columns): string {
   const parts = [
+    formatParked(row, nowNs),
     formatMarks(row.marks, columns.marks),
     row.chip === null
       ? ''
@@ -135,12 +145,12 @@ function tailOf(row: ListRow, nowNs: Ns, columns: Columns): string {
 }
 
 /**
- * One list row on one line: the state, the title, the time in state, then the marks, the pull
- * request chip, "note" and the short id, each after two spaces and only when there is something to
- * show. When that is longer than `width`, columns are dropped until the title has 24 characters
- * (or all of it): the note mark, the time in state, all marks but the first (shown as "+n"), the
- * pull-request count. The state, the title and the short id always stay. A title that still does
- * not fit is cut and ends with an ellipsis.
+ * One list row on one line: the state, the title, the time in state, then the parked mark (F44),
+ * the marks, the pull request chip, "note" and the short id, each after two spaces and only when
+ * there is something to show. When that is longer than `width`, columns are dropped until the title
+ * has 24 characters (or all of it): the note mark, the time in state, all marks but the first
+ * (shown as "+n"), the pull-request count. The state, the title, the parked mark and the short id
+ * always stay. A title that still does not fit is cut and ends with an ellipsis.
  */
 export function formatRow(row: ListRow, nowNs: Ns, width: number): string {
   const head = `${row.state.padEnd(STATE_WIDTH)} `;
