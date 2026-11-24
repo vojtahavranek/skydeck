@@ -4,8 +4,9 @@
 // terminal. A page's `act restart`: one hang-up, then the session resumed as a plain resume (or
 // with the flags given) in a terminal with the same number and at the same place in Open — after a
 // move too, with all nine numbers taken and a tenth terminal waiting, with a terminal opened during
-// the restart, in a second window —; not marked done, an ordinary end. When it is given up, and
-// when the server stops meanwhile, nothing is resumed. In the test process (A19).
+// the restart, in a second window, of a parked session, which stays parked and, unparked with all
+// nine taken, waits at its old place before the tenth —; not marked done, an ordinary end. When it
+// is given up, and when the server stops meanwhile, nothing is resumed. In the test process (A19).
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -207,14 +208,16 @@ describe('restarting a session from the window (#166)', () => {
     assert.equal(d.deck.store.getKv('window_open_order'), order, 'the kept order unchanged');
   });
 
-  test('all nine numbers taken and a tenth terminal waiting: the restart keeps its number, the tenth stays without; a terminal opened during the restart takes a free number, never the held one', async (t) => {
+  test('all nine numbers taken and a tenth terminal waiting (#189: a freed number goes to it): the restart keeps its number, which nobody gets meanwhile; a terminal opened during the restart takes another number freed meanwhile, never the held one', async (t) => {
     const ten = [S1, S2, S3, ...MORE.slice(0, 7)];
     const { d, page, list } = await started(t, ten);
     const fourth = termOf(list, MORE[0] as string);
-    await hupLate(page, d, fourth, 2);
-    // Number 7 is free once S7's program ended (F43); the tenth terminal keeps none (#189 aside).
+    const numberOf = (candidate: ListMessage, name: string): string | undefined =>
+      new Map(drawn(candidate).map((one) => one.split(':') as [string, string])).get(name);
+    // S7's program ends: its number goes to the tenth terminal at once (#189).
     page.send({ t: 'input', term: termOf(list, MORE[3] as string), data: '/exit\r' });
-    await page.list((candidate) => drawn(candidate).length === 9, 'S7 left Open');
+    await page.list((candidate) => numberOf(candidate, 'S10') === '7', 'S10 took number 7');
+    await hupLate(page, d, fourth, 3);
     const restarting = page.act(
       { kind: 'restart', term: fourth, sessionId: MORE[0] as string },
       30_000,
@@ -224,14 +227,30 @@ describe('restarting a session from the window (#166)', () => {
         candidate.terminals.some((one) => one.id === fourth && one.restarting === true),
       'S4 restarting',
     );
-    await resume(page, MORE[7] as string); // S11, during the restart
+    // S11 opened during the restart: every number is taken (4 is held), so it waits.
+    await resume(page, MORE[7] as string);
+    const waiting = await page.list(
+      (candidate) => numberOf(candidate, 'S11') === '-',
+      'S11 waits for a number',
+    );
+    assert.ok(waiting.terminals.some((one) => one.id === fourth && one.restarting === true));
+    // S9's program ends during the restart: S11 takes 9, never the held 4.
+    page.send({ t: 'input', term: termOf(list, MORE[5] as string), data: '/exit\r' });
+    const nine = await page.list(
+      (candidate) => numberOf(candidate, 'S11') === '9',
+      'S11 took number 9',
+    );
+    assert.ok(
+      nine.terminals.some((one) => one.id === fourth && one.restarting === true),
+      'while S4 was still restarting',
+    );
     const result = await restarting;
     assert.equal(result.ok, true, JSON.stringify(result));
     const after = await runsAgain(page, MORE[0] as string, fourth);
-    const byName = new Map(drawn(after).map((one) => one.split(':') as [string, string]));
-    assert.equal(byName.get('S4'), '4', 'S4 keeps number 4');
-    assert.equal(byName.get('S11'), '7', 'the terminal opened meanwhile took the free number 7');
-    assert.equal(byName.get('S10'), '-', 'the tenth still waits');
+    assert.deepEqual(
+      ['S4', 'S10', 'S11'].map((name) => numberOf(after, name)),
+      ['4', '7', '9'],
+    );
     assertNoNumberTwice(after);
   });
 
@@ -316,6 +335,62 @@ describe('restarting a parked session (#166 with F44)', () => {
       'S1 back under Open with number 1',
     );
     assertNoNumberTwice(back);
+  });
+
+  test('nine numbers taken and a tenth terminal waiting (#189): a parked session restarted and then unparked stands without a number at its old place, before the tenth, so it is the first that waits and takes the next freed number', async (t) => {
+    const { d, page, list } = await started(t, [S1, S2, S3, ...MORE.slice(0, 7)]);
+    const numberOf = (candidate: ListMessage, name: string): string | undefined =>
+      new Map(drawn(candidate).map((one) => one.split(':') as [string, string])).get(name);
+    const old = termOf(list, S1);
+    // Parked: S1's number 1 goes to the terminal that waited, S10 (#189).
+    const parked = await page.act({ kind: 'park', sessionId: S1 });
+    assert.equal(parked.ok, true, JSON.stringify(parked));
+    await page.list(
+      (candidate) =>
+        JSON.stringify(drawn(candidate, 'parked')) === JSON.stringify(['S1:-']) &&
+        numberOf(candidate, 'S10') === '1',
+      'S1 under Parked, S10 took number 1',
+    );
+    // The tenth: S11, opened before the restart, so S1's next terminal is opened after it.
+    await resume(page, MORE[7] as string);
+    await page.list((candidate) => numberOf(candidate, 'S11') === '-', 'S11 waits for a number');
+    const result = await page.act({ kind: 'restart', term: old, sessionId: S1 }, 20_000);
+    assert.deepEqual([result.ok, result.ended], [true, true], JSON.stringify(result));
+    const after = await page.list((candidate) => {
+      const row = rowOf(candidate, S1);
+      return (
+        row !== undefined &&
+        row.terminal !== null &&
+        row.terminal !== old &&
+        row.state !== 'not-running' &&
+        !candidate.terminals.some((one) => one.id === old)
+      );
+    }, 'S1 running again in a new terminal');
+    assert.deepEqual(drawn(after, 'parked'), ['S1:-'], 'still parked, no number');
+    const next = termOf(after, S1);
+    const opened = (id: string): bigint =>
+      BigInt(after.terminals.find((one) => one.id === id)?.openedNs ?? '0');
+    assert.ok(
+      opened(next) > opened(termOf(after, MORE[7] as string)),
+      'S1’s next terminal was opened after the tenth’s',
+    );
+    // Unparked: no number is free, so it waits, at its old place (the restart kept it): before S11.
+    const unparked = await page.act({ kind: 'unpark', sessionId: S1 });
+    assert.equal(unparked.ok, true, JSON.stringify(unparked));
+    const back = await page.list(
+      (candidate) => drawn(candidate).includes('S1:-'),
+      'S1 back under Open without a number',
+    );
+    assert.deepEqual(drawn(back).slice(-2), ['S1:-', 'S11:-'], drawn(back).join(' '));
+    // S5's program ends: its number goes to the first that waits, S1, not the tenth.
+    page.send({ t: 'input', term: termOf(back, MORE[1] as string), data: '/exit\r' });
+    const given = await page.list(
+      (candidate) => numberOf(candidate, 'S1') === '5',
+      'S1 took number 5',
+    );
+    assert.equal(numberOf(given, 'S11'), '-', 'the tenth still waits');
+    assertNoNumberTwice(given);
+    assert.equal(d.deck.store.meta(S1)?.parkedAtNs ?? null, null, 'unparked');
   });
 });
 

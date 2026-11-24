@@ -1296,19 +1296,24 @@ Issue #166: a restart (12.10) holds its terminal's slot from before the hang-up 
 session's next terminal is open (`holdSlot`, `src/window/terminals.ts`). While held the terminal is
 `restarting` (8.2.3's `terminals`), and its slot stays on it after its program's exit — the one
 exception to F43's rule above, for the moment between that exit and the next terminal's spawn —, so
-`nextSlot`, a `hello`'s lowest-free rule and every rule that reads which slots are taken see it
-taken; no move gives it or takes it (`setSlots` refuses one that touches a held terminal), and
-`close-terminal` refuses the terminal. The resume of the restart opens its terminal with that slot
-in its meta, taken from the held terminal in the same synchronous step as the spawn (a transfer:
-at no moment is the slot free, and the held terminal never gets it back), with its moved entry, if
-any, removed as F43 removes it. Without a slot (the tenth terminal) the next terminal gets none. A
-restart that is given up or whose resume opens no terminal lets the hold go: a slot nobody took is
-freed then as F43 frees it, and the terminal is an ordinary ended one (7.8). The hold is in memory
-only: a server that stops meanwhile frees the slot as for any program that ended (the next
-server's `hello` says it exited). A parked session's terminal holds no slot (F44, above), so a
-restart of it holds none and its next terminal is opened with none (and is withheld as its
-session's at its spawn); a session parked while a restart holds its terminal loses the held number
-at that `withholdSlots`, as any terminal does, and the next terminal then gets none.
+`nextSlot`, a `hello`'s lowest-free rule, issue #189's hand-out and every rule that reads which
+slots are taken see it taken; no move gives it or takes it (`setSlots` refuses one that touches a
+held terminal), and `close-terminal` refuses the terminal. The resume of the restart opens its
+terminal with that slot in its meta, taken from the held terminal in the same synchronous step as
+the spawn (a transfer: at no moment is the slot free, and the held terminal never gets it back),
+with its moved entry, if any, removed as F43 removes it. A held terminal without a slot (the
+tenth) waits for one as any other does until its program ends, and a slot #189 gives it meanwhile
+passes on so; without one, the next terminal is opened with none and waits. A restart that is
+given up or whose resume opens no terminal lets the hold go: a slot nobody took is freed then as
+F43 frees it (and goes to a terminal that waits, #189), and the terminal is an ordinary ended one
+(7.8). The hold is in memory only: a server that stops meanwhile frees the slot as for any
+program that ended (the next server's `hello` says it exited). A parked session's terminal holds
+no slot (F44, above), so a restart of it holds none and its next terminal is opened with none (and
+is withheld as its session's at its spawn); a session parked while a restart holds its terminal
+loses the held number at that `withholdSlots`, as any terminal does, and the next terminal then
+gets none. Un-parked after the restart while all nine are held and no move keeps Open's order
+(12.1), its terminal waits at the old one's place, which the restart kept: before a waiting
+terminal opened after the old one, so it takes the next freed slot first.
 
 A limit: an older skydeck's server reads only the meta slots, so after a move its window can show
 two terminals with one slot until one of them closes. An F37 server reads a null entry as none and
