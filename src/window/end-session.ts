@@ -58,8 +58,7 @@ export type EndOutcome = { ok: false; error: string } | { ok: true; ended: boole
 /** Issue #166: what `check` found — a refusal, or the terminal, the session's row and its holders
  *  that belong to that terminal. */
 export type EndCheck =
-  | { ok: false; error: string }
-  | { ok: true; term: TerminalInfo; row: ListRow; holders: Holder[] };
+  { ok: false; error: string } | { ok: true; term: TerminalInfo; row: ListRow; holders: Holder[] };
 
 /** Issue #166: how a hang-up for a restart ended: the program ended, or why it did not (a
  *  sentence: not within the wait, the keeper lost, the terminal gone, the hang-up not sent). */

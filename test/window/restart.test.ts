@@ -287,9 +287,22 @@ function resumeRefuses(flags: string[]): string {
 
 describe('act restart: refused before anything is ended', () => {
   const sessionCases: [string, () => TerminalInfo[], string, Record<string, unknown>?][] = [
-    ['an unknown terminal', () => [info()], 'this terminal is no longer there', { term: 'ffffffffffff' }],
-    ['a terminal that shows another session', () => [info({ sessionId: S2 })], 'that terminal shows another session now'],
-    ['a terminal whose program holds no session yet', () => [info({ sessionId: null })], 'that terminal shows another session now'],
+    [
+      'an unknown terminal',
+      () => [info()],
+      'this terminal is no longer there',
+      { term: 'ffffffffffff' },
+    ],
+    [
+      'a terminal that shows another session',
+      () => [info({ sessionId: S2 })],
+      'that terminal shows another session now',
+    ],
+    [
+      'a terminal whose program holds no session yet',
+      () => [info({ sessionId: null })],
+      'that terminal shows another session now',
+    ],
     [
       'an ended terminal',
       () => [
@@ -301,7 +314,11 @@ describe('act restart: refused before anything is ended', () => {
       ],
       'its program is not running',
     ],
-    ['a terminal reconnecting', () => [info({ state: 'reconnecting', endable: false })], 'its program is not running'],
+    [
+      'a terminal reconnecting',
+      () => [info({ state: 'reconnecting', endable: false })],
+      'its program is not running',
+    ],
     [
       'a terminal whose keeper cannot end it (an older keeper, no connection)',
       () => [info({ endable: false })],
@@ -512,7 +529,9 @@ describe('act restart: ended, then resumed as a plain resume', () => {
   test('with flags: those flags in place of the recorded ones, as act resume passes them', async (t) => {
     const d = running(t);
     const h = harness(d);
-    const answer = h.act(restart({ flags: "--model example --mcp-config '/tmp/example config.json'" }));
+    const answer = h.act(
+      restart({ flags: "--model example --mcp-config '/tmp/example config.json'" }),
+    );
     await Promise.resolve();
     h.hub.exitNow();
     assert.equal((await answer).ok, true);

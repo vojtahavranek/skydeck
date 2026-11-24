@@ -413,6 +413,9 @@ export interface TerminalPayload {
   ownsSize: boolean;
   /** When the window opened it: the header's "opened <time>" (S2 12.5, plan D6). */
   openedNs: NsText;
+  /** Issue #166: present (true) only while a restart holds it — it ends its program and opens the
+   *  session's next terminal: the page shows its screen without the ended bar meanwhile. */
+  restarting?: true;
 }
 /** For the selected session only: what the resume card shows (S2 12.6), and what the header and
  *  the dialogs of stage D need (plan D6). */
@@ -1139,10 +1142,9 @@ const ACTS: Readonly<Record<string, Check>> = {
   // F30: the dialog's `End session and mark done`.
   'end-session': object({ t: ANY, id: COUNT, kind: ANY, term: TERM, sessionId: SESSION }),
   // Issue #166: the restart dialog's `Restart`; #188: an optional `flags`, as `resume`'s.
-  restart: object(
-    { t: ANY, id: COUNT, kind: ANY, term: TERM, sessionId: SESSION, flags: TEXT },
-    ['flags'],
-  ),
+  restart: object({ t: ANY, id: COUNT, kind: ANY, term: TERM, sessionId: SESSION, flags: TEXT }, [
+    'flags',
+  ]),
   // F36 (S2 12.13): the settings screen. The key is a text; the table decides which it may be.
   settings: object({ t: ANY, id: COUNT, kind: ANY }),
   'setting-set': object({ t: ANY, id: COUNT, kind: ANY, key: TEXT, value: SETTING_VALUE }),
