@@ -496,6 +496,36 @@ test('F44: parking a session in the window', async (t) => {
   );
 
   await t.test(
+    'its number is free at once: after w Ctrl+Shift+2 reaches no session; a new session takes 2 and Ctrl+Shift+2 reaches it',
+    async (t) => {
+      const w = await world(t, chromium, { running: [S1, S2, S3], stopped: [S4] });
+      await pick(w.page, S2);
+      assert.equal((await drawn(w.page)).find((row) => row.id === S2)?.slot, '2');
+      await w.page.keyboard.press('w');
+      const parked = await under(w.page, S2, 'parked');
+      assert.equal(parked.slot, '', 'no number');
+      await selectionIs(w.page, S3, 'the next row');
+      await w.page.keyboard.press('Control+Shift+2');
+      await until(
+        async () => (await keyMessage(w.page)) === 'no session in slot 2',
+        'Ctrl+Shift+2 reaches no session',
+      );
+      assert.equal(await selectedRow(w.page), S3, 'the selection stays');
+      const result = await w.api.act({ kind: 'resume', sessionId: S4, cols: 80, rows: 24 });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      await untilDrawn(
+        w.page,
+        (rows) => rows.some((row) => row.id === S4 && row.section === 'open' && row.slot === '2'),
+        'S4 takes 2',
+      );
+      await toZone(w.page, 'list');
+      await w.page.keyboard.press('Control+Shift+2');
+      await until(async () => (await selectedRow(w.page)) === S4, 'Ctrl+Shift+2 reaches S4');
+      assert.deepEqual(w.problems, []);
+    },
+  );
+
+  await t.test(
     'a parked row that asks shows its mark; Ctrl+Shift+J skips it and goes to one that needs you',
     async (t) => {
       const w = await world(t, chromium, { running: [S1, S2], stopped: [S3] });
@@ -872,12 +902,24 @@ test('F44: parking a session in the window', async (t) => {
           `${what}: no other row of Parked moved`,
         );
       }
+      // Back under Open each took the lowest free number (S2 7.6): S7 6, S6 7, S8 8; Open, with no
+      // kept order, is drawn by number.
+      assert.deepEqual(
+        (await drawn(w.page))
+          .filter((row) => row.section === 'open')
+          .slice(-3)
+          .map((row) => [row.id, row.slot]),
+        [
+          [S7, '6'],
+          [S6, '7'],
+          [S8, '8'],
+        ],
+      );
       // R-8: w again on the same session parks it again, and moves the selection on in Open: S8,
-      // back with its number 8, is Open's last row, so the one before it.
-      assert.deepEqual((await idsIn(w.page, 'open')).slice(-2), [S7, S8]);
+      // with its number 8, is Open's last row, so the one before it.
       await w.page.keyboard.press('w');
       await under(w.page, S8, 'parked');
-      await selectionIs(w.page, S7, "Open's last row: the one before it");
+      await selectionIs(w.page, S6, "Open's last row: the one before it");
       assert.deepEqual(
         (await acts(w.page)).map((one) => `${one.kind} ${one.sessionId}`),
         [

@@ -20,6 +20,7 @@ import type { KeeperHello } from '../../src/window/frames.ts';
 import type { Terminal } from '../../src/terminals/types.ts';
 import type { Registry } from '../../src/window/terminals.ts';
 import { decideFoundKeeper, settleEndedTerminal } from '../../src/window/starts.ts';
+import { KeeperStartError } from '../../src/window/terminals.ts';
 import { windowTerminal } from '../../src/window/window-terminal.ts';
 import { sleep, startProgram, until, within } from '../helpers/keeper.ts';
 import { info } from '../helpers/registry.ts';
@@ -636,5 +637,128 @@ describe('window terminal: restore', () => {
       [S1, S2].sort(),
       'each stand-in resumed its own session',
     );
+  });
+});
+
+describe('window terminal: the spawn’s step (F44, S2 11.2, 7.6)', () => {
+  /** A registry over `r`'s that records, in order, its nextSlot (with the slot), its spawn (with
+   *  the meta's slot) and the settling of the spawn's promise; `spawn` replaces the spawn. */
+  function recording(r: TestRegistry, steps: string[], spawn?: Registry['spawn']): Registry {
+    return {
+      ...r.registry,
+      nextSlot() {
+        const slot = r.registry.nextSlot();
+        steps.push(`nextSlot ${slot}`);
+        return slot;
+      },
+      spawn(spec) {
+        steps.push(`spawn ${spec.meta.slot}`);
+        const spawning = (spawn ?? r.registry.spawn)(spec);
+        spawning.then(
+          () => steps.push('settled'),
+          () => steps.push('settled'),
+        );
+        return spawning;
+      },
+    };
+  }
+
+  function specOf(w: WindowDeck): Parameters<Terminal['open']>[0] {
+    w.resumable(S1);
+    return launchSpec(prepareResumeById(w.deck, S1), readLock(w.deck, S1));
+  }
+
+  test('listed is called once, after the spawn was called and before its promise settled; the meta’s slot is nextSlot’s', async (t) => {
+    const w = await windowDeck(t);
+    const r = w.registry();
+    const steps: string[] = [];
+    const { deps } = w.deps(r, {
+      over: {
+        registry: recording(r, steps),
+        listed: () => {
+          steps.push('listed');
+          assert.ok(r.registry.list().length === 1, 'the terminal is listed by then');
+        },
+      },
+    });
+    const result = await windowTerminal(deps, SIZE).open(specOf(w));
+    assert.deepEqual(result, { ok: true });
+    assert.deepEqual(steps, ['nextSlot 1', 'spawn 1', 'listed', 'settled']);
+  });
+
+  test('listed is not called when open() refuses before the spawn', async (t) => {
+    const w = await windowDeck(t);
+    const r = w.registry();
+    let calls = 0;
+    const { deps } = w.deps(r, {
+      over: {
+        listed: () => {
+          calls += 1;
+        },
+      },
+    });
+    const result = await windowTerminal(deps, SIZE).open({ ...specOf(w), lock: null });
+    assert.equal(result.ok, false);
+    assert.equal(calls, 0);
+    assert.deepEqual(r.spawned, []);
+  });
+
+  test('a listed that throws: the spawn is still awaited and open() answers as without it', async (t) => {
+    const w = await windowDeck(t);
+    const r = w.registry();
+    const steps: string[] = [];
+    const { deps } = w.deps(r, {
+      over: {
+        registry: recording(r, steps),
+        listed: () => {
+          steps.push('listed');
+          throw new Error('listed failed');
+        },
+      },
+    });
+    const result = await windowTerminal(deps, SIZE).open(specOf(w));
+    assert.deepEqual(result, { ok: true });
+    assert.deepEqual(steps, ['nextSlot 1', 'spawn 1', 'listed', 'settled']);
+  });
+
+  test('a listed that throws and a spawn that rejects: open() answers the spawn’s failure, and no rejection is left unhandled', async (t) => {
+    const w = await windowDeck(t);
+    const r = w.registry();
+    const unhandled: unknown[] = [];
+    const listener = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', listener);
+    t.after(() => {
+      process.off('unhandledRejection', listener);
+    });
+    const steps: string[] = [];
+    const { deps } = w.deps(r, {
+      over: {
+        registry: recording(
+          r,
+          steps,
+          () =>
+            new Promise((_, reject) => {
+              setTimeout(() => {
+                reject(new KeeperStartError('spawn-failed', 'the keeper could not be started'));
+              }, 20);
+            }),
+        ),
+        listed: () => {
+          steps.push('listed');
+          throw new Error('listed failed');
+        },
+      },
+    });
+    const result = await windowTerminal(deps, SIZE).open(specOf(w));
+    assert.deepEqual(result, {
+      ok: false,
+      error: 'the keeper could not be started',
+      timedOut: false,
+    });
+    await sleep(50); // a rejection nobody handled is reported after the microtasks
+    assert.deepEqual(unhandled, []);
+    assert.deepEqual(steps, ['nextSlot 1', 'spawn 1', 'listed', 'settled']);
   });
 });

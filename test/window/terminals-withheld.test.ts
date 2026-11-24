@@ -6,9 +6,12 @@
 // dropped with the terminal. After every operation no two listed terminals hold one slot.
 // Platform: realTestPlatform; real keepers running the stand-in (not started: no G).
 import assert from 'node:assert/strict';
+import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, test } from 'node:test';
 
 import type { KeeperSpec } from '../../src/window/frames.ts';
+import { KeeperStartError } from '../../src/window/terminals.ts';
 import { sleep, until } from '../helpers/keeper.ts';
 import { info, registrySandbox } from '../helpers/registry.ts';
 import type { RegistryBox, TestRegistry } from '../helpers/registry.ts';
@@ -420,5 +423,82 @@ describe('registry: a withheld slot and the other slot rules (F44)', () => {
     await sleep(50);
     const slots = ids.map((id) => slotOf(r, id));
     assert.deepEqual([...slots].sort(), [1, 2, 3, 4, 5, 6]);
+  });
+});
+
+describe('registry: a terminal withheld before its keeper started, whose spawn fails (F44)', () => {
+  /** Spawns `spec`, names it to withholdSlots in the same step (as the server does for a parked
+   *  session's terminal), and answers the spawn's error. */
+  async function failing(
+    r: TestRegistry,
+    spec: KeeperSpec,
+    between?: () => Promise<void>,
+  ): Promise<unknown> {
+    const spawning = r.registry.spawn(spec).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    assert.equal(withhold(r, [spec.id]), 'ok', 'listed at once: it enters');
+    await between?.();
+    return spawning;
+  }
+
+  test('python3 missing: its id is out of the set and out of what was written last', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const bare = join(box.s.root, 'bare-bin');
+    const platform = { ...box.tp.platform, env: { ...box.tp.platform.env, PATH: bare } };
+    const r = box.registry({ platform, persistSlots: kept.persist });
+    const spec = box.spec({ meta: { ...box.spec().meta, slot: 1 } });
+    const error = await failing(r, spec);
+    assert.ok(error instanceof KeeperStartError, String(error));
+    assert.equal(error.kind, 'python-missing');
+    assert.deepEqual(r.registry.list(), []);
+    assert.deepEqual(kept.latest().withheld, new Set(), 'written without it');
+    assert.ok(kept.writes.length >= 2, 'the withholding, then the drop');
+  });
+
+  test('a keeper that ends at its start: its id is out of the set and out of what was written last', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const r = box.registry({ persistSlots: kept.persist });
+    const spec = { ...box.spec({ meta: { ...box.spec().meta, slot: 1 } }), argv: [] };
+    const error = await failing(r, spec);
+    assert.ok(error instanceof KeeperStartError, String(error));
+    assert.equal(error.kind, 'spawn-failed');
+    assert.deepEqual(r.registry.list(), []);
+    assert.deepEqual(kept.latest().withheld, new Set());
+  });
+
+  test('the registry stopped before the hello: forgotten, and nothing is written once stopped (the keeper may live: a later server finds it withheld)', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const slow = join(box.s.root, 'slow-bin');
+    mkdirSync(slow);
+    const script = join(slow, 'python3');
+    writeFileSync(script, `#!/bin/sh\nsleep 2\nexec ${join(box.s.bin, 'python3')} "$@"\n`);
+    chmodSync(script, 0o755);
+    const platform = {
+      ...box.tp.platform,
+      env: { ...box.tp.platform.env, PATH: `${slow}:${box.s.bin}` },
+    };
+    const r = box.registry({ platform, persistSlots: kept.persist });
+    const spec = box.spec({ meta: { ...box.spec().meta, slot: 1 } });
+    let writes = 0;
+    const error = await failing(r, spec, async () => {
+      writes = kept.writes.length;
+      await sleep(300);
+      await r.registry.stopAll();
+    });
+    assert.ok(error instanceof KeeperStartError, String(error));
+    assert.equal(error.kind, 'stopping');
+    assert.deepEqual(r.registry.list(), []);
+    assert.equal(kept.writes.length, writes, 'nothing written once stopped');
+    // The keeper lives on: its pid line, by which the cleanup's killKeepersIn finds it.
+    await until(
+      () => existsSync(box.files.termPid(spec.id)),
+      'the keeper came up after all (its pid line)',
+      10_000,
+    );
   });
 });

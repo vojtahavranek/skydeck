@@ -1208,6 +1208,34 @@ before its keeper's `hello` is forgotten because its keeper could not start; an 
 being found stays, and one of a keeper never found again goes at the next write. Once the server is
 stopping the operation changes and writes nothing (`stopping`).
 
+Who calls it, and when (F44). Whether a session is parked now is derived from the store and the
+transcripts, and the mark can be written by another process (`skydeck park`), so no act owns the
+numbers: the server makes the registry agree with the derived state every time its rows or its
+terminals change, by one call that names the whole truth — every terminal whose session (the one
+the mapping gave it, else the one it was opened for; twins too) has a parked row —
+(`src/window/parked-slots.ts`). It runs after every refresh that worked (first, after the mapping
+set each terminal's session), after every reload of the rows an act or a fetch asks for (10.1),
+and in the step that spawns a terminal (11.2). It does nothing until the first refresh that worked
+has run (the keepers are found by then: before it a stored set would be pruned against an empty
+registry), nothing once the stop began, and never throws. So an act (`park`, `unpark`, `done` of a
+parked session, the toast's Undo) writes the mark and the numbers in one synchronous section of
+the server's one thread, before its lists go out, and no terminal opens between them; a prompt
+that ends a parking, or a parking written by the command, reaches the numbers at the next refresh
+that reads it (about 2 s). The mark and the numbers are two writes, on purpose (the mark is also
+written by processes that have no registry): in the gap of a numbers' write that failed the row is
+under Parked and its terminal still holds its number, which the list shows nowhere (12.1), so the
+next terminal takes a higher one, and the next refresh tries again; un-parked with the write
+failing, the row is under Open without a number until then, and a move that would give that
+terminal a number is refused (`the list changed meanwhile; try again`). A terminal opened for a
+parked session (a resume from its row, `skydeck resume --window`) is born as any terminal, with the
+lowest free slot in its keeper's meta, and gives it up in the same synchronous step as the spawn:
+the registry lists it before its first await, and the call follows at once; no page is sent the
+number, and when the withholding cannot be written, or the session is un-parked first, the
+terminal simply keeps it. A parking the server has not seen yet (the command's, less than a refresh
+ago) leaves the terminal its number until that refresh; a terminal whose session changed since the
+last mapping (`/clear` in it) is judged by its old session until the next refresh, and then, no
+longer a parked session's, takes the lowest free slot.
+
 A limit: an older skydeck's server reads only the meta slots, so after a move its window can show
 two terminals with one slot until one of them closes. An F37 server reads a null entry as none and
 gives that terminal its meta slot at its `hello`; its own `hello` rule still keeps any two terminals
@@ -2104,7 +2132,9 @@ cannot be read, is not taken for gone (design 5.5). The server then sends
 the server's own writes move no change mark, so after one the server loads the rows again and
 sends the lists at once, within the pages' once-a-second rule, and so does a pull-request fetch
 of 12.5 that saved something or failed after it may have; a reload that fails is logged by kind
-and left to the next refresh (stage D, plan D7). A tick that fails is logged and shown once to the
+and left to the next refresh (stage D, plan D7). Follow-up F44: after such a reload, before the
+lists go out, and after every refresh that worked, the server sets the numbers of parked sessions'
+terminals (7.6). A tick that fails is logged and shown once to the
 pages; the next tick tries again. The server's store connection checks the schema version at the
 start of every write transaction, and before every write that is a single statement; when the
 store is newer than the server knows (a command of an updated checkout migrated it, 16.5), the
@@ -2411,7 +2441,10 @@ Five changes to step 1's code make that possible, with no change of behaviour fo
 in `src/window/` (4.3) and exists **only inside the server**: no other process opens a terminal of
 the window, and nothing hands the server a launch to run (8.3); the `Terminal` type's names gain
 `window`. Its `open(spec)` spawns a keeper (7.1) with the spec's launch, session id, kind, lock
-value and start deadline (11.1), the first size (8.2.6) and the next free slot; claims it, sends
+value and start deadline (11.1), the first size (8.2.6) and the next free slot (follow-up F44: also
+for a parked session, whose terminal gives that slot up in the same synchronous step: right after
+the spawn is called, before it is awaited, the server sets the numbers of parked sessions'
+terminals, 7.6; a throw there is ignored and the spawn is always awaited); claims it, sends
 `G` on its `hello`, and resolves on what comes back:
 
 - `T` (8.1): `{ ok: true }`; the program runs, and the terminal is tied to its pid and process start
@@ -2600,8 +2633,10 @@ bar at the bottom. The list has four sections (from follow-up F44; three before 
   every page. The most recently parked first, ties by id. It never folds as a whole section (only
   Earlier does); its blocks close as in every section (12.2). An empty Parked has no header, as
   every section but Open. A row under Parked never shows a number, nor does its terminal in the
-  list's `terminals` (7.6), and it is in none of Open's order (it leaves the kept order; back
-  under Open it is placed as a row that was not kept). Its band's bar is `--dim`, as Recent's,
+  list's `terminals` (7.6), and it is in none of Open's order (it leaves the kept order at once,
+  in the same step that frees its number, so an Undo right after a parking does not give the
+  kept place back; back under Open it is placed as a row that was not kept, by the rule above, and
+  no other row moves). Its band's bar is `--dim`, as Recent's,
   its title in the text colour; its header has no tooltip. Its key in the code and the protocol is
   `parked`.
 - **Recent**: not running, last activity within 7 days (a rolling 7 days, not the calendar week),
@@ -4017,7 +4052,10 @@ terminal whose program ended has no number, its row under Recent or Earlier show
 next new or resumed terminal takes the freed number, so Ctrl+Shift+N never goes to an ended
 terminal. A terminal that still holds its number while its row is under Recent — a lost one in
 its 60 seconds (7.6), or a running one whose session ended a moment before its program — is still
-reached by Ctrl+Shift+N, through the window's terminals, though its row shows no number. A move
+reached by Ctrl+Shift+N, through the window's terminals, though its row shows no number.
+Follow-up F44: a parked session's terminal has no number (its number is free at once, 12.15), and
+the list carries none for it on its row or in its `terminals`, also in the moment a write of the
+numbers failed, so Ctrl+Shift+N never goes to a parked session. A move
 hands every number out again from the top: when a block draws a terminal without a number above
 numbered ones (12.2), any move — also of another row — gives that terminal a number and takes one
 from the last numbered terminal; the first move after a block made the numbers read out of order
@@ -4857,6 +4895,15 @@ the new session's form before the list that decides counts as having moved, and 
 next row's session.
 The key help names `w` after `d`, and the tour's line of the list's keys ends `d done · w park`
 (12.14).
+
+**The numbers** (the owner's decision of 2026-11-24, "parking frees it"). Parking a session that
+runs in a terminal of the window frees its number 1-9 at once: the terminal holds none, and the
+next new or resumed terminal takes it by the lowest-free rule; `Ctrl+Shift+N` never goes to a
+parked session. Back under Open while it runs (an `unpark`, a prompt, `done`), it takes the lowest
+free number, none while all nine are taken (then it is moved like any row without one, 12.9). Its
+terminal is otherwise untouched: it runs, and its pane shows when its row is selected. A parked
+session resumed from its row gets no number. No two terminals ever hold one number, also at a
+reconnect, a restart and a write that fails (7.6 has the rules and the races).
 
 **Where it shows.** Under Parked on every page, running or not, whatever its age, the most recently
 parked first (12.1), its row with `parked 6d` and no number (12.2); quiet (12.4, 13); ranked
