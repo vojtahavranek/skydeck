@@ -107,6 +107,11 @@ const KEY_MESSAGE_MS = 5000;
 /** D15: the toast's words (the mockup's), for a session hidden by done and for a running one. */
 const DONE_HIDDEN = 'Marked done: hidden from the list. It comes back on new activity.';
 const DONE_RUNNING = 'Marked done. Stays under Open while it runs; hidden once it stops.';
+/** F44 (S2 12.15): the toast's words after a park, for a session that does not run and for one
+ *  that runs or starts. */
+const PARKED = 'Parked: listed under Parked. It comes back when you send it a prompt.';
+const PARKED_RUNNING =
+  'Parked: listed under Parked, and it keeps running. It comes back when you send it a prompt.';
 /** S2 8.2.6's limits of a proposed size. */
 const MAX_COLS = 1000;
 const MAX_ROWS = 500;
@@ -234,19 +239,25 @@ const state = {
    */
   bringing: null,
   lastFocus: '',
-  /** The sessions whose `done` or `undone` of this page waits for its answer (D15). @type {Set<string>} */
+  /** The sessions whose `done`, `undone`, `park` or `unpark` of this page waits for its answer
+   *  (D15, F44). @type {Set<string>} */
   marking: new Set(),
   /**
-   * This page's own `d` in the list (S2 12.9's exception, D15): the session, the section it was
-   * last listed in and that section's order then, whether a list came since its act was sent, and
-   * whether the answer came.
-   * @type {{ sessionId: string, section: SectionPayload['name'], order: string[], listed: boolean, answered: boolean } | null}
+   * This page's own `d` (or end) in the list (S2 12.9's exception, D15), or from follow-up F44 its
+   * own `w` that parks (`mark` says which): the session, the section it was last listed in and
+   * that section's order then, whether a list came since its act was sent, and whether the answer
+   * came. While it names a session, a `w`, a `d` and the end dialog's marking buttons on that
+   * session do nothing (F44's one guard).
+   * @type {{ sessionId: string, section: SectionPayload['name'], order: string[], mark: 'done' | 'park', listed: boolean, answered: boolean } | null}
    */
   leaving: null,
   /**
-   * Where that `d` left the selection (`at`: the row it selected, or the done session itself when
-   * it selected none), so that its Undo selects the session again (ruled); `answered` once the
-   * Undo's answer came. @type {{ sessionId: string, at: string, answered: boolean } | null}
+   * Where that `d` or `w` left the selection (`at`: the row it selected; for a `d` that selected
+   * none the done session itself, for a `w` null), so that its Undo selects the session again
+   * (ruled); `answered` once the Undo's answer came; `away` (F44) the section the session must have
+   * left before it is selected again — `parked` after a `w`, whose row is still listed there until
+   * the list that carries the Undo —, else null.
+   * @type {{ sessionId: string, at: string | null, answered: boolean, away: SectionPayload['name'] | null } | null}
    */
   undoTo: null,
   /** The key (`code`) whose keydown opened the dialog or the switcher shown, until it is
@@ -337,6 +348,7 @@ const cards = createCards(dom.cards, {
   select: (id) => select(id, 'click'),
   edit: (what, sessionId) => edit(what, sessionId, '', ''),
   done: (sessionId) => markDone(sessionId, false),
+  park: (sessionId) => markParked(sessionId, false),
   say: (text) => say(text),
   watchFavourites: (listener) => {
     favouritesListener = listener;
@@ -1513,7 +1525,9 @@ function markDone(sessionId, fromList) {
     say('no session selected');
     return;
   }
-  if (state.marking.has(sessionId)) {
+  // F44's one guard: a `d` on the session this page's own `w`, `d` or end just marked, before its
+  // list decided where the selection goes, does nothing.
+  if (state.marking.has(sessionId) || state.leaving?.sessionId === sessionId) {
     return;
   }
   if (asksFirst(row)) {
@@ -1532,13 +1546,15 @@ function markDone(sessionId, fromList) {
  */
 function sendDone(sessionId, fromList, runningText) {
   const row = sessionRow(state.list, sessionId);
-  if (row === null || state.marking.has(sessionId)) {
+  if (row === null || state.marking.has(sessionId) || state.leaving?.sessionId === sessionId) {
     return;
   }
   const kind = row.done ? 'undone' : 'done';
+  // F44: the toast's Undo gives back what was there: a parked session marked done is parked again.
+  const parked = row.parked === true;
   const place = placeOf(sessionId);
   if (fromList && kind === 'done' && place !== null) {
-    state.leaving = { sessionId, ...place, listed: false, answered: false };
+    state.leaving = { sessionId, ...place, mark: 'done', listed: false, answered: false };
     state.undoTo = null;
   }
   state.marking.add(sessionId);
@@ -1555,10 +1571,15 @@ function sendDone(sessionId, fromList, runningText) {
       return;
     }
     // A row with no section (`selectedRow`'s, E13) says whether it runs by itself: the server's
-    // rule of Open (`open` in src/window/view/build.ts; ruled 13:05Z).
+    // rule of Open (`open` in src/window/view/build.ts; ruled 13:05Z). F44: so does a row under
+    // Parked, which runs or not there; marked done, a running one goes under Open.
     const running =
-      place !== null ? place.section === 'open' : row.starting || row.state !== 'not-running';
-    toast.show(running ? runningText : DONE_HIDDEN, () => undoDone(sessionId));
+      place !== null && place.section !== 'parked'
+        ? place.section === 'open'
+        : row.starting || row.state !== 'not-running';
+    toast.show(running ? runningText : DONE_HIDDEN, () =>
+      undoMark(sessionId, parked ? 'park' : 'undone'),
+    );
     answeredDone(sessionId);
   });
 }
@@ -1573,6 +1594,58 @@ function answeredDone(/** @type {string} */ sessionId) {
       sendView(); // as M2: the list that holds it comes at once (review 2's S3, ruled)
     }
   }
+}
+
+/**
+ * F44 (S2 12.15): `w` and the header's Park park the session, or un-park a parked one (the act
+ * picked from its row's `parked`, as `d` picks `done` or `undone`); no dialog, whatever its state:
+ * parking stops nothing. One act per session at a time, and nothing while this page's own `w`,
+ * `d` or end of it has not been decided by its list (the one guard). A park the server took shows
+ * the toast with Undo (`undoMark`: `unpark`, or `done` for a session that was done); an un-park
+ * shows none. `fromList`: this page's `w` in the list, after which the selection moves to the next
+ * row of the section the row left (`leavePark`, at the list that shows it gone); the header's
+ * control leaves the selection to the main rule. The row is `sessionRow`'s, as for Done.
+ * @param {string} sessionId
+ * @param {boolean} fromList
+ */
+function markParked(sessionId, fromList) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null) {
+    say('no session selected');
+    return;
+  }
+  if (state.marking.has(sessionId) || state.leaving?.sessionId === sessionId) {
+    return;
+  }
+  const parked = row.parked === true;
+  const wasDone = row.done;
+  const running = row.starting || row.state !== 'not-running';
+  const place = placeOf(sessionId);
+  if (fromList && !parked && place !== null) {
+    state.leaving = { sessionId, ...place, mark: 'park', listed: false, answered: false };
+    state.undoTo = null;
+  }
+  state.marking.add(sessionId);
+  void act({ kind: parked ? 'unpark' : 'park', sessionId }).then((result) => {
+    state.marking.delete(sessionId);
+    if (!result.ok) {
+      if (state.leaving?.sessionId === sessionId) {
+        state.leaving = null; // refused before a list decided: a refused `w` moves nothing
+      }
+      say(result.error ?? 'skydeck could not do that');
+      return;
+    }
+    if (parked) {
+      return;
+    }
+    toast.show(running ? PARKED_RUNNING : PARKED, () =>
+      undoMark(sessionId, wasDone ? 'done' : 'unpark'),
+    );
+    if (state.leaving?.sessionId === sessionId) {
+      state.leaving.answered = true;
+      sendView(); // no list showed the row gone from its section yet: the next one decides
+    }
+  });
 }
 
 /**
@@ -1649,12 +1722,14 @@ function keepRunning(sessionId, fromList) {
  * @param {boolean} fromList
  */
 function endSession(sessionId, term, fromList) {
-  if (state.marking.has(sessionId)) {
+  if (state.marking.has(sessionId) || state.leaving?.sessionId === sessionId) {
     return;
   }
+  // F44: the Undo gives back what was there: a parked session is parked again.
+  const parked = sessionRow(state.list, sessionId)?.parked === true;
   const place = placeOf(sessionId);
   if (fromList && place !== null) {
-    state.leaving = { sessionId, ...place, listed: false, answered: false };
+    state.leaving = { sessionId, ...place, mark: 'done', listed: false, answered: false };
     state.undoTo = null;
   }
   state.marking.add(sessionId);
@@ -1669,19 +1744,22 @@ function endSession(sessionId, term, fromList) {
       return;
     }
     toast.show(result.ended === true ? END_TEXTS.ended : END_TEXTS.notEnded, () =>
-      undoDone(sessionId),
+      undoMark(sessionId, parked ? 'park' : 'undone'),
     );
     answeredDone(sessionId);
   });
 }
 
 /**
- * The toast's Undo of a `done`: `undone`. When it undoes this page's own `d` in the list, the
- * session is selected again once it is back, if the selection is still where that `d` left it
- * (ruled; `followUndo`); a `d` whose selection has not moved yet moves it no more.
+ * The toast's Undo, which gives back what was there (F44, both ways): of a `done`, `undone` — or
+ * `park` for a session that was parked —; of a `park`, `unpark` — or `done` for a session that
+ * was done. When it undoes this page's own `d` or `w` in the list, the session is selected again
+ * once it is back, if the selection is still where that `d` or `w` left it (ruled; `followUndo`);
+ * a `d` or `w` whose selection has not moved yet moves it no more.
  * @param {string} sessionId
+ * @param {'undone' | 'park' | 'unpark' | 'done'} kind
  */
-function undoDone(sessionId) {
+function undoMark(sessionId, kind) {
   if (state.leaving?.sessionId === sessionId) {
     state.leaving = null;
   }
@@ -1690,7 +1768,7 @@ function undoDone(sessionId) {
   }
   state.marking.add(sessionId);
   const back = state.undoTo?.sessionId === sessionId ? state.undoTo : null;
-  void act({ kind: 'undone', sessionId }).then((result) => {
+  void act({ kind, sessionId }).then((result) => {
     state.marking.delete(sessionId);
     if (!result.ok) {
       if (state.undoTo === back) {
@@ -1717,6 +1795,22 @@ function undoDone(sessionId) {
 function followDone() {
   const leaving = state.leaving;
   if (leaving === null) {
+    return;
+  }
+  if (leaving.mark === 'park') {
+    // F44: the first list that shows the row out of its section decides, before it is drawn and
+    // without waiting for the answer (so the list never scrolls to the row under Parked).
+    const row = state.list?.sections
+      .find((section) => section.name === leaving.section)
+      ?.rows.find((candidate) => candidate.id === leaving.sessionId);
+    if (row === undefined) {
+      leavePark(leaving);
+      return;
+    }
+    const place = placeOf(leaving.sessionId);
+    if (place !== null) {
+      Object.assign(leaving, place);
+    }
     return;
   }
   if (leaving.answered) {
@@ -1767,20 +1861,84 @@ function leaveDone() {
           .slice(0, at)
           .reverse()
           .find((id) => listed.has(id)));
-  state.undoTo = { sessionId: leaving.sessionId, at: next ?? leaving.sessionId, answered: false };
+  state.undoTo = {
+    sessionId: leaving.sessionId,
+    at: next ?? leaving.sessionId,
+    answered: false,
+    away: null,
+  };
   if (next !== undefined) {
     select(next, 'key');
   }
 }
 
-/** At each list, once the Undo's answer came: the session back, selected again (ruled). */
+/**
+ * F44 (S2 12.9, 12.15; the owner's decision): this page's `w` in the list parked the selected
+ * session, and `state.list` is the first list that shows its row out of the section it left. When
+ * the selection is still that session, it moves to the row after it in that section, else the one
+ * before it — which may be a row of Open (parking stops nothing) —, else to none (`selectNone`);
+ * the keyboard stays in the list. A selection the user moved meanwhile stays.
+ * @param {NonNullable<typeof state.leaving>} leaving
+ */
+function leavePark(leaving) {
+  state.leaving = null;
+  if (state.selected !== leaving.sessionId) {
+    return; // the user moved the selection meanwhile: it stays
+  }
+  const section = state.list?.sections.find((candidate) => candidate.name === leaving.section);
+  const listed = new Set(section?.rows.map((row) => row.id) ?? []);
+  const at = leaving.order.indexOf(leaving.sessionId);
+  const next =
+    leaving.order.slice(at + 1).find((id) => listed.has(id)) ??
+    leaving.order
+      .slice(0, at)
+      .reverse()
+      .find((id) => listed.has(id));
+  state.undoTo = {
+    sessionId: leaving.sessionId,
+    at: next ?? null,
+    answered: false,
+    away: 'parked',
+  };
+  if (next === undefined) {
+    selectNone();
+  } else {
+    select(next, 'key');
+  }
+}
+
+/**
+ * F44: no session is selected (after `w` on the only row of its section): no caption either; the
+ * most-recently-used order is kept, so that no later list selects a row by itself and Ctrl+Tab
+ * goes back to the session just parked. The zone stays.
+ */
+function selectNone() {
+  state.newOpen = false;
+  state.bringing = null;
+  state.caption = null;
+  state.selected = null;
+  sendView();
+  sendFocus();
+  render();
+}
+
+/** At each list, once the Undo's answer came: the session back, selected again (ruled); F44: after
+ *  a `w`, once its row is no longer under Parked (so the list is never sent there and back). */
 function followUndo() {
   const back = state.undoTo;
   if (back === null || !back.answered || rowOf(back.sessionId) === undefined) {
     return;
   }
+  if (back.away !== null && placeOf(back.sessionId)?.section === back.away) {
+    return;
+  }
   state.undoTo = null;
-  if (state.selected === back.at && state.selected !== back.sessionId) {
+  // Still where the `d` or `w` left it: that row, or (F44) none, no caption selected either.
+  const stayed =
+    back.at === null
+      ? state.selected === null && state.caption === null
+      : state.selected === back.at;
+  if (stayed && state.selected !== back.sessionId) {
     select(back.sessionId, 'key');
   }
 }
@@ -2475,6 +2633,20 @@ function doListKey(action, event) {
         say('no session selected');
       } else {
         markDone(row.id, true);
+      }
+      return true;
+    }
+    case 'park': {
+      // F44 (S2 12.15): park the selected session, or un-park a parked one; at the first keydown
+      // only, as `d`.
+      if (event.repeat) {
+        return true;
+      }
+      const row = selectedRow();
+      if (row === undefined) {
+        say('no session selected');
+      } else {
+        markParked(row.id, true);
       }
       return true;
     }

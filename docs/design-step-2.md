@@ -3199,7 +3199,8 @@ For the selected session: the title (a click edits the label, stage D), the grou
 `+ group` when none; its tooltip says when the group comes from the title; a ✎ beside it edits
 it), the state pill, the project directory, "opened <time> · last active <age>", the short id (a
 click copies the whole id), where the title comes from, from follow-up F16 the flags the session
-was started with (below), and buttons Note and Done / Undone. Then
+was started with (below), and buttons Note, Done / Undone and, from follow-up F44, Park / Unpark
+(12.15: tooltips `park it: it waits under Parked (w)` and `back under Open (w)`). Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
 F18 the session's ticket first (below, with its status from F19), then the window's chip (12.3),
@@ -4145,7 +4146,7 @@ session at all), never its card. The header's Done on such
 a session takes its toast from the row, since it is in no section: `Marked done. Stays under Open
 while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
 the lead on 2026-11-15). The list keys (`l`, F2,
-`g`, `n`, `t`, `p`, `d`) act only on a row the list shows: on a hidden selection, and on a selected
+`g`, `n`, `t`, `p`, `d`, from follow-up F44 `w`) act only on a row the list shows: on a hidden selection, and on a selected
 caption, they say `no session selected` and send nothing. `c` (follow-up F40) is the exception: it
 acts whenever the right side shows the carry-over bar, a hidden selection's too (after `/clear`
 the new session has a new title and often no row under a filter). A named limit: when Ctrl+Tab, a slot chord or a click on its
@@ -4166,13 +4167,40 @@ The Undo of that `d` selects the session again once it is back in the list, if t
 still where that `d` left it (the row it selected, or none); if the user moved it meanwhile, it
 stays (ruled for plan D task 37). That list decides once: a row it still has (running, under
 Open) moves nothing later either; a run of `d` marks one row each time (ruled 2026-11-15 on review 2
-of plan D task 37). The header's Done leaves the selection to the main rule. The second click of
+of plan D task 37). The header's Done leaves the selection to the main rule.
+
+**After `w`** (follow-up F44, 12.15; the owner's decision of 2026-11-24, beside the exception for
+`d` and on purpose unlike it). When this page's own `w` in the list has parked the selected session,
+the selection moves to the row after it in the section it left, else the one before it, else none
+(no row and no caption is selected, the right side shows no session, and no later list selects a
+row by itself: the most-recently-used order is kept, so Ctrl+Tab goes back to the session just
+parked and ↓ starts from the first row). Unlike `d`'s rule that row may be a row of Open: parking
+stops nothing. It is decided at the first list that shows the row out of the section it left (the
+server sends the list that carries the parking before the act's answer, and such a list proves the
+write), before that list is drawn and without waiting for the answer; when the answer comes first,
+the page asks for a list with a `view` and that list decides; a list that still has the row in its
+section is older than the write, and only the row's place in it is kept. So the list stays where it
+was: the next row is the one beside the cursor, and the parked row is never scrolled to under
+Parked. A refused `w` moves nothing; when the user moved the selection meanwhile, it stays. The
+keyboard stays in the list, so a run of `w` parks one row each and types nothing into the next
+session, also when that one runs. **`w` on a row under Parked** un-parks it and keeps the selection
+with the session: it goes back under Open (or Recent, Earlier), stays selected, and the list follows
+it there by the rule for a selected row that moved to another section (no call of its own), so a run
+of `w` under Parked is the toggle on one session (a named limit: to un-park several, move to each).
+The toast's Undo of a `w` selects the session again once it is no longer under Parked, if the
+selection is still where that `w` left it (that row, or none); moved meanwhile, it stays. The
+header's Park and Unpark leave the selection to the main rule (it stays with the session), and the
+list then scrolls to the row in its new section by that same rule. **One guard** for `w`, `d` and
+the end dialog: while this page's own `w`, `d` or end of a session has not been decided by its list
+yet, a `w`, a `d` and the dialog's two marking buttons on that session do nothing, so a second key
+on the row just marked never un-parks what `w` parked, marks done what `w` parked, or parks what `d`
+marked. The second click of
 a double click on a button of the header, or on a pull request's × in its dialog, does nothing
 (ruled for plan D task 38), nor does it on a block's caption, wherever the list has moved under
 it: such a double click opens or closes the block once, and its second click selects no row, takes
 no keyboard and resumes nothing (ruled for plan E task 97; the caption since follow-up F9, before it
 the `+n more` line and `×n`). A held
-`d` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
+`d` or `w` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
 `R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
 closed as any window. The focused zone has a
@@ -4715,7 +4743,7 @@ none: no made-up data.
   | the list | The list | every session, one row each, of this window and of any terminal; Open, Recent (the last 7 days) and Earlier; the number 1–9 is the slot |
   | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it, also with other flags (issue #188) |
   | the key bar | Where the keyboard is | `Focus: list` or `Focus: terminal`; Ctrl+Shift+L moves it; with `Focus: terminal` a letter goes to Claude Code |
-  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done; `/` filter, `a` show done |
+  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park (the version is not raised for it: the tour is not shown again); `/` filter, `a` show done |
   | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+J the next session that needs you; Ctrl+Shift+N a new one |
   | the list | After a restart | a restart of the PC or of WSL ends the running sessions; run `skydeck window` again, and the top of the list offers the ones that were open (the banner, 12.7); `Restore` brings the ticked ones back, and after `Not now` `> restore` in `Switch…` offers it again |
   | the gear | Settings and every key (step 7) | the gear opens Settings; Ctrl+Shift+H shows every key; the tour again: `Take the tour` in the key help, or `> tour` in `Switch…` |
@@ -4770,6 +4798,20 @@ by itself, at the next refresh that reads the transcript (about 2 s); a start or
 not, and neither does a key typed and not sent. The stored time stays: nothing clears it by itself.
 `unpark` brings it back at once. A session left by `/clear` stays parked, and the session the
 program goes on with is not parked: the mark is not carried (design 7.1, F40's offer is unchanged).
+
+**In the window: one key and one button, no dialog** (the owner's decisions of 2026-11-24). The
+list's key `w` ("waits", 12.9) parks the selected session, and un-parks a parked one; the header has
+the same control after Done, `Park` (tooltip `park it: it waits under Parked (w)`), `Unpark` on a
+parked row (tooltip `back under Open (w)`), 12.5. The page picks `park` or `unpark` from the row's
+`parked`. Parking a running session leaves it running; no dialog asks anything. A park shows the
+toast `Parked: listed under Parked. It comes back when you send it a prompt.` — for a running or
+starting session `Parked: listed under Parked, and it keeps running. It comes back when you send it
+a prompt.` — with Undo, which gives back what was there: `unpark`, or `done` for a session that was
+done. Both ways: the Undo after `d` on a parked session parks it again (its age starts again, a named
+limit). An un-park shows no toast and has no Undo: `w` on its row, still selected, parks it again.
+Where the selection goes after `w`, and the one guard for `w`, `d` and the end dialog, are 12.9's.
+The key help names `w` after `d`, and the tour's line of the list's keys ends `d done · w park`
+(12.14).
 
 **Where it shows.** Under Parked on every page, running or not, whatever its age, the most recently
 parked first (12.1), its row with `parked 6d` and no number (12.2); quiet (12.4, 13); ranked

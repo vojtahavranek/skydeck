@@ -292,6 +292,8 @@ describe('listKey (S2 12.9)', () => {
     ['t', ev('t', 'KeyT'), { kind: 'edit', what: 'ticket' }],
     ['p', ev('p', 'KeyP'), { kind: 'edit', what: 'pr' }],
     ['d', ev('d', 'KeyD'), { kind: 'done' }],
+    // Follow-up F44: park, or unpark a parked one.
+    ['w', ev('w', 'KeyW'), { kind: 'park' }],
   ];
   for (const [name, e, action] of table) {
     test(name, () => {
@@ -304,6 +306,17 @@ describe('listKey (S2 12.9)', () => {
     assert.deepEqual(listKey(ev('j', 'KeyC')), { kind: 'move', by: 1 });
     assert.deepEqual(listKey(ev('k', 'KeyV')), { kind: 'move', by: -1 });
     assert.equal(listKey(ev('ů', 'Semicolon')), null);
+  });
+
+  test('F44: `w` parks on a US and on a Czech (QWERTZ) layout, matched by the character; `W` is no key, nor `w` with Ctrl, Alt or Meta', () => {
+    // Both layouts type w on the same key; a Dvorak one on the physical comma key.
+    assert.deepEqual(listKey(ev('w', 'KeyW')), { kind: 'park' });
+    assert.deepEqual(listKey(ev('w', 'Comma')), { kind: 'park' });
+    assert.equal(listKey(ev('W', 'KeyW', 'shift')), null);
+    assert.equal(listKey(ev('W', 'KeyW')), null, 'Caps Lock alone');
+    for (const mod of ['ctrl', 'alt', 'meta'] as const) {
+      assert.equal(listKey(ev('w', 'KeyW', mod)), null, `${mod}+w`);
+    }
   });
 
   test('upper-case letters are not the list keys (as in step 1), but Shift+J and Shift+K (F37)', () => {
