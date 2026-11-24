@@ -2882,10 +2882,10 @@ as the ones after them.
 7. **A restart.** Write down the order and the numbers. In W: `skydeck window --restart`. Expected:
    once the window is back, the same order (the session of W included) and the same numbers, and
    each Ctrl+Shift+1…3 shows the terminal of the row that has that number.
-8. **An ended session gives its number up (follow-up F43).** First look under Open: every row of a
-   terminal of the window must have a number (from issue #189 a row without one takes a freed
-   number at once, and this step would read otherwise), so end such sessions first (`/exit`).
-   Type `/exit` in the terminal of the row numbered 1. Expected: its row goes to Recent with no number, its last screen stays on the
+8. **An ended session gives its number up (follow-up F43).** First look under Open: if a row of a
+   terminal of the window has no number, skip this step, because the freed number would go to that
+   row at once (issue #189; step 9 shows it). Type `/exit` in the terminal of the row numbered 1.
+   Expected: its row goes to Recent with no number, its last screen stays on the
    right under `claude exited (status 0)` with Resume and Close; the other rows keep their numbers;
    Ctrl+Shift+1 says `no session in slot 1`. Then Ctrl+Shift+N, the throwaway folder, label
    `move-4`, Enter: `move-4` takes the number 1 and Ctrl+Shift+1 shows its terminal. Then select

@@ -6,18 +6,17 @@
  * it. A terminal on no row of Open (its twin of the window has the row, or its row is under Recent)
  * waits until it has one.
  *
- * The row of a terminal that got a number goes to its number's place, exactly as a new terminal with
- * that number is placed (view/open-sequence.ts's rule, then the blocks, design-step-2.md 12.2), with
- * and without a kept order. Outside a group's block no other row moves. In a block it goes as a new
- * terminal of the group goes: a block whose first row it becomes comes with it, so rows that took no
- * number can move, the numbers can read out of order, and the next move hands them out again from
- * the top (renumbering terminals nobody touched). Without a kept order Open is computed by number
- * and nothing but the numbers is written; with one, the new kept order is written with the numbers
- * in one store transaction, as a move's, and adopted.
+ * Where its row goes (`orderAfterFill`): while an order is kept, a row drawn in no block goes to its
+ * number's place, exactly as a new terminal with that number is placed (view/open-sequence.ts), and
+ * a row drawn in a group's block of two or more keeps its place and only takes the number (the
+ * block's numbers can then read out of order until the next move, design-step-2.md 12.2); no other
+ * row moves. The new kept order is written with the numbers in one store transaction, as a move's,
+ * and adopted. Without a kept order nothing but the numbers is written and a hand-out never starts
+ * one: Open is computed by number as before, and a block follows its first row's number.
  *
  * The registry gives the numbers (`giveSlots`): the free ones by its one rule (`takenSlots`), only
- * to a terminal whose program may run, never to one whose number was freed (F43), and none while a
- * keeper is still being found, whose number is known only at its hello (said once in the log while
+ * to a terminal whose program may run (never to one whose number was freed or whose exit came, F43),
+ * and none while a keeper is still being found, whose number is known only at its hello (said once in the log while
  * that holds a free number back). A write that fails gives nothing: it is logged once by kind and
  * the next run tries again.
  *
@@ -53,18 +52,21 @@ export function waitingTerminals(input: FillInput): string[] {
 }
 
 /**
- * Open's kept order once the terminals of `given` hold their numbers: the order a freeze would keep
- * now (`keptNow`) without the rows of those terminals, which are then placed as rows not kept yet
- * are — a terminal with number k after the last window terminal with a lower number, before the
- * next with a higher one (view/open-sequence.ts) —, every other row at its place. A group's block
- * is then drawn where its first row stands: a block such a row heads, or one whose first row stands
- * below that row's new place, comes up with it (its other rows too, the numbers out of order); a
- * block whose first row stands above it stays where it is.
+ * Open's kept order once the terminals of `given` hold their numbers, for a hand-out while an order
+ * is kept (without one nothing is stored, and Open is computed by number). A row of such a terminal
+ * that is drawn in no block goes to its number's place, as a row not kept yet is placed — after the
+ * last window terminal with a lower number, before the next with a higher one
+ * (view/open-sequence.ts) —; one drawn in a group's block of two or more rows keeps its place and
+ * only takes its number, so the block's numbers can read out of order until the next move
+ * (design-step-2.md 12.2). Every other row keeps its place: at a hand-out the rows nobody touched
+ * never change their order among themselves. The base is the order a freeze would keep now
+ * (`keptNow`).
  */
 export function orderAfterFill(input: FillInput, given: ReadonlyMap<string, number>): string[] {
+  // The rows placed again: those of the given terminals that no block draws.
   const placed = new Set(
     openRows(input, true).flatMap((row) =>
-      row.terminal !== null && given.has(row.terminal) ? [row.id] : [],
+      row.terminal !== null && given.has(row.terminal) && row.stack === null ? [row.id] : [],
     ),
   );
   return keptNow({
@@ -129,7 +131,7 @@ export function createFill(deps: FillDeps): Fill {
   /** A refresh has worked: Open's order is known. */
   let known = false;
   /** The kind of the last failed write, so that a failure that repeats is logged once; cleared by
-   *  a run that gives a number. */
+   *  a run that gives a number or has none to give. */
   let failure: string | null = null;
   /** A run was held back by a keeper being found and said so (once, until a run gives or has
    *  nothing to give). */
@@ -170,10 +172,8 @@ export function createFill(deps: FillDeps): Fill {
           return;
         }
         held = false;
-        if (outcome === 'gave') {
-          failure = null;
-          deps.remember?.();
-        }
+        failure = null;
+        if (outcome === 'gave') deps.remember?.();
       } catch (error) {
         const kind = isBusy(error) ? 'the database is busy' : failureKind(error);
         if (failure !== kind) {

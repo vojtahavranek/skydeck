@@ -1168,26 +1168,26 @@ is known only at its `hello`, so a slot that looks free may be its own; once eve
 answered or was given up, the true gaps are filled. The server's log says once `freed numbers: none
 given while a keeper is still being found` while that holds a free slot back (a limit: a keeper that
 is never given up and never answers holds it back for as long as it is being found). Never to a
-terminal whose program ended, never started or was lost, or whose `hello` said it exited (F43). Free
-is `nextSlot`'s rule, so a slot held for another terminal (moved to a keeper being found, or held
-otherwise) is never given, and none is taken away from a terminal whose keeper only stopped
-answering. A terminal on no row of Open waits until it has one: the second terminal of the window
-that shows a session the first one has the row of (a `/resume` inside it), and a running terminal
-whose row is under Recent (its session ended a moment before its program). The row of the terminal
-that got a slot goes to its slot's place, exactly as a new terminal with that slot is placed (12.1,
-12.2), with and without a kept order: that row moves, and outside a group's block every other row
-keeps its place. In a block it goes as a new terminal of the group goes: a block whose first row it
-becomes — it headed the block, or it was a later row of a block whose first row stands below its
-slot's place — comes with it, its other rows too, so rows that took no slot can move and the slots
-can read out of order (`6 8 7`); the next move then hands the slots out again from the top and can
-renumber terminals nobody touched (12.2, 12.9). A block whose first row stands above the slot's
-place stays where it is. A given slot is kept in `window_slots` as a moved one, with Open's new kept
-order when one is kept, in one store transaction, both or neither, before it is applied; every
-window shows it, and it survives a page reload and a server restart. A write that fails gives
-nothing, is logged once by kind and is tried again at the next change or refresh; meanwhile the slot
-is free, and a new or resumed terminal may take it. Nothing is said: the number and the row's place
-are the whole effect. With more than nine terminals an ended session's slot is taken at once by a
-waiting terminal, so a later resume of that session takes another free slot, or none.
+terminal whose program ended, never started or was lost, whose exit came and waits to be applied, or
+whose `hello` said it exited (F43). Free is `nextSlot`'s rule, so a slot held for another terminal
+(moved to a keeper being found, or held otherwise) is never given, and none is taken away from a
+terminal whose keeper only stopped answering. A terminal on no row of Open waits until it has one:
+the second terminal of the window that shows a session the first one has the row of (a `/resume`
+inside it), and a running terminal whose row is under Recent (its session ended a moment before its
+program). Where its row goes: while Open's order is kept (12.1), a row drawn in no block goes to its
+slot's place, exactly as a new terminal with that slot is placed, and a row drawn in a group's block
+of two or more rows keeps its place and only takes the slot, so the block's slots can read out of
+order until the next move (12.2); every other row keeps its place, and at a hand-out the rows nobody
+touched never change their order among themselves. Without a kept order nothing is stored and a
+hand-out never starts one: Open is computed by slot as before, so the row goes to its slot's place
+and a block follows its first row's slot, as for a new terminal (12.2). A given slot is kept in
+`window_slots` as a moved one, with Open's new kept order when one is kept, in one store
+transaction, both or neither, before it is applied; every window shows it, and it survives a page
+reload and a server restart. A write that fails gives nothing, is logged once by kind and is tried
+again at the next change or refresh; meanwhile the slot is free, and a new or resumed terminal may
+take it. Nothing is said: the number and the row's place are the whole effect. With more than nine
+terminals an ended session's slot is taken at once by a waiting terminal, so a later resume of that
+session takes another free slot, or none.
 
 A moved slot is kept in the store's kv key `window_slots` (10.2): a JSON object from terminal id to
 slot, holding every live terminal whose slot is not its meta's; null (F42) is a slot a move took
@@ -2578,12 +2578,12 @@ bar at the bottom. The list has three sections:
   window terminal with a higher slot, else before the first window terminal), so that a terminal
   a block draws out of its slot's order (one without a slot, or a higher one above lower ones)
   does not stop it; one without a slot after the window's terminals, a session of another
-  terminal last. Issue #189: the row of a terminal given a freed slot (7.6) is placed again by
-  that rule, at its slot's place, also when it had a kept place; a group's block whose first row
-  it then is comes with it (12.2), and every other row keeps its place. The kept order
-  ends when a refresh sees Open empty and holds no place (every reboot, or closing every session):
-  Open is then computed again until the next move. Every window and a reloaded page show the kept
-  order, and it survives a server restart while the sessions run.
+  terminal last. Issue #189: the row of a terminal given a freed slot (7.6) that no block draws
+  is placed again by that rule, at its slot's place, also when it had a kept place; one a group's
+  block draws keeps its place and only takes the slot; every other row keeps its place. The kept
+  order ends when a refresh sees Open empty and holds no place (every reboot, or closing every
+  session): Open is then computed again until the next move. Every window and a reloaded page show
+  the kept order, and it survives a server restart while the sessions run.
 - **Recent**: not running, last activity within 7 days (a rolling 7 days, not the calendar week),
   most recent first. A row under Recent or Earlier never shows a number (follow-up F43, 7.6): an
   ended terminal has none, and a row there whose terminal still holds one for a moment (a lost
@@ -2883,9 +2883,10 @@ block gathers a later slot under its first row; the first move by hand (12.9, fo
 Open's slots out again in drawn order, and a move keeps a block together. Follow-up F42: a new row
 of a group is drawn with its block, also a block that was moved, and a block can draw a terminal
 without a slot above slotted ones (since issue #189 one that waits while all nine are held, 7.6);
-the next move hands the slots out again from the top. Issue #189: a waiting terminal of a group that
-takes a freed slot is placed as a new one with that slot (7.6), so a block whose first row it
-becomes comes along to that slot's place, and its slots can then read out of order (`6 8 7`). A row whose
+the next move hands the slots out again from the top. Issue #189: a waiting terminal drawn in a
+block that takes a freed slot keeps its place while Open's order is kept, so the block's slots can
+read out of order (`7 8 6`) until the next move; before the first move Open is computed by slot, and
+the block follows its first row's slot, as for a new terminal (7.6). A row whose
 group no other row of its section has, and a row without a group, are drawn as before; during a
 typed search (a word in the filter, 12.8) no block is formed. Under chips alone (follow-up F35) the
 blocks are formed by this rule over the rows the chips leave: a block of fewer than two of them is
