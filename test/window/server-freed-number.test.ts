@@ -64,11 +64,21 @@ function termWith(list: ListMessage, slot: number): string {
   return term;
 }
 
-/** `count` sessions resumed in order into the window's terminals: 1–9 take 1–9, the rest none. */
+/**
+ * `count` sessions resumed in order into the window's terminals: 1–9 take 1–9, the rest none.
+ * `waits`: the sessions without a number in Open's drawn order — their opening order on the wall
+ * clock, which a step back of that clock can turn around, so the cases read it from the list.
+ */
 async function resumedMany(
   t: TestContext,
   count: number,
-): Promise<{ d: ServerSandbox; server: TestServer; page: TestPage; list: ListMessage }> {
+): Promise<{
+  d: ServerSandbox;
+  server: TestServer;
+  page: TestPage;
+  list: ListMessage;
+  waits: number[];
+}> {
   const d = serverSandbox(t);
   const ids = Array.from({ length: count }, (_, at) => nth(at + 1));
   for (const id of ids) d.resumable(id);
@@ -78,14 +88,42 @@ async function resumedMany(
     const result = await page.act({ kind: 'resume', sessionId, cols: 80, rows: 24 });
     assert.equal(result.ok, true, JSON.stringify(result));
   }
-  const order = ids.map((_, at) => `${at + 1}:${at < 9 ? at + 1 : '-'}`);
-  const list = await openReads(page, order, 'every terminal opened');
-  return { d, server, page, list };
+  const numbered = ONE_TO_NINE.map((n) => `${n}:${n}`);
+  const rest = ids.slice(9).map((_, at) => `${at + 10}:-`);
+  let last: string[] = [];
+  const list = await page
+    .list((candidate) => {
+      last = openOf(candidate);
+      return (
+        JSON.stringify(last.slice(0, 9)) === JSON.stringify(numbered) &&
+        JSON.stringify(last.slice(9).sort()) === JSON.stringify([...rest].sort())
+      );
+    }, 'every terminal opened')
+    .catch(() => assert.fail(`every terminal opened: Open read ${last.join(' ')}`));
+  const waits = openOf(list)
+    .slice(9)
+    .map((entry) => Number.parseInt(entry, 10));
+  return { d, server, page, list, waits };
+}
+
+const ONE_TO_NINE = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+/** Open as `1:1 … 9:9`, then the waiting ones, with `given` (number → session) in place. */
+function openWith(waits: readonly number[], given: ReadonlyMap<number, number>): string[] {
+  const takers = new Set(given.values());
+  return [
+    ...ONE_TO_NINE.flatMap((n) => {
+      const taker = given.get(n);
+      return taker === undefined ? [`${n}:${n}`] : [`${taker}:${n}`];
+    }),
+    ...waits.filter((n) => !takers.has(n)).map((n) => `${n}:-`),
+  ];
 }
 
 describe('a freed number goes to a running terminal without one (#189)', () => {
   test("the report's case, live: two programs of twelve end, the first two waiting terminals take their numbers, at their numbers' places, on every page, after a reload and a restart", async (t) => {
-    const { d, server, page, list } = await resumedMany(t, 12);
+    const { d, server, page, list, waits } = await resumedMany(t, 12);
+    const [w1, w2] = waits as [number, number, number];
     const other = await connectTestPage(t, d, server.server);
     // At the change that frees it, not a refresh later: no list shows a free number while a
     // running terminal has none.
@@ -99,10 +137,15 @@ describe('a freed number goes to a running terminal without one (#189)', () => {
     };
     // One after the other: the number freed first goes to the first that waits.
     page.send({ t: 'input', term: termWith(list, 6), data: '/exit\r' });
-    const six = ['1:1', '2:2', '3:3', '4:4', '5:5', '10:6', '7:7', '8:8', '9:9', '11:-', '12:-'];
-    await openReads(page, six, '10 takes 6', watch);
+    await openReads(page, openWith(waits, new Map([[6, w1]])), 'the first waiting takes 6', watch);
     page.send({ t: 'input', term: termWith(list, 8), data: '/exit\r' });
-    const filled = ['1:1', '2:2', '3:3', '4:4', '5:5', '10:6', '7:7', '11:8', '9:9', '12:-'];
+    const filled = openWith(
+      waits,
+      new Map([
+        [6, w1],
+        [8, w2],
+      ]),
+    );
     const first = await openReads(page, filled, 'the gaps filled', watch);
     assert.deepEqual(seen, [], 'a list with a free number and a waiting terminal');
     assertNumbersSound(first);
@@ -117,7 +160,8 @@ describe('a freed number goes to a running terminal without one (#189)', () => {
   });
 
   test("the report's case at a server start: programs that ended while no server ran leave numbers the first refresh hands to the waiting terminals", async (t) => {
-    const { d, server, list } = await resumedMany(t, 12);
+    const { d, server, list, waits } = await resumedMany(t, 12);
+    const [w1, w2] = waits as [number, number, number];
     const programs = [6, 8].map((slot) => {
       const term = server.server.hub.list().find((one) => one.id === termWith(list, slot));
       assert.ok(term?.program !== null && term?.program !== undefined, `number ${slot} runs`);
@@ -140,48 +184,57 @@ describe('a freed number goes to a running terminal without one (#189)', () => {
     );
     const second = await d.start();
     const page = await connectTestPage(t, d, second.server);
-    const filled = ['1:1', '2:2', '3:3', '4:4', '5:5', '10:6', '7:7', '11:8', '9:9', '12:-'];
+    const filled = openWith(
+      waits,
+      new Map([
+        [6, w1],
+        [8, w2],
+      ]),
+    );
     assertNumbersSound(await openReads(page, filled, 'the gaps filled at the start'));
   });
 
   test("with a kept order (a move before): the row that takes the number goes to its number's place, every other row keeps its own, both written together; a move after hands the numbers out as before", async (t) => {
-    const { d, page, list } = await resumedMany(t, 12);
-    // 12 moved above 11: Open's order is the server's from now on; no number changes.
-    const moved = await page.act({ kind: 'reorder', sessionId: nth(12), direction: 'up' });
+    const { d, page, list, waits } = await resumedMany(t, 12);
+    const [w1, w2, w3] = waits as [number, number, number];
+    // The last waiting one moved above the one before it: Open's order is the server's from now
+    // on; no number changes.
+    const moved = await page.act({ kind: 'reorder', sessionId: nth(w3), direction: 'up' });
     assert.equal(moved.ok, true, JSON.stringify(moved));
-    const before = ['1:1', '2:2', '3:3', '4:4', '5:5', '6:6', '7:7', '8:8', '9:9', '10:-', '12:-'];
-    await openReads(page, [...before, '11:-'], '12 above 11');
+    const kept = [w1, w3, w2];
+    await openReads(page, openWith(kept, new Map()), 'the last waiting one moved up');
     page.send({ t: 'input', term: termWith(list, 6), data: '/exit\r' });
-    const filled = ['1:1', '2:2', '3:3', '4:4', '5:5', '10:6', '7:7', '8:8', '9:9', '12:-', '11:-'];
-    const after = await openReads(page, filled, '10 takes 6, at its place');
+    const filled = openWith(kept, new Map([[6, w1]]));
+    const after = await openReads(page, filled, 'the first waiting takes 6, at its place');
     assertNumbersSound(after);
-    const ten = after.terminals.find((one) => one.slot === 6)?.id ?? '';
+    const taker = after.terminals.find((one) => one.slot === 6)?.id ?? '';
     const stored = JSON.parse(d.deck.store.getKv('window_slots') ?? '{}') as Record<
       string,
       unknown
     >;
-    assert.equal(stored[ten], 6, 'the number is stored');
+    assert.equal(stored[taker], 6, 'the number is stored');
     assert.deepEqual(
       (JSON.parse(d.deck.store.getKv('window_open_order') ?? '[]') as string[]).map((id) =>
         Number.parseInt(id.slice(-12), 16),
       ),
-      [1, 2, 3, 4, 5, 10, 7, 8, 9, 12, 11],
+      [1, 2, 3, 4, 5, w1, 7, 8, 9, w3, w2],
       'and the order with it',
     );
-    // A move after: 10 down past 7, the numbers follow the order among the numbers in use.
-    const down = await page.act({ kind: 'reorder', sessionId: nth(10), direction: 'down' });
+    // A move after: it goes down past 7, the numbers follow the order among the numbers in use.
+    const down = await page.act({ kind: 'reorder', sessionId: nth(w1), direction: 'down' });
     assert.equal(down.ok, true, JSON.stringify(down));
     assertNumbersSound(
       await openReads(
         page,
-        ['1:1', '2:2', '3:3', '4:4', '5:5', '7:6', '10:7', '8:8', '9:9', '12:-', '11:-'],
-        '10 below 7',
+        ['1:1', '2:2', '3:3', '4:4', '5:5', '7:6', `${w1}:7`, '8:8', '9:9', `${w3}:-`, `${w2}:-`],
+        'it below 7',
       ),
     );
   });
 
   test('a write that fails gives nothing: the number stays free, logged once; the first refresh that works after gives it', async (t) => {
-    const { d, server, page, list } = await resumedMany(t, 11);
+    const { d, server, page, list, waits } = await resumedMany(t, 11);
+    const [w1] = waits as [number, number];
     const other = new DatabaseSync(d.deck.places.dbPath);
     other.exec('BEGIN IMMEDIATE');
     try {
@@ -206,7 +259,7 @@ describe('a freed number goes to a running terminal without one (#189)', () => {
       other.exec('ROLLBACK');
       other.close();
     }
-    const filled = ['1:1', '2:2', '3:3', '10:4', '5:5', '6:6', '7:7', '8:8', '9:9', '11:-'];
+    const filled = openWith(waits, new Map([[4, w1]]));
     assertNumbersSound(await openReads(page, filled, 'given once the store can be written'));
     const logged = server.logs().filter((line) => line.includes('freed numbers:'));
     assert.deepEqual(logged.length, 1, logged.join('\n'));
