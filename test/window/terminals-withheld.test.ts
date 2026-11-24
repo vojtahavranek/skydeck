@@ -194,6 +194,22 @@ describe('registry: withholdSlots, the call (F44)', () => {
     assert.deepEqual([slotOf(r, a), slotOf(r, b), slotOf(r, c), slotOf(r, d)], [2, 4, 3, 1]);
   });
 
+  test('two that leave in one call take slots by opening time, also when the registry lists the later opened first', async (t) => {
+    const box = await registrySandbox(t);
+    const r = box.registry({ persistSlots: store().persist });
+    const at = async (slot: number, openedNs: string): Promise<string> => {
+      const spec = box.spec({ meta: { ...box.spec().meta, slot, openedNs } });
+      await r.registry.spawn(spec);
+      noSlotTwice(r);
+      return spec.id;
+    };
+    const late = await at(1, '9000'); // listed first, opened later
+    const early = await at(2, '8000');
+    assert.equal(withhold(r, [late, early]), 'ok');
+    assert.equal(withhold(r, []), 'ok');
+    assert.deepEqual([slotOf(r, early), slotOf(r, late)], [1, 2], 'the earlier opened first');
+  });
+
   test('all nine held: a leaving terminal takes none, kept as a null entry, and that none survives a reconnect', async (t) => {
     const box = await registrySandbox(t);
     const kept = store();
@@ -340,6 +356,53 @@ describe('registry: a withheld slot over hellos (F44)', () => {
     assert.equal(slotOf(r2, a), null, 'withheld at its hello');
   });
 
+  test('a leaving terminal does not take a slot moved to a keeper still being found', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const r1 = box.registry({ persistSlots: kept.persist });
+    const a = await open(box, r1, 1);
+    const b = await open(box, r1, 2);
+    const c = await open(box, r1, 3);
+    assert.equal(
+      r1.registry.setSlots(
+        new Map([
+          [a, 2],
+          [b, 1],
+        ]),
+      ),
+      'ok',
+    );
+    assert.equal(withhold(r1, [c]), 'ok');
+    r1.drop();
+    // b, moved to 1, does not answer: the new registry keeps 1 for it while it is being found.
+    const keeper = box.keeperOf(b);
+    box.signalKeeper(keeper, 'SIGSTOP');
+    const r2 = box.registry({
+      movedSlots: kept.latest().moved,
+      withheldSlots: kept.latest().withheld,
+      persistSlots: kept.persist,
+    });
+    let found: Promise<unknown> = Promise.resolve();
+    try {
+      found = r2.registry.rediscover();
+      await until(() => r2.registry.list().length === 2, 'a and c found', 10_000);
+      assert.deepEqual([slotOf(r2, a), slotOf(r2, c)], [2, null]);
+      assert.equal(withhold(r2, []), 'ok', 'c leaves while b is being found');
+      assert.equal(slotOf(r2, c), 3, 'not 1, which is kept for b');
+    } finally {
+      box.signalKeeper(keeper, 'SIGCONT');
+    }
+    await found;
+    await until(() => r2.registry.list().length === 3, 'b found', 15_000);
+    noSlotTwice(r2);
+    assert.deepEqual([slotOf(r2, a), slotOf(r2, b), slotOf(r2, c)], [2, 1, 3]);
+    assert.equal(
+      r2.log.some((line) => line.includes("is another terminal's")),
+      false,
+      'no hello found its slot taken',
+    );
+  });
+
   test('an id kept for a keeper that is gone is pruned at the next write', async (t) => {
     const box = await registrySandbox(t);
     const kept = store({ moved: new Map(), withheld: new Set(['0123456789ab']) });
@@ -351,6 +414,28 @@ describe('registry: a withheld slot over hellos (F44)', () => {
 });
 
 describe('registry: a withheld slot and the other slot rules (F44)', () => {
+  test('setSlots refuses a swap that would give a withheld terminal a slot (the values before and after the same)', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const r = box.registry({ persistSlots: kept.persist });
+    const a = await open(box, r, 1);
+    const b = await open(box, r, 2);
+    assert.equal(withhold(r, [b]), 'ok');
+    const writes = kept.writes.length;
+    assert.equal(
+      r.registry.setSlots(
+        new Map([
+          [a, null],
+          [b, 1],
+        ]),
+      ),
+      'changed',
+    );
+    noSlotTwice(r);
+    assert.deepEqual([slotOf(r, a), slotOf(r, b)], [1, null], 'nothing changed');
+    assert.equal(kept.writes.length, writes, 'nothing written');
+  });
+
   test('setSlots refuses a slot for a withheld terminal and still moves the others', async (t) => {
     const box = await registrySandbox(t);
     const kept = store();

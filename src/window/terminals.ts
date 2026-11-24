@@ -1354,9 +1354,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
       if (terms.get(spec.id) === term) {
         term.forgotten = true;
         terms.delete(spec.id);
-        // F44: a terminal can be withheld before its keeper started (the server withholds the slot
-        // of a parked session's terminal in the step that spawns it): no id of a terminal that
-        // never came to be stays in the set or in the store.
+        // F44: a terminal can be withheld before its keeper started (the server may withhold a
+        // terminal's slot in the step that spawns it): no id of a terminal that never came to be
+        // stays in the set or in the store.
         if (withheld.delete(spec.id)) saveSlots();
         changed();
       }

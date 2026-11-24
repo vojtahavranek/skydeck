@@ -1196,7 +1196,11 @@ then id. Its moved entry is that slot when it is not its meta's, null when it ge
 has one (F42's meaning: a later `hello` keeps it without one), else none. Withholding only ever
 takes a number away and its end only ever gives one: a terminal is still opened with the lowest free
 slot in its keeper's meta, so a withheld state that is missing, late or lost (a write that failed, a
-lost entry, a restart) leaves the terminal its number by the rules above. The operation is
+lost entry, a restart) leaves the terminal its number by the rules above. A lost stored set can
+change another terminal's number, though: when a parked session's terminal and the one that took its
+freed number meet at their `hello`s with the same meta slot, the later of the two takes the lowest
+free slot (as for any doubled meta slot, logged), and that stays, also after the parked one gives
+its own up at the first refresh. The operation is
 synchronous and reads and changes the slots in one step, as a move does. It writes the moved slots
 and the set (`window_slots_withheld`, 10.2) in one store transaction before it applies anything: a
 write that throws changes nothing, is logged once by kind while it repeats, and the next call tries
@@ -1209,7 +1213,8 @@ being found stays, and one of a keeper never found again goes at the next write.
 stopping the operation changes and writes nothing (`stopping`). A terminal withheld before its
 `hello` whose spawn ends because the server is stopping leaves the set but not the store (nothing
 is written once stopping): its keeper may live, a later server finds it withheld, and that
-server's first refresh gives it its number when its session is no longer parked.
+server's first refresh gives it the lowest free slot (none while all nine are held) when its
+session is no longer parked.
 
 Who calls it, and when (F44). Whether a session is parked now is derived from the store and the
 transcripts, and the mark can be written by another process (`skydeck park`), so no act owns the
@@ -1234,7 +1239,10 @@ parked session (a resume from its row, `skydeck resume --window`) is born as any
 lowest free slot in its keeper's meta, and gives it up in the same synchronous step as the spawn:
 the registry lists it before its first await, and the call follows at once; no page is sent the
 number, and when the withholding cannot be written, or the session is un-parked first, the
-terminal simply keeps it. A parking the server has not seen yet (the command's, less than a refresh
+terminal simply keeps it. A terminal that takes a slot back in such a call (it leaves the withheld
+ones) has its session dropped from Open's kept order in the same step, as a parked session's is:
+a refresh while its write failed may have kept its row at the place of a row without a number, and
+back under Open it is placed by its number (12.1). A parking the server has not seen yet (the command's, less than a refresh
 ago) leaves the terminal its number until that refresh; a terminal whose session changed since the
 last mapping (`/clear` in it) is judged by its old session until the next refresh, and then, no
 longer a parked session's, takes the lowest free slot.
@@ -4906,7 +4914,9 @@ parked session. Back under Open while it runs (an `unpark`, a prompt, `done`), i
 free number, none while all nine are taken (then it is moved like any row without one, 12.9). Its
 terminal is otherwise untouched: it runs, and its pane shows when its row is selected. A parked
 session resumed from its row gets no number. No two terminals ever hold one number, also at a
-reconnect, a restart and a write that fails (7.6 has the rules and the races).
+reconnect, a restart and a write that fails (7.6 has the rules and the races). Back under Open it
+is placed by its number as a row that was not kept, also when the write of the numbers failed for a
+while: once its terminal takes its number, it leaves the kept order and goes to that number's place.
 
 **Where it shows.** Under Parked on every page, running or not, whatever its age, the most recently
 parked first (12.1), its row with `parked 6d` and no number (12.2); quiet (12.4, 13); ranked

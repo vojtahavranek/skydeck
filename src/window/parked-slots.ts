@@ -8,8 +8,9 @@
  *
  * `sync` withholds the slot of every terminal whose session is parked (`parkedTerminals`: its
  * session, else the one it was opened for; twins too) and gives the others theirs back; and, while
- * Open's order is kept, drops the parked sessions from it at once (12.1: back under Open such a
- * session is placed as a row that was not kept). It does nothing until `ready()` (the first refresh
+ * Open's order is kept, drops from it at once the parked sessions and the sessions whose terminal
+ * took a slot back in this call (12.1: back under Open such a session is placed as a row that was
+ * not kept, by its number). It does nothing until `ready()` (the first refresh
  * that worked has run: before it the keepers may still be looked for, and a stored withheld set
  * would be pruned against an empty registry), nothing once `stopping()`, and never throws: a
  * failure is logged once by kind. A write of the registry that fails is the registry's to log; the
@@ -44,12 +45,25 @@ export function createParkedSlots(deps: ParkedSlotsDeps): ParkedSlots {
       try {
         if (!deps.ready() || deps.stopping()) return;
         const rows = deps.rows();
-        deps.registry.withholdSlots(parkedTerminals(rows, deps.registry.list()));
+        const before = deps.registry.list();
+        const answer = deps.registry.withholdSlots(parkedTerminals(rows, before));
         if (deps.openOrder.keeps()) {
-          const parked = new Set(rows.filter((row) => row.parked).map((row) => row.id));
+          // Parked sessions leave the kept order; so does the session of every terminal that took a
+          // slot in this call (it left the withheld ones): a refresh while its write failed may
+          // have kept its row at the place of a row without a number, and back under Open it is
+          // placed as a row that was not kept, by its number (12.1).
+          const leaving = new Set(rows.filter((row) => row.parked).map((row) => row.id));
+          if (answer === 'ok') {
+            const unslotted = new Set(before.filter((term) => term.slot === null).map((t) => t.id));
+            for (const term of deps.registry.list()) {
+              if (unslotted.has(term.id) && term.slot !== null) {
+                leaving.add(term.sessionId ?? term.expectedSessionId);
+              }
+            }
+          }
           const kept = deps.openOrder.ids();
-          if (kept.some((id) => parked.has(id))) {
-            deps.openOrder.freeze(kept.filter((id) => !parked.has(id)));
+          if (kept.some((id) => leaving.has(id))) {
+            deps.openOrder.freeze(kept.filter((id) => !leaving.has(id)));
           }
         }
         failure = null;

@@ -343,6 +343,28 @@ describe('a parking and the moves around it (F44, A4, A7)', () => {
 });
 
 describe('a restart (F44, A4)', () => {
+  test('a crash after the freed number was taken: the stored withheld set is read at the start, so the terminal that took the number keeps it whatever the order of the hellos', async (t) => {
+    const { d, test, page } = await started(t, [S1, S2]);
+    const second = termOfSession(test, S2);
+    await act(page, 'park', S2);
+    await act(page, 'resume', S3);
+    await page.list(reads(['S1:1', 'S3:2']), 'S3 takes 2');
+    const third = termOfSession(test, S3);
+    await test.drop();
+    const again = await d.start();
+    const later = await connectTestPage(t, d, again.server);
+    const first = await later.list((one) => one.terminals.length === 3, 'the first list');
+    assert.deepEqual(drawn(first, 'open'), ['S1:1', 'S3:2']);
+    assert.equal(hubSlot(again, third), 2);
+    assert.equal(hubSlot(again, second), null);
+    assert.deepEqual(
+      again.logs().filter((line) => line.includes("is another terminal's")),
+      [],
+      'no hello found its slot taken',
+    );
+    noNumberTwice(again, first);
+  });
+
   test('parked: still no number after a restart; un-parked while the server was down: a number at the first list', async (t) => {
     const { d, test, page } = await started(t, [S1, S2, S3]);
     const second = termOfSession(test, S2);
@@ -482,6 +504,29 @@ describe('a write that fails (F44, A4: R-b)', () => {
       assert.equal(rowOf(list, S2)?.slot ?? null, null, 'no page was sent it while parked');
       assert.equal(list.terminals.find((x) => x.id === term)?.slot ?? null, null);
     }
+  });
+
+  test('with a kept order, un-parked while the write is held over refreshes, then released: the row takes its number and its place by that number (no other row moves)', async (t) => {
+    const write = seam();
+    const { d, page } = await started(t, [S1, S2, S3], { server: write.options });
+    await act(page, 'reorder', S3);
+    await page.list(reads(['S1:1', 'S3:2', 'S2:3']), 'the kept order');
+    await act(page, 'park', S1);
+    await page.list(reads(['S3:2', 'S2:3']), 'S1 parked');
+    write.held = true;
+    await act(page, 'unpark', S1);
+    await page.list(reads(['S3:2', 'S2:3', 'S1:-']), 'S1 back, no number');
+    await aRefresh(d, page);
+    await aRefresh(d, page);
+    assert.deepEqual(keptOrder(d).slice(0, 3), ['S3', 'S2', 'S1'], 'kept at its numberless place');
+    write.held = false;
+    await page.list(reads(['S1:1', 'S3:2', 'S2:3']), 'S1 by its number 1, first');
+    const later = await aRefresh(d, page);
+    assert.deepEqual(drawn(later, 'open'), ['S1:1', 'S3:2', 'S2:3'], 'and it stays there');
+    assert.deepEqual(
+      keptOrder(d).filter((id) => ['S1', 'S2', 'S3'].includes(id)),
+      ['S1', 'S3', 'S2'],
+    );
   });
 
   test('the mark’s own write busy (a held write lock): the act answers busy, the row stays where it was with its number, nothing is withheld', async (t) => {

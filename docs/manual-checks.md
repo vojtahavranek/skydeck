@@ -3340,9 +3340,11 @@ done, `l`, `n` and `t` open a dialog.
    selection is on `park-3` (the row after it), the key bar still says `Focus: list`, the list did
    not scroll, and `park-3`'s prompt is empty (nothing was typed into it). Ctrl+Shift+2 says `no
    session in slot 2`.
-3. **Undo.** Within 5 seconds press `Undo`. Expected: `park-2` is back under Open with the number 2,
+3. **Undo.** Click `park-2` under Parked, Ctrl+Shift+L until `Focus: list`, then `w`: it is back
+   under Open with the number 2, still selected, and no toast shows. Press `w` again and, while its
+   toast shows (5 seconds), click `Undo`. Expected: `park-2` is back under Open with the number 2,
    at its place by the number, and selected again.
-4. **The number taken.** With `park-2` selected and `Focus: list`, `w` again. Then Ctrl+Shift+N,
+4. **The number taken.** With `park-2` selected, Ctrl+Shift+L until `Focus: list`, then `w` again. Then Ctrl+Shift+N,
    the throwaway folder, label `park-4`, Enter. Expected: `park-4` takes the number 2, and
    Ctrl+Shift+2 shows its terminal.
 5. **A key typed is not a prompt; a prompt is.** Click `park-2` under Parked, Enter (its terminal
@@ -3371,10 +3373,11 @@ done, `l`, `n` and `t` open a dialog.
    each time the selection is on the next row of Open (on the last, the one before it; when Open
    is empty, none), the list did not jump, the key bar said `Focus: list` throughout, and no
    session's prompt holds a `w` or anything else you did not type.
-10. **`w` on a row under Parked.** Scroll the list so that Open's top is out of view, click the
+10. **`w` on a row under Parked.** Make the window low (drag its bottom edge up) until the list
+    scrolls, and scroll the list down so that its top (where Open is) is out of view. Click the
     middle row of Parked, then `w`. Expected: that session is back under Open with the lowest free
     number, still selected, its row scrolled into view; `Focus: list`; no toast; the other rows of
-    Parked are as they were.
+    Parked are as they were. Give the window its size back.
 11. **`/clear` in a parked session.** Click a parked session that runs, Enter (`Focus: terminal`),
     type `/clear` and Enter. Expected: within a few seconds the old session is still under Parked
     (not running), and the session Claude Code goes on with is under Open with the lowest free
