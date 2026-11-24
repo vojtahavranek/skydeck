@@ -15,23 +15,26 @@
  * one: Open is computed by number as before, and a block follows its first row's number.
  *
  * The registry gives the numbers (`giveSlots`): the free ones by its one rule (`takenSlots`), only
- * to a terminal whose program may run (never to one whose number was freed or whose exit came, F43),
- * and none while a keeper is still being found, whose number is known only at its hello (said once in the log while
+ * to a terminal whose program may run (never to one whose number was freed or whose exit came, F43)
+ * and whose number is not withheld (F44: its session is parked, so its row is under Parked, never
+ * waiting), and none while a keeper is still being found, whose number is known only at its hello (said once in the log while
  * that holds a free number back). A write that fails gives nothing: it is logged once by kind and
  * the next run tries again.
  *
  * WHEN it runs is the server's, in one place (server.ts, `fillFreedNumbers`): at every change of
  * the registry — so at each moment a number becomes free (an exit applied, a hello that says the
  * program exited, a lost terminal's program that may no longer run, the close of a lost terminal
- * that still held one) — and after every refresh that worked (the first after the start, a write
- * that failed, the end of a keeper's finding).
+ * that still held one) — but for the changes inside the setting of parked sessions' numbers (F44,
+ * parked-slots.ts), after which it runs once (a number a parking freed goes to one that waits, once
+ * the parked rows have left Open's kept order), and after every refresh that worked (the first
+ * after the start, a write that failed, the end of a keeper's finding).
  */
 import type { Store } from '../store/store.ts';
 import { failureKind } from './auth.ts';
 import { isBusy } from './busy.ts';
-import { writeMovedSlots } from './moved-slots.ts';
+import { writeMovedSlots, writeWithheldSlots } from './moved-slots.ts';
+import { writeOpenOrder } from './open-order.ts';
 import type { OpenOrder } from './open-order.ts';
-import { persistMove } from './reorder.ts';
 import type { Registry } from './terminals.ts';
 import { keptNow, openRows } from './view/build.ts';
 import type { ViewInput } from './view/build.ts';
@@ -86,9 +89,14 @@ export interface FillDeps {
   input: () => FillInput | null;
   /** Open's kept order: whether one is kept, and the fill's order adopted once it is written. */
   openOrder: Pick<OpenOrder, 'ids' | 'adopt'>;
-  /** Writes the moved numbers and, when an order is kept, Open's new kept order (null: none is),
-   *  both or neither; a throw: nothing written. */
-  persist: (moved: ReadonlyMap<string, number | null>, order: readonly string[] | null) => void;
+  /** Writes the moved numbers, the withheld terminals (F44, as the registry holds them) and, when
+   *  an order is kept, Open's new kept order (null: none is), all or none; a throw: nothing
+   *  written. */
+  persist: (
+    moved: ReadonlyMap<string, number | null>,
+    withheld: ReadonlySet<string>,
+    order: readonly string[] | null,
+  ) => void;
   /** After a fill that gave a number: the restore's memory takes Open's order; it never throws.
    *  Absent: nothing is remembered. */
   remember?: () => void;
@@ -107,17 +115,23 @@ export interface Fill {
 }
 
 /**
- * The fill's writes (S2 7.6, 10.2): the moved numbers alone (`window_slots`) while no order is kept;
- * with one, the numbers and Open's new kept order (`window_open_order`) in one store transaction,
- * both or neither, as a move's (reorder.ts's `persistMove`). A store that cannot be written throws.
+ * The fill's writes (S2 7.6, 10.2), in one store transaction, all or none: the moved numbers
+ * (`window_slots`) and the withheld terminals (`window_slots_withheld`, F44: written with the
+ * numbers at every write outside a move, so that neither write undoes the other's part) and, while
+ * an order is kept, Open's new kept order (`window_open_order`), as a move's. A store that cannot be
+ * written throws.
  */
 export function persistFill(
   store: Pick<Store, 'transaction' | 'setKv' | 'deleteKv'>,
   moved: ReadonlyMap<string, number | null>,
+  withheld: ReadonlySet<string>,
   order: readonly string[] | null,
 ): void {
-  if (order === null) writeMovedSlots(store, moved);
-  else persistMove(store, moved, order);
+  store.transaction(() => {
+    writeMovedSlots(store, moved);
+    writeWithheldSlots(store, withheld);
+    if (order !== null) writeOpenOrder(store, order);
+  });
 }
 
 /** What one run came to: a number given, nothing to give, or held back by a keeper being found. */
@@ -148,9 +162,9 @@ export function createFill(deps: FillDeps): Fill {
     if (waiting.length === 0) return 'none';
     const kept = deps.openOrder.ids().length > 0;
     let gave = false;
-    const outcome = deps.registry.giveSlots(waiting, (moved, given) => {
+    const outcome = deps.registry.giveSlots(waiting, (moved, withheld, given) => {
       const order = kept ? orderAfterFill(input, given) : null;
-      deps.persist(moved, order);
+      deps.persist(moved, withheld, order);
       if (order !== null) deps.openOrder.adopt(order); // after the write: they cannot part
       gave = true;
     });

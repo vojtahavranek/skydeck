@@ -9,6 +9,7 @@ import type {
   SectionPayload,
   TerminalPayload,
 } from '../../src/window/protocol.ts';
+import { buildListMessage } from '../../src/window/view/build.ts';
 import { MAY_START as SERVER_MAY_START } from '../../src/window/view/sections.ts';
 import {
   blockInfo,
@@ -19,7 +20,8 @@ import {
   paneFor,
   sessionRow,
 } from '../../web/pane.js';
-import { S1, S2, S3 } from '../helpers/platform.ts';
+import { ds, meta, rows } from '../helpers/derived.ts';
+import { BOOT_A, S1, S2, S3, T0 } from '../helpers/platform.ts';
 
 function row(id: string, more: Partial<RowPayload> = {}): RowPayload {
   return {
@@ -350,6 +352,77 @@ test("blockInfo (F9): a closed caption's size and needYou; an open card's size a
   assert.equal(blockInfo(null, 'open', 'G'), null);
   // A section with no closed block and no row of the group: none.
   assert.equal(blockInfo(listWith([{ name: 'week' }]), 'week', 'G'), null);
+});
+
+test("blockInfo (F44): an open block's rows are counted by the server's `needsYou`: a parked row that asks is not; the number the server's caption gives for the same block closed", () => {
+  const asks = { reason: 'asks' as const, detail: null, sinceNs: '1' };
+  const parkedRow = (id: string, more: Partial<RowPayload> = {}) =>
+    row(id, { parked: true, parkedAtNs: '1', attention: asks, needsYou: false, ...more });
+  const list = listWith([
+    {
+      name: 'parked',
+      rows: [
+        parkedRow(S1, { stack: { group: 'G', size: 3, role: 'head', head: S1 } }),
+        parkedRow(S2, { stack: { group: 'G', size: 3, role: 'member', head: S1 } }),
+        row(S3, { stack: { group: 'G', size: 3, role: 'member', head: S1 }, parked: true }),
+      ],
+    },
+  ]);
+  assert.deepEqual(blockInfo(list, 'parked', 'G'), { size: 3, needYou: 0 });
+  // Absent `needsYou` (a scripted row, a server before F44) is by `attention`.
+  const old = listWith([
+    {
+      name: 'open',
+      rows: [
+        row(S1, { stack: { group: 'G', size: 2, role: 'head', head: S1 }, attention: asks }),
+        row(S2, { stack: { group: 'G', size: 2, role: 'member', head: S1 } }),
+      ],
+    },
+  ]);
+  assert.deepEqual(blockInfo(old, 'open', 'G'), { size: 2, needYou: 1 });
+  // The server's own list: the same block open and closed says the same.
+  const sessions = rows(
+    [S1, S2].map((id) =>
+      ds({
+        id,
+        state: 'waiting',
+        holders: [
+          {
+            process: { bootId: BOOT_A, pid: id === S1 ? 1 : 2, procStart: 1 },
+            sinceNs: T0,
+            live: null,
+            scripted: false,
+          },
+        ],
+        parkedAtNs: T0,
+        parked: true,
+      }),
+    ),
+    { metas: [meta(S1, { group: 'G' }), meta(S2, { group: 'G' })] },
+  );
+  const facts = {
+    marks: new Map(),
+    live: new Map(
+      [S1, S2].map((id) => [id, { status: 'waiting', waitingFor: null, sinceNs: T0 }] as const),
+    ),
+  };
+  const base = {
+    rows: sessions,
+    terminals: [],
+    elsewhere: new Map(),
+    selected: null,
+    nowNs: T0,
+    attention: facts,
+  };
+  const view = { filter: '', unfolded: [], showDone: false, selected: null };
+  const open = buildListMessage({ ...base, view }) as unknown as ListMessage;
+  const closed = buildListMessage({
+    ...base,
+    view: { ...view, closed: [{ section: 'parked', group: 'G' }] },
+  }) as unknown as ListMessage;
+  assert.equal(open.sections.find((s) => s.name === 'parked')?.rows[0]?.attention?.reason, 'asks');
+  assert.deepEqual(blockInfo(open, 'parked', 'G'), { size: 2, needYou: 0 });
+  assert.deepEqual(blockInfo(closed, 'parked', 'G'), blockInfo(open, 'parked', 'G'));
 });
 
 // --- F40: the selection follows its terminal (S2 12.9) ------------------------------------------

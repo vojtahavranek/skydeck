@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
+import { writeOpenOrder } from '../../src/window/open-order.ts';
 import type { ListMessage } from '../../src/window/protocol.ts';
 import { stillRuns, until } from '../helpers/keeper.ts';
 import { connectTestPage, serverSandbox } from '../helpers/window.ts';
@@ -266,5 +267,45 @@ describe('a freed number goes to a running terminal without one (#189)', () => {
       logged[0]?.endsWith('freed numbers: a free number was not given (the database is busy)'),
       logged[0],
     );
+  });
+});
+
+describe('the hand-out meets Parked, on the server (F44, #189)', () => {
+  test('a parking frees its number for the first that waits, a row of a block of the kept order keeps its place; un-parked with all nine held it waits, and the next number freed goes to it at its place', async (t) => {
+    const { d, server, waits } = await resumedMany(t, 10);
+    const [w1] = waits as [number];
+    // The waiting terminal in a block with 8 (group G), and an order kept (written while the
+    // server is down, as Open draws it).
+    const nowNs = d.platform.clock.nowNs();
+    for (const n of [8, w1]) d.deck.store.updateMeta(nth(n), { group: 'G' }, nowNs);
+    await server.server.stop('the test restarts it with a kept order');
+    writeOpenOrder(d.deck.store, [1, 2, 3, 4, 5, 6, 7, 8, w1, 9].map(nth));
+    const second = await d.start();
+    const page = await connectTestPage(t, d, second.server);
+    const block = ['1:1', '2:2', '3:3', '4:4', '5:5', '6:6', '7:7', '8:8', `${w1}:-`, '9:9'];
+    let list = await openReads(page, block, 'the block of 8 and the waiting one, kept');
+
+    // Parked: 5 gives its number up, and the waiting row takes it where it stands, in its block.
+    const parked = await page.act({ kind: 'park', sessionId: nth(5) });
+    assert.equal(parked.ok, true, JSON.stringify(parked));
+    const taken = ['1:1', '2:2', '3:3', '4:4', '6:6', '7:7', '8:8', `${w1}:5`, '9:9'];
+    list = await openReads(page, taken, 'the parked number taken in the block');
+    assertNumbersSound(list);
+    assert.equal(
+      list.terminals.find((one) => one.sessionId === nth(5))?.slot,
+      null,
+      'the parked one has none',
+    );
+
+    // Un-parked with all nine held: it takes none (F44), waits, and no number is free.
+    const unparked = await page.act({ kind: 'unpark', sessionId: nth(5) });
+    assert.equal(unparked.ok, true, JSON.stringify(unparked));
+    list = await openReads(page, [...taken, '5:-'], 'un-parked, waiting');
+    assert.equal(second.server.hub.list().filter((one) => one.slot !== null).length, 9);
+
+    // The next number freed (1's program ends) goes to it, at that number's place.
+    page.send({ t: 'input', term: termWith(list, 1), data: '/exit\r' });
+    const after = ['5:1', '2:2', '3:3', '4:4', '6:6', '7:7', '8:8', `${w1}:5`, '9:9'];
+    assertNumbersSound(await openReads(page, after, 'the un-parked one takes 1'));
   });
 });

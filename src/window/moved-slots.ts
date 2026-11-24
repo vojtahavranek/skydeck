@@ -11,6 +11,8 @@ import type { Store } from '../store/store.ts';
 import type { KvKey } from '../store/types.ts';
 
 export const MOVED_SLOTS_KEY: KvKey = 'window_slots';
+/** F44 (S2 7.6, 10.2): the terminals whose slot the server withholds (their sessions are parked). */
+export const WITHHELD_SLOTS_KEY: KvKey = 'window_slots_withheld';
 
 /** A terminal id (window-terminal.ts: 6 random bytes in lowercase hex). */
 const TERMINAL_ID = /^[0-9a-f]{12}$/;
@@ -53,4 +55,37 @@ export function writeMovedSlots(
 ): void {
   if (moved.size === 0) store.deleteKv(MOVED_SLOTS_KEY);
   else store.setKv(MOVED_SLOTS_KEY, JSON.stringify(Object.fromEntries(moved)));
+}
+
+/**
+ * F44 (S2 7.6, 10.2): the terminals whose slot the server withholds, which the window keeps in the
+ * `kv` entry `window_slots_withheld`: a JSON array of terminal ids. The registry applies it at each
+ * terminal's hello (such a terminal takes no slot), so that a reconnect and a restart keep it
+ * without a slot. A value that is not JSON, or not an array, is none; of an array, the strings that
+ * are terminal ids are read, the others left out.
+ */
+export function readWithheldSlots(store: Pick<Store, 'getKv'>): Set<string> {
+  const withheld = new Set<string>();
+  const stored = store.getKv(WITHHELD_SLOTS_KEY);
+  if (stored === null) return withheld;
+  let value: unknown;
+  try {
+    value = JSON.parse(stored);
+  } catch {
+    return withheld;
+  }
+  if (!Array.isArray(value)) return withheld;
+  for (const id of value as unknown[]) {
+    if (typeof id === 'string' && TERMINAL_ID.test(id)) withheld.add(id);
+  }
+  return withheld;
+}
+
+/** Writes the withheld terminals (in id order); none removes the entry. */
+export function writeWithheldSlots(
+  store: Pick<Store, 'setKv' | 'deleteKv'>,
+  withheld: ReadonlySet<string>,
+): void {
+  if (withheld.size === 0) store.deleteKv(WITHHELD_SLOTS_KEY);
+  else store.setKv(WITHHELD_SLOTS_KEY, JSON.stringify([...withheld].sort()));
 }

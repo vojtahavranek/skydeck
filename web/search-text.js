@@ -160,15 +160,16 @@ export function highlightParts(text, found) {
 const RANK_HEADINGS = new Map([
   ['need', 'Needs you'],
   ['open', 'Open'],
+  ['parked', 'Parked'],
   ['not-running', 'Not running'],
   ['done', 'Done'],
 ]);
 
 /**
- * E9: the heading over a rank's items: `Needs you`, `Open`, `Not running`, `Done`. A rank it does
+ * E9: the heading over a rank's items: `Needs you`, `Open`, `Parked` (F44), `Not running`, `Done`. A rank it does
  * not know shows its own name, sanitised and trimmed (as list-text.js shows a section's); anything
  * that is not a string, nothing.
- * @param {string} rank `need`, `open`, `not-running` or `done`
+ * @param {string} rank `need`, `open`, `parked`, `not-running` or `done`
  * @returns {string}
  */
 export function rankHeading(rank) {

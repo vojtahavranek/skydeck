@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { main } from '../../../src/cli/main.ts';
-import { isoFromNs } from '../../../src/platform/time.ts';
+import { NS_PER_DAY, isoFromNs } from '../../../src/platform/time.ts';
 import { attachManualPr, markDone } from '../../../src/sessions/meta.ts';
 import { testContext } from '../../helpers/context.ts';
 import { testDeck } from '../../helpers/deck.ts';
@@ -187,6 +187,8 @@ test('ls --json lists the sessions in list order with the stable keys', async (t
     'hasNote',
     'continuedFrom',
     'done',
+    'parked',
+    'parkedAt',
     'prs',
   ]);
 });
@@ -211,6 +213,41 @@ test('ls --all shows a session marked done, flagged as done', async (t) => {
     [
       [S1, true],
       [S2, false],
+    ],
+  );
+});
+
+test('ls lists a parked session (F44) without --all, in its own group, with the mark and its age', async (t) => {
+  const d = twoSessions(t);
+  d.deck.store.updateMeta(S1, { group: 'ABC-1' }, T0);
+  assert.equal(await main(['park', '0b5f'], d.ctx), 0);
+  d.clock.setNs(T0 + 6n * NS_PER_DAY);
+  const parked = d.stdout().length; // the line park printed
+
+  assert.equal(await main(['ls'], d.ctx), 0);
+
+  const lines = d.stdout().slice(parked).split('\n');
+  const at = lines.findIndex((line) => line.includes('0b5f3c1e'));
+  assert.equal(lines[at - 1], 'ABC-1', 'in its own group');
+  assert.match(lines[at] ?? '', /^ {2}not-running .* {2}6d {2}parked 6d {2}0b5f3c1e$/);
+  assert.ok(!(lines.find((line) => line.includes('1c6a4d2f')) ?? '').includes('parked'));
+});
+
+test('ls --json carries parked and parkedAt (F44) for every session, the time only while parked', async (t) => {
+  const d = twoSessions(t);
+  assert.equal(await main(['park', '0b5f'], d.ctx), 0);
+  const parked = d.stdout().length; // the line park printed
+
+  assert.equal(await main(['ls', '--json'], d.ctx), 0);
+
+  const { sessions } = JSON.parse(d.stdout().slice(parked)) as {
+    sessions: { id: string; done: boolean; parked: boolean; parkedAt: string | null }[];
+  };
+  assert.deepEqual(
+    sessions.map((session) => [session.id, session.done, session.parked, session.parkedAt]),
+    [
+      [S1, false, true, isoFromNs(T0)],
+      [S2, false, false, null],
     ],
   );
 });

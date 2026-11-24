@@ -475,8 +475,9 @@ const DONE_ONLY_HIDES = [
 ];
 
 /**
- * Design 7.1 "First run", once (D20): the listed sessions that are not running and whose last
- * activity is older than firstRunDoneAfterDays may be marked as done. Nothing changes without a yes.
+ * Design 7.1 "First run", once (D20): the listed sessions that are not running, not parked (F44)
+ * and whose last activity is older than firstRunDoneAfterDays may be marked as done. Nothing
+ * changes without a yes.
  */
 async function offerFirstRun(out: Output, deck: Deck): Promise<void> {
   const { store, config } = deck;
@@ -487,7 +488,12 @@ async function offerFirstRun(out: Output, deck: Deck): Promise<void> {
   const days = config.firstRunDoneAfterDays;
   const before = now - BigInt(days) * NS_PER_DAY;
   const old = loadRows(deck).filter(
-    (row) => isListed(row, false) && row.state === 'not-running' && row.lastActivityNs < before,
+    (row) =>
+      isListed(row, false) &&
+      // F44: a parking is a mark the user set on purpose; a bulk yes must not end it.
+      !row.parked &&
+      row.state === 'not-running' &&
+      row.lastActivityNs < before,
   );
   let mark = false;
   if (old.length > 0) {

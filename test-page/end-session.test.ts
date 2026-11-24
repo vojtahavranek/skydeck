@@ -637,7 +637,8 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
       await clickRow(page, S1);
       await toZone(page, 'list');
       let n = 0;
-      for (const typed of ['do not touch the tests', 'done\n', 'd ', 'worked\n', 'fixed\n']) {
+      // No `w` in them: since F44 `w` is the list's key that parks (S2 12.15), and parks at once.
+      for (const typed of ['do not touch the tests', 'done\n', 'd ', 'used\n', 'fixed\n']) {
         await page.waitForSelector('#toast[hidden]', { state: 'attached', timeout: 15_000 });
         await toZone(page, 'list');
         for (const character of typed) {

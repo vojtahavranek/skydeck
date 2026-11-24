@@ -167,10 +167,13 @@ describe('registry: giveSlots (#189)', () => {
       changes += 1;
     });
     const writes: { moved: Map<string, number | null>; given: Map<string, number> }[] = [];
-    const outcome = r.registry.giveSlots([e, b, a, '0123456789ab', d], (moved, given) => {
-      assert.deepEqual(slotsOf(r, [b, d, e]), [null, null, null], 'written before applied');
-      writes.push({ moved: new Map(moved), given: new Map(given) });
-    });
+    const outcome = r.registry.giveSlots(
+      [e, b, a, '0123456789ab', d],
+      (moved, _withheld, given) => {
+        assert.deepEqual(slotsOf(r, [b, d, e]), [null, null, null], 'written before applied');
+        writes.push({ moved: new Map(moved), given: new Map(given) });
+      },
+    );
     assert.equal(outcome, 'ok');
     const given = new Map([
       [e, 2],
@@ -215,7 +218,7 @@ describe('registry: giveSlots (#189)', () => {
     );
     assert.deepEqual(slotsOf(r, [one, w1, w2, w3]), [null, null, null, null], 'nothing changed');
     let given: Map<string, number> | null = null;
-    r.registry.giveSlots([one, w1, w2, w3], (_moved, g) => {
+    r.registry.giveSlots([one, w1, w2, w3], (_moved, _withheld, g) => {
       given = new Map(g);
     });
     assert.deepEqual(
@@ -621,5 +624,55 @@ describe('registry: the terminals giveSlots passes over, each by its own guard (
     assert.equal(slotOf(r, id), null);
     await until(() => info(r.registry, id).state === 'ended', 'the exit applied', 10_000);
     assert.equal(slotOf(r, id), null);
+  });
+});
+
+describe('registry: the hand-out meets Parked, a withheld terminal (F44, #189)', () => {
+  test('a withheld terminal is never given a number, whatever its state; the give writes the withheld set as it is, and a later un-withholding takes the next free number, the given one kept', async (t) => {
+    const box = await registrySandbox(t);
+    const writes: { moved: Map<string, number | null>; withheld: Set<string> }[] = [];
+    const r = box.registry({
+      persistSlots: (moved, withheld) => {
+        writes.push({ moved: new Map(moved), withheld: new Set(withheld) });
+      },
+    });
+    const a = await open(box, r, 1);
+    const parked = await open(box, r, 2);
+    const waiting = await open(box, r, null);
+    assert.equal(r.registry.withholdSlots(new Set([parked])), 'ok');
+    assert.deepEqual(slotsOf(r, [a, parked, waiting]), [1, null, null]);
+    assert.equal(info(r.registry, parked).state, 'starting', 'its program may run');
+    let gave: { withheld: Set<string>; given: Map<string, number> } | null = null;
+    assert.equal(
+      r.registry.giveSlots([parked, waiting], (_moved, withheld, given) => {
+        gave = { withheld: new Set(withheld), given: new Map(given) };
+      }),
+      'ok',
+    );
+    assert.deepEqual(gave, { withheld: new Set([parked]), given: new Map([[waiting, 2]]) });
+    assert.deepEqual(slotsOf(r, [a, parked, waiting]), [1, null, 2]);
+    assert.equal(
+      r.registry.giveSlots([parked], () => {
+        assert.fail('nothing to give to a withheld terminal');
+      }),
+      'ok',
+    );
+    // Un-withheld (F44's rule): the lowest free number, 3; the given 2 stays where it went.
+    assert.equal(r.registry.withholdSlots(new Set()), 'ok');
+    assert.deepEqual(slotsOf(r, [a, parked, waiting]), [1, 3, 2]);
+    assert.deepEqual(writes.at(-1)?.withheld, new Set(), 'the withheld set written empty');
+    assert.equal(writes.at(-1)?.moved.get(waiting), 2, 'the given number kept in that write');
+  });
+
+  test('a number a withholding frees goes to the first terminal that waits, with the fill wired; the withheld one takes none', async (t) => {
+    const box = await registrySandbox(t);
+    const kept = store();
+    const r = box.registry({ persistSlots: kept.persist });
+    const { held, waits } = await openAll(box, r, ONE_TO_NINE, 2);
+    wire(box, r, kept);
+    const five = held.get(5) ?? '';
+    assert.equal(r.registry.withholdSlots(new Set([five])), 'ok');
+    assert.deepEqual(slotsOf(r, [five, ...waits]), [null, 5, null]);
+    assert.equal(kept.latest().get(waits[0] ?? ''), 5, 'written');
   });
 });

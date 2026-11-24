@@ -57,6 +57,11 @@ export interface SessionMeta {
   doneAtNs: Ns | null;
   /** F18: the ticket's address (column ticket_url, migration 3), null for none. */
   ticket: string | null;
+  /**
+   * F44: when the user parked the session (column parked_at_ns, migration 5), null for none. The
+   * stored time only: whether the session is parked now is derived (design 7.1).
+   */
+  parkedAtNs: Ns | null;
   createdNs: Ns;
   updatedNs: Ns;
 }
@@ -67,6 +72,7 @@ export interface MetaPatch {
   note?: string | null;
   doneAtNs?: Ns | null;
   ticket?: string | null;
+  parkedAtNs?: Ns | null;
 }
 
 export interface TranscriptRow {
@@ -199,6 +205,9 @@ export type KvKey =
   | 'window_update_check' // F38: the last look for a newer skydeck, of one checkout (S2 10.2, 16.5)
   | 'window_update_run' // F38: the one update started from a window, and its outcome (S2 16.5)
   | 'window_slots' // slots moved by hand: a JSON object, terminal id → slot 1–9 (S2 7.6, F37)
+  // F44 (S2 7.6): the terminals whose slot the server withholds (their sessions are parked): a JSON
+  // array of terminal ids.
+  | 'window_slots_withheld'
   // The order of Open the sessions last had in the window, per boot (the newest two): a restore's
   // order (design 7.8, F37, F42). A JSON array of { bootId, order: [<session id>, …] }; F37 wrote
   // { bootId, sessions: { <session id>: <slot> } }, still read by slot.

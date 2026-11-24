@@ -22,10 +22,14 @@ import {
   dumpDatabase,
   isTicketStatusEntry,
   schema1Database,
+  withoutParkedColumn,
 } from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
 
 const TICKET = 'https://tickets.example.com/browse/ABC-12';
+
+/** The newest schema version, as kv holds it (F44: an open goes on with migration 5). */
+const NEWEST = String(SCHEMA_VERSION);
 
 /**
  * A database at `path` as schema 3 leaves it: schema1Database's rows, then migrations 2 and 3's own
@@ -72,9 +76,12 @@ function opened(t: TestContext, path: string): Store {
 /**
  * `after` is `before` (a schema-3 database) migrated to 4: sqlite_master is as it was and holds
  * migration 4's table and its key's index besides; every row of every table is as it was, but kv
- * schema_version, which is '4'; `ticket_status` is empty.
+ * schema_version, which is the newest; `ticket_status` is empty.
  */
-function assertMigrated(before: DatabaseDump, after: DatabaseDump): void {
+function assertMigrated(before: DatabaseDump, newest: DatabaseDump): void {
+  // F44: the open goes on with migration 5, which only adds the column parked_at_ns to
+  // session_meta, NULL in every row.
+  const after = withoutParkedColumn(newest);
   assert.deepEqual(
     after.schema.filter((entry) => !isTicketStatusEntry(entry)),
     before.schema,
@@ -96,11 +103,11 @@ function assertMigrated(before: DatabaseDump, after: DatabaseDump): void {
     'no kv entry changed but schema_version',
   );
   assert.deepEqual(before.tables['kv']?.filter(version), [{ key: 'schema_version', value: '3' }]);
-  assert.deepEqual(after.tables['kv']?.filter(version), [{ key: 'schema_version', value: '4' }]);
+  assert.deepEqual(after.tables['kv']?.filter(version), [{ key: 'schema_version', value: NEWEST }]);
 }
 
 test('migration 4 creates the table ticket_status and nothing else', () => {
-  assert.equal(SCHEMA_VERSION, 4);
+  assert.ok(SCHEMA_VERSION >= 4);
   // Its text without the comments: one statement, a CREATE TABLE and no other (no index, no
   // ALTER, no data).
   const sql = (MIGRATIONS[3] ?? '').replaceAll(/--[^\n]*/g, '');
@@ -127,13 +134,13 @@ test('the fixture is a schema-3 database with a row in every table and a ticket'
   assert.equal(dump.tables['ticket_status'], undefined);
 });
 
-test('openStore migrates a schema-3 database to 4: every value kept, ticket_status is new and empty', (t) => {
+test('openStore migrates a schema-3 database to 4 (and on to the newest): every value kept, ticket_status is new and empty', (t) => {
   const path = schema3(t);
   const before = dumpDatabase(path);
 
   const store = opened(t, path);
 
-  assert.equal(store.getKv('schema_version'), '4');
+  assert.equal(store.getKv('schema_version'), NEWEST);
   assertMigrated(before, dumpDatabase(path));
   const s1 = store.meta(SCHEMA1.s1);
   assert.equal(s1?.label, 'Přehled – the old plan ✓');
@@ -158,7 +165,7 @@ test('after the migration a status is written and read; opening again changes no
   const again = opened(t, path);
 
   assert.deepEqual(dumpDatabase(path), migrated);
-  assert.equal(again.getKv('schema_version'), '4');
+  assert.equal(again.getKv('schema_version'), NEWEST);
   assert.deepEqual(again.ticketStatuses(), [
     {
       url: TICKET,

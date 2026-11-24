@@ -270,6 +270,35 @@ export function withoutTicketStatus(after: DatabaseDump): DatabaseDump {
   return { schema: after.schema.filter((entry) => !isTicketStatusEntry(entry)), tables };
 }
 
+/** What migration 5 (follow-up F44) appends to session_meta's statement in sqlite_master. */
+export const PARKED_COLUMN_SQL = ', parked_at_ns INTEGER)';
+
+/**
+ * `after` without what migration 5 added (session_meta's column `parked_at_ns`, at the end of its
+ * statement and in each row), for the tests of an older migration, after which an open goes on to
+ * the newest schema. Throws when the statement does not end in the column or a row holds a value
+ * in it: a migration makes it NULL.
+ */
+export function withoutParkedColumn(after: DatabaseDump): DatabaseDump {
+  const schema = after.schema.map((entry) => {
+    if (entry.type !== 'table' || entry.name !== 'session_meta') {
+      return entry;
+    }
+    if (entry.sql === null || !entry.sql.endsWith(PARKED_COLUMN_SQL)) {
+      throw new Error('session_meta does not end in parked_at_ns');
+    }
+    return { ...entry, sql: `${entry.sql.slice(0, -PARKED_COLUMN_SQL.length)})` };
+  });
+  const rows = (after.tables['session_meta'] ?? []).map((row) => {
+    const { parked_at_ns: parked, ...rest } = row;
+    if (parked !== null) {
+      throw new Error('parked_at_ns is not NULL');
+    }
+    return rest;
+  });
+  return { schema, tables: { ...after.tables, session_meta: rows } };
+}
+
 export interface DatabaseDump {
   schema: { type: string; name: string; sql: string | null }[];
   tables: Record<string, Record<string, unknown>[]>;

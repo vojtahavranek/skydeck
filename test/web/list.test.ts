@@ -200,6 +200,40 @@ describe('rowText: a running row has two lines', () => {
       ['done'],
     );
   });
+
+  test('a parked row (F44) has the mark `parked 6d`, its tooltip the age and what brings it back; `parked` alone when the time cannot be read', () => {
+    const text = rowText(
+      row({ state: 'working', sinceNs: ago(MIN), parked: true, parkedAtNs: ago(6n * DAY) }),
+      now,
+      null,
+    );
+    assert.deepEqual(
+      text.marks.map((mark) => [mark.kind, mark.text, mark.tip]),
+      [
+        [
+          'parked',
+          'parked 6d',
+          'parked 6d ago: it waits; a prompt in it, or w, brings it back under Open',
+        ],
+      ],
+    );
+    assert.equal(text.slot, '');
+    for (const parkedAtNs of [null, undefined, 'soon']) {
+      const plain = rowText(
+        row({ parked: true, ...(parkedAtNs === undefined ? {} : { parkedAtNs }) }),
+        now,
+        null,
+      );
+      assert.deepEqual(
+        plain.marks.map((mark) => [mark.text, mark.tip]),
+        [['parked', 'parked: it waits; a prompt in it, or w, brings it back under Open']],
+        String(parkedAtNs),
+      );
+    }
+    // Not parked (absent, false): no mark, whatever time a row carries.
+    assert.deepEqual(rowText(row({}), now, null).marks, []);
+    assert.deepEqual(rowText(row({ parked: false, parkedAtNs: ago(DAY) }), now, null).marks, []);
+  });
 });
 
 describe('rowText: a row that is not running has one line', () => {
@@ -659,6 +693,13 @@ describe('sectionText (S2 12.1)', () => {
     });
     assert.equal(sectionText(section({ name: 'week', count: 1 }), now).title, 'Recent');
     assert.equal(sectionText(section({ name: 'earlier', count: 1 }), now).title, 'Earlier');
+    // F44: Parked, with no tooltip.
+    assert.deepEqual(sectionText(section({ name: 'parked', count: 2 }), now), {
+      title: 'Parked',
+      tip: '',
+      count: '2',
+      span: '',
+    });
   });
 
   test('the key `week` is titled Recent, and only its header carries the tooltip with the exact meaning (F5)', () => {

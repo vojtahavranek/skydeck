@@ -23,6 +23,8 @@ interface Spec {
   ticket?: string;
   done?: boolean;
   open?: boolean;
+  /** F44: under Parked. */
+  parked?: boolean;
   need?: boolean;
   hiddenBy?: HiddenBy[];
 }
@@ -51,6 +53,7 @@ function candidate(spec: Spec): SwitchCandidate {
     row: rowPayload(row, { terminal: null, elsewhere: null }),
     searchable: searchable(row),
     open: spec.open ?? false,
+    ...(spec.parked === undefined ? {} : { parked: spec.parked }),
     need: spec.need ?? false,
     hiddenBy: spec.hiddenBy ?? [],
   };
@@ -106,6 +109,29 @@ test('switcherPayload: no text lists every candidate, ranked need, open, not run
     'd2:done',
   ]);
   assert.equal(payload.more, 0);
+});
+
+test("switcherPayload (F44): `parked` ranks after `open` and before `not-running`, in the candidates' order; a parked candidate that needs you is `need` only if build.ts says so", () => {
+  // build.ts gives Open's rows, then Parked's most recently parked first, then the others; and
+  // never `need` for a parked row (its `needsYou` is false).
+  const candidates = [
+    candidate({ id: 'o1', open: true }),
+    candidate({ id: 'p2', parked: true }),
+    candidate({ id: 'p1', parked: true }),
+    candidate({ id: 'r1' }),
+    candidate({ id: 'd1', done: true }),
+    candidate({ id: 'n1', need: true }),
+  ];
+  assert.deepEqual(ranked(switcherPayload('', candidates, ['n1'])), [
+    'n1:need',
+    'o1:open',
+    'p2:parked',
+    'p1:parked',
+    'r1:not-running',
+    'd1:done',
+  ]);
+  // Absent `parked` is false: the rank of stages before F44.
+  assert.deepEqual(ranked(switcherPayload('', [candidate({ id: 'r2' })], [])), ['r2:not-running']);
 });
 
 test('switcherPayload: white space only is no text: every candidate', () => {

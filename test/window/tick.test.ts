@@ -457,6 +457,47 @@ describe('reloadNow (plan D7)', () => {
     assert.equal(f.tick.rows().find((row) => row.id === S1)?.title, 'renamed', 'the next refresh');
   });
 
+  test('F44: afterReload runs after the rows were loaded and before the lists are pushed; not when the load failed', async (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    let failing = false;
+    const f = fixture(t, {
+      d,
+      deck: (deck) =>
+        deckWith(deck, {
+          store: {
+            allMeta: () => {
+              if (failing) throw busyError('database is locked');
+              return deck.store.allMeta();
+            },
+          },
+        }),
+    });
+    const seen: { title: string | undefined; pushes: number }[] = [];
+    let tick: Tick | null = null;
+    const reloading = createTick({
+      ...f.deps,
+      afterReload: () => {
+        seen.push({
+          title: tick?.rows().find((row) => row.id === S1)?.title,
+          pushes: f.pushes(),
+        });
+      },
+    });
+    tick = reloading;
+    t.after(() => reloading.stop());
+    await reloading.run();
+    assert.deepEqual(seen, [], 'not at a refresh');
+    setLabel(d.deck, S1, 'renamed');
+    const pushes = f.pushes();
+    reloading.reloadNow();
+    assert.deepEqual(seen, [{ title: 'renamed', pushes }], 'the new rows, before the push');
+    assert.equal(f.pushes(), pushes + 1);
+    failing = true;
+    reloading.reloadNow();
+    assert.equal(seen.length, 1, 'not after a load that failed');
+  });
+
   test('after stop() it loads nothing and pushes nothing', async (t) => {
     const d = testDeck(t);
     writeTranscript(d, S1);

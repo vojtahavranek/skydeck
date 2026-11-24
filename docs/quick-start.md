@@ -90,10 +90,11 @@ the tour` in the key help (Ctrl+Shift+H), or `> tour` in the quick switcher (Ctr
 
 ### Read the list
 
-The list has three sections:
+The list has four sections:
 
 - **Open**: the sessions that run, in the window or in another terminal. The small number 1–9 of a
   session in the window is its slot: Ctrl+Shift+1…9 jumps to it.
+- **Parked**: the sessions you set aside (below), running or not.
 - **Recent**: the sessions that do not run and were active in the last 7 days.
 - **Earlier**: the older ones, folded. Click its band to unfold it.
 
@@ -150,6 +151,15 @@ starts) only marks it done. The list's footer counts the hidden ones (`2 done hi
 **show**, `a` in the list or the switch **Show done** lists them again, and `d` in the list (or
 **Undone** in the header) on one of them takes the mark away. A done session that gets new activity
 comes back by itself.
+
+### Park a session that waits
+
+A session whose work went to review, or that waits for someone, need not crowd Open: press `w` in
+the list (`Focus: list`), or **Park** in the header. It moves under **Parked**, keeps running if it
+runs (its number 1-9 is free for the next session), and stays quiet (no notification, not counted as
+needing you). A message with **Undo** shows
+for 5 seconds. Send it a prompt and it comes back under Open by itself; `w` on its row (or
+**Unpark**) brings it back at once.
 
 ### Attach a pull request and a ticket
 

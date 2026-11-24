@@ -7,6 +7,7 @@ import type { TuiModel } from '../../../src/cli/tui/model.ts';
 import { render, scrolled } from '../../../src/cli/tui/render.ts';
 import { NS_PER_MINUTE } from '../../../src/platform/time.ts';
 import type { PrView } from '../../../src/sessions/list.ts';
+import { ds } from '../../helpers/derived.ts';
 import { S1, S2, S3, T0 } from '../../helpers/platform.ts';
 import { listRow } from '../../helpers/rows.ts';
 
@@ -171,6 +172,21 @@ test('the rows are cut to the width: the title gets the ellipsis', () => {
   assert.equal(lines[2], '> ' + formatRow(wide, T0, 48));
   assert.ok(lines[2]?.length === 50);
   assert.match(lines[2] ?? '', /…/);
+});
+
+test('a parked row (F44) shows its mark and its age in its line, as ls does', () => {
+  const parked = listRow({
+    id: S1,
+    title: 'waits for review',
+    state: 'not-running',
+    parked: true,
+    session: ds({ id: S1, parked: true, parkedAtNs: T0 - 6n * 24n * 60n * MIN }),
+  });
+  const lines = render(initModel([parked, R2], T0), SIZE);
+  const line = lines.find((candidate) => candidate.includes('waits for review')) ?? '';
+  assert.equal(line.slice(2), formatRow(parked, T0, 78));
+  assert.ok(line.includes('  parked 6d  '), line);
+  assert.ok(!(lines.find((candidate) => candidate.includes('beta')) ?? '').includes('parked'));
 });
 
 test('no rows: "no sessions"', () => {

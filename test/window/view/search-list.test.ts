@@ -34,6 +34,8 @@ const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
 const S5 = '4f9d7a5c-2b6e-4dae-9a7b-6c5d4e3f2a1b';
 const S6 = '5a0e8b6d-3c7f-4ebf-8b8c-7d6e5f4a3b2c';
 const NEW = '6b1f9c7e-4d8a-4fca-9c9d-8e7f6a5b4c3d';
+const P1 = '7c2a0d8f-5e9b-4adb-8dae-9f8a7b6c5d4e';
+const P2 = '8d3b1e9a-6fac-4bec-9ebf-a09b8c7d6e5f';
 
 type Message = ReturnType<typeof buildListMessage>;
 
@@ -85,6 +87,17 @@ function idle(id: string, title: string, ago: bigint, done = false): DerivedSess
     hidden: done,
     doneAtNs: done ? T0 : null,
     transcript: { aiTitle: title },
+  });
+}
+
+/** F44: a stopped session parked `parkedAgo` before NOW, last active `ago` before it. */
+function parkedIdle(id: string, title: string, ago: bigint, parkedAgo: bigint): DerivedSession {
+  return ds({
+    id,
+    lastActivityNs: NOW - ago,
+    parkedAtNs: NOW - parkedAgo,
+    parked: true,
+    transcript: { aiTitle: title, lastUserNs: NOW - ago },
   });
 }
 
@@ -505,6 +518,7 @@ test('blocks: every section carries `closedStacks`: [] with nothing closed, whil
     folded.sections.map((s) => [s.name, s.closedStacks]),
     [
       ['open', []],
+      ['parked', []],
       ['week', []],
       ['earlier', []],
     ],
@@ -528,6 +542,9 @@ test('blocks: a group in two sections is two blocks, each closed on its own (G1)
     idle(S2, 'ORB-1 fix two', 2n * MIN),
     idle(S3, 'ORB-1 fix old', 30n * DAY),
     idle(S4, 'ORB-1 fix older', 31n * DAY),
+    // F44: two parked rows of the group, a block of Parked's own.
+    parkedIdle(P1, 'ORB-1 waits', 2n * DAY, 3n * MIN),
+    parkedIdle(P2, 'ORB-1 waits too', 40n * DAY, 4n * MIN),
   ]);
   const elsewhere = new Map([
     [S5, { pid: 9005, tty: null }],
@@ -539,12 +556,14 @@ test('blocks: a group in two sections is two blocks, each closed on its own (G1)
   assert.deepEqual(ids(open, 'open'), [S5, S6]);
   assert.deepEqual(ids(open, 'week'), [S1, S2]);
   assert.deepEqual(ids(open, 'earlier'), [S3, S4]);
+  assert.deepEqual(ids(open, 'parked'), [P1, P2]);
+  assert.deepEqual(rowIn(open, P1).stack, orb({ size: 2, head: P1, role: 'head' }));
   assert.deepEqual(rowIn(open, S5).stack, orb({ size: 2, head: S5, role: 'head' }));
   assert.deepEqual(rowIn(open, S1).stack, orb({ size: 2, head: S1, role: 'head' }));
   assert.deepEqual(rowIn(open, S3).stack, orb({ size: 2, head: S3, role: 'head' }));
-  for (const name of ['open', 'week', 'earlier'] as const) {
+  for (const name of ['open', 'parked', 'week', 'earlier'] as const) {
     const one = build(shut(name, 'ORB-1'));
-    for (const other of ['open', 'week', 'earlier'] as const) {
+    for (const other of ['open', 'parked', 'week', 'earlier'] as const) {
       assert.equal(ids(one, other).length, other === name ? 0 : 2, `${name} closed, ${other}`);
       assert.equal(captions(one, other).length, other === name ? 1 : 0, `${name}, ${other}`);
       assert.equal(section(one, other).count, 2, `${name} closed, ${other}`);

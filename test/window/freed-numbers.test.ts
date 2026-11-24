@@ -269,7 +269,7 @@ function glue(
       const first = candidates[0];
       if (first === undefined || free === null) return 'ok';
       const given = new Map([[first, free]]);
-      write(new Map(given), given);
+      write(new Map(given), new Set(), given);
       events.push('changed');
       nested?.();
       return 'ok';
@@ -288,7 +288,7 @@ function glue(
         kept = ids;
       },
     },
-    persist: (moved, order) => {
+    persist: (moved, _withheld, order) => {
       if (failure !== null) throw failure;
       events.push('persist');
       persisted.push({ moved: new Map(moved), order });
@@ -448,7 +448,7 @@ describe('the fill: what it says in the log, and its writes (#189)', () => {
     ]);
   });
 
-  test('persistFill: the numbers alone without a kept order; with one, both in one transaction', () => {
+  test('persistFill: the numbers and the withheld set in one transaction, the kept order with them when there is one', () => {
     const events: string[] = [];
     const store = {
       transaction<T>(run: () => T): T {
@@ -464,10 +464,20 @@ describe('the fill: what it says in the log, and its writes (#189)', () => {
         events.push(`delete ${key}`);
       },
     };
-    persistFill(store, new Map([[term(10), 6]]), null);
-    assert.deepEqual(events, ['set window_slots'], 'no kept order: nothing of one is written');
+    persistFill(store, new Map([[term(10), 6]]), new Set(), null);
+    assert.deepEqual(
+      events,
+      ['begin', 'set window_slots', 'delete window_slots_withheld', 'commit'],
+      'no kept order: nothing of one is written',
+    );
     events.length = 0;
-    persistFill(store, new Map([[term(10), 6]]), [nth(1), nth(10)]);
-    assert.deepEqual(events, ['begin', 'set window_slots', 'set window_open_order', 'commit']);
+    persistFill(store, new Map([[term(10), 6]]), new Set([term(5)]), [nth(1), nth(10)]);
+    assert.deepEqual(events, [
+      'begin',
+      'set window_slots',
+      'set window_slots_withheld',
+      'set window_open_order',
+      'commit',
+    ]);
   });
 });
