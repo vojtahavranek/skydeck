@@ -140,14 +140,15 @@ const ONE_TO_NINE = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 /**
  * Waits until the wall clock, which a keeper's start deadline is read on, is a second past
- * `startBy`, and a second more: the keeper has then ended its program as not started. (A fixed
- * sleep is not enough where that clock runs slow or steps back.)
+ * `startBy`, and a second more: the keeper has then ended its program as not started. `Date.now()`
+ * is that clock (the platform's `nowNs()` holds its value while it steps back, #202); a fixed sleep
+ * is not enough where it runs slow or steps back.
  */
-async function pastOnTheWallClock(box: RegistryBox, startBy: bigint): Promise<void> {
+async function pastOnTheWallClock(startBy: bigint): Promise<void> {
   await until(
-    () => box.tp.platform.clock.nowNs() > startBy + 1_000_000_000n,
+    () => BigInt(Date.now()) * 1_000_000n > startBy + 1_000_000_000n,
     'past the deadline on the wall clock',
-    20_000,
+    30_000,
   );
   await sleep(1000);
 }
@@ -254,7 +255,7 @@ describe('registry: giveSlots (#189)', () => {
     const startBy = box.tp.platform.clock.nowNs() + 2_000_000_000n;
     const seven = await open(box, r1, 7, { startBy: String(startBy) });
     r1.drop();
-    await pastOnTheWallClock(box, startBy);
+    await pastOnTheWallClock(startBy);
     // Number 4's keeper does not answer: the new registry goes on finding it.
     const slow = held.get(4) ?? '';
     const keeper = box.keeperOf(slow);
@@ -341,7 +342,7 @@ describe('registry: each moment a number becomes free, with the fill wired as th
     const seven = await open(box, r1, 7, { startBy: deadline() });
     const three = await open(box, r1, 3, { startBy: deadline() });
     r1.drop();
-    await pastOnTheWallClock(box, last);
+    await pastOnTheWallClock(last);
     const r2 = box.registry({ movedSlots: kept.latest(), persistSlots: kept.persist });
     const fill = wire(box, r2, kept);
     await r2.registry.rediscover();
