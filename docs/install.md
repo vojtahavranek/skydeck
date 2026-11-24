@@ -1098,8 +1098,8 @@ you` count leaves it out and Ctrl+Shift+J skips it. Running in the window, it gi
 at once: its row and terminal show none, Ctrl+Shift+1…9 never go to it, and a terminal of the
 window that waits for a number takes it at once (else the next session you start or resume does);
 it keeps running, and its terminal shows when you select its row. Back under Open it takes the
-lowest free number, not its old one (none while all nine are in use: then it waits for the next
-number freed, and is moved like any session without one). A restore never starts it; resume it from its row (Enter), and it stays parked. It comes back under
+lowest free number, which need not be its old one (none while all nine are in use: then it waits
+for the next number freed, and is moved like any session without one). A restore never starts it; resume it from its row (Enter), and it stays parked. It comes back under
 Open by itself once you send it a prompt (in the window or in any terminal; starting or resuming it
 alone, or a key typed and not sent, does not), or with `w` on its row or `Unpark` (no toast; it stays
 selected and the list follows it). Marking a parked session done ends its parking, and its `Undo`

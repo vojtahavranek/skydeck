@@ -1177,8 +1177,8 @@ terminal whose keeper only stopped answering. Follow-up F44 meets it: a terminal
 server withholds (its session is parked, its row under Parked) never waits, whatever its state, and
 is given none; a slot a parking frees is handed out like any freed slot, once the parked sessions
 have left Open's kept order (the server gives it right after it set the parked numbers, never in the
-middle); an un-parked terminal takes the lowest free slot by F44's rule (not its old one), or waits
-while all nine are held. A give writes the withheld set as the registry holds it with the slots, so
+middle); an un-parked terminal takes the lowest free slot by F44's rule (which need not be its old
+one), or waits while all nine are held. A give writes the withheld set as the registry holds it with the slots, so
 that neither write undoes the other's part. A terminal on no row of Open waits until it has one: the
 second terminal of the window that shows a session the first one has the row of (a `/resume` inside
 it), and a running terminal whose row is under Recent (its session ended a moment before its
@@ -1232,7 +1232,7 @@ terminals beside the moved slots, and one operation, `withholdSlots(ids)`, which
 set each time: the listed terminals withheld are from then on exactly those named (an id not
 listed, and a terminal whose program is over, are ignored). One that enters gives its slot up at
 once — no slot, its moved entry gone —, so its number is the lowest free one: the first terminal
-that waits takes it (issue #189, given after this operation, below), else the next terminal
+that waits takes it (issue #189, given after this operation, above), else the next terminal
 (`nextSlot` is unchanged). One that leaves takes the lowest free slot — every listed terminal's slot
 and the slots moved to keepers still being found count as held, less those of the terminals
 entering in the same call —, none while all nine are held; several take theirs by opening time,
@@ -4967,8 +4967,9 @@ runs in a terminal of the window frees its number 1-9 at once: the terminal hold
 first terminal under Open that waits for a number takes it at once (issue #189, 7.6), else the
 next new or resumed terminal by the lowest-free rule; `Ctrl+Shift+N` never goes to a parked
 session. Back under Open while it runs (an `unpark`, a prompt, `done`), it takes the lowest free
-number, not its old one, none while all nine are taken (then it waits like any terminal without
-one, takes the next number freed, issue #189, and is moved like any row without one, 12.9). Its
+number, which need not be its old one, none while all nine are taken (then it waits like any
+terminal without one, takes the next number freed, issue #189, and is moved like any row without
+one, 12.9). Its
 terminal is otherwise untouched: it runs, and its pane shows when its row is selected. A parked
 session resumed from its row gets no number. No two terminals ever hold one number, also at a
 reconnect, a restart and a write that fails (7.6 has the rules and the races). Back under Open it
