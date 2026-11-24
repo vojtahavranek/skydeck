@@ -1917,6 +1917,19 @@ describe('a wall clock that stepped back between two events of one process (#207
     assert.deepEqual(session({ events, isAlive: () => true }, S2).holders, []);
   });
 
+  test('a process that moved on without an end (its hook lost), the move stamped before the start: the holding moved on, not ended unexpectedly', () => {
+    // The holding's end is the process's NEXT event in its order (holdingOf), not by stamp.
+    const events = [
+      start(P1, S1, T0, 'startup', undefined, up(1000n)),
+      start(P1, S2, T0 + SEC - STEP, 'clear', undefined, up(1100n)),
+    ];
+    const s1 = session({ events }, S1);
+    assert.equal(s1.lastHolding?.endDetail, 'moved-on');
+    assert.deepEqual(s1.marks, []);
+    const stamped = events.map(({ uptimeCs: _left, ...rest }) => rest);
+    assert.deepEqual(session({ events: stamped }, S1).marks, ['ended-unexpectedly'], 'before #207');
+  });
+
   test('two processes are still compared on their times (the latest holding across processes)', () => {
     // P2 ended S1 later by its stamp, though its uptime is lower than P1's: across processes,
     // time decides.

@@ -188,6 +188,9 @@ Parsing (in `src/claude/hookinput.ts`) normalises each event:
   not know is stored as its bare name: what follows it cannot be classified, and may be a prompt.
   Reconcile (5.4) applies the same rule to the command line it reads itself.
 - A file in which a key appears twice before the `--` line cannot be parsed; it goes to `spool/bad/`.
+- An `uptime` that is not seconds with two decimals (empty, when the hook could not read
+  `/proc/uptime`, or another form) gives the event no uptime; it never makes a file one that cannot
+  be parsed (#207).
   An empty `pwd`, `session_env` or `entrypoint_env` means "unknown".
 - `SessionStart.source` → kind `start` with detail `startup`, `resume`, `clear`, `compact`,
   `fork`, or `unknown` for anything else.
@@ -447,8 +450,9 @@ Marks are shown next to the state.
   transcript is not activity. The done time is the clock when it is marked, but never below the
   latest such activity already recorded (#207): after the wall clock stepped back, a start stamped
   a moment before would otherwise count as activity after it and the session would stay shown. A
-  limit: a stamp from a clock that was far ahead keeps the session hidden until the clock passes
-  it.
+  limit: a stamp from a clock that was far ahead keeps the session hidden until there is activity
+  stamped after that stamp (activity stamped before it, at the clock's true time, does not show it
+  again).
 - **Parked** (follow-up F44). Sets the session aside: alive, but not the user's to move now (it
   waits for a review, a person or another part of the work). The user parks it and un-parks it
   (`skydeck park`, `skydeck unpark`, 7.5); nothing parks by itself, and it never stops a process.

@@ -510,6 +510,34 @@ test("#207: an observed event carries the machine's uptime, and is stamped not b
   assert.equal(latest?.kind, 'observed');
 });
 
+test("#207: the process's latest event is the latest in its order, not by stamp: a /clear stamped before the start it follows is the one the live file agrees with", (t) => {
+  const d = setup(t);
+  const hook = (
+    sessionId: string,
+    source: string,
+    timeNs: Ns,
+    uptime: string,
+    seq: number,
+  ): void => {
+    const fields = {
+      event: 'SessionStart' as const,
+      timeNs,
+      uptime,
+      pid: 4242,
+      input: hookInput('SessionStart', sessionId, { source }),
+      argv: ['claude', '--model', 'opus'],
+    };
+    writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, seq)), spoolText(fields));
+  };
+  hook(S1, 'startup', T0 + 5n * SEC, '41.00', 1);
+  hook(S2, 'clear', T0 + 3n * SEC, '41.50', 2); // the wall clock stepped back between them
+  assert.equal(ingestSpool(d.deck).ingested, 2);
+  live(d, { sessionId: S2 }, T0 + 10n * SEC);
+  d.clock.advanceMs(20_000);
+
+  assert.deepEqual(reconcile(d.deck), { observed: 0 }, 'the hook spoke last: nothing observed');
+});
+
 test('#207: with the clock past every stamp, the observed event is stamped with the clock; without an uptime it has none', (t) => {
   const d = setup(t);
   hookStart(d);

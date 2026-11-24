@@ -140,7 +140,9 @@ export interface Store {
   /**
    * The latest of what makes a done session active again (design 7.1, derive's activityAfter): the
    * time of its latest `start` event with one of `details`, and the last input of any of its
-   * transcripts; null when it has neither. A done mark is stamped not below it (#207).
+   * transcripts; null when it has neither. A done mark is stamped not below it (#207). Derive
+   * compares the one transcript it chooses for the session; this takes the highest of all of its
+   * rows (a session has one in practice), which is never below that one's: the safe side.
    */
   latestActivityNs(sessionId: string, details: readonly string[]): Ns | null;
   /** All links ordered by time_ns. */
@@ -319,8 +321,9 @@ function optIntParam(value: number | null): bigint | null {
 
 /**
  * Design 5.3 "Order" in SQL (#207): the one definition every query of one process's events goes
- * through (PROCESS_RULE, PROCESS_ROWS, BEFORE_PLACE and the ORDER BY of #inProcessOrder). `processOrder` (src/sessions/process-order.ts) is the same rule in TypeScript, and a
- * test holds the two to the same answers. ?1 to ?3: the process; ?4: 1 when an event not stored
+ * through (PROCESS_RULE, PROCESS_ROWS, BEFORE_PLACE and the ORDER BY of #inProcessOrder).
+ * `processOrder` (src/sessions/process-order.ts) is the same rule in TypeScript, and a test holds
+ * the two to the same answers. ?1 to ?3: the process; ?4: 1 when an event not stored
  * yet takes part (a `ProcessPlace`), else 0; ?5 and ?6: its uptime (NULL for none) and its time.
  * `rule.byUptime` is true when every event of the process, that one included, has an uptime: then
  * the order is (uptime_cs, time_ns, id), else (time_ns, id). Read on the index events_by_process.

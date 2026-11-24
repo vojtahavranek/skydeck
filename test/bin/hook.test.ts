@@ -686,11 +686,22 @@ describe('hook: concurrency and the programs it uses', () => {
 });
 
 describe('hook: the uptime beside the time (#207, design 5.2)', () => {
-  /** The shells the hook is run with: dash, and bash run as `sh` (its POSIX mode). */
+  /**
+   * The shells the hook is run with: dash, and bash run as `sh` (its POSIX mode); `file` is where
+   * this machine has it, and a shell it does not have skips its cases, saying so.
+   */
   const SHELLS = [
-    { name: 'dash', file: '/bin/dash' },
-    { name: 'bash as sh', file: '/usr/bin/bash' },
-  ];
+    { name: 'dash', files: ['/bin/dash', '/usr/bin/dash'] },
+    { name: 'bash as sh', files: ['/usr/bin/bash', '/bin/bash'] },
+  ].map(({ name, files }) => {
+    const file = files.find((path) => existsSync(path)) ?? null;
+    return {
+      name,
+      file: file ?? '',
+      skip: file === null ? `this machine has no ${files.join(' or ')}` : false,
+    };
+  });
+  const bash = SHELLS[1] ?? { file: '', skip: 'no bash' };
 
   /**
    * The hook as it is, but reading its uptime from `path` instead of /proc/uptime (the one place
@@ -716,10 +727,10 @@ describe('hook: the uptime beside the time (#207, design 5.2)', () => {
     return { status: result.status, stdout: result.stdout, stderr: result.stderr };
   }
 
-  test('bash started as sh runs in its POSIX mode', (t) => {
+  test('bash started as sh runs in its POSIX mode', { skip: bash.skip }, (t) => {
     const s = hookSandbox(t);
     const result = spawnSync(
-      '/usr/bin/bash',
+      bash.file,
       ['-c', 'case :$SHELLOPTS: in *:posix:*) echo posix ;; esac'],
       {
         argv0: 'sh',
@@ -731,18 +742,22 @@ describe('hook: the uptime beside the time (#207, design 5.2)', () => {
   });
 
   for (const shell of SHELLS) {
-    test(`${shell.name}: the line is /proc/uptime's first field, written after time_ns`, (t) => {
-      const s = hookSandbox(t);
-      const before = uptimeCs();
-      const ran = runWith(s, shell.file, hook);
-      const after = uptimeCs();
+    test(
+      `${shell.name}: the line is /proc/uptime's first field, written after time_ns`,
+      { skip: shell.skip },
+      (t) => {
+        const s = hookSandbox(t);
+        const before = uptimeCs();
+        const ran = runWith(s, shell.file, hook);
+        const after = uptimeCs();
 
-      assertSilent(ran);
-      const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
-      const { head } = split(content);
-      assert.match(head[2] ?? '', /^time_ns=[0-9]{19}$/);
-      assertUptime(head[3], before, after);
-    });
+        assertSilent(ran);
+        const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
+        const { head } = split(content);
+        assert.match(head[2] ?? '', /^time_ns=[0-9]{19}$/);
+        assertUptime(head[3], before, after);
+      },
+    );
 
     for (const [what, make] of [
       ['a file that is not there', (_s: Sandbox): string => '/proc/no-uptime-here'],
@@ -763,27 +778,52 @@ describe('hook: the uptime beside the time (#207, design 5.2)', () => {
         },
       ],
     ] as const) {
-      test(`${shell.name}: an uptime it cannot read (${what}) is written empty; silent, exit 0, nothing logged`, (t) => {
-        if (what === 'a file it may not read' && process.getuid?.() === 0) {
-          t.skip('root reads any file');
-          return;
-        }
+      test(
+        `${shell.name}: an uptime it cannot read (${what}) is written empty; silent, exit 0, nothing logged`,
+        { skip: shell.skip },
+        (t) => {
+          if (what === 'a file it may not read' && process.getuid?.() === 0) {
+            t.skip('root reads any file');
+            return;
+          }
+          const s = hookSandbox(t);
+          const script = hookReading(s, make(s));
+          const started = performance.now();
+          const ran = runWith(s, shell.file, script);
+          const took = performance.now() - started;
+
+          assertSilent(ran);
+          const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
+          const { head, body } = split(content);
+          assert.equal(head[3], 'uptime=');
+          assert.match(head[2] ?? '', /^time_ns=[0-9]{19}$/);
+          assert.equal(head.length, 10, 'every other key as always');
+          assert.equal(body, INPUT);
+          assert.equal(
+            existsSync(join(s.skydeckHome, 'state', 'hook.log')),
+            false,
+            'nothing logged',
+          );
+          assert.ok(took < 5000, `${Math.round(took)} ms: no wait`);
+        },
+      );
+    }
+
+    test(
+      `${shell.name}: an uptime that ends in a carriage return is written empty, as any value with one`,
+      { skip: shell.skip },
+      (t) => {
         const s = hookSandbox(t);
-        const script = hookReading(s, make(s));
-        const started = performance.now();
-        const ran = runWith(s, shell.file, script);
-        const took = performance.now() - started;
+        const file = join(s.root, 'uptime-crlf');
+        writeFileSync(file, '119174.07\r\n');
+        const ran = runWith(s, shell.file, hookReading(s, file));
 
         assertSilent(ran);
         const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
-        const { head, body } = split(content);
+        const { head } = split(content);
         assert.equal(head[3], 'uptime=');
-        assert.match(head[2] ?? '', /^time_ns=[0-9]{19}$/);
-        assert.equal(head.length, 10, 'every other key as always');
-        assert.equal(body, INPUT);
-        assert.equal(existsSync(join(s.skydeckHome, 'state', 'hook.log')), false, 'nothing logged');
-        assert.ok(took < 5000, `${Math.round(took)} ms: no wait`);
-      });
-    }
+        assert.equal(content.includes('\r'), false);
+      },
+    );
   }
 });

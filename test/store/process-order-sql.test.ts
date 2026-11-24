@@ -62,20 +62,28 @@ function order(events: readonly Ordered[]): number[] {
   return processOrder(events).map((one) => one.id);
 }
 
+/** A process: boot, pid and process start (null: none recorded). */
+interface Key {
+  bootId: string;
+  pid: number;
+  procStart: number | null;
+}
+
 /**
- * The stored events of the process `pid`, made from `next`, among events of the process `pid + 1`
- * (another process of the same boot, which must change nothing).
+ * Four processes of ONE pid — two process starts, none, and the same start in another boot: a pid
+ * used again, and the shapes that must never be taken for one another — each with its own share
+ * of events without an uptime, made from `next`, stored mixed; the stored events of each.
  */
-function filled(
-  s: Store,
-  pid: number,
-  next: () => number,
-  count: number,
-  withoutUptime: number,
-): EventRow[] {
+function filled(s: Store, pid: number, next: () => number, count: number): Map<Key, EventRow[]> {
+  const keys: [Key, number][] = [
+    [{ bootId: BOOT, pid, procStart: START }, [0, 0.1, 0.5, 1][Math.floor(next() * 4)] ?? 0],
+    [{ bootId: BOOT, pid, procStart: START + 1 }, [0, 1][Math.floor(next() * 2)] ?? 0],
+    [{ bootId: BOOT, pid, procStart: null }, [0, 1][Math.floor(next() * 2)] ?? 0],
+    [{ bootId: 'boot-b', pid, procStart: START }, [0, 1][Math.floor(next() * 2)] ?? 0],
+  ];
   s.transaction(() => {
     for (let i = 0; i < count; i++) {
-      const other = next() < 0.2;
+      const [key, withoutUptime] = keys[Math.floor(next() * keys.length)]!;
       s.insertEvent(
         event({
           // Few distinct times and uptimes, so that ties are common, in no relation to each other.
@@ -83,64 +91,98 @@ function filled(
           ...(next() < withoutUptime ? {} : { uptimeCs: BigInt(Math.floor(next() * 6)) }),
           kind: next() < 0.5 ? 'start' : 'end',
           argv: next() < 0.4 ? ['claude'] : null,
-          pid: other ? pid + 1 : pid,
+          ...key,
         }),
       );
     }
   });
-  return s.events().filter((one) => one.pid === pid);
+  const all = s.events();
+  return new Map(
+    keys.map(([key]) => [
+      key,
+      all.filter(
+        (one) =>
+          one.bootId === key.bootId && one.pid === key.pid && one.procStart === key.procStart,
+      ),
+    ]),
+  );
 }
 
+const shown = (events: readonly EventRow[]): string =>
+  JSON.stringify(events.map((e) => [e.id, String(e.timeNs), String(e.uptimeCs)]));
+
 describe('the process order in SQL is the TypeScript rule (#207)', () => {
-  test('first, latest and the rule on 300 processes made at random', (t) => {
+  test('first, latest, the rule and the latest stamp on 300 x 4 processes made at random', (t) => {
     const next = random(207);
     const s = store(t);
     for (let round = 0; round < 300; round++) {
-      const PID = 1000 + 2 * round;
-      const withoutUptime = [0, 0, 0.1, 0.5, 1][round % 5] ?? 0;
-      const own = filled(s, PID, next, 1 + Math.floor(next() * 12), withoutUptime);
-      const ordered = order(own);
-      const what = `round ${round}: ${JSON.stringify(own.map((e) => [e.id, String(e.timeNs), String(e.uptimeCs)]))}`;
-      assert.equal(s.processOrderedByUptime(BOOT, PID, START), byUptime(own), what);
-      assert.equal(s.latestEventOfProcess(BOOT, PID, START, null)?.id, ordered.at(-1), what);
-      assert.equal(s.firstEventOfProcess(BOOT, PID, START)?.id, ordered[0], what);
-      // The rule is the whole process's: a subset is not ordered by its own.
-      const launches = new Set(
-        own.filter((e) => e.kind === 'start' && e.argv !== null).map((e) => e.id),
-      );
-      assert.equal(
-        s.firstEventOfProcess(BOOT, PID, START, { startWithLaunch: true })?.id,
-        ordered.find((id) => launches.has(id)),
-        what,
-      );
+      const PID = 1000 + round;
+      for (const [key, own] of filled(s, PID, next, 4 + Math.floor(next() * 30))) {
+        const { bootId, pid, procStart } = key;
+        const ordered = order(own);
+        const what = `round ${round}, ${JSON.stringify(key)}: ${shown(own)}`;
+        assert.equal(s.processOrderedByUptime(bootId, pid, procStart), byUptime(own), what);
+        assert.equal(
+          s.latestEventOfProcess(bootId, pid, procStart, null)?.id,
+          ordered.at(-1),
+          what,
+        );
+        assert.equal(s.firstEventOfProcess(bootId, pid, procStart)?.id, ordered[0], what);
+        const stamps = own.map((e) => e.timeNs);
+        assert.equal(
+          s.latestStampOfProcess(bootId, pid, procStart),
+          stamps.length === 0 ? null : stamps.reduce((a, b) => (a > b ? a : b)),
+          what,
+        );
+        // The rule is the whole process's: a subset is not ordered by its own.
+        const launches = new Set(
+          own.filter((e) => e.kind === 'start' && e.argv !== null).map((e) => e.id),
+        );
+        assert.equal(
+          s.firstEventOfProcess(bootId, pid, procStart, { startWithLaunch: true })?.id,
+          ordered.find((id) => launches.has(id)),
+          what,
+        );
+      }
     }
   });
 
-  test('the events before a place not stored yet, on 300 processes made at random', (t) => {
+  test('the events before a place not stored yet, on 300 x 4 processes made at random', (t) => {
     const next = random(202);
     const s = store(t);
     for (let round = 0; round < 300; round++) {
-      const PID = 1000 + 2 * round;
-      const own = filled(s, PID, next, 1 + Math.floor(next() * 10), [0, 0.2, 1][round % 3] ?? 0);
-      const place: ProcessPlace = {
-        timeNs: T0 + BigInt(Math.floor(next() * 7)) - 1n,
-        ...(next() < 0.8 ? { uptimeCs: BigInt(Math.floor(next() * 7)) - 1n } : {}),
-      };
-      // The place is an event stored after all of them: the highest id.
-      const placed = { id: Number.MAX_SAFE_INTEGER, ...place };
-      const ordered = order([...own, placed]);
-      const before = ordered.slice(0, ordered.indexOf(placed.id));
-      const what = `round ${round}: ${JSON.stringify(own.map((e) => [e.id, String(e.timeNs), String(e.uptimeCs)]))} place ${String(place.timeNs)} ${String(place.uptimeCs)}`;
-      assert.equal(s.latestEventOfProcess(BOOT, PID, START, place)?.id, before.at(-1), what);
-      assert.equal(s.firstEventOfProcess(BOOT, PID, START, { before: place })?.id, before[0], what);
-      const launches = new Set(
-        own.filter((e) => e.kind === 'start' && e.argv !== null).map((e) => e.id),
-      );
-      assert.equal(
-        s.firstEventOfProcess(BOOT, PID, START, { before: place, startWithLaunch: true })?.id,
-        before.find((id) => launches.has(id)),
-        what,
-      );
+      const PID = 1000 + round;
+      for (const [key, own] of filled(s, PID, next, 4 + Math.floor(next() * 24))) {
+        const { bootId, pid, procStart } = key;
+        const place: ProcessPlace = {
+          timeNs: T0 + BigInt(Math.floor(next() * 7)) - 1n,
+          ...(next() < 0.8 ? { uptimeCs: BigInt(Math.floor(next() * 7)) - 1n } : {}),
+        };
+        // The place is an event stored after all of them: the highest id.
+        const placed = { id: Number.MAX_SAFE_INTEGER, ...place };
+        const ordered = order([...own, placed]);
+        const before = ordered.slice(0, ordered.indexOf(placed.id));
+        const what = `round ${round}, ${JSON.stringify(key)}: ${shown(own)} place ${String(place.timeNs)} ${String(place.uptimeCs)}`;
+        assert.equal(
+          s.latestEventOfProcess(bootId, pid, procStart, place)?.id,
+          before.at(-1),
+          what,
+        );
+        assert.equal(
+          s.firstEventOfProcess(bootId, pid, procStart, { before: place })?.id,
+          before[0],
+          what,
+        );
+        const launches = new Set(
+          own.filter((e) => e.kind === 'start' && e.argv !== null).map((e) => e.id),
+        );
+        assert.equal(
+          s.firstEventOfProcess(bootId, pid, procStart, { before: place, startWithLaunch: true })
+            ?.id,
+          before.find((id) => launches.has(id)),
+          what,
+        );
+      }
     }
   });
 

@@ -108,7 +108,7 @@ export function discardKeptNote(deck: Deck, sessionId: string): void {
  * session active again (a start, a transcript's input): the wall clock can be behind such a stamp
  * after it stepped back, and the session would then never be hidden (#207; a parking has the same
  * rule for its input, `parkTime`). A stamp from a clock that was far ahead keeps it hidden until
- * the clock passes it.
+ * there is activity stamped after that stamp.
  */
 export function markDone(deck: Deck, sessionId: string): void {
   const now = deck.platform.clock.nowNs();
