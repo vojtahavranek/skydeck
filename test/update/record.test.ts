@@ -1,6 +1,7 @@
 // The stored outcome of the window's check for a newer skydeck, and the entry of an update started
 // from the window (F38; src/update/record.ts): the strict readers, the checkout's root, and the
-// texts as the page gets them.
+// texts as the page gets them. The check's record is of version 2 (the notes of what is new): one
+// of the shape before reads as none, and the reader of the shape before takes none of the new.
 import assert from 'node:assert/strict';
 import { mkdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
@@ -27,7 +28,41 @@ import { NEW, OLD } from '../helpers/update.ts';
 
 const ROOT = '/srv/skydeck';
 
+type Available = Extract<CheckRecord['outcome'], { kind: 'available' }>;
+
+function outcome(over: Partial<Available> = {}): Available {
+  return {
+    kind: 'available',
+    upstream: 'origin/main',
+    count: 2,
+    from: OLD,
+    to: NEW,
+    notes: [{ title: 'Parked: set a session aside', paragraphs: ['Press `w` on it.', 'More.'] }],
+    moreNotes: 0,
+    others: ['the new commit'],
+    otherCount: 1,
+    upgradesDatabase: false,
+    blocked: null,
+    ...over,
+  };
+}
+
 function available(over: Partial<CheckRecord> = {}): CheckRecord {
+  return {
+    v: 2,
+    root: ROOT,
+    lookedAtNs: '1794474000000000000',
+    checkedAtNs: '1794474000000000000',
+    fetchedAtNs: '1794474000000000000',
+    failure: null,
+    head: OLD,
+    outcome: outcome(),
+    ...over,
+  };
+}
+
+/** The record of the shape before (version 1), as the code before this change wrote it. */
+function before(outcomeBefore: Record<string, unknown>): Record<string, unknown> {
   return {
     v: 1,
     root: ROOT,
@@ -36,16 +71,29 @@ function available(over: Partial<CheckRecord> = {}): CheckRecord {
     fetchedAtNs: '1794474000000000000',
     failure: null,
     head: OLD,
-    outcome: {
-      kind: 'available',
-      upstream: 'origin/main',
-      count: 2,
-      to: NEW,
-      lines: ['2 new commits on origin/main (0123456..fedcba9):', '  fedcba9  the new commit'],
-      blocked: null,
-    },
-    ...over,
+    outcome: outcomeBefore,
   };
+}
+
+/**
+ * The strict reader of the shape before (src/update/record.ts at 789189a, the record's own keys
+ * and version), kept here to show that the code before this change reads a new record as none.
+ */
+function readerBefore(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const keys = [
+    'v',
+    'root',
+    'lookedAtNs',
+    'checkedAtNs',
+    'fetchedAtNs',
+    'failure',
+    'head',
+    'outcome',
+  ];
+  const own = Object.keys(value);
+  if (own.length !== keys.length || !keys.every((key) => Object.hasOwn(value, key))) return false;
+  return (value as { v: unknown }).v === 1;
 }
 
 describe('the check entry in kv', () => {
@@ -76,7 +124,8 @@ describe('the check entry in kv', () => {
       'not json',
       '[]',
       'null',
-      { ...good, v: 2 },
+      { ...good, v: 1 },
+      { ...good, v: 3 },
       { ...good, extra: 1 },
       { ...good, root: 5 },
       { ...good, root: '' },
@@ -94,7 +143,31 @@ describe('the check entry in kv', () => {
       { ...good, outcome: { ...good.outcome, count: '2' } },
       { ...good, outcome: { ...good.outcome, count: 0 } },
       { ...good, outcome: { ...good.outcome, to: 'fedcba9' } },
-      { ...good, outcome: { ...good.outcome, lines: ['a', 1] } },
+      { ...good, outcome: { ...good.outcome, from: null } },
+      { ...good, outcome: { ...good.outcome, lines: ['a'] } },
+      { ...good, outcome: { ...good.outcome, notes: 'x' } },
+      { ...good, outcome: { ...good.outcome, notes: [{ title: 'x' }] } },
+      { ...good, outcome: { ...good.outcome, notes: [{ title: 'x', paragraphs: [] }] } },
+      { ...good, outcome: { ...good.outcome, notes: [{ title: 1, paragraphs: ['y'] }] } },
+      { ...good, outcome: { ...good.outcome, notes: [{ title: 'x', paragraphs: ['y', 2] }] } },
+      {
+        ...good,
+        outcome: { ...good.outcome, notes: [{ title: 'x', paragraphs: ['y'], extra: 1 }] },
+      },
+      {
+        ...good,
+        outcome: {
+          ...good.outcome,
+          notes: Array.from({ length: 21 }, () => ({ title: 'x', paragraphs: ['y'] })),
+        },
+      },
+      { ...good, outcome: { ...good.outcome, moreNotes: -1 } },
+      { ...good, outcome: { ...good.outcome, moreNotes: 1.5 } },
+      { ...good, outcome: { ...good.outcome, others: [1] } },
+      { ...good, outcome: { ...good.outcome, others: Array.from({ length: 21 }, () => 'x') } },
+      { ...good, outcome: { ...good.outcome, otherCount: 3 } },
+      { ...good, outcome: { ...good.outcome, otherCount: '1' } },
+      { ...good, outcome: { ...good.outcome, upgradesDatabase: 'no' } },
       { ...good, outcome: { ...good.outcome, blocked: false } },
     ];
     for (const value of bad) {
@@ -106,21 +179,19 @@ describe('the check entry in kv', () => {
     assert.equal(readCheckEntry(d.deck.store), null);
   });
 
-  test('every line is clipped to 300 characters as it is stored', (t) => {
+  test('every line is clipped to 300 characters as it is stored, a note to 120 and 600', (t) => {
     const d = testDeck(t);
     const long = 'z'.repeat(5000);
     writeCheck(
       d.deck.store,
       available({
         failure: { atNs: '1', line: long },
-        outcome: {
-          kind: 'available',
+        outcome: outcome({
           upstream: long,
-          count: 1,
-          to: NEW,
-          lines: [long],
+          others: [long],
+          notes: [{ title: long, paragraphs: [long, 'dropped'] }],
           blocked: long,
-        },
+        }),
       }),
     );
     const read = readCheck(d.deck.store, ROOT);
@@ -128,11 +199,50 @@ describe('the check entry in kv', () => {
     for (const line of [
       read.failure?.line,
       read.outcome.upstream,
-      read.outcome.lines[0],
+      read.outcome.others[0],
       read.outcome.blocked,
     ]) {
       assert.equal(line?.length, 300);
       assert.ok(line?.endsWith('…'));
+    }
+    assert.equal(read.outcome.notes[0]?.title.length, 120);
+    assert.deepEqual(read.outcome.notes[0]?.paragraphs, [`${'z'.repeat(599)}…`]);
+  });
+});
+
+describe('the shape before (version 1) and the code before', () => {
+  test('a record of the shape before, of each outcome, reads as none (the server then makes its own check; doctor says what it says for none)', (t) => {
+    const d = testDeck(t);
+    for (const outcomeBefore of [
+      {
+        kind: 'available',
+        upstream: 'origin/main',
+        count: 2,
+        to: NEW,
+        lines: ['2 new commits on origin/main (0123456..fedcba9):', '  fedcba9  the new commit'],
+        blocked: null,
+      },
+      { kind: 'current', line: 'skydeck is up to date (main at 0123456, as origin/main)' },
+      { kind: 'cannot', line: 'no' },
+    ]) {
+      d.deck.store.setKv(CHECK_KEY, JSON.stringify(before(outcomeBefore)));
+      assert.equal(readCheckEntry(d.deck.store), null, JSON.stringify(outcomeBefore));
+      assert.equal(readCheck(d.deck.store, ROOT), null);
+    }
+  });
+
+  test('the reader of the shape before takes no record of the new one, of any outcome', (t) => {
+    const d = testDeck(t);
+    for (const record of [
+      available(),
+      available({ outcome: { kind: 'current', line: 'up to date' } }),
+      available({ outcome: { kind: 'cannot', line: 'no' } }),
+    ]) {
+      writeCheck(d.deck.store, record);
+      const stored: unknown = JSON.parse(d.deck.store.getKv(CHECK_KEY) ?? 'null');
+      assert.equal(readerBefore(stored), false);
+      // …while it took the shape it was written for.
+      assert.equal(readerBefore(before({ kind: 'cannot', line: 'no' })), true);
     }
   });
 });
@@ -223,12 +333,30 @@ describe('checkoutRoot', () => {
 });
 
 describe('checkPayload', () => {
-  test('each outcome: its state, summary, lines, to and blocked', () => {
+  test('each outcome: its state and summary; for an update its ids, the notes in runs, the other changes, the database and blocked', () => {
     assert.deepEqual(checkPayload(available()), {
       state: 'available',
       summary: '2 new commits on origin/main',
+      from: OLD,
       to: NEW,
-      lines: ['2 new commits on origin/main (0123456..fedcba9):', '  fedcba9  the new commit'],
+      upstream: 'origin/main',
+      notes: [
+        {
+          title: [{ text: 'Parked: set a session aside', code: false }],
+          paragraphs: [
+            [
+              { text: 'Press ', code: false },
+              { text: 'w', code: true },
+              { text: ' on it.', code: false },
+            ],
+            [{ text: 'More.', code: false }],
+          ],
+        },
+      ],
+      moreNotes: 0,
+      others: ['the new commit'],
+      otherCount: 1,
+      upgradesDatabase: false,
       blocked: null,
     });
     assert.deepEqual(
@@ -248,23 +376,31 @@ describe('checkPayload', () => {
     });
   });
 
-  test('texts are sanitised and clipped', () => {
+  test('texts are sanitised and clipped, a note to its limits', () => {
     const payload = checkPayload(
       available({
-        outcome: {
-          kind: 'available',
+        outcome: outcome({
           upstream: 'origin/\u001b[31mmain',
           count: 1,
-          to: NEW,
-          lines: ['a\u0007b', 'q'.repeat(400)],
+          others: ['a\u0007b', 'q'.repeat(400)],
+          notes: [
+            { title: `t\u001b[1m${'T'.repeat(200)}`, paragraphs: ['p\u0007', 'P'.repeat(700)] },
+          ],
           blocked: 'x\u001b]0;title\u0007y',
-        },
+        }),
       }),
     );
     assert.ok(payload.state === 'available');
     assert.doesNotMatch(payload.summary, /\u001b/);
-    assert.doesNotMatch(payload.lines[0] ?? '', /\u0007/);
-    assert.equal(payload.lines[1]?.length, 300);
+    assert.equal(payload.upstream, 'origin/main');
+    assert.equal(payload.others[0], 'ab');
+    assert.equal(payload.others[1]?.length, 300);
     assert.doesNotMatch(payload.blocked ?? '', /[\u001b\u0007]/);
+    const [note] = payload.notes;
+    assert.equal(note?.title[0]?.text, `t${'T'.repeat(118)}…`);
+    assert.deepEqual(
+      note?.paragraphs.map((runs) => runs.map((run) => run.text).join('')),
+      ['p', `${'P'.repeat(598)}…`],
+    );
   });
 });

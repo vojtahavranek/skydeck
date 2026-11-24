@@ -4,6 +4,8 @@
  */
 import { main } from '../../src/cli/main.ts';
 import type { Platform, RunResult } from '../../src/platform/types.ts';
+import type { CheckOutcome } from '../../src/update/record.ts';
+import type { UpdateCheckPayload } from '../../src/window/protocol.ts';
 import type { Captured } from './capture.ts';
 import { insideSandbox } from './git-checkout.ts';
 import { run } from './install.ts';
@@ -15,6 +17,45 @@ import type { Sandbox } from './sandbox.ts';
 /** HEAD before the update, and the upstream's commit after the fetch (full ids). */
 export const OLD = '0123456789abcdef0123456789abcdef01234567';
 export const NEW = 'fedcba9876543210fedcba9876543210fedcba98';
+
+type AvailableOutcome = Extract<CheckOutcome, { kind: 'available' }>;
+type AvailablePayload = Extract<UpdateCheckPayload, { state: 'available' }>;
+
+/** A stored `available` outcome (record version 2): the scripted repository's one new commit, no note. */
+export function availableOutcome(over: Partial<AvailableOutcome> = {}): AvailableOutcome {
+  return {
+    kind: 'available',
+    upstream: 'origin/main',
+    count: 1,
+    from: OLD,
+    to: NEW,
+    notes: [],
+    moreNotes: 0,
+    others: ['the new commit'],
+    otherCount: 1,
+    upgradesDatabase: false,
+    blocked: null,
+    ...over,
+  };
+}
+
+/** The page's `available` check for availableOutcome(): the same facts. */
+export function availablePayload(over: Partial<AvailablePayload> = {}): AvailablePayload {
+  return {
+    state: 'available',
+    summary: '1 new commit on origin/main',
+    from: OLD,
+    to: NEW,
+    upstream: 'origin/main',
+    notes: [],
+    moreNotes: 0,
+    others: ['the new commit'],
+    otherCount: 1,
+    upgradesDatabase: false,
+    blocked: null,
+    ...over,
+  };
+}
 
 /** The id of the i-th new commit (1 = the oldest); its short id is its first seven characters. */
 export function commitId(i: number): string {

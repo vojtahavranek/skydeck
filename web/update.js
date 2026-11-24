@@ -1,23 +1,34 @@
 // Follow-up F38 (S2 16.5, 12.1): the dialog the title bar's `Update available` opens, shown over the
 // page in the manner of stage D's dialogs (web/edit.js, edit.css; modal: app.js makes the page
 // inert under it, D2). It asks the server to look again without the network (`act update-look`),
-// so that what it says is true now, and draws the answer: `skydeck update --check`'s lines, one per
-// line, and the command to run in a terminal (web/update-text.js), or why the update cannot be
-// applied as the checkout is, or why skydeck cannot tell. `Close` has the keyboard from the start;
-// for an update that can be applied as it is, `Update now` stands before it (milestone 2) and
-// sends `act update-apply` with the commit the dialog drew; a refusal is drawn under the lines.
-// While it is shown an `update` message draws the answer again.
+// so that what it says is true now, and draws the answer (web/update-text.js's dialogModel): the
+// notes of what is new the update brings, the fold of its other changes (a button: a click, Enter
+// or Space opens and closes the list under it; folded at every open, open from the start when the
+// update brings no note), the database note, why it cannot be applied as the checkout is, and
+// small at the bottom the commits and the command for a terminal; or why skydeck cannot tell. The
+// body scrolls inside the dialog, its heading and buttons stay in view. `Close` has the keyboard
+// from the start; for an update that can be applied as it is, `Update now` stands before it
+// (milestone 2) and sends `act update-apply` with the commit the dialog drew; a refusal is drawn
+// under the answer. While it is shown an `update` message draws the answer again (the fold as the
+// user left it).
 //
 // Milestone 2's running form (`running`): while an update runs, every connected page shows the
 // dialog with one line and no button; Esc does not close it. app.js lifts it when the connection
 // is lost or ends fatal and at every welcome.
 //
-// It decides nothing (S2 4.3): what is known is the server's. Keys come from app.js's capture
-// phase (`key`): Esc closes; Tab and Shift+Tab go round the buttons. Every text reaches the DOM as
-// text.
+// It decides nothing (S2 4.3): what is known, the notes and their code runs are the server's. Keys
+// come from app.js's capture phase (`key`): Esc closes; Tab and Shift+Tab go round the fold line
+// and the buttons. Every text reaches the DOM as text.
 
-/** @import { ResultMessage, UpdatePayload } from '../src/window/protocol.ts' */
-import { dialogLines, offersUpdateNow, runningLine, UPDATE_TEXTS } from './update-text.js';
+/** @import { ResultMessage, TextRun, UpdatePayload } from '../src/window/protocol.ts' */
+/** @import { DialogBlock, DialogModel } from './update-text.js' */
+import {
+  dialogModel,
+  lineModel,
+  offersUpdateNow,
+  runningRuns,
+  UPDATE_TEXTS,
+} from './update-text.js';
 
 /**
  * @typedef {object} UpdateDialogDeps
@@ -55,9 +66,19 @@ export function createUpdateDialog(root, deps) {
   box.setAttribute('aria-describedby', 'update-dialog-lines');
   const heading = element('div', 'edit-heading update-heading', UPDATE_TEXTS.heading);
   heading.id = 'update-dialog-heading';
-  const lines = element('div', 'update-lines');
+  const lines = element('div', 'update-body');
   lines.id = 'update-dialog-lines';
   lines.setAttribute('aria-live', 'polite');
+  const before = element('div', 'update-before');
+  const fold = /** @type {HTMLButtonElement} */ (element('button', 'update-fold'));
+  fold.type = 'button';
+  fold.hidden = true;
+  const others = element('ul', 'update-others');
+  others.id = 'update-dialog-others';
+  others.hidden = true;
+  fold.setAttribute('aria-controls', others.id);
+  const after = element('div', 'update-after');
+  lines.append(before, fold, others, after);
   const close = /** @type {HTMLButtonElement} */ (
     element('button', 'update-close', UPDATE_TEXTS.close)
   );
@@ -82,25 +103,85 @@ export function createUpdateDialog(root, deps) {
   let offered = /** @type {string | null} */ (null);
   /** Milestone 2: the running form is shown. */
   let runningForm = false;
+  /** The body drawn last (the fold is drawn again from it). */
+  let model = /** @type {DialogModel} */ (lineModel(''));
+  /** The fold as the user set it in this open; null: as the body says (folded, or open with no note). */
+  let foldOpen = /** @type {boolean | null} */ (null);
 
-  /** @param {string[]} texts */
-  const draw = (texts) => {
-    lines.replaceChildren(
-      ...texts.map((text) => {
-        const line = element('div', 'update-line');
-        line.textContent = text;
-        return line;
-      }),
+  /**
+   * Runs as nodes: a code run in the terminal's font, the rest as text.
+   * @param {HTMLElement} into
+   * @param {TextRun[]} runs
+   */
+  const fill = (into, runs) => {
+    into.append(
+      ...runs.map((run) =>
+        run.code ? element('code', 'update-code', run.text) : document.createTextNode(run.text),
+      ),
     );
+    return into;
+  };
+
+  /**
+   * @param {DialogBlock} block
+   * @returns {HTMLElement}
+   */
+  const blockElement = (block) => {
+    if (block.kind === 'note') {
+      const note = element('div', 'update-note');
+      note.append(
+        fill(element('div', 'update-note-title'), block.title),
+        ...block.paragraphs.map((runs) => fill(element('p', 'update-note-text'), runs)),
+      );
+      return note;
+    }
+    if (block.kind === 'database') {
+      const marked = element('div', 'update-database');
+      const mark = element('span', 'update-database-mark', '!');
+      mark.setAttribute('aria-hidden', 'true');
+      marked.append(mark, fill(element('span', 'update-database-text'), block.runs));
+      return marked;
+    }
+    return fill(element('div', block.kind === 'meta' ? 'update-meta' : 'update-line'), block.runs);
+  };
+
+  /** The fold line and its list, as `model` and the user's choice say. */
+  const drawFold = () => {
+    const shown = model.fold;
+    const had = document.activeElement === fold;
+    fold.hidden = shown === null;
+    if (shown === null) {
+      others.hidden = true;
+      others.replaceChildren();
+      if (had) {
+        close.focus();
+      }
+      return;
+    }
+    const open = foldOpen ?? shown.openAtStart;
+    const mark = element('span', 'update-fold-mark', open ? '▾' : '▸');
+    mark.setAttribute('aria-hidden', 'true');
+    fold.replaceChildren(mark, document.createTextNode(` ${shown.label}`));
+    fold.setAttribute('aria-expanded', String(open));
+    others.hidden = !open;
+    others.replaceChildren(...shown.items.map((item) => element('li', 'update-other', item)));
+  };
+
+  /** @param {DialogModel} next */
+  const draw = (next) => {
+    model = next;
+    before.replaceChildren(...next.before.map(blockElement));
+    after.replaceChildren(...next.after.map(blockElement));
+    drawFold();
   };
 
   /**
    * The look's answer drawn, `Update now` offered for an update that can be applied as it is.
    * @param {UpdatePayload} update
-   * @param {string[]} [after] lines under the answer (a refusal of `Update now`)
+   * @param {string | null} [refusal] under the answer: why `Update now` was refused
    */
-  const drawAnswer = (update, after = []) => {
-    draw([...dialogLines(update.check), ...after]);
+  const drawAnswer = (update, refusal = null) => {
+    draw(dialogModel(update.check, refusal));
     const check = update.check;
     offered =
       check !== null && check.state === 'available' && offersUpdateNow(check) ? check.to : null;
@@ -110,6 +191,15 @@ export function createUpdateDialog(root, deps) {
       close.focus();
     }
   };
+
+  // The fold: a click (or Enter or Space on it, a button's own) opens or closes the list.
+  fold.addEventListener('click', () => {
+    if (!shown || runningForm || model.fold === null) {
+      return;
+    }
+    foldOpen = !(foldOpen ?? model.fold.openAtStart);
+    drawFold();
+  });
 
   const hide = () => {
     if (!shown) {
@@ -133,6 +223,7 @@ export function createUpdateDialog(root, deps) {
   close.addEventListener('click', hide);
   // A click acts without moving the keyboard off `Close` (D17).
   close.addEventListener('mousedown', (event) => event.preventDefault());
+  fold.addEventListener('mousedown', (event) => event.preventDefault());
   updateNow.addEventListener('mousedown', (event) => event.preventDefault());
   // Milestone 2: the second click. The server looks again and refuses what it does not list; its
   // `applying` brings the running form (app.js), a refusal is drawn under the answer.
@@ -153,13 +244,13 @@ export function createUpdateDialog(root, deps) {
       }
       const why = result.error ?? 'skydeck could not start the update';
       if (result.update === undefined) {
-        draw([why]);
+        draw(lineModel(why));
         offered = null;
         updateNow.hidden = true;
         close.focus();
         return;
       }
-      drawAnswer(result.update, [why]);
+      drawAnswer(result.update, why);
     });
   });
   scrim.addEventListener('mousedown', (event) => event.preventDefault());
@@ -172,9 +263,10 @@ export function createUpdateDialog(root, deps) {
       }
       shown = true;
       answered = false;
+      foldOpen = null; // folded at every open
       opens++;
       const open = opens;
-      draw([UPDATE_TEXTS.looking]);
+      draw(lineModel(UPDATE_TEXTS.looking));
       root.hidden = false;
       close.focus();
       void deps.act({ kind: 'update-look' }).then((result) => {
@@ -182,7 +274,7 @@ export function createUpdateDialog(root, deps) {
           return;
         }
         if (result.update === undefined) {
-          draw([result.error ?? 'skydeck could not look for an update']);
+          draw(lineModel(result.error ?? 'skydeck could not look for an update'));
           return;
         }
         answered = true;
@@ -219,7 +311,7 @@ export function createUpdateDialog(root, deps) {
       runningForm = true;
       answered = false;
       offered = null;
-      draw([runningLine(applying.to)]);
+      draw(lineModel(runningRuns(applying.to)));
       updateNow.hidden = true;
       close.hidden = true;
       box.focus();
@@ -228,7 +320,7 @@ export function createUpdateDialog(root, deps) {
     runningShown: () => shown && runningForm,
     /**
      * A keydown while shown, from app.js's capture phase: true when the dialog took it — Esc
-     * closes, Tab and Shift+Tab keep the keyboard on `Close`.
+     * closes, Tab and Shift+Tab go round the fold line, `Update now` and `Close` (those shown).
      * @param {KeyboardEvent} event
      * @returns {boolean}
      */
@@ -250,13 +342,15 @@ export function createUpdateDialog(root, deps) {
       if (event.key === 'Tab') {
         event.preventDefault();
         event.stopPropagation();
-        if (runningForm) {
+        const round = [fold, updateNow, close].filter((button) => !button.hidden);
+        if (runningForm || round.length === 0) {
           box.focus();
-        } else if (!updateNow.hidden && document.activeElement === close) {
-          updateNow.focus();
-        } else {
-          close.focus();
+          return true;
         }
+        const at = round.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement));
+        const step = event.shiftKey ? -1 : 1;
+        const next = at === -1 ? round.length - 1 : (at + step + round.length) % round.length;
+        round[next]?.focus();
         return true;
       }
       return false;

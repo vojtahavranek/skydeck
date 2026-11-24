@@ -14,6 +14,7 @@ import type { Browser, Page } from 'playwright';
 import { createSettings } from '../src/window/settings.ts';
 import type { UpdatePayload } from '../src/window/protocol.ts';
 import { testDeck } from '../test/helpers/deck.ts';
+import { availablePayload } from '../test/helpers/update.ts';
 import { browser, newPage } from './helpers/browser.ts';
 import {
   connection,
@@ -31,7 +32,13 @@ import { until } from './helpers/terminal.ts';
 
 const TO = '5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f80';
 const LOG = '/home/you/.local/state/skydeck/update.log';
-const LINES = ['1 new commit on origin/main (0123456..5d6e7f8):', '  5d6e7f8  the new commit'];
+/** The body of the dialog for state(): the fold open (no note), its one change, the bottom lines. */
+const LINES = [
+  '▾ 1 change',
+  'the new commit',
+  '0123456 → 5d6e7f8 on origin/main',
+  'In a terminal instead: skydeck update',
+];
 const RUNNING = 'skydeck is being updated to 5d6e7f8. The window comes back by itself.';
 const STALE_UNSTORED =
   "this window's page is not the one skydeck's server serves, and its key could not be stored, so it cannot reload itself; run skydeck window again";
@@ -41,13 +48,7 @@ const NOT_VALID = "this window's key is not valid; run skydeck window again";
 function state(over: Partial<UpdatePayload> = {}): UpdatePayload {
   return {
     checking: false,
-    check: {
-      state: 'available',
-      summary: '1 new commit on origin/main',
-      to: TO,
-      lines: LINES,
-      blocked: null,
-    },
+    check: availablePayload({ to: TO }),
     checkedAtNs: '1794474000000000000',
     fetchedAtNs: '1794474000000000000',
     failure: null,
@@ -156,7 +157,10 @@ async function world(t: TestContext, chromium: Browser): Promise<World> {
   };
 }
 
-/** Whether the update dialog shows, its lines, its visible buttons, and whether the page is inert. */
+/**
+ * Whether the update dialog shows, its body's lines (each block, the fold line and each item under
+ * it, as shown), its visible buttons (Update now, Close), and whether the page is inert.
+ */
 function dialogOf(page: Page): Promise<{
   shown: boolean;
   lines: string[];
@@ -170,10 +174,16 @@ function dialogOf(page: Page): Promise<{
       const root = document.getElementById('update-dialog');
       return {
         shown: root?.hidden === false,
-        lines: [...document.querySelectorAll('#update-dialog .update-line')].map(
-          (line) => line.textContent ?? '',
-        ),
-        buttons: [...document.querySelectorAll<HTMLButtonElement>('#update-dialog button')]
+        lines: [
+          ...document.querySelectorAll<HTMLElement>(
+            '#update-dialog :is(.update-note, .update-line, .update-fold, .update-other, .update-database, .update-meta)',
+          ),
+        ]
+          .filter((line) => line.offsetParent !== null)
+          .map((line) => line.textContent ?? ''),
+        buttons: [
+          ...document.querySelectorAll<HTMLButtonElement>('#update-dialog .update-actions button'),
+        ]
           .filter((button) => !button.hidden)
           .map((button) => button.textContent ?? ''),
         inert: (document.querySelector('.app') as HTMLElement | null)?.inert === true,
@@ -356,14 +366,11 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
       await liftedOn(page);
 
       const blocked = state({
-        check: {
-          state: 'available',
-          summary: '1 new commit on origin/main',
+        check: availablePayload({
           to: TO,
-          lines: LINES,
           blocked:
             'this checkout has changes that are not committed (1 file, the first: a.txt); commit or undo them first',
-        },
+        }),
       });
       await openDialog(w, page, blocked, 2);
       assert.deepEqual((await dialogOf(page)).buttons, ['Close']);
@@ -384,8 +391,9 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
       });
       await until(
         async () =>
-          (await dialogOf(page)).lines.at(-1) ===
-          'a check for updates is running; try again once it has ended',
+          (await dialogOf(page)).lines.includes(
+            'a check for updates is running; try again once it has ended',
+          ),
         'the refusal in the dialog',
       );
       assert.equal((await dialogOf(page)).shown, true);

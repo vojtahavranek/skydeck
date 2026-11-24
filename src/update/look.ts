@@ -435,7 +435,7 @@ export function subjectLine(subject: string): string {
   return text.length > SUBJECT_MAX ? `${clip(text, SUBJECT_MAX - 1)}…` : text;
 }
 
-/** U4's lines for an update that brings commits (`skydeck update --check`'s, and the dialog's). */
+/** U4's lines for an update that brings commits (`skydeck update --check`'s and `skydeck update`'s). */
 export function report(update: Update): string[] {
   const lines = [
     `${counted(update.count, 'new commit', 'new commits')} on ${sanitize(update.upstream)} (${short(update.oldId)}..${short(update.newId)}):`,

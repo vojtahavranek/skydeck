@@ -1,8 +1,10 @@
 // The update notice in the page (follow-up F38, issue #163; S2 16.5, 12.1, 12.13): Check now in
 // the settings screen's group Updates; the title bar's `Update available` on every page
 // exactly while a newer skydeck is known, also through a check whose fetch failed; the dialog it
-// opens, which lists the commits as `skydeck update --check` does and gives the command, or why the
-// checkout cannot be updated as it is, or why skydeck cannot tell. On a real test server whose
+// opens, which shows the notes of what is new the update brings, the fold of its other changes,
+// the database note and, small at the bottom, the commits and the command; or why the checkout
+// cannot be updated as it is, or why skydeck cannot tell; its keyboard round, its scroll with the
+// heading and the buttons in view, and its colours in both schemes. On a real test server whose
 // checker looks at a throwaway checkout inside the sandbox (updateSeam), its only remote a bare
 // repository beside it; the switch off, so that only Check now fetches. Never a real home or the
 // network.
@@ -15,8 +17,6 @@ import type { TestContext } from 'node:test';
 import type { Browser, Page } from 'playwright';
 
 import type { Platform } from '../src/platform/types.ts';
-import { gitOn } from '../src/update/git.ts';
-import { lookForUpdate, report } from '../src/update/look.ts';
 import { gitCheckout, gitTestEnv } from '../test/helpers/git-checkout.ts';
 import type { GitCheckout } from '../test/helpers/git-checkout.ts';
 import { updateSeam } from '../test/helpers/update.ts';
@@ -40,6 +40,21 @@ interface World {
   other: Page;
   /** The sandbox's platform with git's test settings: for the test's own look at the checkout. */
   platform: Platform;
+}
+
+/** WCAG 2's contrast ratio of two colours as getComputedStyle gives them (`rgb(r, g, b)`). */
+function contrast(a: string, b: string): number {
+  const luminance = (css: string): number => {
+    const found = /^rgba?\(([0-9]+), ([0-9]+), ([0-9]+)(?:, 1)?\)$/.exec(css);
+    assert.ok(found !== null, `${css} is an opaque rgb() colour`);
+    const [r, g, bl] = found.slice(1, 4).map((part) => {
+      const c = Number(part) / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    }) as [number, number, number];
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
 }
 
 /** A launched page and a second one, the server's checker on a checkout of the sandbox. */
@@ -96,16 +111,42 @@ function blockLines(page: Page): Promise<string[]> {
   );
 }
 
-/** The dialog's lines. */
+/**
+ * The dialog's body as it shows: each note's title and each of its paragraphs, each line, the fold
+ * line and each item under it while open, the database note's text and the small lines at the
+ * bottom, in order; what is hidden left out.
+ */
 function dialogLines(page: Page): Promise<string[]> {
   return readPage(
     page,
     () =>
-      [...document.querySelectorAll('#update-dialog .update-line')].map(
-        (line) => line.textContent ?? '',
-      ),
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          '#update-dialog :is(.update-note-title, .update-note-text, .update-line, .update-fold, .update-other, .update-database-text, .update-meta)',
+        ),
+      ]
+        .filter((line) => line.offsetParent !== null)
+        .map((line) => line.textContent ?? ''),
     null,
   );
+}
+
+/** The visible buttons under the dialog's body, by their words. */
+function dialogButtons(page: Page): Promise<string> {
+  return readPage(
+    page,
+    () =>
+      [...document.querySelectorAll<HTMLButtonElement>('#update-dialog .update-actions button')]
+        .filter((b) => !b.hidden)
+        .map((b) => b.textContent)
+        .join('|'),
+    null,
+  );
+}
+
+/** The class of what has the keyboard. */
+function holder(page: Page): Promise<string> {
+  return readPage(page, () => document.activeElement?.className ?? '', null);
 }
 
 async function openSettings(page: Page): Promise<void> {
@@ -165,18 +206,14 @@ async function closeDialog(page: Page): Promise<void> {
   );
 }
 
-/** What `skydeck update --check` prints for the checkout now, without the network. */
-async function checkLines(w: World): Promise<string[]> {
-  const looked = await lookForUpdate(gitOn(w.platform, w.c.root), w.platform.files, {
-    fetch: 'none',
-    tolerant: true,
-  });
-  assert.equal(looked.kind, 'known');
-  assert.ok(looked.kind === 'known');
-  return report(looked.update);
+/** The bottom lines for the checkout's HEAD and its upstream now. */
+function bottom(w: World, blocked = false): string[] {
+  const range = `${w.c.id().slice(0, 7)} → ${w.c.id('origin/main').slice(0, 7)} on origin/main`;
+  return blocked ? [range] : [range, 'In a terminal instead: skydeck update'];
 }
 
-const APPLY = 'To apply it, in a WSL terminal of your own: skydeck update';
+const DATABASE =
+  'This update may upgrade the database. A copy is kept first; an older skydeck cannot open it afterwards. Going back to ';
 const SET_RIGHT = 'Once that is set right, in a WSL terminal of your own: skydeck update';
 
 test('the update notice (F38, S2 16.5)', async (t) => {
@@ -212,7 +249,7 @@ test('the update notice (F38, S2 16.5)', async (t) => {
   );
 
   await t.test(
-    'the dialog: the commits as skydeck update --check lists them, the database line, the command; text as text; Esc gives the keyboard back; a window chord says to close it first',
+    'the dialog: no note, the changes open under their count, the database note, the bottom lines; text as text; Esc gives the keyboard back; a window chord says to close it first',
     async (t) => {
       const w = await world(t, chromium);
       w.c.push('<b>bold</b> & <img src=x onerror="window.hit=1">', { 'b.txt': 'b\n' });
@@ -224,12 +261,13 @@ test('the update notice (F38, S2 16.5)', async (t) => {
       const before = await active(w.l.page);
 
       const lines = await openDialog(w.l.page);
-      const expected = await checkLines(w);
-      assert.deepEqual(lines, [...expected, APPLY]);
-      assert.match(lines.at(-2) ?? '', /^this update changes the database's upgrade steps/);
-      assert.ok(
-        lines.some((line) => line.endsWith('<b>bold</b> & <img src=x onerror="window.hit=1">')),
-      );
+      assert.deepEqual(lines, [
+        '▾ 2 changes',
+        'changes the upgrade steps',
+        '<b>bold</b> & <img src=x onerror="window.hit=1">',
+        `${DATABASE}${w.c.id().slice(0, 7)}: docs/install.md, "Going back".`,
+        ...bottom(w),
+      ]);
       assert.equal(
         await readPage(
           w.l.page,
@@ -239,28 +277,232 @@ test('the update notice (F38, S2 16.5)', async (t) => {
         true,
       );
       assert.equal(await readPage(w.l.page, () => 'hit' in window, null), false);
-      assert.equal(
-        await readPage(w.l.page, () => document.activeElement?.className ?? '', null),
-        'update-close',
-        'the keyboard starts on Close',
-      );
-      assert.equal(
-        await readPage(
-          w.l.page,
-          () =>
-            [...document.querySelectorAll<HTMLButtonElement>('#update-dialog button')]
-              .filter((b) => !b.hidden)
-              .map((b) => b.textContent)
-              .join('|'),
-          null,
-        ),
-        'Update now|Close',
-        'Update now (milestone 2) before Close',
-      );
+      assert.equal(await holder(w.l.page), 'update-close', 'the keyboard starts on Close');
+      assert.equal(await dialogButtons(w.l.page), 'Update now|Close', 'Update now before Close');
       await w.l.page.keyboard.press('Control+Shift+N');
       await showsText(w.l.page, '#key-message', /^close the dialog first \(Esc\)$/);
       await closeDialog(w.l.page);
       assert.equal(await active(w.l.page), before, 'the keyboard back where it was');
+      assert.deepEqual(w.l.problems, []);
+    },
+  );
+
+  await t.test(
+    'the notes: newest first, the title heavier, code runs and ids in the terminal font; every commit a note: no fold line; with other changes the fold, folded at every open, opened and closed by Enter, Space and a click; Tab goes round it',
+    async (t) => {
+      const w = await world(t, chromium);
+      w.c.push('adds the first note', {
+        'docs/news/2026-11-01-first.md': '# The first `note`\n\nRun `skydeck doctor`\nonce.\n',
+      });
+      await openSettings(w.l.page);
+      await checkNow(w.l.page, /^Last check: [01]s ago — 1 new commit on origin\/main$/);
+      await closeSettings(w.l.page);
+
+      assert.deepEqual(await openDialog(w.l.page), [
+        'The first note',
+        'Run skydeck doctor once.',
+        ...bottom(w),
+      ]);
+      assert.deepEqual(
+        await readPage(
+          w.l.page,
+          () =>
+            [...document.querySelectorAll('#update-dialog code')].map((c) => ({
+              text: c.textContent,
+              font: getComputedStyle(c).fontFamily,
+            })),
+          null,
+        ),
+        [
+          'note',
+          'skydeck doctor',
+          w.c.id().slice(0, 7),
+          w.c.id('origin/main').slice(0, 7),
+          'skydeck update',
+        ].map((text) => ({ text, font: '"Cascadia Mono", "Cascadia Code", Consolas, monospace' })),
+        "code runs, ids and the command in the terminal's font",
+      );
+      const style = await readPage(
+        w.l.page,
+        () => {
+          const of = (selector: string): CSSStyleDeclaration =>
+            getComputedStyle(document.querySelector(selector) as Element);
+          return {
+            title: of('#update-dialog .update-note-title').fontWeight,
+            text: of('#update-dialog .update-note-text').fontWeight,
+            body: of('#update-dialog .update-body').fontFamily,
+            page: getComputedStyle(document.body).fontFamily,
+          };
+        },
+        null,
+      );
+      assert.deepEqual(
+        { title: style.title, text: style.text, body: style.body },
+        { title: '600', text: '400', body: style.page },
+        "the window's font, the title heavier",
+      );
+      for (const key of ['Tab', 'Tab', 'Shift+Tab'] as const) {
+        await w.l.page.keyboard.press(key);
+      }
+      assert.equal(await holder(w.l.page), 'edit-save update-now', 'no fold line in the round');
+      await closeDialog(w.l.page);
+
+      w.c.push('a plain change', { 'a.txt': 'a\n' });
+      w.c.push('changes the upgrade steps', { 'src/store/migrations.ts': 'export {};\n' });
+      w.c.push('adds the second note', {
+        'docs/news/2026-11-02-second.md':
+          '# The second\n\nIt is newer.\n\nIt has two paragraphs.\n',
+      });
+      await openSettings(w.l.page);
+      await checkNow(w.l.page, /^Last check: [01]s ago — 4 new commits on origin\/main$/);
+      await closeSettings(w.l.page);
+      const folded = [
+        'The second',
+        'It is newer.',
+        'It has two paragraphs.',
+        'The first note',
+        'Run skydeck doctor once.',
+        '▸ 2 other changes',
+        `${DATABASE}${w.c.id().slice(0, 7)}: docs/install.md, "Going back".`,
+        ...bottom(w),
+      ];
+      const opened = [
+        ...folded.slice(0, 5),
+        '▾ 2 other changes',
+        'changes the upgrade steps',
+        'a plain change',
+        ...folded.slice(6),
+      ];
+      assert.deepEqual(await openDialog(w.l.page), folded);
+      const expanded = (): Promise<string | null> =>
+        readPage(
+          w.l.page,
+          () =>
+            document.querySelector('#update-dialog .update-fold')?.getAttribute('aria-expanded') ??
+            null,
+          null,
+        );
+      assert.equal(await expanded(), 'false');
+      assert.equal(await holder(w.l.page), 'update-close');
+      for (const [key, on] of [
+        ['Tab', 'update-fold'],
+        ['Tab', 'edit-save update-now'],
+        ['Tab', 'update-close'],
+        ['Shift+Tab', 'edit-save update-now'],
+        ['Shift+Tab', 'update-fold'],
+        ['Shift+Tab', 'update-close'],
+        ['Tab', 'update-fold'],
+      ] as const) {
+        await w.l.page.keyboard.press(key);
+        assert.equal(await holder(w.l.page), on, `${key} goes to ${on}`);
+      }
+      await w.l.page.keyboard.press('Enter');
+      await until(async () => (await expanded()) === 'true', 'Enter opens the fold');
+      assert.deepEqual(await dialogLines(w.l.page), opened);
+      await w.l.page.keyboard.press('Space');
+      await until(async () => (await expanded()) === 'false', 'Space closes it');
+      assert.deepEqual(await dialogLines(w.l.page), folded);
+      assert.equal(await holder(w.l.page), 'update-fold', 'the keyboard stays on the fold line');
+      await w.l.page.locator('#update-dialog .update-fold').click();
+      await until(async () => (await expanded()) === 'true', 'a click opens it');
+      await closeDialog(w.l.page);
+      assert.deepEqual(await openDialog(w.l.page), folded, 'folded again at the next open');
+      await closeDialog(w.l.page);
+      assert.deepEqual(w.l.problems, []);
+    },
+  );
+
+  await t.test(
+    'a dialog longer than the window: 20 notes and `… and 1 more`, its body scrolls inside it, the heading and the buttons stay in view; both colour schemes read at least 4.5 : 1',
+    async (t) => {
+      const w = await world(t, chromium);
+      const files: Record<string, string> = {};
+      for (let i = 1; i <= 21; i += 1) {
+        const day = String(i).padStart(2, '0');
+        files[`docs/news/2026-10-${day}-note-${i}.md`] =
+          `# Note ${i}\n\n${'A sentence that says what changed. '.repeat(16).trim()}\n`;
+      }
+      w.c.push('adds 21 notes', files);
+      w.c.push('changes the upgrade steps', { 'src/store/migrations.ts': 'export {};\n' });
+      await openSettings(w.l.page);
+      await checkNow(w.l.page, /^Last check: [01]s ago — 2 new commits on origin\/main$/);
+      await closeSettings(w.l.page);
+      await w.l.page.setViewportSize({ width: 900, height: 560 });
+
+      const lines = await openDialog(w.l.page);
+      const titles = lines.filter((line) => /^Note [0-9]+$/.test(line));
+      assert.equal(titles.length, 20);
+      assert.equal(titles[0], 'Note 21');
+      assert.equal(titles[19], 'Note 2');
+      assert.ok(lines.includes('… and 1 more'));
+      assert.ok(lines.includes('▸ 1 other change'));
+
+      const inView = (): Promise<{ scrolls: boolean; heading: boolean; buttons: boolean }> =>
+        readPage(
+          w.l.page,
+          () => {
+            const body = document.querySelector('#update-dialog .update-body') as HTMLElement;
+            const inside = (selector: string): boolean => {
+              const r = (document.querySelector(selector) as Element).getBoundingClientRect();
+              return r.height > 0 && r.top >= 0 && r.bottom <= window.innerHeight;
+            };
+            return {
+              scrolls: body.scrollHeight > body.clientHeight,
+              heading: inside('#update-dialog .update-heading'),
+              buttons:
+                inside('#update-dialog .update-now') && inside('#update-dialog .update-close'),
+            };
+          },
+          null,
+        );
+      assert.deepEqual(await inView(), { scrolls: true, heading: true, buttons: true });
+      await w.l.page.evaluate(() => {
+        const body = document.querySelector('#update-dialog .update-body') as HTMLElement;
+        body.scrollTop = body.scrollHeight;
+      });
+      assert.deepEqual(
+        await inView(),
+        { scrolls: true, heading: true, buttons: true },
+        'scrolled to its end',
+      );
+      assert.equal((await dialogLines(w.l.page)).at(-1), 'In a terminal instead: skydeck update');
+
+      for (const colorScheme of ['light', 'dark'] as const) {
+        await w.l.page.emulateMedia({ colorScheme });
+        const pairs = await readPage(
+          w.l.page,
+          () => {
+            const colour = (selector: string, property: 'color' | 'backgroundColor'): string =>
+              getComputedStyle(document.querySelector(selector) as Element)[property];
+            const dialog = colour('#update-dialog .update-dialog', 'backgroundColor');
+            const marked = colour('#update-dialog .update-database', 'backgroundColor');
+            return [
+              ['.update-note-title', dialog],
+              ['.update-note-text', dialog],
+              ['.update-line', dialog],
+              ['.update-fold', dialog],
+              ['.update-meta', dialog],
+              ['.update-database-text', marked],
+            ].map(([selector, ground]) => ({
+              selector,
+              text: colour(`#update-dialog ${selector ?? ''}`, 'color'),
+              ground: ground ?? '',
+            }));
+          },
+          null,
+        );
+        for (const { selector, text, ground } of pairs) {
+          const ratio = contrast(text, ground);
+          assert.ok(
+            ratio >= 4.5,
+            `${colorScheme} ${selector}: ${text} on ${ground}, ${ratio.toFixed(2)} : 1`,
+          );
+        }
+        if (colorScheme === 'dark') {
+          assert.notEqual(pairs[0]?.ground, 'rgb(255, 255, 255)', 'the dark scheme is drawn');
+        }
+      }
+      await closeDialog(w.l.page);
       assert.deepEqual(w.l.problems, []);
     },
   );
@@ -276,31 +518,24 @@ test('the update notice (F38, S2 16.5)', async (t) => {
 
       writeFileSync(join(w.c.root, 'README.md'), 'changed by hand\n');
       const changed = await openDialog(w.l.page);
-      assert.deepEqual(changed.slice(-2), [
+      assert.deepEqual(changed, [
+        '▾ 1 change',
+        'a commit to bring',
         'This checkout cannot be updated as it is: this checkout has changes that are not committed (1 file, the first: README.md); commit or undo them first',
         SET_RIGHT,
+        ...bottom(w, true),
       ]);
       await closeDialog(w.l.page);
 
       w.c.git(w.c.root, 'checkout', '--', 'README.md');
       w.c.commit(w.c.root, 'a local commit', { 'local.txt': 'l\n' });
       const diverged = await openDialog(w.l.page);
-      assert.deepEqual(diverged.slice(-2), [
+      assert.deepEqual(diverged.slice(-3), [
         'This checkout cannot be updated as it is: this checkout has 1 commit that origin/main does not have; update it with git yourself',
         SET_RIGHT,
+        ...bottom(w, true),
       ]);
-      assert.equal(
-        await readPage(
-          w.l.page,
-          () =>
-            [...document.querySelectorAll<HTMLButtonElement>('#update-dialog button')].filter(
-              (b) => !b.hidden,
-            ).length,
-          null,
-        ),
-        1,
-        'Close alone: no Update now',
-      );
+      assert.equal(await dialogButtons(w.l.page), 'Close', 'Close alone: no Update now');
       await closeDialog(w.l.page);
       assert.deepEqual(w.l.problems, []);
     },
@@ -421,22 +656,21 @@ test('the update notice (F38, S2 16.5)', async (t) => {
         lines = await dialogLines(w.l.page);
         return lines.length > 0 && lines[0] !== 'Looking at the checkout…';
       }, 'the dialog answered');
-      assert.match(lines[0] ?? '', /^1 new commit on origin\/main/);
+      assert.deepEqual(lines.slice(0, 2), ['▾ 1 change', 'the first commit to bring']);
       const inert = (): Promise<boolean> =>
         readPage(w.l.page, () => (document.querySelector('.app') as HTMLElement).inert, null);
       assert.equal(await inert(), true, 'the page under the dialog is inert');
-      const holder = (): Promise<string> =>
-        readPage(w.l.page, () => document.activeElement?.className ?? '', null);
-      // Milestone 2: Update now stands before Close; Tab and Shift+Tab stay on the two.
-      assert.equal(await holder(), 'update-close', 'the keyboard starts on Close');
+      // The fold line, Update now (milestone 2) and Close: Tab and Shift+Tab go round the three.
+      assert.equal(await holder(w.l.page), 'update-close', 'the keyboard starts on Close');
       for (const [key, on] of [
-        ['Tab', 'edit-save update-now'],
-        ['Shift+Tab', 'update-close'],
+        ['Shift+Tab', 'edit-save update-now'],
+        ['Tab', 'update-close'],
+        ['Tab', 'update-fold'],
         ['Tab', 'edit-save update-now'],
         ['Tab', 'update-close'],
       ] as const) {
         await w.l.page.keyboard.press(key);
-        assert.equal(await holder(), on, `${key} goes to ${on}`);
+        assert.equal(await holder(w.l.page), on, `${key} goes to ${on}`);
       }
       await w.l.page.keyboard.press('Control+Shift+H');
       await showsText(w.l.page, '#key-message', /^close the dialog first \(Esc\)$/);
@@ -451,7 +685,7 @@ test('the update notice (F38, S2 16.5)', async (t) => {
       await openSettings(w.other);
       await checkNow(w.other, /^Last check: [01]s ago — 2 new commits on origin\/main$/);
       await until(
-        async () => /^2 new commits on origin\/main/.test((await dialogLines(w.l.page))[0] ?? ''),
+        async () => (await dialogLines(w.l.page))[0] === '▾ 2 changes',
         'the open dialog is drawn again',
       );
 

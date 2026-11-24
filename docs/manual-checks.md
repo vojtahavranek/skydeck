@@ -30,7 +30,8 @@ window (follow-up F41), at "The tour of the window"; W46 checks copy on select i
 terminal (issue #184), at "Copy on select"; W47 checks the carry over after `/clear` (follow-up
 F40), at "Carry over after /clear"; W48 checks the list's width set by a drag (issue #192), at "The
 list's width"; W49 checks resuming a session with other flags (issue #188), at "Resuming with other
-flags"; W50 checks parking a session (follow-up F44), at "Parked".
+flags"; W50 checks parking a session (follow-up F44), at "Parked"; W51 checks the notes of what is
+new in the update dialog, at "What is new in the update dialog".
 
 Setup:
 
@@ -2940,10 +2941,12 @@ In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git rem
    — …` (or `1s`). When it says that new commits are there, the title bar shows `Update available`
    right before `Switch…` and the gear; when it says up to date, it shows none. Press Esc: the screen closes, the keyboard is back where it was.
 2. **The dialog**, only when the title bar shows `Update available`. Click it. Expected: a dialog
-   with the lines `skydeck update --check` prints (in W, `skydeck update --check` prints the same
-   lines, then `run skydeck update to apply it`), then `To apply it, in a WSL terminal of your own:
-   skydeck update`, and two buttons, `Update now` and `Close`; `Close` has the keyboard, and Tab
-   goes to `Update now` and back. Ctrl+Shift+N says `close the dialog first (Esc)`. Press Esc
+   that says what is new — the notes the update brings, when it brings any (W51 looks at them
+   closely), and the other changes under `▸ <n> other changes`, or `▾ <n> changes` open when it
+   brings no note, whose subjects are those `skydeck update --check` lists in W —, small at the
+   bottom `<id> → <id> on origin/main` and `In a terminal instead: skydeck update`, and two
+   buttons, `Update now` and `Close`; `Close` has the keyboard, and Tab goes round the fold line,
+   `Update now` and `Close`. Ctrl+Shift+N says `close the dialog first (Esc)`. Press Esc
    (do not press `Update now` here): it closes. Nothing was applied: `git log -1 --format=%h` prints
    the id the block's line had before (`skydeck doctor`'s first line names it too).
 3. **doctor.** In W: `skydeck doctor`. Expected: an `info` line `update: …` — `update: <n> new
@@ -3406,3 +3409,50 @@ Write down: for each step whether it went as expected, and the words where they 
 version and your two layouts; whether Windows showed any notification in step 7.
 
 Not tried before this check was written: all of it, in Edge and with real Claude Code.
+
+## What is new in the update dialog
+
+The check of the notes of what is new in the update dialog (design-step-2.md 12.1, 16.5;
+[install.md](install.md), "The window says when there is one"): W51, in your window, on your own
+checkout, at the first update after this change that brings a note (a file of `docs/news/` that
+your checkout does not have yet). It applies nothing. The tests draw the dialog in headless
+Chromium against a test server and throwaway repositories; only here does it meet Edge, your
+fonts, your colour theme and the notes as they were written. Commands are typed in W, a WSL
+terminal of your own (never a `!` command inside Claude Code).
+
+## W51. The notes of what is new
+
+Setup: skydeck updated to a commit that has the notes of what is new (`docs/news/` exists in your
+checkout); the window open; the title bar shows `Update available` (Settings' `Check now` makes
+sure). In W: `cd ~/skydeck`, `git log -1 --format=%h` (write it down), then `git diff --stat HEAD
+origin/main -- docs/news/`: it must name at least one file that is added (else write down "left
+out: no note yet" and stop here).
+
+1. **The command line.** In W: `skydeck update --check`. Expected: the lines as before — `<n> new
+   commits on origin/main (…):` and one line per commit —, then `what is new:` and, indented, the
+   titles of the notes the diff above added, newest first; then the database line when there is
+   one, and `run skydeck update to apply it`.
+2. **The dialog.** Click `Update available`. Expected: the notes, each its title heavier than its
+   text and the text under it in the window's font, newest first, the same titles as step 1; a
+   word between backticks in a note (if any) in the terminal's font, without the backticks; no
+   Markdown shown as markup. Then `▸ <n> other changes` (when some commits add no note), the
+   database note as a block marked at its left (when step 1 printed the database line), and small
+   at the bottom `<the id you wrote down> → <id> on origin/main` and `In a terminal instead:
+   skydeck update`; the ids and `skydeck update` in the terminal's font.
+3. **The fold.** Click `▸ <n> other changes`. Expected: `▾`, and under it the subjects of the
+   commits that add no note, newest first. Click it again: folded. Press Tab until it has the
+   keyboard (Tab goes round it, `Update now` and `Close`), then Enter: open; Space: folded. Press
+   Esc and open the dialog again: folded.
+4. **A low window.** Make the window low (drag its bottom edge up) until the dialog does not fit.
+   Expected: its body scrolls with the mouse wheel; `Update available` at its top and the two
+   buttons stay in view. Give the window its size back.
+5. **The schemes.** In Settings' Appearance, `Mode` `Light`, then `Dark`, and your colour theme of
+   each: open the dialog each time. Expected: every text reads well, the bottom lines a little
+   dimmer than the notes. Set `Mode` back to what it was.
+6. **Nothing applied.** Press Esc (not `Update now`). In W: `git log -1 --format=%h` prints the id
+   of the setup.
+
+Write down: for each step whether it went as expected, and the words where they differ; your Edge
+version and your colour themes; how the notes read to you.
+
+Not tried before this check was written: all of it, in Edge.
