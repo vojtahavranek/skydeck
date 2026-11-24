@@ -90,6 +90,23 @@ async function untilStarts(d: ServerSandbox, sessionId: string, count: number): 
   }
 }
 
+/** `/hup-late <seconds>` typed into terminal `term`, once its stand-in has read it (a hang-up sent
+ *  before that would end the program at once). */
+async function hupLate(
+  page: TestPage,
+  d: ServerSandbox,
+  term: string,
+  seconds: number,
+): Promise<void> {
+  const before = readRecords(d.record).filter((one) => one.ev === 'hup-late').length;
+  page.send({ t: 'input', term, data: `/hup-late ${seconds}\r` });
+  const deadline = performance.now() + 15_000;
+  while (readRecords(d.record).filter((one) => one.ev === 'hup-late').length <= before) {
+    assert.ok(performance.now() < deadline, `/hup-late ${seconds} read`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 async function resume(page: TestPage, sessionId: string): Promise<void> {
   const result = await page.act({ kind: 'resume', sessionId, cols: 80, rows: 24 });
   assert.equal(result.ok, true, JSON.stringify(result));
@@ -192,9 +209,9 @@ describe('restarting a session from the window (#166)', () => {
 
   test('all nine numbers taken and a tenth terminal waiting: the restart keeps its number, the tenth stays without; a terminal opened during the restart takes a free number, never the held one', async (t) => {
     const ten = [S1, S2, S3, ...MORE.slice(0, 7)];
-    const { page, list } = await started(t, ten);
+    const { d, page, list } = await started(t, ten);
     const fourth = termOf(list, MORE[0] as string);
-    page.send({ t: 'input', term: fourth, data: '/hup-late 2\r' });
+    await hupLate(page, d, fourth, 2);
     // Number 7 is free once S7's program ended (F43); the tenth terminal keeps none (#189 aside).
     page.send({ t: 'input', term: termOf(list, MORE[3] as string), data: '/exit\r' });
     await page.list((candidate) => drawn(candidate).length === 9, 'S7 left Open');
@@ -233,7 +250,7 @@ describe('restarting a session from the window (#166)', () => {
   test('one at a time: while a restart waits for the end, a second restart, an end, a resume, a done mark and Close are refused', async (t) => {
     const { d, page, list } = await started(t, [S1]);
     const old = termOf(list, S1);
-    page.send({ t: 'input', term: old, data: '/hup-late 2\r' });
+    await hupLate(page, d, old, 2);
     const first = page.act({ kind: 'restart', term: old, sessionId: S1 }, 30_000);
     await page.list(
       (candidate) => candidate.terminals.some((one) => one.id === old && one.restarting === true),
@@ -340,7 +357,7 @@ describe('restarting a session: when it does not work (#166)', () => {
       focused: false,
     });
     const old = termOf(list, S1);
-    page.send({ t: 'input', term: old, data: '/hup-late 3\r' });
+    await hupLate(page, d, old, 3);
     const result = await page.act({ kind: 'restart', term: old, sessionId: S1 }, 20_000);
     assert.deepEqual(
       [result.ok, result.ended, result.error],
@@ -394,7 +411,7 @@ describe('restarting a session: when it does not work (#166)', () => {
       focused: false,
     });
     const old = termOf(list, S1);
-    page.send({ t: 'input', term: old, data: '/hup-late 4\r' });
+    await hupLate(page, d, old, 4);
     const result = await page.act({ kind: 'restart', term: old, sessionId: S1 }, 20_000);
     assert.deepEqual([result.ok, result.ended], [false, false]);
     const notified = await page.next('notify', 'the late end notified', 30_000);
@@ -412,7 +429,7 @@ describe('restarting a session: when it does not work (#166)', () => {
   test('the server stops while the program ends: after its next start the terminal is an ordinary ended one without a number, and nothing resumes the session', async (t) => {
     const { d, server, page, list } = await started(t, [S1, S2]);
     const old = termOf(list, S1);
-    page.send({ t: 'input', term: old, data: '/hup-late 3\r' });
+    await hupLate(page, d, old, 3);
     void page.act({ kind: 'restart', term: old, sessionId: S1 }, 30_000).catch(() => {});
     await page.list(
       (candidate) => candidate.terminals.some((one) => one.id === old && one.restarting === true),

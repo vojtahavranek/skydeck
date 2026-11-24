@@ -447,6 +447,7 @@ function command(text: string): void {
       break;
     case '/hup-late':
       hupLateMs = (positive(rest) ?? 0) * 1000;
+      record({ ev: 'hup-late', seconds: hupLateMs / 1000 });
       break;
     case '/idle':
       setStatus('idle', null);
