@@ -20,7 +20,8 @@
  *
  * Once the program has ended the server records, for each holder of the session the request found
  * in the terminal, an `end` event of detail `exit` and raw detail ENDED_IN_WINDOW (no spool file;
- * no schema change), so that the session reads as an ordinary ended one (design 6.1: never
+ * stamped not below the holder's process's stamps, with the machine's uptime: #207, design 5.3
+ * "Order"), so that the session reads as an ordinary ended one (design 6.1: never
  * `ended-unexpectedly`, so no `was-working` and no restore offer) whatever end Claude Code's own
  * hook sends after its hang-up, before or after this one; then it closes the terminal (what
  * `close-terminal` does for an ended terminal: its slot is free, and its row, done, is hidden).

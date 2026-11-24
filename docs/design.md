@@ -104,7 +104,8 @@ spool directory and exits. Rules (principle 3):
   one line each: a newline inside an error message becomes a space, so every line starts with its
   time.
 - It always exits 0.
-- It uses only `sh`, `date`, `cat`, `base64`, `mkdir` and `mv`.
+- It uses only `sh`, `date`, `cat`, `base64`, `mkdir` and `mv` (it reads `/proc` with `sh`'s
+  own `read`).
 - It does no interpretation. Everything else happens at ingest (5.3).
 
 The settings entry for each event is exactly:
@@ -138,6 +139,7 @@ so no value can add a line to the file.
 | `v` | `1` |
 | `event` | The argument: `SessionStart` or `SessionEnd`. |
 | `time_ns` | `date +%s%N` at hook start. |
+| `uptime` | The first field of `/proc/uptime` (seconds with two decimals), read right after `time_ns`; empty when it cannot be read (#207). Unlike `time_ns` it never steps back: it orders one process's events (5.3 "Order"). A skydeck from before it ignores the key, as any key it does not know. |
 | `claude_pid` | `$CLAUDE_PID` (the hook's own parent is a shell, not `claude`). |
 | `session_env` | `$CLAUDE_CODE_SESSION_ID`. |
 | `entrypoint_env` | `$CLAUDE_CODE_ENTRYPOINT`, may be empty. |
@@ -247,7 +249,20 @@ reconcile is the first to see a process that had cleared already (it started bef
 install`, or its hook did not run) —, that cleared session is linked in the copy's place. It heals
 itself at that session's first prompt (7.2).
 
-**Order.** "Earlier" and "latest" for events always mean ordering by (`time_ns`, `id`).
+**Order.** "Earlier" and "latest" for events mean ordering by (`time_ns`, `id`), but among the
+events of ONE process (same boot, pid and process start): those are ordered by (`uptime_cs`,
+`time_ns`, `id`) when every one of them has an uptime, and by (`time_ns`, `id`) otherwise (#207).
+The wall clock the hook stamps `time_ns` with can step back (seen on a WSL 2 machine: 2.1 to 2.7 s
+every 32 s), and two events of one process that follow each other closely (the end and the start
+of a `/clear`, a start and an `/exit` typed soon after it) can then carry their stamps in the
+reverse order; the machine's uptime never steps back, and a process lives within one boot. No
+comparison mixes the two inside one process, so a process that began under a hook from before
+#207 stays on its stamps for its life. Ingest records the files of one pass in that order too (the
+files of one process take the places their names give them, in the process's order), and finds a
+process's previous event (for a link, a scripted end, the stored launch command) in it. The
+uptime's resolution is a hundredth of a second: two events in the same hundredth fall back to
+their stamps. Orders across processes stay on time. Times that are stored or shown stay wall-clock
+times.
 
 ### 5.4 Reconcile with live processes
 
@@ -261,7 +276,9 @@ hook file was lost.
 - For each such process whose latest event does not name the file's `sessionId`, or that has no
   event with a launch command, it inserts an `observed` event with the process facts from `/proc`
   (launch command from `/proc/<pid>/cmdline`, `cwd` from the file). The event's time is the clock
-  at reconcile, and its launch command is reduced and its path flags made absolute exactly as for a
+  at reconcile, but never below a time already stored for the process (#207: the wall clock may be
+  behind a stamp after it stepped back), and it carries the machine's uptime of that moment (5.3
+  "Order"); its launch command is reduced and its path flags made absolute exactly as for a
   spooled one (5.3).
 - A file that names another session than the process's latest event wins only when it was
   modified after that event (the hook of the change was lost). When the event is newer, the hook
@@ -334,7 +351,8 @@ a command runs. None of it is stored.
 
 ### 6.1 Which process holds which session
 
-For a process, the **held session** is the session id of its latest event that is not an `end`.
+For a process, the **held session** is the session id of its latest event (in the process's order,
+5.3 "Order") when that is not an `end`.
 A process **stopped holding** a session when an `end` event for it arrives. An `end` with detail
 `exit` is a **deliberate exit**; every other `end` detail, and no `end` at all, is not. A
 `scripted` event (5.3) makes its process hold the session like any other: the guard refuses to
@@ -425,7 +443,11 @@ Marks are shown next to the state.
   the user's word, design-step-2.md 12.5). A done session is shown again when it
   has activity after the done time: `user` input (5.6) in its transcript, or a `start` event with
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the
-  transcript is not activity.
+  transcript is not activity. The done time is the clock when it is marked, but never below the
+  latest such activity already recorded (#207): after the wall clock stepped back, a start stamped
+  a moment before would otherwise count as activity after it and the session would stay shown. A
+  limit: a stamp from a clock that was far ahead keeps the session hidden until the clock passes
+  it.
 - **First run.** `skydeck install` offers to mark as done every listed session whose last
   activity is older than `firstRunDoneAfterDays` (default 7) and that is not running. It shows
   the count and does nothing unless confirmed.
@@ -1288,9 +1310,10 @@ and no `argv` or `name`. The column is free text, so this needs no migration. No
 before F33 derives no mark from such a row (`show` prints its kind as it is).
 
 Step 2 adds migration 2 (the table `attention`), migration 3 (follow-up F18: the nullable column
-`ticket_url` of `session_meta`, the ticket of 7.1, by the first `ALTER TABLE`) and migration 4
-(follow-up F19: the table `ticket_status`, a cached ticket status by address, 7.3); their SQL is in
-design-step-2.md 10.2. A migration is never undone: a database migrated by a newer skydeck is refused
+`ticket_url` of `session_meta`, the ticket of 7.1, by the first `ALTER TABLE`), migration 4
+(follow-up F19: the table `ticket_status`, a cached ticket status by address, 7.3) and migration 5
+(#207: the nullable column `uptime_cs` of `events`, 5.3 "Order"); their SQL is in design-step-2.md
+10.2. A migration is never undone: a database migrated by a newer skydeck is refused
 by an older one at its open ("written by a newer skydeck").
 
 The way back is a copy (follow-up F21). Before the first migration an open runs on a database that

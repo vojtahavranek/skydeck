@@ -4283,7 +4283,11 @@ gone after `d` (a row of Open: nothing else is selected).
 
 A session ended so is an ordinary ended one: once its program has exited the server stores an `end`
 of detail `exit` for each of its holders that belonged to the terminal (no spool file, raw detail
-`skydeck-window`; no change of the schema), and design 6.3 reads that holding as a deliberate exit
+`skydeck-window`; no change of the schema), stamped with its clock but never below a time already
+stored for that holder's process, and with the machine's uptime (#207, design 5.3 "Order": after a
+step back of the wall clock it would otherwise lie before the session's own start); the done mark
+is never below the session's latest start either (design 7.1). Design 6.3 reads that holding as a
+deliberate exit
 whatever end Claude Code's own hook sends after its hang-up (reason `other`, design 14), before or
 after it — also when the program ends only after the 10 seconds (the server follows the terminal
 until then). So it is never `ended-unexpectedly` or `was-working`, never needs you as an ended

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { parseSpoolFile } from '../../src/claude/hookinput.ts';
 import { NS_PER_DAY, NS_PER_MINUTE, NS_PER_SECOND } from '../../src/platform/time.ts';
@@ -945,4 +947,57 @@ describe('one process recorded in its order (#207, design 5.3 "Order")', () => {
       [11_917_407n, undefined, undefined, undefined],
     );
   });
+});
+
+test('#207, the real hook: a /clear whose two hooks have the wall clock 2.7 s back between them is recorded in its true order, with its clear link', async (t) => {
+  // The hook runs as Claude Code runs it; only its `date` is a stand-in that prints the stamp the
+  // test gives it: the end before the step, the start after it. Its uptime is the machine's own.
+  const d = testDeck(t);
+  const s = d.sandbox;
+  s.link('sh', 'cat', 'base64', 'mkdir', 'mv');
+  writeFileSync(join(s.bin, 'date'), '#!/bin/sh\nprintf \'%s\\n\' "$STUB_DATE_NS"\n', {
+    mode: 0o755,
+  });
+  const hook = fileURLToPath(new URL('../../bin/skydeck-hook', import.meta.url));
+  const run = (
+    event: string,
+    sessionId: string,
+    extra: Record<string, string>,
+    stamp: Ns,
+  ): void => {
+    const input = { session_id: sessionId, hook_event_name: event, cwd: s.home, ...extra };
+    const ran = spawnSync(hook, [event], {
+      input: `${JSON.stringify(input)}\n`,
+      env: s.env({ CLAUDE_PID: String(process.pid), STUB_DATE_NS: String(stamp) }),
+      cwd: s.home,
+      encoding: 'utf8',
+    });
+    assert.deepEqual([ran.status, ran.stdout, ran.stderr], [0, '', '']);
+  };
+  const pause = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30));
+
+  run('SessionStart', S1, { source: 'resume' }, T0);
+  ingestSpool(d.deck);
+  run('SessionEnd', S1, { reason: 'clear' }, T0 + SEC);
+  await pause(); // the uptime moves on by at least one hundredth
+  run('SessionStart', S2, { source: 'clear' }, T0 + SEC - 2_700_000_000n);
+  assert.deepEqual(ingestSpool(d.deck), { ...NONE, ingested: 2 });
+
+  const own = d.deck.store.events().filter((one) => one.pid === process.pid);
+  assert.ok(
+    own.every((one) => one.uptimeCs !== undefined),
+    'each with the uptime',
+  );
+  assert.deepEqual(
+    [...own].sort((a, b) => a.id - b.id).map((one) => [one.kind, one.sessionId]),
+    [
+      ['start', S1],
+      ['end', S1],
+      ['start', S2],
+    ],
+  );
+  assert.deepEqual(
+    d.deck.store.links().map((one) => [one.kind, one.fromSession, one.toSession]),
+    [['clear', S1, S2]],
+  );
 });
