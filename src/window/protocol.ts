@@ -155,6 +155,15 @@ export interface ResizeMessage {
  *  (src/window/end-session.ts); its `result` comes once the program has ended (`ended` true) or
  *  the wait is over (`ended` false).
  *
+ *  Issue #166 (with #188's flags): `restart` is the restart dialog's `Restart` (or its `Other
+ *  flags…`'s Start, with `flags`, the field's text as typed, as `resume` sends it) for the session
+ *  `sessionId` that the window's terminal `term` holds: the server checks everything first, ends
+ *  the program as `end-session` does without marking it done, and resumes the session as a plain
+ *  resume does (with `flags`: in place of the recorded flags), in a terminal of the old one's size
+ *  that takes its number (src/window/restart.ts). Its `result` has `ended` once the program was
+ *  hung up: false when it did not end (nothing resumed), true when it ended (then `ok` says
+ *  whether the resume started it).
+ *
  *  F36 (S2 12.13): `settings` asks for the settings screen's payload (the result's `settings`);
  *  `setting-set` sets ONE setting `key` (a text) of config.json to `value` — a string of at most
  *  4,096 bytes, a number, true or false (issue #184: `window.copyOnSelect`) or null, never an
@@ -218,6 +227,7 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'favourite-add'; text: string; at?: number }
   | { t: 'act'; id: number; kind: 'favourite-remove'; text: string }
   | { t: 'act'; id: number; kind: 'end-session'; term: string; sessionId: string }
+  | { t: 'act'; id: number; kind: 'restart'; term: string; sessionId: string; flags?: string }
   | { t: 'act'; id: number; kind: 'settings' }
   | {
       t: 'act';
@@ -694,7 +704,10 @@ export interface ResultMessage {
   error: string | null;
   sessionId: string | null;
   /** F30, `end-session` only: with `ok` (the session was marked done, its program hung up),
-   *  whether the program ended within the wait. Absent for every other kind and a refusal. */
+   *  whether the program ended within the wait. Absent for every other kind and a refusal.
+   *  Issue #166, `restart`: once its program was hung up, whether it ended (false: the restart
+   *  was given up, nothing resumed; true: `ok` says whether the resume started it); absent for a
+   *  refusal, when nothing was ended. */
   ended?: boolean;
   /** F36, `settings`, `setting-set` and `setting-default` only, also with a refusal: the settings
    *  screen as the file and the running server are now. Absent for every other kind. */
@@ -1125,6 +1138,11 @@ const ACTS: Readonly<Record<string, Check>> = {
   'favourite-remove': object({ t: ANY, id: COUNT, kind: ANY, text: TEXT }),
   // F30: the dialog's `End session and mark done`.
   'end-session': object({ t: ANY, id: COUNT, kind: ANY, term: TERM, sessionId: SESSION }),
+  // Issue #166: the restart dialog's `Restart`; #188: an optional `flags`, as `resume`'s.
+  restart: object(
+    { t: ANY, id: COUNT, kind: ANY, term: TERM, sessionId: SESSION, flags: TEXT },
+    ['flags'],
+  ),
   // F36 (S2 12.13): the settings screen. The key is a text; the table decides which it may be.
   settings: object({ t: ANY, id: COUNT, kind: ANY }),
   'setting-set': object({ t: ANY, id: COUNT, kind: ANY, key: TEXT, value: SETTING_VALUE }),

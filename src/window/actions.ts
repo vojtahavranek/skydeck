@@ -9,7 +9,10 @@
  * `setting-default`, settings.ts: no path, no program, no key outside its table's changeable ones);
  * since F37 move a session of Open one place up or down (`reorder`, reorder.ts; since F42 any row of
  * Open); since F40 answer the offer to carry fields over after `/clear` (`carry-over`,
- * `dismiss-carry-over`, carry-over.ts: the offer computed again, one transaction). Every field of an action is the page's — any page that passed the handshake — so each
+ * `dismiss-carry-over`, carry-over.ts: the offer computed again, one transaction); since issue #166
+ * restart a session's program in its terminal, with #188's flags (`restart`, restart.ts: every
+ * refusal before the end, then the end as `end-session` makes it without the done mark, then a
+ * plain resume). Every field of an action is the page's — any page that passed the handshake — so each
  * one is checked here again and goes through step 1's own rules: a resume
  * names a session and nothing more (the guard, the lock and the command builder decide the rest,
  * S2 11.1), a new session's directory, label, group and flags are checked as `skydeck new` checks
@@ -40,15 +43,17 @@ import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
 import { isBusy } from './busy.ts';
 import type { CarryOver } from './carry-over.ts';
-import { createEndings } from './end-session.ts';
+import { createEndings, RESTARTING } from './end-session.ts';
 import { splitFlags } from './flags.ts';
 import { addFavourite, removeFavourite } from './favourites.ts';
-import type { ActionHandler, PageInfo, TerminalHub } from './hub.ts';
+import type { ActionHandler, PageInfo, SlotHold, TerminalHub } from './hub.ts';
 import { createLaunches } from './launches.ts';
 import type { Launched } from './launches.ts';
 import type { PrFetches } from './pr-fetches.ts';
 import type { TicketFetches } from './ticket-fetches.ts';
 import { parsePageMessage } from './protocol.ts';
+import { createRestarts } from './restart.ts';
+import type { RestartOutcome } from './restart.ts';
 import type { ActMessage, ResultMessage, SettingsPayload } from './protocol.ts';
 import type { Settings } from './settings.ts';
 import type { Updates } from './updates.ts';
@@ -62,8 +67,9 @@ export interface ActionDeps {
    * only BUILDS the object: nothing is spawned and no slot is taken before its `open()` (ruled,
    * review 1 of task 32; tasks 21 and 23 keep it so). The actions build it before the guard and
    * the lock, so that a factory that throws leaves nothing taken; a refused action never opens it.
+   * Issue #166: a restart's resume passes its `hold`; that terminal takes the held number.
    */
-  terminalFor(size: { cols: number; rows: number }): Terminal;
+  terminalFor(size: { cols: number; rows: number }, hold?: SlotHold): Terminal;
   /** Task 19's openLink, bound to the configuration and the interop link. */
   openLink(url: string): Promise<boolean>;
   log: (line: string) => void;
@@ -162,6 +168,28 @@ function answerOf(launch: Launched): Answer {
 }
 
 /**
+ * Issue #166: a restart's outcome as its result. Refused: its words, nothing ended (no `ended`).
+ * Given up: its words, `ended` false. Ended and not resumed: why, `ended` true. Ended and resumed:
+ * the resume's answer (answerOf) with `ended` true, its lines also the error when it did not start
+ * the session.
+ */
+function restarted(outcome: RestartOutcome): Answer {
+  switch (outcome.kind) {
+    case 'refused':
+      return refusal(outcome.error);
+    case 'not-ended':
+      return { ...refusal(outcome.error), ended: false };
+    case 'not-resumed':
+      return { ...refusal(outcome.error), ended: true };
+    case 'resumed': {
+      const answer = answerOf(outcome.launched);
+      const error = answer.ok ? null : (answer.error ?? answer.lines.join(' '));
+      return { ...answer, error, ended: true };
+    }
+  }
+}
+
+/**
  * A SkydeckError thrown by an action as its result, as answerOf answers a refusal: one line per
  * line of the message (`act` sanitises each), and the same text as one line for `error`.
  */
@@ -252,11 +280,24 @@ export function createActions(deps: ActionDeps): ActionHandler {
   const launches = createLaunches({
     deck,
     hub,
-    terminalFor: (size) => deps.terminalFor(size),
+    terminalFor: (size, hold) => deps.terminalFor(size, hold),
     log: (line) => log(`act ${line}`),
   });
   // F30: the one way the window ends a session's program, on the user's word in the dialog.
   const endings = createEndings({ deck, hub, log, changed: () => deps.changed() });
+  // Issue #166: the restart, by those two.
+  const restarts = createRestarts({ deck, hub, endings, launches, log });
+
+  /** Issue #166: whether a restart holds a terminal of the session (R7: an action on it waits for
+   *  nobody; it is refused). */
+  function restarting(sessionId: string): boolean {
+    return hub
+      .list()
+      .some(
+        (term) =>
+          term.restarting === true && (term.sessionId ?? term.expectedSessionId) === sessionId,
+      );
+  }
 
   /**
    * Plan D9: an edit acts only on a session the store knows, a row of loadRows — the id is whole,
@@ -368,6 +409,8 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'note':
         return saveNote(action);
       case 'done':
+        // Issue #166: a restart that fails leaves the session ended; ended and done it would hide.
+        if (restarting(sessionId)) return refusal(RESTARTING);
         markDone(deck, sessionId);
         return wrote(action.kind);
       case 'undone':
@@ -419,6 +462,10 @@ export function createActions(deps: ActionDeps): ActionHandler {
         );
       }
       case 'close-terminal': {
+        // Issue #166: the terminal of a restart is the session's until its next terminal is open.
+        if (hub.list().some((term) => term.id === action.term && term.restarting === true)) {
+          return refusal(RESTARTING);
+        }
         const closed = hub.close(action.term);
         if (closed === 'ok') return DONE;
         return refusal(closed === 'running' ? STILL_RUNS : NO_TERMINAL);
@@ -458,6 +505,16 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'end-session': {
         const outcome = await endings.end(action.term, action.sessionId);
         return outcome.ok ? { ...DONE, ended: outcome.ended } : refusal(outcome.error);
+      }
+      case 'restart': {
+        // #188: `flags` given, the field's text split as `resume`'s, in place of the recorded ones.
+        let flags: string[] | null = null;
+        if (action.flags !== undefined) {
+          const split = splitFlags(action.flags);
+          if (!split.ok) return refusal(split.error);
+          flags = split.flags;
+        }
+        return restarted(await restarts.restart(action.term, action.sessionId, flags));
       }
       case 'settings':
         return deps.settings === undefined

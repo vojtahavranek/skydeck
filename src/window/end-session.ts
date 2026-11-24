@@ -24,12 +24,20 @@
  * `ended-unexpectedly`, so no `was-working` and no restore offer) whatever end Claude Code's own
  * hook sends after its hang-up, before or after this one; then it closes the terminal (what
  * `close-terminal` does for an ended terminal: its slot is free, and its row, done, is hidden).
+ *
+ * Issue #166: a restart (restart.ts) ends the program by the same means — `check`, the same
+ * refusals in the same words but for a session marked done, and `hangUp`, the same hang-up, wait,
+ * following on and record — without marking it done and without closing the terminal: the
+ * restart resumes the session, or leaves the ended terminal for the user. While a restart holds a
+ * terminal (`TerminalInfo.restarting`) an end of it is refused (`skydeck is restarting this
+ * session`).
  */
 import { isBusy } from './busy.ts';
 import { failureKind } from './auth.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { loadRows } from '../sessions/load.ts';
 import { markDone } from '../sessions/meta.ts';
+import type { ListRow } from '../sessions/list.ts';
 import type { Holder } from '../sessions/types.ts';
 import { ENDED_IN_WINDOW } from '../store/types.ts';
 import type { TerminalHub, TerminalInfo } from './hub.ts';
@@ -47,9 +55,30 @@ export interface EndingDeps {
 /** A refusal (nothing was done), or the session marked done and whether its program ended. */
 export type EndOutcome = { ok: false; error: string } | { ok: true; ended: boolean };
 
+/** Issue #166: what `check` found — a refusal, or the terminal, the session's row and its holders
+ *  that belong to that terminal. */
+export type EndCheck =
+  | { ok: false; error: string }
+  | { ok: true; term: TerminalInfo; row: ListRow; holders: Holder[] };
+
+/** Issue #166: how a hang-up for a restart ended: the program ended, or why it did not (a
+ *  sentence: not within the wait, the keeper lost, the terminal gone, the hang-up not sent). */
+export type HangUpOutcome = { ended: true } | { ended: false; why: string };
+
 export interface Endings {
   /** Throws (before anything is sent) only what marking done throws: a busy store, an error. */
   end(termId: string, sessionId: string): Promise<EndOutcome>;
+  /**
+   * Issue #166: `end`'s refusals in its order and words, with `done` the words for a session
+   * marked done; nothing is done. Ok: the terminal, the row and the holders `hangUp` is given.
+   */
+  check(termId: string, sessionId: string, done: string): EndCheck;
+  /**
+   * Issue #166: `end`'s hang-up for a restart, after its `check`: no done mark, and the terminal
+   * is not closed. Resolves once the program ended (its end recorded, as `end` records it) or why
+   * not; after the wait the end is followed on and recorded when it comes, nothing closed.
+   */
+  hangUp(termId: string, sessionId: string, holders: readonly Holder[]): Promise<HangUpOutcome>;
 }
 
 /** How long the answer waits for the program to end after its hang-up. */
@@ -67,6 +96,12 @@ const ALREADY_DONE = 'it was marked done meanwhile';
 const NOT_HERE = 'it does not run in that terminal';
 const ENDING = 'skydeck is ending this session already';
 const NOT_AN_ACTION = 'skydeck cannot do that action';
+/** Issue #166: a restart holds the terminal (R7). */
+export const RESTARTING = 'skydeck is restarting this session';
+/** Issue #166: why a restart's hang-up did not end the program. */
+const NOT_ENDED = 'claude has not ended within 10 seconds, so it runs on';
+const KEEPER_LOST = "its terminal's keeper ended unexpectedly";
+const NOT_SENT = 'skydeck could not ask it to end';
 
 /** A test setting (A31): a whole number of at least 1 from `SKYDECK_TEST_<name>`, else `fallback`. */
 function testNumber(
@@ -84,11 +119,13 @@ function testNumber(
  */
 interface Ending {
   sessionId: string;
-  holders: Holder[];
-  /** Answers the request with `ended`; null once it has been answered. */
-  answer: ((ended: boolean) => void) | null;
+  holders: readonly Holder[];
+  /** Answers the request: null once the program ended, else why not; null once answered. */
+  answer: ((why: string | null) => void) | null;
   /** Stops the wait's timer. */
   cancel(): void;
+  /** Its terminal is closed once its program ended (`end`); a restart's is not (#166). */
+  close: boolean;
 }
 
 export function createEndings(deps: EndingDeps): Endings {
@@ -167,8 +204,15 @@ export function createEndings(deps: EndingDeps): Endings {
     unwatch ??= hub.onChange(changedTerminals);
   };
 
-  /** Follows the terminal no more; answers `ended` when it has not been answered yet. */
-  function finish(termId: string, entry: Ending, ended: boolean, why: string): void {
+  /** Follows the terminal no more; answers when it has not been answered yet: `ended`, else why
+   *  not (`reason`, the user's words). */
+  function finish(
+    termId: string,
+    entry: Ending,
+    ended: boolean,
+    why: string,
+    reason = NOT_ENDED,
+  ): void {
     if (ending.get(termId) !== entry) return;
     ending.delete(termId);
     entry.cancel();
@@ -179,7 +223,7 @@ export function createEndings(deps: EndingDeps): Endings {
     log(`terminal ${termId}: ${why}`);
     const answer = entry.answer;
     entry.answer = null;
-    answer?.(ended);
+    answer?.(ended ? null : reason);
   }
 
   function changedTerminals(): void {
@@ -188,9 +232,9 @@ export function createEndings(deps: EndingDeps): Endings {
     for (const [termId, entry] of [...ending]) {
       const term = terminals.get(termId);
       if (term === undefined) {
-        finish(termId, entry, false, 'the terminal was forgotten'); // nothing known of its end
+        finish(termId, entry, false, 'the terminal was forgotten', NO_TERMINAL); // nothing known of its end
       } else if (term.state === 'lost') {
-        finish(termId, entry, false, 'its keeper was lost'); // its exit is made up, not the end
+        finish(termId, entry, false, 'its keeper was lost', KEEPER_LOST); // its exit is made up, not the end
       } else if (term.state === 'ended' && term.exit !== null && term.exit.notStarted === null) {
         // The keeper reaped the program and sent its exit.
         const late = entry.answer === null;
@@ -202,10 +246,12 @@ export function createEndings(deps: EndingDeps): Endings {
           `its program ended as the user asked${late ? ', after the wait' : ''}`,
         );
         // After the registry's own steps for the exit (its A to the keeper, the exited event),
-        // which come after this announcement.
-        queueMicrotask(() => {
-          if (hub.close(termId) === 'ok') tell();
-        });
+        // which come after this announcement. Not for a restart (#166): it resumes the session.
+        if (entry.close) {
+          queueMicrotask(() => {
+            if (hub.close(termId) === 'ok') tell();
+          });
+        }
       }
     }
   }
@@ -214,51 +260,84 @@ export function createEndings(deps: EndingDeps): Endings {
     return Promise.resolve({ ok: false, error });
   }
 
+  /**
+   * The checks of a request, in their order (F30), nothing done: a terminal a restart holds
+   * (#166), a request for the terminal that waits, a hub that cannot end, the terminal, the
+   * session it shows, its program, the store's row (`done`: the words for one marked done) and
+   * the holders that belong to it.
+   */
+  function check(termId: string, sessionId: string, done: string): EndCheck {
+    const term = hub.list().find((candidate) => candidate.id === termId);
+    if (term?.restarting === true) return { ok: false, error: RESTARTING };
+    // While a request waits for its answer, no second one (no second signal); once answered, a
+    // new request (the session undone and asked again) replaces the end that is followed.
+    if (ending.get(termId)?.answer != null) return { ok: false, error: ENDING };
+    if (hub.end === undefined) return { ok: false, error: NOT_AN_ACTION };
+    if (term === undefined) return { ok: false, error: NO_TERMINAL };
+    if (term.sessionId !== sessionId) return { ok: false, error: OTHER_SESSION };
+    if (term.state !== 'running' || term.exit !== null || term.program === null) {
+      return { ok: false, error: NOT_RUNNING };
+    }
+    if (term.endable !== true) return { ok: false, error: CANNOT_END };
+    const row = loadRows(deck).find((candidate) => candidate.id === sessionId);
+    if (row === undefined) return { ok: false, error: UNKNOWN };
+    if (row.done) return { ok: false, error: done };
+    if (row.state === 'not-running') return { ok: false, error: NOT_RUNNING };
+    const holders = holdersIn(term, row.session.holders);
+    if (holders.length === 0) return { ok: false, error: NOT_HERE };
+    return { ok: true, term, row, holders };
+  }
+
+  /**
+   * The hang-up of a checked request, and its wait: `answer` gets null once the program ended,
+   * else why not. An end still followed for the terminal (answered, its program not ended) is
+   * replaced. The end is followed on after the wait until the program exits.
+   */
+  function follow(
+    termId: string,
+    sessionId: string,
+    holders: readonly Holder[],
+    close: boolean,
+    answer: (why: string | null) => void,
+  ): void {
+    const before = ending.get(termId);
+    if (before !== undefined) finish(termId, before, false, 'asked again');
+    const entry: Ending = { sessionId, holders, answer, cancel: () => {}, close };
+    ending.set(termId, entry);
+    watch();
+    // The answer after the wait; the end is followed on until the program exits.
+    entry.cancel = clock.after(waitMs, () => {
+      const answered = entry.answer;
+      entry.answer = null;
+      if (answered !== null && ending.get(termId) === entry) {
+        log(`terminal ${termId}: its program has not ended within the wait`);
+        answered(NOT_ENDED);
+      }
+    });
+    if (hub.end?.(termId) !== 'ok') {
+      finish(termId, entry, false, 'the hang-up could not be sent', NOT_SENT);
+    }
+  }
+
   return {
     end(termId, sessionId) {
-      // While a request waits for its answer, no second one (no second signal); once answered, a
-      // new request (the session undone and asked again) replaces the end that is followed.
-      if (ending.get(termId)?.answer != null) return refuse(ENDING);
-      if (hub.end === undefined) return refuse(NOT_AN_ACTION);
-      const term = hub.list().find((candidate) => candidate.id === termId);
-      if (term === undefined) return refuse(NO_TERMINAL);
-      if (term.sessionId !== sessionId) return refuse(OTHER_SESSION);
-      if (term.state !== 'running' || term.exit !== null || term.program === null) {
-        return refuse(NOT_RUNNING);
-      }
-      if (term.endable !== true) return refuse(CANNOT_END);
-      const row = loadRows(deck).find((candidate) => candidate.id === sessionId);
-      if (row === undefined) return refuse(UNKNOWN);
-      if (row.done) return refuse(ALREADY_DONE);
-      if (row.state === 'not-running') return refuse(NOT_RUNNING);
-      const holders = holdersIn(term, row.session.holders);
-      if (holders.length === 0) return refuse(NOT_HERE);
+      const checked = check(termId, sessionId, ALREADY_DONE);
+      if (!checked.ok) return refuse(checked.error);
       // Done first (a busy store throws here, before anything is sent), then the hang-up.
       markDone(deck, sessionId);
       tell();
-      const before = ending.get(termId);
-      if (before !== undefined) finish(termId, before, false, 'asked again');
       return new Promise<EndOutcome>((resolve) => {
-        const entry: Ending = {
-          sessionId,
-          holders,
-          answer: (ended) => resolve({ ok: true, ended }),
-          cancel: () => {},
-        };
-        ending.set(termId, entry);
-        watch();
-        // The answer after the wait; the end is followed on until the program exits.
-        entry.cancel = clock.after(waitMs, () => {
-          const answer = entry.answer;
-          entry.answer = null;
-          if (answer !== null && ending.get(termId) === entry) {
-            log(`terminal ${termId}: its program has not ended within the wait`);
-            answer(false);
-          }
+        follow(termId, sessionId, checked.holders, true, (why) => {
+          resolve({ ok: true, ended: why === null });
         });
-        if (hub.end?.(termId) !== 'ok') {
-          finish(termId, entry, false, 'the hang-up could not be sent');
-        }
+      });
+    },
+    check,
+    hangUp(termId, sessionId, holders) {
+      return new Promise<HangUpOutcome>((resolve) => {
+        follow(termId, sessionId, holders, false, (why) => {
+          resolve(why === null ? { ended: true } : { ended: false, why });
+        });
       });
     },
   };
