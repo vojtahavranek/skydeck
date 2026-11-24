@@ -130,9 +130,10 @@ function noteHead(note: string | null): string[] {
  * chip is the window's (S2 12.3, `windowChip`), not design 7.3's of `ls`. Stage A has no attention and no stacks.
  * F19: `ticketStatus` is the session's ticket status while one is known — its name, its text and
  * its category —, else null (the row's chip is not drawn). F30: `endable` while the session runs in
- * the row's terminal of the window and that terminal can be ended (`TerminalInfo.endable`). F33:
- * `copyOf` names the session a copy began as a copy of (`ListRow.copyOf`), else null, with
- * `hiddenWhileEmpty` while the list hides it (`isHiddenCopy`, no terminal of the window showing it).
+ * the row's terminal of the window and that terminal can be ended (`TerminalInfo.endable`); issue
+ * #166: not while a restart holds that terminal. F33: `copyOf` names the session a copy began as a
+ * copy of (`ListRow.copyOf`), else null, with `hiddenWhileEmpty` while the list hides it
+ * (`isHiddenCopy`, no terminal of the window showing it).
  * F44: `parked` is the row's (`ListRow.parked`, the derived mark) and `parkedAtNs` the time it was
  * parked while it is, else null; `needsYou` is false here (build.ts's `claimOf` sets it with
  * `attention`).
@@ -190,9 +191,11 @@ export function rowPayload(
     attention: null,
     needsYou: false,
     stack: null,
+    // Issue #166: not while a restart holds the terminal (it is ending it already).
     endable:
       terminal !== null &&
       terminal.endable === true &&
+      terminal.restarting !== true &&
       terminal.sessionId === row.id &&
       row.state !== 'not-running',
     ticketStatus:

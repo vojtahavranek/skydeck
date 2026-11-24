@@ -33,6 +33,39 @@ export interface TerminalInfo {
    * test made up, a hub without `end`) is false.
    */
   endable?: boolean;
+  /**
+   * Issue #166: a restart holds it (`TerminalHub.holdSlot`): it ends its program and opens the
+   * session's next terminal. While held its number stays on it after the program's exit, and
+   * neither Close nor a move takes it. Present (true) only while held.
+   */
+  restarting?: true;
+  /**
+   * Issue #166: where Open places it among the window's terminals without a number, in place of
+   * `openedNs`: the place of the terminal a restart opened it for (in memory only). Absent: its
+   * `openedNs`.
+   */
+  placeNs?: bigint;
+}
+
+/**
+ * Issue #166 (S2 7.6, 7.8): a restart's hold on its terminal's number, from before the hang-up to
+ * the session's next terminal. Every rule that reads which numbers are taken sees the held one as
+ * taken, so between the program's exit and the next terminal's spawn nobody else gets it.
+ */
+export interface SlotHold {
+  /**
+   * The number the terminal `newId` is opened with — the held terminal's (null: it had none) —
+   * and, for the order of Open, the held terminal's place: called right before that terminal is
+   * spawned, in the same synchronous step, so the number passes from one listed terminal to the
+   * next with no moment in which it is free. A transfer, not a freeing. Null, and nothing taken,
+   * while the held terminal's program still runs, once taken, and once let go.
+   */
+  take(newId: string): number | null;
+  /**
+   * Ends the hold: the terminal is no longer `restarting`; a number nobody took is freed now when
+   * its program is over (as F43 frees it at the exit), and the change is announced. Once only.
+   */
+  release(): void;
 }
 
 export interface StreamSink {
@@ -66,6 +99,12 @@ export interface TerminalHub {
    * ends nothing (the actions refuse the request).
    */
   end?(termId: string): 'ok' | 'cannot' | 'unknown';
+  /**
+   * Issue #166: a restart's hold on the terminal (`SlotHold`), null when it cannot be held — the
+   * terminal is not known, its program is over, a hold is on it already, or the hub stopped.
+   * Optional: a hub without it restarts nothing (the actions refuse the request).
+   */
+  holdSlot?(termId: string): SlotHold | null;
   /** The colours the last focused page reported, for OSC 10 and 11 (S2 7.2). Pages calls it when
    *  a page starts focused and when a page reports focus (with the theme of its start, or of its
    *  latest `theme` message; ruled), and when the page that had focus last sends `theme`
