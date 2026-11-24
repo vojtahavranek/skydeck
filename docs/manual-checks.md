@@ -30,7 +30,7 @@ window (follow-up F41), at "The tour of the window"; W46 checks copy on select i
 terminal (issue #184), at "Copy on select"; W47 checks the carry over after `/clear` (follow-up
 F40), at "Carry over after /clear"; W48 checks the list's width set by a drag (issue #192), at "The
 list's width"; W49 checks resuming a session with other flags (issue #188), at "Resuming with other
-flags".
+flags"; W50 checks parking a session (follow-up F44), at "Parked".
 
 Setup:
 
@@ -3307,5 +3307,84 @@ keyboard is (the key bar names the zone; a field shows its caret). In the list a
 
 Write down: for each step whether it went as expected, and the words where they differ; the model
 the picker marked in steps 3 and 4.
+
+Not tried before this check was written: all of it, in Edge and with real Claude Code.
+
+## Parked
+
+The check of parking a session (follow-up F44; design.md 7.1; design-step-2.md 7.6, 12.1, 12.4,
+12.9, 12.15; [install.md](install.md), "Using the window", its paragraph "Parked"): W50, in your
+window, with real Claude Code, on throwaway sessions in the throwaway folder. Commands are typed in
+W, a WSL terminal of your own (never a `!` command inside Claude Code). The tests park sessions of
+the stand-in program in headless Chromium against a test server; only here do the keys meet Edge
+and your layouts, the prompts come from the real Claude Code, and Windows shows (or does not show)
+a desktop notification.
+
+## W50. Parking throwaway sessions (real claude)
+
+Setup: skydeck updated to a commit that has follow-up F44 (`skydeck update`, W32), then the window
+open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Close every other
+terminal of the window first, or read the numbers below as the free ones, ascending. Throughout:
+type a word only where the step says the keyboard is (the key bar names the zone, `Focus: list` or
+`Focus: terminal`; Ctrl+Shift+L switches it). In the list a letter is a key: `w` parks, `d` marks
+done, `l`, `n` and `t` open a dialog.
+
+1. **Three throwaway sessions.** Three times: Ctrl+Shift+N, the throwaway folder's full path in the
+   directory field (`/home/<you>/skydeck-try`), a label `park-1`, `park-2`, `park-3` in turn, Enter.
+   In each, once Claude Code's prompt shows, type `Reply with the single word ok.` and Enter.
+   Expected: under Open `park-1`, `park-2`, `park-3` with the numbers 1, 2, 3.
+2. **`w` and the toast.** Click `park-2`, then Ctrl+Shift+L until the key bar says `Focus: list`,
+   then `w`. Expected: `park-2` is under a new section **Parked**, after Open, with the mark
+   `parked 0s` (later `parked 1m`) and no number; it still runs. The toast says `Parked: listed
+   under Parked, and it keeps running. It comes back when you send it a prompt.` with `Undo`. The
+   selection is on `park-3` (the row after it), the key bar still says `Focus: list`, the list did
+   not scroll, and `park-3`'s prompt is empty (nothing was typed into it). Ctrl+Shift+2 says `no
+   session in slot 2`.
+3. **Undo.** Within 5 seconds press `Undo`. Expected: `park-2` is back under Open with the number 2,
+   at its place by the number, and selected again.
+4. **The number taken.** With `park-2` selected and `Focus: list`, `w` again. Then Ctrl+Shift+N,
+   the throwaway folder, label `park-4`, Enter. Expected: `park-4` takes the number 2, and
+   Ctrl+Shift+2 shows its terminal.
+5. **A key typed is not a prompt; a prompt is.** Click `park-2` under Parked, Enter (its terminal
+   shows, `Focus: terminal`), type `hello` and do not press Enter; wait 10 seconds. Expected: it
+   stays under Parked, no number. Delete the word (Backspace), then type `Reply with the single
+   word ok.` and Enter. Expected: within a few seconds after Claude Code takes the prompt,
+   `park-2` is back under Open with the number 4 (the lowest free one), and stays selected.
+6. **The command line.** In W: `skydeck park <park-3's short id>` (the id `skydeck ls` shows).
+   Expected: it prints `<the id> parked`; within seconds the window lists `park-3` under Parked, no
+   number; `skydeck ls` shows `parked 0s` (or more) on its row, and `skydeck show <the id>` a line
+   `parked:    since <the time>`. Then `skydeck unpark <the id>`: `<the id> unparked`, and within
+   seconds `park-3` is under Open with the number 3.
+7. **A parked session that asks.** Click `park-1`, Enter (`Focus: terminal`), type `Use the Bash
+   tool to run the command date.` and Enter, and wait until Claude Code asks for the permission
+   (keep the window in front). Then Ctrl+Shift+L (`Focus: list`) and `w`. Expected: `park-1` is
+   under Parked with its `asks` mark beside `parked 0s`; the title bar's `need you` count leaves
+   it out; Ctrl+Shift+J says `no session needs you` (or goes to another session that needs you,
+   never to `park-1`). Click another Windows program and wait 20 seconds: no desktop notification
+   for `park-1`. Back in the window: select `park-1`, Enter, and refuse the permission (Esc).
+   Expected: it stays under Parked (an answer to a question is not a prompt).
+8. **A restart.** In W: `skydeck window --restart`. Expected: once the window is back, `park-1` is
+   still under Parked with no number, the other rows keep their numbers, and Ctrl+Shift+1 says `no
+   session in slot 1`.
+9. **Three `w` in a row.** Click the top row of Open, Ctrl+Shift+L (`Focus: list`), then press `w`
+   three times, each once the selection has moved. Expected: three sessions parked, one per `w`;
+   each time the selection is on the next row of Open (on the last, the one before it; when Open
+   is empty, none), the list did not jump, the key bar said `Focus: list` throughout, and no
+   session's prompt holds a `w` or anything else you did not type.
+10. **`w` on a row under Parked.** Scroll the list so that Open's top is out of view, click the
+    middle row of Parked, then `w`. Expected: that session is back under Open with the lowest free
+    number, still selected, its row scrolled into view; `Focus: list`; no toast; the other rows of
+    Parked are as they were.
+11. **`/clear` in a parked session.** Click a parked session that runs, Enter (`Focus: terminal`),
+    type `/clear` and Enter. Expected: within a few seconds the old session is still under Parked
+    (not running), and the session Claude Code goes on with is under Open with the lowest free
+    number, not parked.
+12. **The Czech layout.** Switch Windows to the Czech layout (W8): `w` on a row of Open parks it,
+    and `w` on it under Parked un-parks it, as in steps 2 and 10. Switch back.
+13. **The end.** For each throwaway session: type `/exit` and Enter in its terminal, then `d` in
+    the list (`Focus: list`) to mark it done (done ends a parking too).
+
+Write down: for each step whether it went as expected, and the words where they differ; your Edge
+version and your two layouts; whether Windows showed any notification in step 7.
 
 Not tried before this check was written: all of it, in Edge and with real Claude Code.

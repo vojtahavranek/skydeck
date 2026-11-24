@@ -972,6 +972,7 @@ effect.
   and `skydeck window --restart`. A session whose program ends gives its number up at once — also
   one marked done that you let keep running, and with its ended terminal still on screen; a row
   under Recent or Earlier never shows a number, and Ctrl+Shift+1…9 never go to an ended session.
+  A session you park gives its number up at once too, while it goes on running ("Parked" below).
   That leaves a gap (nothing is renumbered), and a new terminal takes the lowest free number, at
   that number's place: after the terminals with lower numbers, before the next one with a higher
   number, also when a block shows a terminal out of its
@@ -1085,8 +1086,11 @@ before it, else none (the list does not move; Ctrl+Tab goes back to the parked s
 keyboard stays in the list, so `w` again parks the next one. `Park` in the header keeps the session
 selected and the list follows it under Parked. A parked session is quiet: its marks (asks,
 finished, ended) still show in its row, but it sends no desktop notification, the title bar's `need
-you` count leaves it out and Ctrl+Shift+J skips it. It shows no number while it runs in the window.
-A restore never starts it; resume it from its row (Enter), and it stays parked. It comes back under
+you` count leaves it out and Ctrl+Shift+J skips it. Running in the window, it gives its number up
+at once: its row and terminal show none, Ctrl+Shift+1…9 never go to it, and the next session you
+start or resume takes that number; it keeps running, and its terminal shows when you select its
+row. Back under Open it takes the lowest free number (none while all nine are in use: then it is
+moved like any session without one). A restore never starts it; resume it from its row (Enter), and it stays parked. It comes back under
 Open by itself once you send it a prompt (in the window or in any terminal; starting or resuming it
 alone, or a key typed and not sent, does not), or with `w` on its row or `Unpark` (no toast; it stays
 selected and the list follows it). Marking a parked session done ends its parking, and its `Undo`

@@ -156,7 +156,8 @@ comes back by itself.
 
 A session whose work went to review, or that waits for someone, need not crowd Open: press `w` in
 the list (`Focus: list`), or **Park** in the header. It moves under **Parked**, keeps running if it
-runs, and stays quiet (no notification, not counted as needing you). A message with **Undo** shows
+runs (its number 1-9 is free for the next session), and stays quiet (no notification, not counted as
+needing you). A message with **Undo** shows
 for 5 seconds. Send it a prompt and it comes back under Open by itself; `w` on its row (or
 **Unpark**) brings it back at once.
 

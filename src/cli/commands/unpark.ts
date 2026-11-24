@@ -12,8 +12,9 @@ const SPEC: ArgSpec = {
   usage: `skydeck unpark <ref>
 
 Ends the parking of a session that was parked with 'skydeck park': it is listed as before, and
-the window lists it under Open while it runs. It changes nothing else, and never starts or stops
-a process. Sending the session a prompt ends its parking as well.
+the window lists it under Open while it runs, its terminal there with the lowest free number 1-9
+(none while all nine are in use). It changes nothing else, and never starts or stops a process.
+Sending the session a prompt ends its parking as well.
 `,
   flags: {},
   min: 1,

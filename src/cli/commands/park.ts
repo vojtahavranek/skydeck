@@ -13,8 +13,9 @@ const SPEC: ArgSpec = {
 
 Parks a session: it waits, for a review, a person or another part of the work. It stays listed,
 with its mark and how long it has been parked, and the window lists it under Parked. It never
-stops a process. It is no longer parked once you send it a prompt, or with 'skydeck unpark <ref>'.
-Parking a session marked done shows it again.
+stops a process: running in a terminal of the window, it goes on running there, and that terminal
+gives its number 1-9 up for the next one. It is no longer parked once you send it a prompt, or
+with 'skydeck unpark <ref>'. Parking a session marked done shows it again.
 `,
   flags: {},
   min: 1,

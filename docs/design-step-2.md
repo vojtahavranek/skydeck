@@ -1685,7 +1685,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `label`, `group` | `sessionId`, `text` (empty clears) | 12.5. |
 | `note` | `sessionId`, `text`, `base` (the note the edit started from) | 12.5. |
 | `done`, `undone` | `sessionId` | 12.5, 12.10. |
-| `park`, `unpark` | `sessionId` | Follow-up F44, 12.15: `park` parks the session (design 7.1: the time it is parked, its done mark cleared, in one write; a session parked already is not written and keeps its first time, answered `ok` all the same), `unpark` ends its parking. Absolute, never a toggle: the page picks the act from its row's `parked`, as it picks `done` or `undone`. Refused as `done` is: a session the store does not know, a `new` terminal's session not started yet, a busy store. Every page's `list` follows a write. |
+| `park`, `unpark` | `sessionId` | Follow-up F44, 12.15: `park` parks the session (design 7.1: the time it is parked, its done mark cleared, in one write; a session parked already is not written and keeps its first time, answered `ok` all the same), `unpark` ends its parking. Absolute, never a toggle: the page picks the act from its row's `parked`, as it picks `done` or `undone`. Refused as `done` is: a session the store does not know, a `new` terminal's session not started yet, a busy store. Every page's `list` follows a write; before it goes out, a terminal of the window running the session gives its number up (`park`) or takes the lowest free one (`unpark`), 7.6. |
 | `pr-add`, `pr-rm` | `sessionId`, `url` | 12.5. |
 | `pr-refresh` | `sessionId` | An explicit refresh of that session's pull requests (design 7.3). |
 | `ticket` | `sessionId`, `text` (a link or a key as typed; empty removes the ticket) | 12.5 (follow-up F18): the server reads `text` by design 7.1's rule (`readTicket`) and stores the address, replacing the ticket before; a refusal's words are the result's error, nothing stored. `text` is held to the URL limit, so that a link of 2,048 characters is sent whole. Every page's `list` follows. |
@@ -4405,7 +4405,7 @@ a double click that slips still resets. Resizing with the keyboard is not offere
 A session marked done disappears as in design 7.1, except that a running session marked done
 stays under Open with a `done` mark until it stops (then it is hidden). Marking a parked session
 done ends its parking (follow-up F44, 12.15): it leaves Parked, under Open with its `done` mark while
-it runs, else hidden. Marking done shows an Undo
+it runs (its terminal with the lowest free number, 7.6), else hidden. Marking done shows an Undo
 toast. An empty copy (12.1, follow-up F33) is not kept under Open by running: done or not, it is
 hidden until it has a message or a terminal of the window shows it.
 
@@ -5840,7 +5840,20 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
   `test/window/restore-memory.test.ts`): the tenth terminal moved above the ninth takes 9 on every
   page and after a stop or a crash, a kept order is drawn from the first list, a session closing or
   opening moves no other row, the new session after `/clear` keeps the old one's place, closing
-  every terminal ends the kept order, a locked store delays the freeze without failing the refresh.
+  every terminal ends the kept order, a locked store delays the freeze without failing the refresh;
+- follow-up F44, Parked (`test/window/server-parked.test.ts`, `server-parked-slots.test.ts`; the
+  section, its order and quiet in `test/window/view/parked.test.ts`; the withheld slots with real
+  keepers in `test/window/terminals-withheld.test.ts`; who sets them, with a real registry and
+  scripted rows and no tick, in `test/window/parked-slots.test.ts`; the spawn's step in
+  `test/window/window-terminal.test.ts`): a parking written by the command reaches every page
+  within a refresh, a prompt in its transcript brings a session back, a parked session that asks
+  sends no `notify` (with its control); parking frees the terminal's number in the act itself and
+  the next resume takes it, back under Open it takes the lowest free one or none with nine taken;
+  no two terminals share a number around a move made just before or after, a restart, `/clear`, a
+  parked session resumed from its row (born with a number, withheld in the same step, no list
+  carrying it), the registry's write held failing (the server's `beforeSlotsWrite` seam, a test
+  option `serve` never sets) and the mark's write busy; before the first refresh nothing is
+  withheld or written, and a stored set is never pruned against an empty registry.
 
 ### 17.4 The page
 
@@ -5888,6 +5901,11 @@ In the browser suite, besides those:
   for the selected session, a refusal's line shows in the key bar, one act waits at a time, the
   moved row is scrolled into view, (follow-up F42) the last row's refusal shows its line, and against a real server the slot chords reach the rows that show
   their numbers after a move;
+- follow-up F44 (`test-page/parked.test.ts`): `w` and the header's Park / Unpark against a real
+  server, the toast and its Undo, where the selection goes after `w` and that the list does not
+  jump, the one guard for `w`, `d` and the end dialog, the key help's line, and the number freed:
+  after `w` Ctrl+Shift+2 says `no session in slot 2`, and the next session takes 2; the moment a
+  list comes held still against a scripted stand-in;
 - follow-up F41 (`test-page/tour.test.ts`): the tour starts by itself after the first list, with
   sessions and on an empty list, and never where it was seen, where the storage throws or refuses a
   write, or without a key; each step's ring lies on its region and its panel beside it with the
@@ -6070,6 +6088,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W47 | **Real claude**, follow-up F40: carry over after `/clear` in a window terminal — the bar without a click, a click on it leaves the keyboard in the prompt, `Carry over`, `×`, two clears, `c` from the list with the list changing under it, a session cleared outside the window, and an old cleared session that shows no bar (manual-checks.md, "Carry over after /clear"). | F40 | 12.6, 12.9, design 7.1 |
 | W48 | The list's width in the owner's Edge (issue #192): the handle shows its cursor and tooltip on the border, a drag changes the width live and stops at 240 and 800 px and where the right side keeps 320 px; after a reload and after the window is closed and opened again the width is there with no jump; a narrower window shows less and a wider one the kept width again; a double click gives 400 px back, also one with a slight slip; the list's scroll bar right beside the border scrolls the list and leaves its width; a drag with `Focus: terminal`, over a throwaway session's terminal, leaves the keyboard in the prompt and types nothing into it; the terminal fits its new width; a browser tab (`--print-url`) keeps its own width. At the end a double click puts 400 px back. | #192 | 12.1, 12.9 |
 | W49 | **Real claude**, issue #188 part 1: a throwaway session resumed from its card's `Other flags…` with another `--model` — the field filled with the flags it was started with, `f` from the list, the header showing the new flag once Claude Code has started, a plain `Resume here` keeping it (manual-checks.md, "Resuming with other flags"). | #188 | 12.6, 12.9, design 7.6 |
+| W50 | **Real claude**, follow-up F44: Parked on throwaway sessions — `w`, the toast and Undo; the number freed and taken by a new session, and the lowest free one back under Open; a prompt brings it back, a key typed and not sent does not; `skydeck park` and `skydeck unpark` in W show within seconds; a parked session that asks shows its mark, sends no notification and Ctrl+Shift+J passes it; `skydeck window --restart` keeps it parked without a number; after `w` the selection is on the next row and the list has not moved, three `w` in a row park three sessions and nothing is typed into the session the selection moved to; `w` on a row under Parked brings it back, still selected and in view; `/clear` in a parked session; `w` on a US and a Czech layout (manual-checks.md, "Parked"). | F44 | 7.6, 12.1, 12.4, 12.9, 12.15, design 7.1 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
