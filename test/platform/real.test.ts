@@ -978,15 +978,18 @@ describe('real runner', () => {
       const s = sandbox(t);
       s.link('sh', 'sleep');
       const pidFile = join(s.root, 'pid');
+      // Timed on the clock that cannot step: a wall clock that steps back would shorten the
+      // durations measured below (issue #202).
+      const since = (start: number): number => Math.floor(performance.now() - start);
 
-      const started = Date.now();
+      const started = performance.now();
       const timedOut = await realPlatform().runner.run('sh', looping(s, "trap '' TERM"), {
         env: s.env(),
         timeoutMs: 200,
         killGraceMs: 400,
       });
       assert.equal(timedOut.timedOut, true);
-      assert.ok(Date.now() - started >= 550, `answered after ${Date.now() - started} ms`);
+      assert.ok(since(started) >= 550, `answered after ${since(started)} ms`);
       assert.equal(await gone(pidIn(pidFile)), true);
 
       rmSync(pidFile);
@@ -997,10 +1000,10 @@ describe('real runner', () => {
         signal: controller.signal,
       });
       await written(pidFile);
-      const aborted = Date.now();
+      const aborted = performance.now();
       controller.abort();
       await assert.rejects(running, { name: 'AbortError' });
-      assert.ok(Date.now() - aborted >= 350, `rejected after ${Date.now() - aborted} ms`);
+      assert.ok(since(aborted) >= 350, `rejected after ${since(aborted)} ms`);
       assert.equal(await gone(pidIn(pidFile)), true);
     });
 
@@ -1308,7 +1311,8 @@ describe('real clock: after', () => {
   test('calls back once after that many milliseconds', async () => {
     const { clock } = realPlatform();
     let calls = 0;
-    const started = Date.now();
+    // The clock that cannot step: a wall clock that steps back would shorten it (issue #202).
+    const started = performance.now();
 
     clock.after(20, () => {
       calls++;
@@ -1317,7 +1321,8 @@ describe('real clock: after', () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
 
     assert.equal(calls, 1);
-    assert.ok(Date.now() - started >= 15, `after ${Date.now() - started} ms`);
+    const after = Math.floor(performance.now() - started);
+    assert.ok(after >= 15, `after ${after} ms`);
   });
 
   test('the returned function cancels it, and calling it again does nothing', async () => {
@@ -1896,7 +1901,8 @@ describe('real net', () => {
     t.after(() => listener.close());
     const lines: string[] = [];
 
-    const started = Date.now();
+    // The clock that cannot step: a wall clock that steps back would shorten it (issue #202).
+    const started = performance.now();
 
     await net.requestUnix(path, {
       method: 'GET',
@@ -1905,7 +1911,7 @@ describe('real net', () => {
       onLine: (line) => lines.push(line),
     });
 
-    assert.ok(Date.now() - started > 500, 'the stream outlasted the timeout');
+    assert.ok(performance.now() - started > 500, 'the stream outlasted the timeout');
     assert.deepEqual(lines, [...Array.from({ length: 39 }, (_, i) => String(i + 1)), 'end']);
   });
 

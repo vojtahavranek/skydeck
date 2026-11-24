@@ -717,8 +717,15 @@ describe(
       await first.registry.spawn(spec);
       first.drop();
       if (startByNs !== undefined) {
+        // Past it on the clock the keeper judges it by, the wall clock (Date.now()): nowNs() holds
+        // its last value while the wall clock steps back, and a step back lengthens this wait by
+        // the step (#202).
         const due = BigInt(spec.startBy);
-        await until(() => w.tp.platform.clock.nowNs() > due + 500_000_000n, 'past the deadline');
+        await until(
+          () => BigInt(Date.now()) * 1_000_000n > due + 500_000_000n,
+          'past the deadline',
+          30_000,
+        );
       }
       const r = w.registry();
       await r.registry.rediscover();

@@ -5717,6 +5717,29 @@ and the launcher need linked into the sandbox. With the fake clock a keeper's st
 lie in its real past and its `.pid` line would count as dead. A test that starts keepers ends them
 itself, and only after checking that the runtime directory lies inside its sandbox.
 
+**A wall clock that steps back** (issue #202). On a WSL 2 machine the wall clock was seen to step
+back by 2.1 to 2.7 s every 32 s, while timers and the clock that cannot step (`monotonicNs`,
+`performance.now()`) run on. So a test measures a duration it bounds from below with
+`performance.now()`: two `Date.now()` readings would shorten it by the step (an upper bound on two
+such readings is left as it is, since a step back only shortens what they measure); and a
+deadline that a keeper judges is set and waited for on the clock the
+keeper reads, the wall clock: one that has "already passed" lies a minute back, not a second (the
+real clock's `nowNs()` holds its last value while the wall clock is stepped back, the keeper's
+`time.time_ns()` does not), and a wait for one to pass polls `Date.now()` with a limit that leaves
+room for steps, never a fixed sleep. `test/helpers/clock-step.ts` makes such steps on purpose:
+with `SKYDECK_TEST_CLOCK_STEP=<step>/<period>` (milliseconds) and
+`NODE_OPTIONS=--import=./test/helpers/clock-step.ts`, the wall clock that every process of a test
+sees steps back by `<step>` once every `<period>`, timed on the clock that cannot step from one
+start they all share; the sandbox (`test/helpers/sandbox.ts`) then passes both variables on to its
+children and writes the `date` and `python3` of its `bin` as wrappers that read the same stepped
+clock (the hook's time stamps, the keeper's deadline). Timers, file times and the machine's own
+clock are left alone; without the variable nothing changes. So under the tool a file's
+modification time stays real while `Date` falls behind: a file written a moment ago lies in the
+future of the clock the code reads, by as much as that clock was stepped back. `npm test` and `npm run test:page` run
+with a global setup (`test/helpers/clock-watch.ts`) that compares the wall clock with the clock that
+cannot step for the whole run and, when the wall clock fell more than a second behind, says so in
+one line after the summary, so that a red run can be read at once.
+
 ### 17.1 The stand-in program
 
 `test/fixtures/standin/` is a Node.js program that the tests configure as `claudeCommand`. It
@@ -6022,10 +6045,11 @@ each page's storage (follow-up F41, 12.14) unless a case asks for a context with
   `npm test -- --test-shard=i/n`: npm puts that argument after the glob in `package.json`, where
   `node --test` ignores it without a word and every shard would run the whole suite. The suites'
   sandbox (`test/helpers/sandbox.ts`) builds the environment of its child processes from nothing,
-  so it drops `NODE_OPTIONS` and the nested `node --test` runs of `test-page/smoke.test.ts` stay
+  so it drops `NODE_OPTIONS` (it gives one of its own only for the stepped clock of 17, which never
+  carries a shard) and the nested `node --test` runs of `test-page/smoke.test.ts` stay
   whole; a test that started `node --test` with the inherited environment would take the shard
-  too and could pass with no test at all. The commands
-  in `package.json` and `npm run check` stay as they are. A job has a time limit of its own: 10
+  too and could pass with no test at all. No shard is written into the commands of `package.json`
+  (they carry only the global setup of 17) or into `npm run check`. A job has a time limit of its own: 10
   minutes for `lint`, 25 for a shard; the test step of a shard has 20 minutes of its own, because a
   job that reaches its limit is only cancelled, which not every reader of the checks takes for a
   failure, while a step that reaches its limit fails its job; so a pull request is good when every
