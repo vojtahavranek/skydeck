@@ -70,4 +70,8 @@ export interface DerivedSession {
   bootId: string | null;
   doneAtNs: Ns | null;
   hidden: boolean; // done, and no activity after doneAtNs (7.1)
+  /** Follow-up F44: the time the user parked the session (stored), null for none. */
+  parkedAtNs: Ns | null;
+  /** F44 (7.1): parked, not hidden, and no user input after parkedAtNs (a start does not count). */
+  parked: boolean;
 }

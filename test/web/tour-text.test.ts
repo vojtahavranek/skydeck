@@ -116,6 +116,8 @@ test('what each step says (the brief, Behaviour 2)', () => {
     assert.match(keys?.join(' ') ?? '', new RegExp(word), word);
   }
   assert.match(keys?.join(' ') ?? '', /a show done sessions/);
+  // F44: the line of the list's keys ends with `w park`, after `d done`.
+  assert.match(keys?.[2] ?? '', /d done · w park$/);
   assert.match(around?.join(' ') ?? '', /Switch… \(Ctrl\+Shift\+P\)/);
   assert.match(around?.join(' ') ?? '', /Ctrl\+Shift\+1…9/);
   assert.match(around?.join(' ') ?? '', /new session/);
@@ -222,6 +224,7 @@ test('every key a step names is one web/keys.js classifies in the zone it is nam
   assert.equal(kind('Ctrl+Tab'), 'previous');
   assert.equal(kind('Ctrl+Shift+O'), 'previous');
   assert.equal(listKey(eventsOf('d')[0] as KeyLike)?.kind, 'done');
+  assert.equal(listKey(eventsOf('w')[0] as KeyLike)?.kind, 'park');
   assert.deepEqual(listKey(eventsOf('t')[0] as KeyLike), { kind: 'edit', what: 'ticket' });
   assert.deepEqual(listKey(eventsOf('Shift+↑')[0] as KeyLike), { kind: 'reorder', by: -1 });
   assert.deepEqual(listKey(eventsOf('Shift+↓')[0] as KeyLike), { kind: 'reorder', by: 1 });

@@ -16,7 +16,7 @@ No. skydeck works in any terminal. Only one thing needs a terminal program: star
 | What you do | Needs terminal support? |
 |---|---|
 | Recording sessions (the hook) | No. It is a Claude Code hook. It records a session whatever terminal `claude` runs in. |
-| `skydeck`, `ls`, `show`, `label`, `group`, `note`, `done`, `undone`, `pr ...` | No. They read and write skydeck's own database and call `gh`. |
+| `skydeck`, `ls`, `show`, `label`, `group`, `note`, `done`, `undone`, `park`, `unpark`, `pr ...` | No. They read and write skydeck's own database and call `gh`. |
 | `install`, `uninstall`, `doctor` | No. (`doctor` runs a WezTerm check only when the configuration says `"terminal": "wezterm"`.) |
 | `resume`, `new`, `restore`, and `R` in the interactive list | They start `claude`. By default they do it in the terminal you are in: skydeck ends and `claude` takes its place. That works in any terminal. With `--window` (`resume`, `new`) or `"terminal": "window"` the window's server starts it in the skydeck window instead ("Starting sessions in the window from a terminal (stage C)"). |
 | Starting a session in a **new tab** (`--tab`, or `"terminal": "wezterm"`) | Yes. WezTerm is the only terminal skydeck can open tabs in. There are two adapters, `here` and `wezterm`, in `src/terminals/`. |
@@ -864,11 +864,12 @@ effect.
 
 ### Using the window
 
-- **The list**, on the left, has three sections: **Open** (running or starting, in the window or
+- **The list**, on the left, has four sections: **Open** (running or starting, in the window or
   in another terminal; the window's terminals carry the slots 1–9, read top to bottom; Shift+↑ and
   Shift+↓ in the list (`Focus: list`) move the selected one, any session of Open, see Keys),
-  **Recent** (not running, last active in the last 7 days) and **Earlier** (folded; a click on its
-  header unfolds it). Done sessions are hidden: the footer's `show`, or `a` in the list, shows them.
+  **Parked** (the sessions you set aside with `w`, running or not, however old, the most recently
+  parked first, each with `parked 6d` and no number; see "Parked" below), **Recent** (not running,
+  last active in the last 7 days) and **Earlier** (folded; a click on its header unfolds it). Done sessions are hidden: the footer's `show`, or `a` in the list, shows them.
   While there is no session at all (none yet, or the last one done or gone), the list says so under
   Open and names the two ways to get one: start `claude` in any terminal (it shows in the list as
   soon as it starts), or start one in the window with Ctrl+Shift+N (`+ New` in a browser tab); the
@@ -971,6 +972,7 @@ effect.
   and `skydeck window --restart`. A session whose program ends gives its number up at once — also
   one marked done that you let keep running, and with its ended terminal still on screen; a row
   under Recent or Earlier never shows a number, and Ctrl+Shift+1…9 never go to an ended session.
+  A session you park gives its number up at once too, while it goes on running ("Parked" below).
   That leaves a gap (nothing is renumbered), and a new terminal takes the lowest free number, at
   that number's place: after the terminals with lower numbers, before the next one with a higher
   number, also when a block shows a terminal out of its
@@ -999,13 +1001,14 @@ header:
 | the ticket | `t` | `Ticket` (`+ ticket` while none is set), beside `Pull requests` |
 | the pull requests | `p` | `Pull requests` (`+ PR` while none is attached) |
 | done, undone | `d` | `Done` (`Undone` for a session marked done) |
+| park, unpark | `w` | `Park` (`Unpark` for a parked session) |
 
 With no session selected, a key says `no session selected`.
 
 **The header** has four lines, the same height for every session and every window width; each
 is one line, cut with an ellipsis when it is long:
 
-1. the title, the group chip with its ✎ (or `+ group`), the state, `Note` and `Done`;
+1. the title, the group chip with its ✎ (or `+ group`), the state, `Note`, `Done` and `Park`;
 2. the directory (whole in its tooltip), `opened today at 14:02 · last active 3m` (`opened` while
    the window shows the session's terminal), where the title comes from (`title: your label`,
    `title: Claude Code's name`, `title: Claude Code's summary` or `title: start time and
@@ -1072,6 +1075,27 @@ requests — …`): look at it before you save.
   yet; press t again`; the header's controls say the same with the list's key (`press l again`, …).
   `p` never waits. Right after you select a session, `n` and `t` can also say so. A refusal that
   comes after you closed its dialog shows in the toast as `not saved: <why>`.
+
+**Parked.** Some sessions are alive but not yours to move right now: the work went to review, or
+waits for a person or for another part of the work. `w` in the list ("waits") or `Park` in the
+header parks the selected session: it moves under **Parked**, keeps running if it runs, and keeps
+its group. No dialog asks anything. The toast says `Parked: listed under Parked. It comes back when
+you send it a prompt.` (`…, and it keeps running. …` for a running one), with `Undo` for 5 seconds.
+After `w` in the list the selection goes to the row after it in the section it left, else the one
+before it, else none (the list does not move; Ctrl+Tab goes back to the parked session); the
+keyboard stays in the list, so `w` again parks the next one. `Park` in the header keeps the session
+selected and the list follows it under Parked. A parked session is quiet: its marks (asks,
+finished, ended) still show in its row, but it sends no desktop notification, the title bar's `need
+you` count leaves it out and Ctrl+Shift+J skips it. Running in the window, it gives its number up
+at once: its row and terminal show none, Ctrl+Shift+1…9 never go to it, and the next session you
+start or resume takes that number; it keeps running, and its terminal shows when you select its
+row. Back under Open it takes the lowest free number (none while all nine are in use: then it is
+moved like any session without one). A restore never starts it; resume it from its row (Enter), and it stays parked. It comes back under
+Open by itself once you send it a prompt (in the window or in any terminal; starting or resuming it
+alone, or a key typed and not sent, does not), or with `w` on its row or `Unpark` (no toast; it stays
+selected and the list follows it). Marking a parked session done ends its parking, and its `Undo`
+parks it again. A session you leave with `/clear` stays parked; the session `claude` goes on with is
+not. `skydeck park <ref>` and `skydeck unpark <ref>` do the same in a terminal.
 
 **Done.** `d` in the list or `Done` marks the session done and shows a toast with `Undo` for 5
 seconds: `Marked done: hidden from the list. It comes back on new activity.`, or for a session that
@@ -1930,7 +1954,7 @@ never one Enter away.
 When the list stops showing the selected session — the filter or a chip hides it, done sessions
 are hidden again, or a filter is cleared while Earlier is folded and the session is in it (← and
 a click on Earlier's header select the row above it before they fold) — no row is selected and
-the list's keys act on none: `l`, F2, `g`, `n`, `p` and `d` say `no session selected`. When a
+the list's keys act on none: `l`, F2, `g`, `n`, `p`, `d` and `w` say `no session selected`. When a
 terminal of the window holds the session, the right side keeps it: the terminal with its header,
 whose controls edit that session as usual (a click on the title, ✎, `Note`, `Done`, `Pull
 requests`), and once its program has ended, the ended bar with Resume and Close (and Other
@@ -2567,7 +2591,11 @@ every checkout from before it refuses the database the same way (`schema version
 F19) upgrades it once more, to schema version 4: it adds one table for the statuses read so far,
 by address, and keeps everything else as it was; from then on every checkout from before it —
 the one of follow-up F18 included — refuses the database the same way (`schema version 4, this one
-knows 3`), and nothing takes the table away again. The way forward is its `update skydeck`:
+knows 3`), and nothing takes the table away again. The update that brings Parked (follow-up F44)
+upgrades it once more, to schema version 5: it adds one empty column for the time a session was
+parked to the table of labels, groups and notes, and keeps everything else as it was; from then on
+every checkout from before it refuses the database the same way (`schema version 5, this one knows
+4`), and nothing takes the column away again. The way forward is its `update skydeck`:
 `skydeck update` in a checkout that has the command (from the update that brings it on), and
 `git pull` in an older one (which prints the same `update skydeck` and has no `skydeck update`).
 `skydeck update` runs on such a database, although no other command does: it says `skydeck: the

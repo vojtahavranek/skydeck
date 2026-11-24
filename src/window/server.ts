@@ -78,9 +78,15 @@ import { createSettings } from './settings.ts';
 import type { Seen } from './seen.ts';
 import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
-import { readMovedSlots, writeMovedSlots } from './moved-slots.ts';
+import {
+  readMovedSlots,
+  readWithheldSlots,
+  writeMovedSlots,
+  writeWithheldSlots,
+} from './moved-slots.ts';
 import { createReorder, persistMove } from './reorder.ts';
 import { createOpenOrder } from './open-order.ts';
+import { createParkedSlots } from './parked-slots.ts';
 import { createRestoreMemory } from './restore-memory.ts';
 import { createRegistry } from './terminals.ts';
 import type { Registry } from './terminals.ts';
@@ -105,6 +111,10 @@ export interface ServerOptions {
    *  server.json, while only the window_server lock names it; default 0. `serve` sets it from
    *  SKYDECK_TEST_SERVE_START_DELAY_MS in a marked test sandbox only. */
   startDelayMs?: number;
+  /** F44 (S2 7.6), a seam for tests: called by the registry's write of the moved and withheld
+   *  slots before its transaction; a throw of it is that write's failure, and no other write's.
+   *  `serve` never sets it. */
+  beforeSlotsWrite?: () => void;
 }
 
 export interface RunningServer {
@@ -499,8 +509,15 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       log,
       // F37 (S2 7.6): the slots moved by hand, applied at each keeper's hello.
       movedSlots: readMovedSlots(deck.store),
-      persistSlots: (moved) => {
-        writeMovedSlots(deck.store, moved);
+      // F44 (S2 7.6): the terminals whose slot is withheld (their sessions are parked), applied
+      // at each keeper's hello too; written with the moved slots, both or neither.
+      withheldSlots: readWithheldSlots(deck.store),
+      persistSlots: (moved, withheld) => {
+        options.beforeSlotsWrite?.();
+        deck.store.transaction(() => {
+          writeMovedSlots(deck.store, moved);
+          writeWithheldSlots(deck.store, withheld);
+        });
       },
       events: {
         hello(term, hello, origin) {
@@ -536,6 +553,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
           coreSoft: environment.coreSoft,
           interop: () => interop.current(),
           build,
+          // F44 (S2 7.6): a terminal opened for a parked session gives its number up in the step
+          // that spawns it.
+          listed: () => {
+            parkedNow();
+          },
         },
         size,
       );
@@ -596,6 +618,21 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       log: quietLog,
       stopping: () => stopBegun,
     });
+    // F44 (S2 7.6, 12.1): the numbers of parked sessions' terminals, and Open's kept order without
+    // them. Ready from the first refresh that worked on (the keepers are found by then).
+    let slotsReady = false;
+    const parkedSlots = createParkedSlots({
+      registry: created,
+      rows: () => tick?.rows() ?? NO_ROWS,
+      ready: () => slotsReady,
+      stopping: () => stopBegun,
+      openOrder,
+      log: quietLog,
+    });
+    /** F44: the registry made to agree with what is parked now; it never throws. */
+    const parkedNow = (): void => {
+      parkedSlots.sync();
+    };
     // F37, F42 (design 7.8): the order of Open in this boot, a restore's order.
     const restoreMemory = createRestoreMemory({
       store: deck.store,
@@ -871,11 +908,15 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       keepersLog,
       log,
       afterRefresh: () => {
+        slotsReady = true;
+        parkedNow(); // F44: first, after the mapping set each terminal's session; it never throws
         pageMark.update(pages.count()); // plan C20; it never throws
         decidePostponed();
         created.flushSlots(); // F37: a write of the moved slots that failed; it never throws
         tookOpen(true); // F42: the kept order and the restore's order take Open; it never throws
       },
+      // F44: an act's write (reloadNow) sets the numbers before the lists go out; it never throws.
+      afterReload: parkedNow,
       storeNewer,
       attention: attending.tick,
       tickets: ticketFetches,

@@ -76,6 +76,10 @@ const SECTIONS = [
       [['t'], 'ticket: a link, or a key when a ticket address is set (Settings)'],
       [['p'], 'pull requests: attach one'],
       [['d'], 'done, or undone for a done session (an Undo follows a done)'],
+      [
+        ['w'],
+        'park: the session waits under Parked until you send it a prompt; on a parked one, unpark (an Undo follows a park)',
+      ],
       [['c'], 'carry over after /clear: to the offer of the selected session'],
       [
         ['f'],

@@ -685,3 +685,27 @@ describe('F42: a put-back id goes after the nearest earlier id still there', () 
     assert.deepEqual(withPutBack(['a', 'b'], [], ['b']), ['b']);
   });
 });
+
+describe('F44: a parked row is not under Open for the held places', () => {
+  test("a parked successor running in the held session's process takes no place: the place stays held, with no successor", () => {
+    const specs: Spec[] = [
+      { n: 1, slot: 1 },
+      { n: 10, left: { pid: 4010, detail: 'clear' } },
+      { n: 11, slot: 2, pid: 4010 },
+    ];
+    const plain = world(specs, [1, 10]);
+    assert.deepEqual(heldPlaces(plain), { held: [sid(10)], takes: new Map([[sid(10), sid(11)]]) });
+    // The same world with session 11 parked: it is under Parked, so no row of Open takes the place.
+    const input = world(specs, [1, 10]);
+    const parked = {
+      ...input,
+      rows: input.rows.map((row) =>
+        row.id === sid(11)
+          ? { ...row, parked: true, session: { ...row.session, parked: true, parkedAtNs: T0 } }
+          : row,
+      ),
+    };
+    assert.deepEqual(heldPlaces(parked), { held: [sid(10)], takes: new Map() });
+    assert.deepEqual(drawn(parked), [1]);
+  });
+});

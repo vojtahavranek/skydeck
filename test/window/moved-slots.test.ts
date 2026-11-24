@@ -1,10 +1,18 @@
 // Follow-up F37 (S2 7.6, 10.2): the kv entry `window_slots`, terminal id → slot moved by hand.
-// Read tolerantly (what is not well formed is left out), written whole, removed when empty.
+// Read tolerantly (what is not well formed is left out), written whole, removed when empty. F44:
+// the kv entry `window_slots_withheld`, the terminals whose slot the server withholds, the same way.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import type { KvKey } from '../../src/store/types.ts';
-import { MOVED_SLOTS_KEY, readMovedSlots, writeMovedSlots } from '../../src/window/moved-slots.ts';
+import {
+  MOVED_SLOTS_KEY,
+  readMovedSlots,
+  readWithheldSlots,
+  WITHHELD_SLOTS_KEY,
+  writeMovedSlots,
+  writeWithheldSlots,
+} from '../../src/window/moved-slots.ts';
 
 function kv(initial: Record<string, string> = {}): {
   values: Map<KvKey, string>;
@@ -104,4 +112,23 @@ test('F42: a slot taken away (null) is written and read back', () => {
       [B, null],
     ]),
   );
+});
+
+test('F44: the key is window_slots_withheld; written as a JSON array in id order, read back; none removes the entry', () => {
+  assert.equal(WITHHELD_SLOTS_KEY, 'window_slots_withheld');
+  const store = kv();
+  writeWithheldSlots(store, new Set([B, A]));
+  assert.deepEqual(JSON.parse(store.values.get('window_slots_withheld') ?? ''), [A, B]);
+  assert.deepEqual(readWithheldSlots(store), new Set([A, B]));
+  writeWithheldSlots(store, new Set());
+  assert.equal(store.values.has('window_slots_withheld'), false);
+  assert.deepEqual(readWithheldSlots(store), new Set());
+});
+
+test('F44: the withheld terminals read tolerantly: not JSON or not an array is none; of an array, only terminal ids', () => {
+  for (const text of ['[', 'not json', '3', '"x"', 'null', '{"a": 1}', 'true']) {
+    assert.deepEqual(readWithheldSlots(kv({ window_slots_withheld: text })), new Set(), text);
+  }
+  const stored = JSON.stringify([A, '0123456789AB', '0123456789a', 5, null, [B], B, A]);
+  assert.deepEqual(readWithheldSlots(kv({ window_slots_withheld: stored })), new Set([A, B]));
 });

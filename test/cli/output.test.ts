@@ -99,6 +99,8 @@ const SESSION_KEYS = [
   'hasNote',
   'continuedFrom',
   'done',
+  'parked',
+  'parkedAt',
   'prs',
 ];
 
@@ -123,6 +125,8 @@ test('sessionJson of a row with every field set is the object of 2.10.5, keys in
     hasNote: true,
     continuedFrom: S2,
     done: true,
+    parked: false,
+    parkedAt: null,
     prs: [
       {
         url: PR1,
@@ -311,6 +315,27 @@ test('showJson: doneAt is the time the session was marked done, null when it is 
   );
 });
 
+test('sessionJson and showJson (F44): parked, and parkedAt the time of the parking while it is parked', () => {
+  const parked = listRow({
+    id: S1,
+    parked: true,
+    session: ds({ id: S1, parked: true, parkedAtNs: T0 - 2n * MIN }),
+  });
+  for (const json of [sessionJson(parked), showJson(parked, [])]) {
+    assert.equal(json.parked, true);
+    assert.equal(json.parkedAt, '2026-11-12T08:58:00.000Z');
+    assert.equal(json.done, false);
+  }
+  const ended = listRow({
+    id: S1,
+    parked: false,
+    session: ds({ id: S1, parked: false, parkedAtNs: T0 - 2n * MIN }),
+  });
+  assert.equal(sessionJson(ended).parked, false);
+  assert.equal(sessionJson(ended).parkedAt, null, 'a parking that ended: null');
+  assert.equal(sessionJson(listRow({ id: S1 })).parkedAt, null);
+});
+
 test('showJson: no note and no launch command are null; unknownFlags is [] without a launch command', () => {
   const json = showJson(listRow({ id: S1 }), []);
   assert.equal(json.note, null);
@@ -484,6 +509,24 @@ test('formatShow: a session marked done and active again is not done, and says n
     session: ds({ id: S1, hidden: false, doneAtNs: T0 - 2n * MIN }),
   });
   assert.ok(!showText(row).includes('done:'));
+});
+
+test('formatShow (F44): a parked session says since when, on the line after its state; one not parked has no line', () => {
+  const row = listRow({
+    id: S1,
+    parked: true,
+    session: ds({ id: S1, parked: true, parkedAtNs: T0 - 2n * MIN }),
+  });
+  const lines = showText(row).split('\n');
+  assert.equal(lines[2]?.startsWith('state:'), true);
+  assert.equal(lines[3], 'parked:    since 2026-11-12T08:58:00.000Z');
+  assert.ok(!showText(listRow({ id: S1 })).includes('parked:'));
+  const ended = listRow({
+    id: S1,
+    parked: false,
+    session: ds({ id: S1, parked: false, parkedAtNs: T0 - 2n * MIN }),
+  });
+  assert.ok(!showText(ended).includes('parked:'), 'a parking that ended');
 });
 
 test('formatShow: several marks are joined by a comma; none, no label and no group show as "-"', () => {

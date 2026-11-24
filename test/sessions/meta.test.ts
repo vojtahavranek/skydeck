@@ -15,7 +15,10 @@ import {
   discardKeptNote,
   keptNotePath,
   markDone,
+  markParked,
   markUndone,
+  markUnparked,
+  parkTime,
   requirePrKey,
   setGroup,
   setLabel,
@@ -25,6 +28,8 @@ import {
 import { refresh } from '../../src/sessions/refresh.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
+import type { Ns } from '../../src/platform/types.ts';
+import type { MetaPatch } from '../../src/store/types.ts';
 import { S1, S2, SEC, T0 } from '../helpers/platform.ts';
 import { startRunning, twoSessions, writeTranscript } from '../helpers/session-files.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
@@ -88,6 +93,7 @@ describe('setLabel, setGroup, setNote', () => {
       note: 'remember',
       doneAtNs: null,
       ticket: null,
+      parkedAtNs: null,
       createdNs: T0,
       updatedNs: T0 + 5n * SEC,
     });
@@ -180,6 +186,132 @@ describe('markDone, markUndone', () => {
     const [row] = loadRows(d.deck);
     assert.equal(row?.done, true);
     assert.equal(row?.state, 'working', 'still running');
+    assert.notEqual(d.proc.stat(4242), null, 'its process is still there');
+    assert.deepEqual(d.runner.calls, []);
+    assert.deepEqual(d.runner.interactiveCalls, []);
+  });
+});
+
+describe('markParked, markUnparked, parkTime (follow-up F44)', () => {
+  /** The session's row as the list reads it now, which `markParked` is given. */
+  function target(d: TestDeck, sessionId: string, parked: boolean) {
+    const row = loadRows(d.deck).find((candidate) => candidate.id === sessionId);
+    assert.ok(row, `a row of ${sessionId}`);
+    assert.equal(row.parked, parked);
+    return row;
+  }
+
+  /** Every patch `updateMeta` is called with from now on. */
+  function patches(d: TestDeck): MetaPatch[] {
+    const seen: MetaPatch[] = [];
+    const store = d.deck.store;
+    const update = store.updateMeta.bind(store);
+    store.updateMeta = (sessionId, patch, nowNs) => {
+      seen.push(patch);
+      return update(sessionId, patch, nowNs);
+    };
+    return seen;
+  }
+
+  test('parkTime is the later of now and one nanosecond after the last input', () => {
+    const cases: [what: string, lastUserNs: Ns | null, expected: Ns][] = [
+      ['no input', null, T0],
+      ['input before now', T0 - 30n * SEC, T0],
+      ['input one nanosecond before now', T0 - 1n, T0],
+      ['input at now', T0, T0 + 1n],
+      ['input after now (the clock stepped back)', T0 + 2n * SEC, T0 + 2n * SEC + 1n],
+    ];
+    for (const [what, lastUserNs, expected] of cases) {
+      assert.equal(parkTime(T0, lastUserNs), expected, what);
+    }
+  });
+
+  test('markParked stores the clock time and returns true; markUnparked clears it; the other fields stay', (t) => {
+    const d = known(t);
+    setLabel(d.deck, S1, 'x');
+    d.clock.setNs(T0 + 5n * SEC);
+
+    assert.equal(markParked(d.deck, target(d, S1, false)), true);
+    assert.equal(meta(d, S1)?.parkedAtNs, T0 + 5n * SEC);
+    assert.equal(meta(d, S1)?.label, 'x');
+    d.clock.setNs(T0 + 9n * SEC);
+    markUnparked(d.deck, S1);
+
+    assert.equal(meta(d, S1)?.parkedAtNs, null);
+    assert.equal(meta(d, S1)?.updatedNs, T0 + 9n * SEC);
+    assert.equal(meta(d, S1)?.label, 'x');
+    assert.equal(meta(d, S2), null, 'another session is not touched');
+  });
+
+  test("markParked dates a parking after the input it knows of, when the clock is behind the transcript's", (t) => {
+    const d = known(t); // S1's last input is at T0 - 30 s
+    d.clock.setNs(T0 - 31n * SEC);
+
+    markParked(d.deck, target(d, S1, false));
+
+    assert.equal(meta(d, S1)?.parkedAtNs, T0 - 30n * SEC + 1n);
+  });
+
+  test('parking a done session clears its done mark in the same statement', (t) => {
+    const d = known(t);
+    markDone(d.deck, S1);
+    d.clock.setNs(T0 + 5n * SEC);
+    const seen = patches(d);
+
+    markParked(d.deck, target(d, S1, false));
+
+    assert.deepEqual(seen, [{ parkedAtNs: T0 + 5n * SEC, doneAtNs: null }], 'one updateMeta');
+    assert.equal(meta(d, S1)?.doneAtNs, null);
+    assert.equal(meta(d, S1)?.parkedAtNs, T0 + 5n * SEC);
+  });
+
+  test('marking a parked session done ends its parking in the same statement', (t) => {
+    const d = known(t);
+    markParked(d.deck, target(d, S1, false));
+    d.clock.setNs(T0 + 5n * SEC);
+    const seen = patches(d);
+
+    markDone(d.deck, S1);
+
+    assert.deepEqual(seen, [{ doneAtNs: T0 + 5n * SEC, parkedAtNs: null }], 'one updateMeta');
+    assert.equal(meta(d, S1)?.parkedAtNs, null);
+    assert.equal(meta(d, S1)?.doneAtNs, T0 + 5n * SEC);
+  });
+
+  test('markUndone leaves a parking as it is', (t) => {
+    const d = known(t);
+    markParked(d.deck, target(d, S1, false));
+
+    markUndone(d.deck, S1);
+
+    assert.equal(meta(d, S1)?.parkedAtNs, T0);
+    assert.equal(meta(d, S1)?.doneAtNs, null);
+  });
+
+  test('a second markParked on a parked row writes nothing and keeps the first time', (t) => {
+    const d = known(t);
+    markParked(d.deck, target(d, S1, false));
+    const first = meta(d, S1);
+    d.clock.setNs(T0 + 60n * SEC);
+    const seen = patches(d);
+    const row = loadRows(d.deck).find((candidate) => candidate.id === S1);
+    assert.equal(row?.parked, true, 'derived as parked');
+
+    assert.equal(row !== undefined && markParked(d.deck, row), false);
+
+    assert.deepEqual(seen, []);
+    assert.deepEqual(meta(d, S1), first);
+  });
+
+  test('a running session can be parked, and nothing is stopped', (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1);
+    startRunning(d, S1, 4242);
+    refresh(d.deck);
+
+    markParked(d.deck, target(d, S1, false));
+
+    assert.equal(loadRows(d.deck)[0]?.state, 'working', 'still running');
     assert.notEqual(d.proc.stat(4242), null, 'its process is still there');
     assert.deepEqual(d.runner.calls, []);
     assert.deepEqual(d.runner.interactiveCalls, []);

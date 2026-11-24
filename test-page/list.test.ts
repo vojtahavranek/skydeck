@@ -333,7 +333,13 @@ function fullPr(
 
 /** A `list` with sections Open, Recent and Earlier holding these rows. */
 function fullList(
-  sections: { open?: RowPayload[]; week?: RowPayload[]; earlier?: RowPayload[] | 'folded' },
+  sections: {
+    open?: RowPayload[];
+    /** F44: given, a section Parked after Open; absent, none (a list of three sections). */
+    parked?: RowPayload[];
+    week?: RowPayload[];
+    earlier?: RowPayload[] | 'folded';
+  },
   terminals: TerminalPayload[] = [],
   more: Record<string, unknown> = {},
 ): Record<string, unknown> {
@@ -362,7 +368,12 @@ function fullList(
     t: 'list',
     nowNs: String(NOW),
     counts: { working: 0, waiting: 0, running: 0, starting: 0, elsewhere: 0, notRunning: 0 },
-    sections: [section('open', sections.open ?? []), section('week', sections.week ?? []), earlier],
+    sections: [
+      section('open', sections.open ?? []),
+      ...(sections.parked === undefined ? [] : [section('parked', sections.parked)]),
+      section('week', sections.week ?? []),
+      earlier,
+    ],
     doneHidden: 0,
     banner: null,
     terminals,
@@ -2038,6 +2049,84 @@ test('the list', async (t) => {
           );
           await s.page.mouse.move(1200, 600);
         }
+      }
+      assert.deepEqual(await s.page.evaluate(() => Reflect.get(globalThis, 'pageErrors')), []);
+    },
+  );
+
+  await t.test(
+    "F44: a list with parked rows draws four bands, Parked second, by F17's rules: --bg, 28 px, a 1 px --line above and below, sticky; its mark --dim as Recent's, its title --text, no tooltip; each row its mark `parked 6d` and no number",
+    async (t) => {
+      const parked = [
+        fullRow(S2, {
+          state: 'running',
+          title: 'parked and running',
+          terminal: 'aaaaaaaaaaaa',
+          slot: null,
+          parked: true,
+          parkedAtNs: ago(6n * DAY),
+        }),
+        fullRow(S3, { title: 'parked long ago', parked: true, parkedAtNs: ago(40n * DAY) }),
+      ];
+      const list = fullList(
+        {
+          open: [fullRow(S1, { state: 'running', terminal: 'bbbbbbbbbbbb', slot: 1 })],
+          parked,
+          week: [fullRow(S4)],
+          earlier: 'folded',
+        },
+        [
+          fullTerminal('aaaaaaaaaaaa', { sessionId: S2, slot: null }),
+          fullTerminal('bbbbbbbbbbbb', { sessionId: S1, slot: 1 }),
+        ],
+      );
+      const s = await scripted(t, chromium, () => list, 77);
+      const rows = await untilDrawn(s.page, (drawnRows) => drawnRows.length === 4, 'four rows');
+      assert.deepEqual(await headers(s.page), [
+        'open Open 1',
+        'parked Parked 2',
+        'week Recent 1',
+        'earlier Earlier 4 9d–30d ago',
+      ]);
+      assert.deepEqual(await headerTips(s.page), [
+        'week section-title: last active in the last 7 days',
+      ]);
+      assert.deepEqual(
+        rows.map((row) => [row.id, row.section, row.slot, row.marks]),
+        [
+          [S1, 'open', '1', []],
+          [S2, 'parked', '', ['parked 6d']],
+          [S3, 'parked', '', ['parked 40d']],
+          [S4, 'week', '', []],
+        ],
+      );
+      await s.page.mouse.move(1200, 600);
+      for (const scheme of ['light', 'dark'] as const) {
+        await s.page.emulateMedia({ colorScheme: scheme });
+        const want = await colours(s.page, {
+          bg: 'var(--bg)',
+          line: 'var(--line)',
+          text: 'var(--text)',
+          dim: 'var(--dim)',
+        });
+        const drawnBands = (await bands(s.page)).bands;
+        assert.deepEqual(
+          drawnBands.map((band) => band.section),
+          ['open', 'parked', 'week', 'earlier'],
+        );
+        const band = drawnBands[1];
+        assert.ok(band !== undefined);
+        const what = `${scheme}, parked`;
+        assert.equal(band.ground, want.bg, `${what}: the page's --bg`);
+        assert.equal(band.position, 'sticky', what);
+        assert.equal(band.stuckAt, '0px', what);
+        assert.ok(Math.abs(band.bottom - band.top - 28) < 0.01, `${what}: 28 px high`);
+        assert.equal(band.lines.top, `1px solid ${want.line}`, what);
+        assert.equal(band.lines.bottom, `1px solid ${want.line}`, what);
+        assert.equal(band.mark.colour, want.dim, `${what}: the mark is --dim, as Recent's`);
+        assert.equal(band.mark.colour, drawnBands[2]?.mark.colour, `${what}: Recent's colour`);
+        assert.equal(band.title.colour, want.text, `${what}: the title in the text colour`);
+        assert.equal(band.count.colour, want.dim, `${what}: the count is dim`);
       }
       assert.deepEqual(await s.page.evaluate(() => Reflect.get(globalThis, 'pageErrors')), []);
     },

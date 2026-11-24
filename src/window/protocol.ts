@@ -177,7 +177,11 @@ export interface ResizeMessage {
  *  F40 (design 7.1, S2 12.6): `carry-over` answers the offer of `list.selected.carryOver` for the
  *  new session `sessionId`: `rev` is the offer as drawn, `fields` the ticked fields, `done` the
  *  tick of `mark the old one done`; the server computes the offer again in one transaction and
- *  copies or refuses (src/window/carry-over.ts). `dismiss-carry-over` ends that offer for good. */
+ *  copies or refuses (src/window/carry-over.ts). `dismiss-carry-over` ends that offer for good.
+ *
+ *  F44 (S2 12.15): `park` parks the session (`markParked`: nothing written when it is parked
+ *  already, the time it was parked kept) and `unpark` ends its parking (`markUnparked`); each names
+ *  only the session. Absolute, never a toggle: the page picks the act from its row's `parked`. */
 export type ActMessage =
   | {
       t: 'act';
@@ -208,7 +212,7 @@ export type ActMessage =
   | {
       t: 'act';
       id: number;
-      kind: 'done' | 'undone' | 'pr-refresh' | 'ticket-refresh';
+      kind: 'done' | 'undone' | 'park' | 'unpark' | 'pr-refresh' | 'ticket-refresh';
       sessionId: string;
     }
   | { t: 'act'; id: number; kind: 'pr-add' | 'pr-rm'; sessionId: string; url: string }
@@ -362,6 +366,18 @@ export interface RowPayload {
    *  no copy. The server always sends it; optional for the reader: absent (a scripted row, a server
    *  before F33) is none. */
   copyOf?: RowCopyPayload | null;
+  /** Follow-up F44 (S2 12.15): the session is parked now (the derived mark: marked and no prompt
+   *  of the user's since). The server always sends it; optional for the reader: absent (a scripted
+   *  row, a server before F44) is false. */
+  parked?: boolean;
+  /** F44: when the session was parked, while it is parked; else null. Always sent; optional for
+   *  the reader: absent is null. */
+  parkedAtNs?: NsText | null;
+  /** F44 (S2 12.4): the row counts as needing you — its `attention` is set and it is not parked
+   *  (a parked session is quiet: its mark shows, it is not counted, not in `needYou.order`, not
+   *  notified). The server says it per row and the page counts and closes on it, deciding nothing
+   *  itself. Always sent; optional for the reader: absent is `attention !== null`. */
+  needsYou?: boolean;
 }
 /** Follow-up F33: what a copy's row names of its original, and whether the list hides it. */
 export interface RowCopyPayload {
@@ -380,7 +396,8 @@ export interface RowTicketPayload {
   category: string | null;
 }
 export interface SectionPayload {
-  name: 'open' | 'week' | 'earlier';
+  /** S2 12.1: Open, Parked (F44), Recent (key `week`), Earlier, in this order. */
+  name: 'open' | 'parked' | 'week' | 'earlier';
   folded: boolean;
   firstNs: NsText | null;
   lastNs: NsText | null;
@@ -581,7 +598,8 @@ export interface ClosedStackPayload {
    *  the last row. Captions at one place come in the array's order. */
   at: number;
 }
-export type SwitchRank = 'need' | 'open' | 'not-running' | 'done';
+/** F44: `parked` between `open` and `not-running`; a parked row is never `need`. */
+export type SwitchRank = 'need' | 'open' | 'parked' | 'not-running' | 'done';
 /** E10: what the page changes so that its list shows the row, in this order of meaning:
  *  `filter` — its words or chips do not match the row; `done` — the row is done and not open and
  *  the view shows no done sessions once the filter is cleared, or (F35) while chips alone match it
@@ -1047,7 +1065,10 @@ const CHIP: Check = (value, where) => {
   return Object.hasOwn(CHIPS, value) ? null : `${where}: wrong value`;
 };
 const VIEW_CHIPS = list(CHIP, false, true, Object.keys(CHIPS).length);
-const CLOSED_ENTRY = object({ section: oneOf('open', 'week', 'earlier'), group: TEXT });
+const CLOSED_ENTRY = object({
+  section: oneOf('open', 'parked', 'week', 'earlier'),
+  group: TEXT,
+});
 /** E6 (ruled 2026-11-16): at most MAX_CLOSED entries, each exactly a section and a text, each
  *  section and group once. */
 const CLOSED: Check = (value, where) => {
@@ -1107,6 +1128,9 @@ const ACTS: Readonly<Record<string, Check>> = {
   note: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, text: NOTE, base: NOTE }),
   done: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   undone: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  // Follow-up F44: the session alone, as done and undone.
+  park: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  unpark: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   'pr-refresh': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   'pr-add': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
   'pr-rm': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),

@@ -6,7 +6,7 @@
 // - `globalThis.headerCalls`: one entry per call, `{ row, selected, term, now }` — `now` the
 //   value `now()` gave at the call ('' when no function came);
 // - `globalThis.headerNow`: the last call's `now` function;
-// - `globalThis.cardsDeps`: the deps (`act`, `select`, and stage D's `edit`, `done`, `say`), so
+// - `globalThis.cardsDeps`: the deps (`act`, `select`, stage D's `edit`, `done`, `say`, F44's `park`), so
 //   that a test can do what the header's controls of task 38 will do.
 //
 // The right side's header and cards (S2 7.8, 7.9, 12.5, 12.6) — the smallest working version,

@@ -66,10 +66,16 @@ describe("the section headers' bands (F17)", () => {
     assert.match(band, /\btext-transform:\s*uppercase;/);
   });
 
-  test('the marks: Open --accent, Recent --dim, Earlier --faint; the titles: Open and Recent --text, Earlier --dim; the count dim', () => {
+  test('the marks: Open --accent, Parked and Recent --dim, Earlier --faint; the titles: Open, Parked and Recent --text, Earlier --dim; the count dim', () => {
     assert.equal(variable(rule(MARK), 'background'), '--faint');
     assert.equal(variable(rule(mark('open')), 'background'), '--accent');
-    assert.equal(variable(rule(mark('week')), 'background'), '--dim');
+    // F44: Parked's mark shares Recent's rule, and its band no colour of its own.
+    assert.equal(variable(rule(`${mark('parked')},\n${mark('week')}`), 'background'), '--dim');
+    assert.doesNotMatch(
+      readFileSync(new URL('../../web/list.css', import.meta.url), 'utf8'),
+      /\[data-section='parked'\]\s*\{/,
+      'no rule of its own for the Parked band',
+    );
     assert.equal(variable(rule(BAND), 'color'), '--text');
     assert.equal(variable(rule(`${BAND}[data-section='earlier']`), 'color'), '--dim');
     assert.equal(variable(rule('.section-count'), 'color'), '--dim');
@@ -85,7 +91,7 @@ describe("the section headers' bands (F17)", () => {
       };
       const ground = colour(variable(rule(BAND), 'background'));
       const words = {
-        'Open and Recent': colour(variable(rule(BAND), 'color')),
+        'Open, Parked and Recent': colour(variable(rule(BAND), 'color')),
         Earlier: colour(variable(rule(`${BAND}[data-section='earlier']`), 'color')),
         count: colour(variable(rule('.section-count'), 'color')),
         span: colour(variable(rule('.section-span'), 'color')),

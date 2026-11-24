@@ -71,7 +71,7 @@ function clean(text) {
  * @property {string} key the ticket key the title starts with (dim, monospaced), '' when none
  * @property {string} group the group printed dim before a title that does not start with it, or ''
  * @property {string} title the title, after its key when it has one
- * @property {MarkText[]} marks design 6.3's marks in words, then `done`
+ * @property {MarkText[]} marks design 6.3's marks in words, then `done`, then (F44) `parked 6d`
  * @property {ChipText | null} chip S2 12.3's chip, null when no pull request is attached
  * @property {TicketText | null} ticket F19: the ticket's status chip, null while none is known
  * @property {string | null} note null without a note; else the note's first line, the ✎'s tooltip
@@ -153,9 +153,10 @@ function copyMark(row, marks) {
 
 /**
  * @param {RowPayload} row
+ * @param {string} nowNs
  * @returns {MarkText[]}
  */
-function marksOf(row) {
+function marksOf(row, nowNs) {
   const marks = Array.isArray(row.marks) ? row.marks : [];
   /** @type {MarkText[]} */
   const shown = [];
@@ -189,6 +190,15 @@ function marksOf(row) {
   }
   if (row.done) {
     shown.push({ kind: 'done', text: 'done', tip: 'marked done' });
+  }
+  if (row.parked === true) {
+    // F44 (S2 12.2): how long it has been parked; `parked` alone when the time cannot be read.
+    const age = ageBetween(nowNs, row.parkedAtNs ?? null);
+    shown.push({
+      kind: 'parked',
+      text: age === '' ? 'parked' : `parked ${age}`,
+      tip: `${age === '' ? 'parked' : `parked ${age} ago`}: it waits; a prompt in it, or w, brings it back under Open`,
+    });
   }
   return shown;
 }
@@ -456,7 +466,7 @@ function attentionMark(row) {
 export function rowText(row, nowNs, terminal) {
   const needs = attentionLine(row.attention ?? null, nowNs);
   const twoLines = needs !== null || row.starting || row.state !== 'not-running';
-  const marks = marksOf(row);
+  const marks = marksOf(row, nowNs);
   /** @type {RowIcon} */
   const icon = row.starting
     ? 'starting'
@@ -485,8 +495,13 @@ export function rowText(row, nowNs, terminal) {
 // The section with the key `week` (the key of the protocol and the code, S2 12.1) is titled
 // Recent, and its header's tooltip says what it holds exactly: a rolling 7 days, not the calendar
 // week (F5).
-const SECTION_TITLES = { open: 'Open', week: 'Recent', earlier: 'Earlier' };
-const SECTION_TIPS = { open: '', week: 'last active in the last 7 days', earlier: '' };
+const SECTION_TITLES = { open: 'Open', parked: 'Parked', week: 'Recent', earlier: 'Earlier' };
+const SECTION_TIPS = {
+  open: '',
+  parked: '',
+  week: 'last active in the last 7 days',
+  earlier: '',
+};
 
 /**
  * A section's header: its name and count, and while folded the time span of its rows (S2 12.1:

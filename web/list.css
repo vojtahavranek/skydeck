@@ -98,8 +98,8 @@
 .list-section[data-section='earlier'][data-folded='true'] .section-twist::before {
   content: '▸';
 }
-/* The mark: a small bar in the section's strength — Open the accent, Recent --dim, Earlier
-   --faint. */
+/* The mark: a small bar in the section's strength — Open the accent, Parked and Recent --dim,
+   Earlier --faint. */
 .section-mark {
   flex: none;
   width: 3px;
@@ -110,6 +110,7 @@
 .list-section[data-section='open'] .section-mark {
   background: var(--accent);
 }
+.list-section[data-section='parked'] .section-mark,
 .list-section[data-section='week'] .section-mark {
   background: var(--dim);
 }

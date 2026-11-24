@@ -78,7 +78,16 @@ import { captionNeedText } from './search-text.js';
  */
 
 /** The marks a row can show, each in an element of its own (list-text.js's kinds). */
-const MARK_KINDS = ['crashed', 'continued', 'expired', 'expiring', 'duplicate', 'other', 'done'];
+const MARK_KINDS = [
+  'crashed',
+  'continued',
+  'expired',
+  'expiring',
+  'duplicate',
+  'other',
+  'done',
+  'parked',
+];
 /** How often the ages are counted on (A18: the page formats them; a `list` comes on change). */
 const AGE_TICK_MS = 1000;
 /** A row's height when none is drawn to measure (PgUp and PgDn move by a page). */

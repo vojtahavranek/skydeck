@@ -113,20 +113,25 @@ function names(query: string, command: string): boolean {
 export interface SwitchCandidate {
   row: RowPayload;
   searchable: Searchable;
-  /** In Open (running, or starting in a terminal of the window). */
+  /** In Open (running, or starting in a terminal of the window; not parked). */
   open: boolean;
-  /** The row needs you (stage B's attention); false without stage B. */
+  /** F44: under Parked. Optional: absent is false. */
+  parked?: boolean;
+  /** The row needs you (stage B's attention; F44: never a parked one); false without stage B. */
   need: boolean;
   hiddenBy: HiddenBy[];
 }
 
-/** A candidate's rank: needing you wins over open, open over done. */
+/** A candidate's rank: needing you wins over open, open over parked (F44), parked over done. */
 function rankOf(candidate: SwitchCandidate): SwitchRank {
   if (candidate.need) {
     return 'need';
   }
   if (candidate.open) {
     return 'open';
+  }
+  if (candidate.parked === true) {
+    return 'parked';
   }
   return candidate.row.done ? 'done' : 'not-running';
 }
@@ -161,10 +166,11 @@ function inNeedOrder(
 
 /**
  * E9. `candidates`: every session the list lists with done ones shown, in S2 12.1's order —
- * Open's rows in Open's order, then the others most recent first (build.ts sorts them). Those
- * whose row matches every word of searchWords(query) — all of them for none — ranked: `need`
- * (in needOrder's order, then any that needOrder lacks in the candidates' order), `open`,
- * `not-running` (not open, not done), `done` (not open, done); inside each rank in the
+ * Open's rows in Open's order, then Parked's most recently parked first (F44), then the others
+ * most recent first (build.ts sorts them). Those whose row matches every word of
+ * searchWords(query) — all of them for none — ranked: `need` (in needOrder's order, then any that
+ * needOrder lacks in the candidates' order), `open`, `parked` (F44: under Parked, never `need`),
+ * `not-running` (not open, not parked, not done), `done` (not open, done); inside each rank in the
  * candidates' order. The first MAX_ITEMS; `more` the rest; `restore` null. A text in command
  * form (its first character `>`, E12, ruled) lists no session: `command` true, `items` [] and
  * `more` 0, whatever follows the `>`, `settings` whether it names the settings command (F36,
@@ -191,6 +197,7 @@ export function switcherPayload(
   const byRank: Record<SwitchRank, SwitchCandidate[]> = {
     need: [],
     open: [],
+    parked: [],
     'not-running': [],
     done: [],
   };
@@ -202,6 +209,7 @@ export function switcherPayload(
   const ranked: [SwitchRank, readonly SwitchCandidate[]][] = [
     ['need', inNeedOrder(byRank.need, needOrder)],
     ['open', byRank.open],
+    ['parked', byRank.parked],
     ['not-running', byRank['not-running']],
     ['done', byRank.done],
   ];
