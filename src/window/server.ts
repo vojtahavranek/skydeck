@@ -38,7 +38,7 @@ import { openLink } from './edge.ts';
 import { serverEnvironment } from './env.ts';
 import { readFavourites } from './favourites.ts';
 import type { KeeperHello } from './frames.ts';
-import type { ActionHandler, TerminalHub } from './hub.ts';
+import type { ActionHandler, SlotHold, TerminalHub } from './hub.ts';
 import { createInteropFrom, probeSocket } from './interop.ts';
 import { createKeepAlive } from './keepalive.ts';
 import { createLaunches } from './launches.ts';
@@ -78,6 +78,7 @@ import { createSettings } from './settings.ts';
 import type { Seen } from './seen.ts';
 import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
+import { createFill, persistFill } from './freed-numbers.ts';
 import {
   readMovedSlots,
   readWithheldSlots,
@@ -542,8 +543,9 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     });
     registry = created;
 
-    /** The window terminal (task 21) for a launch of `size`; it spawns nothing before open(). */
-    const terminalFor = (size: { cols: number; rows: number }): Terminal => {
+    /** The window terminal (task 21) for a launch of `size`; it spawns nothing before open().
+     *  Issue #166: a restart's `hold` gives it the held number. */
+    const terminalFor = (size: { cols: number; rows: number }, hold?: SlotHold): Terminal => {
       const terminal = windowTerminal(
         {
           registry: created,
@@ -560,6 +562,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
           },
         },
         size,
+        hold,
       );
       return {
         name: terminal.name,
@@ -629,9 +632,26 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       openOrder,
       log: quietLog,
     });
-    /** F44: the registry made to agree with what is parked now; it never throws. */
+    /** #189 meets F44: the parked numbers' setting is on (the fill, and the pages' lists, wait for
+     *  its end). */
+    let parkedSyncing = false;
+    /** A change came while it was on: the lists are pushed once after it. */
+    let pushHeld = false;
+    /** F44: the registry made to agree with what is parked now; then (#189) a number it freed goes
+     *  to a terminal that waits, and only then do the pages get their lists (none with a number
+     *  free while a terminal waits). It never throws. */
     const parkedNow = (): void => {
-      parkedSlots.sync();
+      parkedSyncing = true;
+      try {
+        parkedSlots.sync();
+      } finally {
+        parkedSyncing = false;
+      }
+      fillFreedNumbers('parked');
+      if (pushHeld) {
+        pushHeld = false;
+        pages.pushList();
+      }
     };
     // F37, F42 (design 7.8): the order of Open in this boot, a restore's order.
     const restoreMemory = createRestoreMemory({
@@ -687,6 +707,48 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         tookOpen(false);
       },
     });
+    // #189 (S2 7.6, 12.1): the free numbers to the terminals that wait (freed-numbers.ts).
+    const fill = createFill({
+      registry: created,
+      input: () =>
+        tick === null
+          ? null
+          : {
+              rows: tick.rows(),
+              terminals: created.list(),
+              elsewhere: tick.elsewhere(),
+              nowNs: clock.nowNs(),
+              openOrder: openOrder.ids(),
+            },
+      openOrder,
+      // The numbers and the withheld set, with the kept order when there is one: all or none. A
+      // write of the slots, as the registry's (the same seam).
+      persist: (moved, withheld, order) => {
+        options.beforeSlotsWrite?.();
+        persistFill(deck.store, moved, withheld, order);
+      },
+      remember: () => {
+        tookOpen(false);
+      },
+      log: quietLog,
+      stopping: () => stopBegun,
+    });
+    /**
+     * #189: WHEN the free numbers are given, in this one place. It is called at every change of the
+     * registry (before the pages' lists are pushed), so at each moment a number becomes free — an
+     * exit applied, a hello that says the program exited, a lost terminal's program that may no
+     * longer run, the close of a lost terminal that still held one —, and after every refresh that
+     * worked: the first after the start (the gaps a start finds; nothing is given before it, Open's
+     * order is not known yet), the end of a keeper's finding (the registry gives nothing
+     * meanwhile), and a write that failed. F44: not at the changes inside the setting of parked
+     * sessions' numbers (`parkedNow`), but once after it, so that a number a parking freed is given
+     * after the parked rows left Open's kept order, and that setting never takes the row a fill
+     * placed for one an un-parking placed. It never throws.
+     */
+    const fillFreedNumbers = (after: 'change' | 'refresh' | 'parked'): void => {
+      if (after === 'refresh') fill.refreshed();
+      else if (after === 'parked' || !parkedSyncing) fill.run();
+    };
     const acting = createActions({
       deck,
       hub: created,
@@ -872,7 +934,10 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       update: () => updates.payload(),
     });
     created.onChange(() => {
-      pages.pushList();
+      fillFreedNumbers('change'); // #189: a number this change freed goes to one that waits first
+      // #189 meets F44: a change inside the parked numbers' setting is pushed after its fill.
+      if (parkedSyncing) pushHeld = true;
+      else pages.pushList();
     });
     const notices = keepAliveNotices();
     keepAlive.onChange((state) => {
@@ -913,6 +978,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         pageMark.update(pages.count()); // plan C20; it never throws
         decidePostponed();
         created.flushSlots(); // F37: a write of the moved slots that failed; it never throws
+        fillFreedNumbers('refresh'); // #189: before the freeze, which then keeps the rows there
         tookOpen(true); // F42: the kept order and the restore's order take Open; it never throws
       },
       // F44: an act's write (reloadNow) sets the numbers before the lists go out; it never throws.

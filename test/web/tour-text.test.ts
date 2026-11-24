@@ -116,8 +116,8 @@ test('what each step says (the brief, Behaviour 2)', () => {
     assert.match(keys?.join(' ') ?? '', new RegExp(word), word);
   }
   assert.match(keys?.join(' ') ?? '', /a show done sessions/);
-  // F44: the line of the list's keys ends with `w park`, after `d done`.
-  assert.match(keys?.[2] ?? '', /d done · w park$/);
+  // F44: the line of the list's keys has `w park` after `d done`; issue #166 then `r restart`.
+  assert.match(keys?.[2] ?? '', /d done · w park · r restart$/);
   assert.match(around?.join(' ') ?? '', /Switch… \(Ctrl\+Shift\+P\)/);
   assert.match(around?.join(' ') ?? '', /Ctrl\+Shift\+1…9/);
   assert.match(around?.join(' ') ?? '', /new session/);

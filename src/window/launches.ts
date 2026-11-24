@@ -19,6 +19,13 @@
  * lock given back after a throw before `open()`. For restore (task 73): `refusal`, `gone` and
  * `restoreTerminal`, which never throw (a hook that throws would end the whole run, task 71).
  *
+ * Issue #166: a restart's resume (restart.ts) comes through `resume` too, with the terminal it ended
+ * and that terminal's hold: the window's refusals leave that terminal out, the terminal of the
+ * resume takes its number, and it is not closed here (the restart closes it once the new one is
+ * there). While a restart holds a terminal of the session, every other start of it through here —
+ * the page's Resume, `POST /resume`, restore's check — is refused: `skydeck is restarting this
+ * session`.
+ *
  * Logs carry kinds only (S2 2, 5.2): never a label, a group, a directory, a flag or an error's
  * message. Each line names what it was part of (`resume: …`, `new: …`, `restore: …`); the caller's
  * `log` puts its own prefix before it.
@@ -34,7 +41,8 @@ import { prepareResumeById } from '../sessions/resume-by-id.ts';
 import type { OpenResult, Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
-import type { TerminalHub, TerminalInfo } from './hub.ts';
+import { RESTARTING } from './end-session.ts';
+import type { SlotHold, TerminalHub, TerminalInfo } from './hub.ts';
 import { lives, lostProgramMayRun } from './mapping.ts';
 import type { NewRequest } from './protocol.ts';
 import { MAY_START } from './view/sections.ts';
@@ -44,9 +52,16 @@ type Size = { cols: number; rows: number };
 export interface LaunchesDeps {
   deck: Deck;
   hub: TerminalHub;
-  /** As stage A's ActionDeps.terminalFor: it only builds the object, nothing is spawned before open(). */
-  terminalFor(size: Size): Terminal;
+  /** As stage A's ActionDeps.terminalFor: it only builds the object, nothing is spawned before
+   *  open(). Issue #166: with a restart's `hold`, the terminal takes the held number. */
+  terminalFor(size: Size, hold?: SlotHold): Terminal;
   log: (line: string) => void;
+}
+
+/** Issue #166: the restart a resume is part of: the terminal it ended, and that terminal's hold. */
+export interface RestartOf {
+  term: string;
+  hold: SlotHold;
 }
 
 export interface Launched {
@@ -66,9 +81,15 @@ export interface Launches {
   /** `flags` (issue #188): this resume's flags in place of the recorded ones, given to
    *  `prepareResumeById` as they are (its refusal is a refusal, code 2); null or absent: a plain
    *  resume. */
-  resume(sessionId: string, size: Size, flags?: readonly string[] | null): Promise<Launched>;
+  resume(
+    sessionId: string,
+    size: Size,
+    flags?: readonly string[] | null,
+    restart?: RestartOf,
+  ): Promise<Launched>;
   newSession(request: NewRequest, size: Size): Promise<Launched>;
-  /** S2 11.1: "this session is already open in the window" while the hub lists a terminal of the
+  /** Issue #166: `skydeck is restarting this session` while a restart holds a terminal of it.
+   *  S2 11.1: "this session is already open in the window" while the hub lists a terminal of the
    *  session (`sessionId ?? expectedSessionId`) whose state is in MAY_START; else, while a lost
    *  terminal of the session has a program that may still run (plan task 82: task 57's rule, for
    *  60 s after the loss), the guard's words `<short> is running (pid <p>[, pid <p>…])`, the
@@ -163,8 +184,12 @@ export function createLaunches(deps: LaunchesDeps): Launches {
    * that has not reported its session start is no holder (plan task 82). Every such program's pid,
    * the terminal opened last first (checkResumable lists its holders latest first).
    */
-  function windowRefusal(sessionId: string): string | null {
+  function windowRefusal(sessionId: string, own: string | null): string | null {
     const terminals = terminalsOf(sessionId);
+    // Issue #166: a restart of the session runs (its own resume leaves its terminal out).
+    if (terminals.some((terminal) => terminal.restarting === true && terminal.id !== own)) {
+      return RESTARTING;
+    }
     if (terminals.some((terminal) => MAY_START.has(terminal.state))) return ALREADY_OPEN;
     const { proc, clock } = deck.platform;
     const nowNs = clock.nowNs();
@@ -219,11 +244,14 @@ export function createLaunches(deps: LaunchesDeps): Launches {
     }
   }
 
-  /** S2 7.8: the session's terminals that are over go when it runs again. Best effort: a terminal
-   *  left behind costs a slot and a row's place, never the launch itself. */
-  function closeEnded(sessionId: string, part: Part): void {
+  /** S2 7.8: the session's terminals that are over go when it runs again — but `keep`, a
+   *  restart's own (#166). Best effort: a terminal left behind costs a slot and a row's place,
+   *  never the launch itself. */
+  function closeEnded(sessionId: string, part: Part, keep: string | null = null): void {
     try {
-      const ended = terminalsOf(sessionId).filter((terminal) => !MAY_START.has(terminal.state));
+      const ended = terminalsOf(sessionId).filter(
+        (terminal) => !MAY_START.has(terminal.state) && terminal.id !== keep,
+      );
       for (const terminal of ended) hub.close(terminal.id);
     } catch (error) {
       log(`${part}: an ended terminal was not closed (${failureKind(error)})`);
@@ -243,19 +271,20 @@ export function createLaunches(deps: LaunchesDeps): Launches {
   }
 
   return {
-    async resume(sessionId, size, flags = null) {
+    async resume(sessionId, size, flags = null, restart) {
       // Ruled (review 2 of stage A's task 32): a terminal of the window opened for the session
       // whose program may still run refuses a second resume, whatever the lock says — claude can
       // wait at a dialog before its SessionStart for longer than the lock holds. Task 82: so does
       // a lost terminal's program while it may still run.
-      const refused = windowRefusal(sessionId);
+      const own = restart?.term ?? null;
+      const refused = windowRefusal(sessionId, own);
       if (refused !== null) {
         return { code: REFUSED_CODE, lines: [refused], refused: true, sessionId: null };
       }
       // The terminal is made before anything is taken, so that a factory that throws leaves no
       // lock behind.
       let opened = false;
-      const terminal = guarded(deps.terminalFor(size), 'resume', () => {
+      const terminal = guarded(deps.terminalFor(size, restart?.hold), 'resume', () => {
         opened = true;
       });
       let prepared: PreparedLaunch;
@@ -268,7 +297,7 @@ export function createLaunches(deps: LaunchesDeps): Launches {
       let ours: string | null = null;
       try {
         ours = readLock(deck, prepared.sessionId); // the lock prepareResumeById has just taken
-        closeEnded(prepared.sessionId, 'resume');
+        closeEnded(prepared.sessionId, 'resume', own);
         return launched(prepared, await launchPrepared(deck, prepared, terminal));
       } catch (error) {
         if (!opened && ours !== null) giveBackLock(prepared.sessionId, ours);
@@ -296,7 +325,7 @@ export function createLaunches(deps: LaunchesDeps): Launches {
 
     refusal(sessionId) {
       try {
-        return windowRefusal(sessionId);
+        return windowRefusal(sessionId, null);
       } catch (error) {
         // Nothing is started on what could not be checked.
         const failure = failureKind(error);

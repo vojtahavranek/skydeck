@@ -26,7 +26,7 @@ import {
 } from './frames.ts';
 import { parseExit, parseHello, parseResize, parseStarted } from './frames.ts';
 import type { Frame, KeeperExit, KeeperHello, KeeperSpec, KeeperStarted } from './frames.ts';
-import type { StreamSink, TerminalHub, TerminalInfo, TerminalState } from './hub.ts';
+import type { SlotHold, StreamSink, TerminalHub, TerminalInfo, TerminalState } from './hub.ts';
 import { isBusy } from './busy.ts';
 import { claimKeeper } from './keeper-link.ts';
 import { lostProgramMayRun } from './mapping.ts';
@@ -97,8 +97,29 @@ export interface Registry extends TerminalHub {
    *  program may run; it is free once its exit is applied (ended, not started), a hello says it
    *  exited, or a lost keeper's program may no longer run — the ended terminal stays listed
    *  without one. A terminal is opened with it in its keeper's meta; a slot moved later
-   *  (`setSlots`), or none, wins over the meta's. */
+   *  (`setSlots`, `giveSlots`), or none, wins over the meta's. */
   nextSlot(): number | null;
+  /**
+   * #189 (S2 7.6): gives the free slots, lowest first, one each to the first of `candidates`
+   * (terminal ids in the caller's order: Open's) that may take one — listed, without a slot, its
+   * program may run (not ended, lost or not started, no exit waiting to be applied), its slot never
+   * freed (F43) and not withheld (F44: its session is parked) —, until none is free. Free is
+   * `nextSlot`'s rule (`takenSlots`), so whatever that counts as held is never given. Never takes a
+   * slot from a terminal. Nothing while a keeper is still being found (its slot is known only at
+   * its hello, so a slot that looks free may be its own): 'finding'; nothing once `stopAll` ran:
+   * 'stopping'. The moved slots and the withheld set (F44: as it is, pruned, as every write of the
+   * slots outside a move), and the slots given, are written by `write` before any is applied: a
+   * write that throws is thrown from here, nothing changed. Nothing to give: nothing written,
+   * nothing announced.
+   */
+  giveSlots(
+    candidates: readonly string[],
+    write: (
+      moved: ReadonlyMap<string, number | null>,
+      withheld: ReadonlySet<string>,
+      given: ReadonlyMap<string, number>,
+    ) => void,
+  ): 'ok' | 'finding' | 'stopping';
   /**
    * F37, F42 (S2 7.6, 12.9): gives listed terminals other slots, all at once; null takes a
    * terminal's slot away, and a terminal without one can gain one. Refused, nothing changed:
@@ -135,6 +156,8 @@ export interface Registry extends TerminalHub {
   stopAll(): Promise<void>;
   /** F30: the hub's `end`, which the registry always has: `E` on the claim of an endable terminal. */
   end(termId: string): 'ok' | 'cannot' | 'unknown';
+  /** Issue #166: the hub's `holdSlot`, which the registry always has. */
+  holdSlot(termId: string): SlotHold | null;
 }
 
 export class KeeperStartError extends Error {
@@ -261,6 +284,8 @@ interface Term {
   slotFreed: boolean;
   /** F43: stops the watch that frees a lost terminal's slot once its program may no longer run. */
   lostHold: (() => void) | null;
+  /** Issue #166: a restart's hold on its number (`holdSlot`), null while none. */
+  hold: Hold | null;
   hello: KeeperHello | null;
   claim: Claim | null;
   screen: ScreenSide | null;
@@ -299,6 +324,16 @@ interface Term {
   redrawTo: { cols: number; rows: number; due: boolean } | null;
 }
 
+/** Issue #166: what the registry keeps of a restart's hold (`holdSlot`). */
+interface Hold {
+  /** The program is over and the slot would have been freed (F43): `release` frees it then. */
+  over: boolean;
+  /** The next terminal took the slot (`take`). */
+  taken: boolean;
+  /** The id of the terminal that took it, until that terminal is made (its place). */
+  newId: string | null;
+}
+
 export function createRegistry(deps: RegistryDeps): Registry {
   const { platform, files, events } = deps;
   const clock = platform.clock;
@@ -311,6 +346,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
   const backlogHigh = testNumber(platform, 'BACKLOG_BYTES', BACKLOG_HIGH);
   const backlogLow = Math.floor(backlogHigh / 4);
   const finding = new Set<string>();
+  /** Issue #166: the place among the terminals without a number that a terminal about to be
+   *  spawned takes from the terminal a restart held (`take`), by the new terminal's id. */
+  const placed = new Map<string, bigint>();
   /** F37: the slots moved by hand, by terminal id: every live terminal whose slot is not its
    *  meta's, and those the store kept for keepers still being found. F42: null is a slot a move
    *  took away (only a move writes one). */
@@ -447,6 +485,12 @@ export function createRegistry(deps: RegistryDeps): Registry {
    */
   function freeSlot(term: Term): boolean {
     if (stopped) return false;
+    if (term.hold !== null) {
+      // Issue #166: held by a restart: the slot stays on it until the next terminal takes it, or
+      // the hold is let go (`release` frees it then).
+      term.hold.over = true;
+      return false;
+    }
     term.slotFreed = true;
     const had = term.info.slot !== null;
     term.info.slot = null;
@@ -517,6 +561,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     program: term.info.program === null ? null : { ...term.info.program },
     exit: term.info.exit === null ? null : { ...term.info.exit },
     endable: endable(term),
+    ...(term.hold === null ? {} : { restarting: true as const }),
   });
 
   /**
@@ -753,10 +798,13 @@ export function createRegistry(deps: RegistryDeps): Registry {
   // Claims: the hello, the snapshot, the tail (S2 7.3, 8.1)
 
   function newTerm(id: string, meta: KeeperSpec['meta'], cols: number, rows: number): Term {
+    const placeNs = placed.get(id);
+    placed.delete(id);
     return {
       metaSlot: meta.slot,
       slotFreed: false,
       lostHold: null,
+      hold: null,
       info: {
         id,
         slot: meta.slot,
@@ -772,6 +820,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
         rows,
         exit: null,
         notReported: false,
+        ...(placeNs === undefined ? {} : { placeNs }),
       },
       hello: null,
       claim: null,
@@ -1627,7 +1676,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
     close(termId) {
       const term = terms.get(termId);
       if (term === undefined) return 'unknown';
-      if (!isOver(term.info.state)) return 'running';
+      // Issue #166: a terminal a restart holds is the session's until the next one is open.
+      if (!isOver(term.info.state) || term.hold !== null) return 'running';
       const removeFiles = term.info.state === 'lost' && lineIsDead(termId);
       forget(term);
       if (removeFiles) {
@@ -1681,6 +1731,79 @@ export function createRegistry(deps: RegistryDeps): Registry {
     nextSlot() {
       return lowestFree(takenSlots(null));
     },
+    holdSlot(termId) {
+      const term = terms.get(termId);
+      if (stopped || term === undefined || term.hold !== null || term.forgotten) return null;
+      if (isOver(term.info.state) || term.info.exit !== null) return null;
+      const hold: Hold = { over: false, taken: false, newId: null };
+      term.hold = hold;
+      log(termId, 'held for a restart');
+      changed();
+      return {
+        take(newId) {
+          if (term.hold !== hold || hold.taken || term.info.exit === null) return null;
+          hold.taken = true;
+          hold.newId = newId;
+          const slot = term.info.slot;
+          // The slot passes to the terminal about to be spawned (its spec's meta): it is no longer
+          // this one's, and never comes back to it (F43). Announced by that spawn.
+          term.info.slot = null;
+          term.slotFreed = true;
+          // As F43 frees it: its moved entry and (F44) its withheld one go.
+          const hadMoved = moved.delete(term.info.id);
+          if (withheld.delete(term.info.id) || hadMoved) saveSlots();
+          placed.set(newId, term.info.placeNs ?? term.info.openedNs);
+          return slot;
+        },
+        release() {
+          if (term.hold !== hold) return;
+          term.hold = null;
+          if (hold.newId !== null) placed.delete(hold.newId);
+          if (hold.over && !hold.taken) freeSlot(term);
+          log(termId, 'no longer held');
+          changed();
+        },
+      };
+    },
+    giveSlots(candidates, write) {
+      if (stopped) return 'stopping';
+      if (finding.size > 0) return 'finding';
+      const taken = takenSlots(null);
+      const given = new Map<string, number>();
+      for (const id of candidates) {
+        const term = terms.get(id);
+        if (term === undefined || given.has(id) || term.info.slot !== null) continue;
+        // Its program is over: its slot was freed (also by a hello that said it exited, before its
+        // exit frame), or it has its exit — ended, not started, lost (also one in its 60 s that never
+        // had a slot), or an exit that came and waits to be applied (every one of those is stored
+        // before its state is set).
+        if (term.slotFreed || term.info.exit !== null) continue;
+        // F44: a terminal whose slot is withheld (its session is parked) never takes one here.
+        if (withheld.has(id)) continue;
+        const slot = lowestFree(taken);
+        if (slot === null) break;
+        taken.add(slot);
+        given.set(id, slot);
+      }
+      if (given.size === 0) return 'ok';
+      const next = new Map(moved);
+      for (const [id, slot] of given) next.set(id, slot);
+      const pruned = prunedSlots(next); // a slot equal to the meta's is left out there
+      // F44: the withheld set is written with them as it is (pruned, as every write outside a move
+      // does), so that this write keeps withholdSlots' part, also one that failed before.
+      const prunedSet = prunedWithheld(withheld);
+      write(pruned, prunedSet, given); // a throw gives nothing: nothing is applied
+      for (const [id, slot] of given) {
+        const term = terms.get(id);
+        if (term !== undefined) term.info.slot = slot;
+      }
+      moved = pruned;
+      withheld = prunedSet;
+      movedDirty = false;
+      movedFailure = null;
+      changed();
+      return 'ok';
+    },
     setSlots(changes, write) {
       if (stopped) return 'stopping';
       const before: (number | null)[] = [];
@@ -1693,6 +1816,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
         if (term.slotFreed && slot !== null) return 'changed';
         // F44: nor does a terminal whose slot is withheld.
         if (withheld.has(id) && slot !== null) return 'changed';
+        // Issue #166: a number a restart holds is no move's to give or take.
+        if (term.hold !== null) return 'changed';
         before.push(term.info.slot);
         after.push(slot);
       }

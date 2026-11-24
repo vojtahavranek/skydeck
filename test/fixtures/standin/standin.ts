@@ -345,6 +345,8 @@ let blocked = true;
 let line = '';
 let lineEcho = '';
 let onAlt = false;
+/** `/hup-late <s>` (issue #166): a hang-up ends the program only this many seconds later. */
+let hupLateMs = 0;
 
 process.stdin.on('data', (chunk: Buffer) => {
   if (asking !== null) {
@@ -442,6 +444,10 @@ function command(text: string): void {
       break;
     case '/busy':
       setStatus('busy', null);
+      break;
+    case '/hup-late':
+      hupLateMs = (positive(rest) ?? 0) * 1000;
+      record({ ev: 'hup-late', seconds: hupLateMs / 1000 });
       break;
     case '/idle':
       setStatus('idle', null);
@@ -601,6 +607,12 @@ process.stdout.on('resize', () => {
 process.on('SIGHUP', () => {
   screen = '';
   record({ ev: 'hup' });
+  if (hupLateMs > 0) {
+    setTimeout(() => {
+      finish(129, 'other', true);
+    }, hupLateMs);
+    return;
+  }
   finish(129, 'other', true);
 });
 

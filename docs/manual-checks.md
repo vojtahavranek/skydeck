@@ -30,7 +30,8 @@ window (follow-up F41), at "The tour of the window"; W46 checks copy on select i
 terminal (issue #184), at "Copy on select"; W47 checks the carry over after `/clear` (follow-up
 F40), at "Carry over after /clear"; W48 checks the list's width set by a drag (issue #192), at "The
 list's width"; W49 checks resuming a session with other flags (issue #188), at "Resuming with other
-flags"; W50 checks parking a session (follow-up F44), at "Parked".
+flags"; W50 checks parking a session (follow-up F44), at "Parked"; W51 checks restarting a session
+from the window (issue #166), at "Restarting a session from the window".
 
 Setup:
 
@@ -2849,8 +2850,8 @@ only where W16's drill runs anyway.
 
 ## W42. Three throwaway sessions moved up and down (real claude)
 
-Setup: skydeck updated to a commit that has follow-up F42 (and F43 for step 8; `skydeck update`,
-W32), then the window open (`skydeck window`); the throwaway folder there
+Setup: skydeck updated to a commit that has follow-up F42 (F43 for step 8, issue #189 for step 9;
+`skydeck update`, W32), then the window open (`skydeck window`); the throwaway folder there
 (`mkdir -p ~/skydeck-try`). Close every other terminal of the window first, or read the slots below
 as the ones after them.
 
@@ -2882,16 +2883,29 @@ as the ones after them.
 7. **A restart.** Write down the order and the numbers. In W: `skydeck window --restart`. Expected:
    once the window is back, the same order (the session of W included) and the same numbers, and
    each Ctrl+Shift+1…3 shows the terminal of the row that has that number.
-8. **An ended session gives its number up (follow-up F43).** Type `/exit` in the terminal of the
-   row numbered 1. Expected: its row goes to Recent with no number, its last screen stays on the
+8. **An ended session gives its number up (follow-up F43).** First look under Open: if a row of a
+   terminal of the window has no number, skip this step, because the freed number would go to that
+   row at once (issue #189; step 9 shows it). Type `/exit` in the terminal of the row numbered 1.
+   Expected: its row goes to Recent with no number, its last screen stays on the
    right under `claude exited (status 0)` with Resume and Close; the other rows keep their numbers;
    Ctrl+Shift+1 says `no session in slot 1`. Then Ctrl+Shift+N, the throwaway folder, label
    `move-4`, Enter: `move-4` takes the number 1 and Ctrl+Shift+1 shows its terminal. Then select
    `move-4`, press `d`, choose `Mark done, keep it running`, and type `/exit` in its terminal: the
    number 1 is free again without `Show done`, Close or a restart; the next Ctrl+Shift+N session
    takes it.
-9. **The end.** For each throwaway session: type `/exit` in its terminal (in W too), then `d` in the
-   list to mark it done.
+9. **A freed number reaches a session that waits for one (issue #189).** Only on a commit that has
+   it, and only when nine terminals of the window hold the numbers 1–9 anyway (or open throwaway
+   sessions in the throwaway folder until they do) and every row of a terminal of the window under
+   Open has a number (else the first row without one takes the number below, not `move-10`: read
+   the step with that row). Ctrl+Shift+N one more time, label `move-10`, Enter. Expected:
+   `move-10` shows under Open below the window's terminals, with no number. Type
+   `/exit` in the terminal of a throwaway row whose number is lower than 9 (read 4 below as that
+   number). Expected: at once, with no message, `move-10` shows the number 4 and stands where 4
+   stood (after the row numbered 3, before the one numbered 5), Ctrl+Shift+4 shows its terminal,
+   and every other row keeps its number and its place. Then `skydeck window --restart`: the same
+   order and numbers.
+10. **The end.** For each throwaway session: type `/exit` in its terminal (in W too), then `d` in
+    the list to mark it done.
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge
 version and your two layouts.
@@ -3324,7 +3338,9 @@ a desktop notification.
 
 Setup: skydeck updated to a commit that has follow-up F44 (`skydeck update`, W32), then the window
 open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Close every other
-terminal of the window first, or read the numbers below as the free ones, ascending. Throughout:
+terminal of the window first, or read the numbers below as the free ones, ascending. If a row of a
+terminal of the window under Open has no number, skip W50 for now: from issue #189 that row takes a
+parked session's number at once, and steps 2 to 6 and 8 would read otherwise. Throughout:
 type a word only where the step says the keyboard is (the key bar names the zone, `Focus: list` or
 `Focus: terminal`; Ctrl+Shift+L switches it). In the list a letter is a key: `w` parks, `d` marks
 done, `l`, `n` and `t` open a dialog.
@@ -3389,5 +3405,63 @@ done, `l`, `n` and `t` open a dialog.
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge
 version and your two layouts; whether Windows showed any notification in step 7.
+
+Not tried before this check was written: all of it, in Edge and with real Claude Code.
+
+## Restarting a session from the window
+
+The check of restarting a session (issue #166, with part 2 of #188; design.md 7.6 "Other flags";
+design-step-2.md 12.5, 12.10; [install.md](install.md), "Restarting a session"): W51, in your
+window, with real Claude Code, on one throwaway session in a scratch folder. Commands are typed in
+W, a WSL terminal of your own (never a `!` command inside Claude Code). The tests run it against the
+stand-in program, which ends at once on its hang-up and shows no model; only here does Claude Code
+end on the window's hang-up, start again on the same conversation and run with the flags.
+
+## W51. A throwaway session restarted, then restarted with another model
+
+Setup: skydeck updated to a commit that has issue #166 (`skydeck update`, W32); the window open.
+Start a throwaway session from the New form (`+ New`, or Ctrl+Shift+N) in a scratch folder: the
+field `Flags for claude` empty, the field `Label` holding `restart check`, then `Start`. Once its
+terminal shows Claude Code's prompt and the key bar says `Focus: terminal` (else press Ctrl+Shift+L
+until it does), type `Reply with the single word ok, in this chat, with no tool and no file.` and
+Enter, and wait for the answer. Note the number before its row in Open. Throughout: type a word
+only where the step says the keyboard is (the key bar names the zone; a field shows its caret). In
+the list a letter is a key: `d` marks the session done, `w` parks it at once, `l`, `n` and `t` open
+a dialog on it.
+
+1. **The dialog.** Click the throwaway's row, then press `Restart` in the header. Expected: a
+   dialog over the window, `Restart: restart check`, `It ends claude and resumes this session
+   here, with the same flags.`, the buttons `Restart`, `Other flags…` and `Cancel`, the last one
+   outlined (it has the keyboard). Press Tab: `Cancel` stays outlined (Tab stops there). Press ←:
+   `Other flags…` is outlined; type `x`: `Cancel` is outlined again, and ← now moves nothing.
+   Press Enter: the dialog closes, nothing happened (the session still answers as before). In each
+   step below, a dialog whose heading names another session is not this check's: press Esc, click
+   the throwaway's row, and start the step again.
+2. **A plain restart.** In W, `skydeck show <its short id>` and note its `holder:` line (its pid).
+   Press Ctrl+Shift+L until the key bar says `Focus: list`, then `r`. Expected: the dialog,
+   headed `Restart: restart check`. Press ←, ← (`Restart` is outlined) and Enter. Expected:
+   `Restarting…` in the dialog, then the dialog closes and the toast says `Restarted.`; the
+   terminal shows Claude Code starting again on the same conversation (ask `What did I ask you
+   before?` once the keyboard is in the terminal: it names the earlier question); the row has the
+   same number and the same place in Open; it is not marked done; the header shows no flags;
+   nothing asked for your attention and no desktop notification came. In W, `skydeck show <its
+   short id>` again: its `holder:` line names another pid.
+3. **Another model.** Press Ctrl+Shift+L until the key bar says `Focus: list`, then `r`
+   (expected: the dialog headed `Restart: restart check`), ← and Enter (`Other flags…`).
+   Expected: the field `Flags for claude`, empty (it was started with none), its caret in it, the
+   button `Restart` and `restarts with these flags · Esc goes back`. Press Esc: the three buttons
+   again, `Other flags…` outlined; Enter: the field again. Only while the caret is in the field:
+   type `--model` and a model you can use other than the one the session ran with (`sonnet`, say),
+   and Enter. Expected: as in step 2, and once Claude Code has started, the header's second line
+   ends in `--model sonnet`. Once the key bar says `Focus: terminal` (else Ctrl+Shift+L), type
+   `/model` and Enter: Claude Code's model picker marks that model; leave it with Esc.
+4. **The flags passed on.** Press Ctrl+Shift+L until the key bar says `Focus: list`, then `r`
+   (expected: the dialog headed `Restart: restart check`), ←, ← and Enter. Expected: as in step 2;
+   the header still ends in `--model sonnet`; once the key bar says `Focus: terminal` (else
+   Ctrl+Shift+L), `/model` and Enter mark the same model (leave with Esc).
+5. **The end.** Type `/exit` and Enter in its terminal, press `Close`, then `Done` in the header.
+
+Write down: for each step whether it went as expected, and the words where they differ; how long a
+restart took; the model the picker marked in steps 3 and 4.
 
 Not tried before this check was written: all of it, in Edge and with real Claude Code.

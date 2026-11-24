@@ -102,7 +102,8 @@ function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** Slot 1–9 first, by slot; then terminals without a slot by opening time (S2 7.6, 12.1). */
+/** Slot 1–9 first, by slot; then terminals without a slot by opening time (S2 7.6, 12.1) — for a
+ *  terminal a restart opened, the place of the one it replaced (`placeNs`, issue #166). */
 function compareTerminals(a: TerminalInfo, b: TerminalInfo): number {
   if (a.slot !== b.slot) {
     if (a.slot === null || b.slot === null) {
@@ -110,7 +111,11 @@ function compareTerminals(a: TerminalInfo, b: TerminalInfo): number {
     }
     return a.slot - b.slot;
   }
-  return compareNs(a.openedNs, b.openedNs) || compareText(a.id, b.id);
+  return (
+    compareNs(a.placeNs ?? a.openedNs, b.placeNs ?? b.openedNs) ||
+    compareNs(a.openedNs, b.openedNs) ||
+    compareText(a.id, b.id)
+  );
 }
 
 /** Which terminal a session's row gets when several want it: one whose program may still run
@@ -285,8 +290,10 @@ function claimOf(
   const claimed = bySession.get(row.id) ?? null;
   // A terminal whose program is gone stays with a session that is not running (the ended bar,
   // S2 7.8), not with one that runs again elsewhere: that row shows the card of 7.9 (S2 12.6).
+  // Issue #166: a terminal a restart holds stays with its session until the next one is there.
+  const restarting = claimed?.restarting === true;
   const terminal =
-    claimed !== null && (MAY_START.has(claimed.state) || row.state === 'not-running')
+    claimed !== null && (MAY_START.has(claimed.state) || row.state === 'not-running' || restarting)
       ? claimed
       : null;
   // A `new` terminal keeps its own session's row while it is there (A28, ruled), also a row step
@@ -299,7 +306,9 @@ function claimOf(
   }
   const elsewhere = row.state === 'not-running' ? null : (input.elsewhere.get(row.id) ?? null);
   const shown = rowPayload(row, { terminal, elsewhere });
-  const runs = shown.starting || row.state !== 'not-running';
+  // Issue #166: while a restart holds its terminal the session counts as running (under Open, with
+  // its number; a parked one stays under Parked, with none).
+  const runs = shown.starting || row.state !== 'not-running' || restarting;
   // F44: a parked session is under Parked, also while it runs.
   const open = runs && !row.parked;
   // F43 (S2 7.6, 12.1): a row under Recent or Earlier never shows a number, also while its
@@ -683,6 +692,8 @@ export function buildListMessage(
       cols: terminal.cols,
       rows: terminal.rows,
       openedNs: String(terminal.openedNs),
+      // Issue #166: only while a restart holds it (the page shows no ended bar for it).
+      ...(terminal.restarting === true ? { restarting: true as const } : {}),
     })),
     selected:
       input.selected !== null && input.selected.sessionId === view.selected ? input.selected : null,

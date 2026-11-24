@@ -58,6 +58,8 @@ export type StandinRecord = RecordBase &
       }
     | { ev: 'resize'; cols: number; rows: number }
     | { ev: 'hup' }
+    /** Issue #166: `/hup-late <s>` was read: a hang-up ends the program `seconds` later. */
+    | { ev: 'hup-late'; seconds: number }
     /** Always the last record. */
     | { ev: 'exit'; code: number }
   );
