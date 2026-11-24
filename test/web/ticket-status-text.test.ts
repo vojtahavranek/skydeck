@@ -71,6 +71,7 @@ function selected(over: Partial<SelectedPayload> = {}): SelectedPayload {
     flagsKnown: true,
     unknownFlags: [],
     launchFlags: [],
+    resumeFlags: [],
     ended: null,
     expiring: false,
     expired: false,

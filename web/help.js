@@ -77,12 +77,16 @@ const SECTIONS = [
       [['p'], 'pull requests: attach one'],
       [['d'], 'done, or undone for a done session (an Undo follows a done)'],
       [['c'], 'carry over after /clear: to the offer of the selected session'],
+      [
+        ['f'],
+        'other flags: resume a session that is not running with flags you choose, from its card or its ended bar',
+      ],
     ],
   },
 ];
 
 const NOTES = [
-  'Esc in the terminal is Claude Code’s and never leaves the terminal; so are F5, Shift+F5, Ctrl+F5 and Ctrl+R while the terminal has the keyboard (while the page has it — the new form, a card, the find bar — they reload the page, as in the list). Esc in the new form closes it.',
+  'Esc in the terminal is Claude Code’s and never leaves the terminal; so are F5, Shift+F5, Ctrl+F5 and Ctrl+R while the terminal has the keyboard (while the page has it — the new form, a card, the find bar — they reload the page, as in the list). Esc in the new form closes it, and Esc in a resume card’s Other flags… goes back to the card.',
   'In a dialog (label, group, note, ticket, pull requests) Enter saves — Ctrl+Enter in the note, where Enter is a new line — and Esc, Cancel or Close closes it; a changed note needs Esc twice. While a dialog is open the window’s keys do nothing but Ctrl+Shift+H, and the reload keys while no text was changed: close it first (Esc).',
   'The gear at the right of the title bar (or > settings in the quick switcher) opens Settings: the window’s theme and the settings worth changing, each saved as you pick it; every other one under Advanced, where a program, a folder or the port is changed in the file only. In it Tab walks the settings, Enter saves the field you are in (so does leaving it), Esc closes and drops a text not saved.',
   'In a browser tab (skydeck window --print-url) the browser keeps Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab and their Shift forms for itself: use Ctrl+Shift+O for the previous session and + New in the key bar for a new one.',

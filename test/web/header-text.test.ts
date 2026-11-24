@@ -85,6 +85,7 @@ function selected(note: string | null, noteTooLong = false): SelectedPayload {
     flagsKnown: true,
     unknownFlags: [],
     launchFlags: [],
+    resumeFlags: [],
     ended: null,
     expiring: false,
     expired: false,

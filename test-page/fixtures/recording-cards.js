@@ -208,6 +208,16 @@ export function createCards(root, deps) {
       });
       dir.focus();
     },
+    // Issue #188's "Other flags…" (contract 2.9 as widened then): this module has none.
+    openFlags() {
+      return 'this module has no resume card with other flags';
+    },
+    closeFlags() {
+      return false;
+    },
+    flagsShown() {
+      return false;
+    },
     hide() {
       // Hidden, not removed: what had the keyboard in it is given back by app.js.
       head.hidden = true;

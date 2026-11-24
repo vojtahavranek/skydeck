@@ -214,7 +214,9 @@ function orNone(text: string): string | null {
 /**
  * The ActionHandler of stage A. `resume` → `launches.resume` with the action's size (plan C1: the
  * window's "already open" refusal, `prepareResumeById` — the guard on refreshed rows, the lock —,
- * the session's terminals that are over closed, `launchPrepared` with `terminalFor`); `new` →
+ * the session's terminals that are over closed, `launchPrepared` with `terminalFor`) — with issue
+ * #188's `flags` (the field's text) split by `splitFlags` first and passed on in place of the
+ * recorded flags (a text it cannot split is refused in its words, nothing taken); `new` →
  * `splitFlags` → `launches.newSession` with the form's directory, label and group (a blank one is
  * none, `orNone`) → `prepareNew` → `launchPrepared`. A launch answers its outcome's lines (`ok` when
  * it started, with the session's id); a refusal (the window's, the guard, the lock, RefError,
@@ -392,10 +394,17 @@ export function createActions(deps: ActionDeps): ActionHandler {
 
   async function run(page: PageInfo, action: ActMessage): Promise<Answer> {
     switch (action.kind) {
-      case 'resume':
-        return answerOf(
-          await launches.resume(action.sessionId, { cols: action.cols, rows: action.rows }),
-        );
+      case 'resume': {
+        // #188: `flags` given, the field's text split as `new`'s, in place of the recorded flags.
+        let flags: string[] | null = null;
+        if (action.flags !== undefined) {
+          const split = splitFlags(action.flags);
+          if (!split.ok) return refusal(split.error);
+          flags = split.flags;
+        }
+        const size = { cols: action.cols, rows: action.rows };
+        return answerOf(await launches.resume(action.sessionId, size, flags));
+      }
       case 'new': {
         const flags = splitFlags(action.flags);
         if (!flags.ok) return refusal(flags.error);

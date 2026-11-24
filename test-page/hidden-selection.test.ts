@@ -259,9 +259,28 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
       const p = await connectTestPage(t, l.d, l.server, { focused: false, view: null });
       p.send({ t: 'input', term: first, data: '/exit\r' });
       await showsText(page, '#cards .card-ended', /^claude exited \(status 0\) at \d\d:\d\d:\d\d/);
-      assert.deepEqual(await barButtons(page), ['Resume', 'Close']);
+      assert.deepEqual(await barButtons(page), ['Resume', 'Other flags…', 'Close']);
       assert.equal(await shownText(page, '#cards .header-title'), 'alpha work');
       assert.deepEqual(await listed(page), [S2], 'still hidden');
+      // #188: the bar's Other flags… of a session the list does not show closes nothing (no
+      // resume card would show it) and says why on the bar's line; f says the list keys' own
+      // words in the key bar, as those keys do. Nothing sent, the terminal kept.
+      await mark(page, 'f');
+      await page.locator('#cards .card-bar button', { hasText: 'Other flags…' }).click();
+      await showsText(
+        page,
+        '#cards .card-lines',
+        /^the list does not show this session; show it there to resume it with other flags$/,
+      );
+      await toZone(page, 'list');
+      await page.keyboard.press('f');
+      await showsText(page, '#key-message', /^no session selected$/);
+      assert.deepEqual(
+        after(await logOf(page), 'f').filter((entry) => entry.e === 'out' && entry.t === 'act'),
+        [],
+        'nothing sent',
+      );
+      await showsTerminal(page, first);
 
       // Resume on the bar: it runs again in the window, still hidden by the filter.
       await page.locator('#cards .card-bar button', { hasText: 'Resume' }).click();
@@ -274,7 +293,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
       // /exit again, then Close: the terminal is forgotten, the right side shows nothing.
       p.send({ t: 'input', term: second, data: '/exit\r' });
       await showsText(page, '#cards .card-ended', /^claude exited \(status 0\)/);
-      assert.deepEqual(await barButtons(page), ['Resume', 'Close']);
+      assert.deepEqual(await barButtons(page), ['Resume', 'Other flags…', 'Close']);
       await page.locator('#cards .card-bar button', { hasText: 'Close' }).click();
       await page.waitForSelector('#right-zone[data-pane="none"]', {
         state: 'attached',
@@ -300,7 +319,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
   );
 
   await t.test(
-    "a selected session without a terminal that the filter hides: the right side shows nothing (S2 12.9); the list keys d, l, F2, g, n, t, p say `no session selected` and send nothing; the New form's directory is the first known one, not the hidden session's",
+    "a selected session without a terminal that the filter hides: the right side shows nothing (S2 12.9); the list keys d, l, F2, g, n, t, p and (#188) f say `no session selected` and send nothing; the New form's directory is the first known one, not the hidden session's",
     async (t) => {
       const l = await launched(t, chromium);
       const { page } = l;
@@ -321,7 +340,7 @@ async function realServerCases(t: TestContext, chromium: Browser): Promise<void>
       assert.equal(await page.locator('#cards .card:visible').count(), 0, 'no card');
 
       await mark(page, 'keys');
-      for (const key of ['d', 'l', 'F2', 'g', 'n', 't', 'p']) {
+      for (const key of ['d', 'l', 'F2', 'g', 'n', 't', 'p', 'f']) {
         // The key bar's line stays 5 s: emptied first, so that each key must say it again (the
         // page's own timer only empties it).
         await page.evaluate(() => {
@@ -549,7 +568,7 @@ test('the selected session the list does not show', async (t) => {
       });
       s.serve(ended({ ...row, state: 'not-running' }));
       await showsText(s.page, '#cards .card-ended', /^claude is not running in this terminal$/);
-      assert.deepEqual(await barButtons(s.page), ['Resume', 'Close']);
+      assert.deepEqual(await barButtons(s.page), ['Resume', 'Other flags…', 'Close']);
       assert.equal(await shownText(s.page, '#cards .header-title'), 'alpha work');
       assert.equal(await selectedRow(s.page), null);
 

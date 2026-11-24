@@ -232,6 +232,69 @@ describe('resume goes through prepareResumeById (design 7.6, S2 11.1)', () => {
     assert.deepEqual(h.logs, []);
   });
 
+  test('with flags (#188): the spec of buildResumeCommand with those flags in place of the recorded ones', async (t) => {
+    const d = deckOf(t);
+    resumableSession(d);
+    refresh(d.deck);
+    setLabel(d.deck, S1, 'fix the retry');
+    const h = harness(d);
+    const flags = ['--model', 'example', 'go on'];
+    assert.deepEqual(await h.launches.resume(S1, SIZE, flags), {
+      code: 0,
+      lines: [],
+      refused: false,
+      sessionId: S1,
+    });
+    assert.deepEqual(h.specs[0]?.argv, [CLAUDE, '--resume', S1, '-n', 'fix the retry', ...flags]);
+    assert.notEqual(h.specs[0]?.lock ?? null, null);
+  });
+
+  test('with flags a resume refuses: code 2, the words skydeck resume <ref> -- <flags> prints; nothing started (#188)', async (t) => {
+    const d = deckOf(t);
+    resumableSession(d);
+    refresh(d.deck);
+    for (const flags of [['--continue'], ['-n', 'x'], ['--model', 'x', '--bg']]) {
+      const h = harness(d);
+      const said = await commandSays(d, ['resume', S1, '--here', '--', ...flags]);
+      assert.deepEqual(await h.launches.resume(S1, SIZE, flags), refusedWith(2, [said]));
+      nothingStarted(h, S1);
+    }
+  });
+
+  test('with flags, a lock already there stays as it is through each refusal: a refused flag, the lock, the guard (#188)', async (t) => {
+    const d = deckOf(t);
+    resumableSession(d);
+    refresh(d.deck);
+    acquireLock(d.deck, S1, { latestEventId: d.deck.store.latestEventIdOfSession(S1) });
+    const theirs = d.deck.store.getKv(lockKey(S1));
+    assert.notEqual(theirs, null);
+    const h = harness(d);
+    assert.equal((await h.launches.resume(S1, SIZE, ['--tmux'])).code, 2);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), theirs, 'a refused flag');
+    const locked = await h.launches.resume(S1, SIZE, ['--model', 'x']);
+    assert.equal(locked.code, 4);
+    assert.match(locked.lines[0] ?? '', /is being resumed/);
+    assert.equal(d.deck.store.getKv(lockKey(S1)), theirs, 'refused by the lock');
+    d.proc.setProcess(4242, { stat: statLine(4242, 51234567), cmdline: ['claude'] });
+    assert.deepEqual(
+      await h.launches.resume(S1, SIZE, ['--model', 'x']),
+      refusedWith(4, ['0b5f3c1e is running (pid 4242)']),
+    );
+    assert.equal(d.deck.store.getKv(lockKey(S1)), theirs, 'refused by the guard');
+    assert.deepEqual(h.specs, []);
+  });
+
+  test('with flags, the window’s own refusal still comes first: already open (#188)', async (t) => {
+    const d = deckOf(t);
+    resumableSession(d);
+    const h = harness(d, { terminals: [info('aaaaaaaaaaa1', 'running')] });
+    assert.deepEqual(
+      await h.launches.resume(S1, SIZE, ['--model', 'x']),
+      refusedWith(4, ['this session is already open in the window']),
+    );
+    nothingStarted(h, S1);
+  });
+
   test('a running session: the guard refuses with code 4 and its line; the terminal is built, never opened, no lock', async (t) => {
     const d = deckOf(t);
     writeTranscript(d, S1);

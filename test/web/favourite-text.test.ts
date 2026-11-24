@@ -19,6 +19,7 @@ import {
   FAVOURITE_REFUSALS,
   favouriteRefusal,
   flagWords,
+  flagsText,
   holdsFavourite,
   MAX_FAVOURITES,
   withFavourite,
@@ -384,5 +385,53 @@ describe('chipWords: the favourite cut at 28 characters', () => {
   test('characters, not UTF-16 units: an emoji is never cut in half', () => {
     assert.equal(chipWords('😀'.repeat(28)), '😀'.repeat(28));
     assert.equal(chipWords('😀'.repeat(29)), `${'😀'.repeat(27)}…`);
+  });
+});
+
+// Issue #188: the resume card's "Other flags…" field, filled with the flags a plain resume passes on.
+describe('flagsText: the field text whose words are exactly the given words', () => {
+  const WORDS: readonly (readonly string[])[] = [
+    [],
+    ['--model', 'opus'],
+    ['--append-system-prompt', 'be brief'],
+    [''],
+    ['--x', '', '--y'],
+    ["it's"],
+    ['say "hi"'],
+    [`a'b"c`],
+    ["'"],
+    ['"'],
+    [`"'`],
+    [`''"`],
+    ['--x=a b'],
+    ['a\tb', 'a\nb', 'c\u00a0d', 'e\u3000f', 'g\u2028h', 'i\ufeffj'],
+    ['😀', '😀 😀', `😀'😀"`],
+    ['-c', '--', '-'],
+    ['  padded  '],
+  ];
+
+  test('splitFlags (the server) and flagWords (the page) give back each word as it was, in order', () => {
+    for (const words of WORDS) {
+      const text = flagsText(words);
+      assert.deepEqual(splitFlags(text), { ok: true, flags: words }, JSON.stringify(text));
+      const page = flagWords(text);
+      assert.deepEqual(page.ok ? page.words.map((word) => word.text) : page, words);
+    }
+  });
+
+  test('a plain word is written as it is, one space between words; a word that needs it is quoted', () => {
+    assert.equal(flagsText([]), '');
+    assert.equal(
+      flagsText(['--model', 'opus', '--mcp-config', '/tmp/example.json']),
+      '--model opus --mcp-config /tmp/example.json',
+    );
+    assert.equal(
+      flagsText(['--append-system-prompt', 'be brief']),
+      "--append-system-prompt 'be brief'",
+    );
+    assert.equal(flagsText(['']), "''");
+    assert.equal(flagsText(["it's"]), `"it's"`);
+    assert.equal(flagsText(['say "hi"']), `'say "hi"'`);
+    assert.equal(flagsText([`a'b"c`]), `'a'"'"'b"c'`);
   });
 });

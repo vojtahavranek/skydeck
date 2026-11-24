@@ -14,6 +14,7 @@ import type { ListRow } from '../sessions/list.ts';
 import { ticketAddress } from '../sessions/ticket.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { printableCommand } from '../text/shell.ts';
+import { CONTROL } from './favourites.ts';
 import type { SelectedPayload, TicketStatusPayload } from './protocol.ts';
 
 /** The longest note the window edits, in UTF-8 bytes (plan D5): `act note`'s limit. */
@@ -49,7 +50,8 @@ function noteOf(note: string | null): Pick<SelectedPayload, 'note' | 'noteTooLon
  * label), as `prepareResume` builds them; null when the directory is not known or a word holds
  * anything the sanitiser would change. `unknownFlags` are sanitised: they come from a recorded
  * command line; so is each token of `launchFlags` (follow-up F16), the recorded flags a resume
- * passes on again (`passedOnFlags`), also when no command can be printed. `note` and
+ * passes on again (`passedOnFlags`), also when no command can be printed; `resumeFlags` (issue
+ * #188) the same flags as recorded, not sanitised, for the flags field (`resumeFlagsOf`). `note` and
  * `noteTooLong` as `noteOf` says (plan D5); `ticketUrl` is S2 12.5's
  * ticket address of the row's group (`ticketAddress` with the configuration's `groupPattern` and
  * `ticketUrl`), null without one; `ticket` the row's ticket (F18: its address and its name, as
@@ -77,6 +79,7 @@ export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload {
     flagsKnown: launch !== null,
     unknownFlags: launch === null ? [] : unknownFlags(launch).map(sanitize),
     launchFlags: launch === null ? [] : passedOnFlags(launch).map(sanitize),
+    resumeFlags: resumeFlagsOf(launch),
     ended: endedOf(row),
     expiring: row.marks.includes('expiring'),
     expired: row.marks.includes('expired'),
@@ -86,6 +89,16 @@ export function selectedPayload(deck: Deck, row: ListRow): SelectedPayload {
     ticketKeys: deck.config.ticketUrl !== null,
     ticketStatus: ticketStatusOf(row),
   };
+}
+
+/**
+ * Issue #188: the flags a plain resume passes on, exactly as recorded, for the value of the flags
+ * field of the resume card's "Other flags…"; null when one holds what the field cannot hold as it
+ * is (CONTROL: a line break, another control character, a bidirectional control).
+ */
+function resumeFlagsOf(launch: readonly string[] | null): string[] | null {
+  const flags = launch === null ? [] : passedOnFlags(launch);
+  return flags.some((flag) => CONTROL.test(flag)) ? null : flags;
 }
 
 /** F19: the row's ticket status as the page receives it (S2 12.5), null without one. */

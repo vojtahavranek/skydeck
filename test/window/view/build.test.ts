@@ -1199,6 +1199,7 @@ const CARD: SelectedPayload = {
   flagsKnown: true,
   unknownFlags: [],
   launchFlags: [],
+  resumeFlags: [],
   ended: 'exited',
   expiring: false,
   expired: false,

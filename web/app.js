@@ -252,6 +252,9 @@ const state = {
   /** The key (`code`) whose keydown opened the dialog or the switcher shown, until it is
    *  released: its auto-repeats type nothing into the field. */
   openedBy: '',
+  /** Issue #188: the key (`code`) of the `f` that opened a resume card's Other flags…, until it is
+   *  released: its auto-repeats type nothing into the field. */
+  flagsBy: '',
   /** F30: what had the keyboard when the dialog "Mark done" opened: Cancel gives it back. */
   enderFrom: /** @type {Element | null} */ (null),
   /** F36: what had the keyboard when the settings screen opened: it gets it back. */
@@ -836,6 +839,8 @@ const KEY_OF = { label: 'l', group: 'g', note: 'n', ticket: 't', pr: 'p' };
 
 /** The fields of an action that S2 8.2.3's limits hold, with their names for a refusal. */
 const LIMITED = /** @type {Record<string, [string, string, number][]>} */ ({
+  // Issue #188: "Other flags…", held as the new form's flags.
+  resume: [['flags', 'the flags', TEXT_BYTES]],
   new: [
     ['dir', 'the directory', PATH_BYTES],
     ['label', 'the label', TEXT_BYTES],
@@ -1037,11 +1042,17 @@ function act(action) {
         // come up to a second after its answer; a `view` asks for it now (as for EDITS above).
         sendView();
       }
+      // The lines of a plain resume are its card's; "Other flags…" shows its own (#188), and
+      // one that started leaves the card no older line.
       if (action.kind === 'resume' && typeof action['sessionId'] === 'string') {
-        state.lines.set(
-          action['sessionId'],
-          result.ok ? [] : result.error === null ? result.lines : [result.error],
-        );
+        if (action['flags'] === undefined) {
+          state.lines.set(
+            action['sessionId'],
+            result.ok ? [] : result.error === null ? result.lines : [result.error],
+          );
+        } else if (result.ok) {
+          state.lines.set(action['sessionId'], []);
+        }
       }
       if (result.ok && result.sessionId !== null) {
         state.bringing = result.sessionId;
@@ -2040,7 +2051,8 @@ function render() {
     case 'terminal':
       cards.header(pane.row, selected, term, listNow);
       if (pane.ended) {
-        cards.endedBar(pane.row, exit);
+        // #188: the bar's Other flags… closes nothing for a row the list hides (E13: no card).
+        cards.endedBar(pane.row, exit, pane.row !== null && rowOf(pane.row.id) !== undefined);
       }
       carry.render(pane.row, selected?.carryOver ?? null);
       break;
@@ -2500,6 +2512,26 @@ function doListKey(action, event) {
         say(state.selected === null ? 'no session selected' : NOTHING_TO_CARRY);
       }
       return true;
+    case 'flags': {
+      // Issue #188 (S2 12.6, 12.9): the resume card's Other flags…, the keyboard in its field; a
+      // held f acts once and types nothing into it.
+      if (event.repeat) {
+        return true;
+      }
+      // As every list key that acts: on the selected row the list shows (E13).
+      if (selectedRow() === undefined) {
+        say('no session selected');
+        return true;
+      }
+      // The cards say why not: no resume card is shown, or its session expired.
+      const why = cards.openFlags();
+      if (why === null) {
+        state.flagsBy = event.code;
+      } else {
+        say(why);
+      }
+      return true;
+    }
     case 'escape':
       // S2 12.9: Esc clears the filter — the list's, which also clears its field —, then goes
       // back to the terminal; a held Esc does only the first step (Z1, item 6).
@@ -2575,6 +2607,10 @@ function onKeyDown(event) {
   if (updateDialog.shown() && updateDialog.key(event)) {
     return; // F38: Esc and Tab are the dialog's
   }
+  if (event.repeat && state.flagsBy !== '' && event.code === state.flagsBy) {
+    event.preventDefault();
+    return; // #188: a held f that opened Other flags… types nothing into its field
+  }
   const zone = state.zone;
   let handled = false;
   const chord = windowChord(event, zone);
@@ -2608,6 +2644,22 @@ function onKeyDown(event) {
     ) {
       // Esc closes the new form (the page has the keyboard: xterm.js has not).
       closeNew();
+      handled = true;
+    } else if (
+      zone === 'terminal' &&
+      state.pane.kind === 'resume' &&
+      event.key === 'Escape' &&
+      !event.isComposing &&
+      !event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      cards.flagsShown()
+    ) {
+      // Issue #188: Esc in Other flags… goes back to the card, nothing sent; a held Esc once.
+      if (!event.repeat) {
+        cards.closeFlags();
+      }
       handled = true;
     }
   }
@@ -2787,6 +2839,9 @@ addEventListener(
   (event) => {
     if (event.code === state.openedBy) {
       state.openedBy = '';
+    }
+    if (event.code === state.flagsBy) {
+      state.flagsBy = '';
     }
     pressedInDialog.delete(event.code);
     heldIntoTerminal(event);

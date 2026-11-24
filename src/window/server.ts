@@ -984,8 +984,8 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
             log,
             // Plan C2–C5, C22: the command line's starts, prepared here, never by the command.
             launch: {
-              resume: (sessionId) =>
-                launchFor('resume', () => sockLaunches.resume(sessionId, firstSize())),
+              resume: (sessionId, flags) =>
+                launchFor('resume', () => sockLaunches.resume(sessionId, firstSize(), flags)),
               newSession: (request) =>
                 launchFor('new', () => sockLaunches.newSession(request, firstSize())),
               restore: (request, write, closed) => {
