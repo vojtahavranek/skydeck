@@ -2849,8 +2849,8 @@ only where W16's drill runs anyway.
 
 ## W42. Three throwaway sessions moved up and down (real claude)
 
-Setup: skydeck updated to a commit that has follow-up F42 (and F43 for step 8; `skydeck update`,
-W32), then the window open (`skydeck window`); the throwaway folder there
+Setup: skydeck updated to a commit that has follow-up F42 (F43 for step 8, issue #189 for step 9;
+`skydeck update`, W32), then the window open (`skydeck window`); the throwaway folder there
 (`mkdir -p ~/skydeck-try`). Close every other terminal of the window first, or read the slots below
 as the ones after them.
 
@@ -2882,16 +2882,29 @@ as the ones after them.
 7. **A restart.** Write down the order and the numbers. In W: `skydeck window --restart`. Expected:
    once the window is back, the same order (the session of W included) and the same numbers, and
    each Ctrl+Shift+1…3 shows the terminal of the row that has that number.
-8. **An ended session gives its number up (follow-up F43).** Type `/exit` in the terminal of the
-   row numbered 1. Expected: its row goes to Recent with no number, its last screen stays on the
+8. **An ended session gives its number up (follow-up F43).** First look under Open: if a row of a
+   terminal of the window has no number, skip this step, because the freed number would go to that
+   row at once (issue #189; step 9 shows it). Type `/exit` in the terminal of the row numbered 1.
+   Expected: its row goes to Recent with no number, its last screen stays on the
    right under `claude exited (status 0)` with Resume and Close; the other rows keep their numbers;
    Ctrl+Shift+1 says `no session in slot 1`. Then Ctrl+Shift+N, the throwaway folder, label
    `move-4`, Enter: `move-4` takes the number 1 and Ctrl+Shift+1 shows its terminal. Then select
    `move-4`, press `d`, choose `Mark done, keep it running`, and type `/exit` in its terminal: the
    number 1 is free again without `Show done`, Close or a restart; the next Ctrl+Shift+N session
    takes it.
-9. **The end.** For each throwaway session: type `/exit` in its terminal (in W too), then `d` in the
-   list to mark it done.
+9. **A freed number reaches a session that waits for one (issue #189).** Only on a commit that has
+   it, and only when nine terminals of the window hold the numbers 1–9 anyway (or open throwaway
+   sessions in the throwaway folder until they do) and every row of a terminal of the window under
+   Open has a number (else the first row without one takes the number below, not `move-10`: read
+   the step with that row). Ctrl+Shift+N one more time, label `move-10`, Enter. Expected:
+   `move-10` shows under Open below the window's terminals, with no number. Type
+   `/exit` in the terminal of a throwaway row whose number is lower than 9 (read 4 below as that
+   number). Expected: at once, with no message, `move-10` shows the number 4 and stands where 4
+   stood (after the row numbered 3, before the one numbered 5), Ctrl+Shift+4 shows its terminal,
+   and every other row keeps its number and its place. Then `skydeck window --restart`: the same
+   order and numbers.
+10. **The end.** For each throwaway session: type `/exit` in its terminal (in W too), then `d` in
+    the list to mark it done.
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge
 version and your two layouts.
@@ -3324,7 +3337,9 @@ a desktop notification.
 
 Setup: skydeck updated to a commit that has follow-up F44 (`skydeck update`, W32), then the window
 open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Close every other
-terminal of the window first, or read the numbers below as the free ones, ascending. Throughout:
+terminal of the window first, or read the numbers below as the free ones, ascending. If a row of a
+terminal of the window under Open has no number, skip W50 for now: from issue #189 that row takes a
+parked session's number at once, and steps 2 to 6 and 8 would read otherwise. Throughout:
 type a word only where the step says the keyboard is (the key bar names the zone, `Focus: list` or
 `Focus: terminal`; Ctrl+Shift+L switches it). In the list a letter is a key: `w` parks, `d` marks
 done, `l`, `n` and `t` open a dialog.

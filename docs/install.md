@@ -973,10 +973,18 @@ effect.
   one marked done that you let keep running, and with its ended terminal still on screen; a row
   under Recent or Earlier never shows a number, and Ctrl+Shift+1…9 never go to an ended session.
   A session you park gives its number up at once too, while it goes on running ("Parked" below).
-  That leaves a gap (nothing is renumbered), and a new terminal takes the lowest free number, at
-  that number's place: after the terminals with lower numbers, before the next one with a higher
-  number, also when a block shows a terminal out of its
-  number's order; once you moved something, a session that opens or ends moves no other row. A block moves as one, and inside a block a session
+  A terminal of the window that has no number (the tenth and later ones) takes a number as soon as
+  one is free, a parked session's terminal never: the first such row under Open takes the lowest
+  free number, and its row goes to that number's place, as a new terminal with that number would;
+  the other terminals keep their numbers. Once you moved something, a row in a block keeps its
+  place and only takes the number, so the block's numbers can read out of order until the next
+  move. So with more than nine terminals an ended or parked session's number is taken at once, and
+  a later resume or un-park of that session gets another free number, or none. Without such a
+  terminal the free number leaves a gap (nothing is renumbered), and a new terminal takes the
+  lowest free number, at that number's place: after the terminals with lower numbers, before the
+  next one with a higher number, also when a block shows a terminal out of its number's order; once
+  you moved something, a session that opens or ends moves no other row (but the row that takes a
+  freed number, when no block holds it). A block moves as one, and inside a block a session
   trades places with its neighbour; when a block puts a terminal without a number above numbered
   ones, the next move — also of another session — gives that terminal a number and takes one from
   the last numbered terminal. After `/clear`, or a `/resume` inside a session, the new session keeps
@@ -1087,10 +1095,11 @@ keyboard stays in the list, so `w` again parks the next one. `Park` in the heade
 selected and the list follows it under Parked. A parked session is quiet: its marks (asks,
 finished, ended) still show in its row, but it sends no desktop notification, the title bar's `need
 you` count leaves it out and Ctrl+Shift+J skips it. Running in the window, it gives its number up
-at once: its row and terminal show none, Ctrl+Shift+1…9 never go to it, and the next session you
-start or resume takes that number; it keeps running, and its terminal shows when you select its
-row. Back under Open it takes the lowest free number (none while all nine are in use: then it is
-moved like any session without one). A restore never starts it; resume it from its row (Enter), and it stays parked. It comes back under
+at once: its row and terminal show none, Ctrl+Shift+1…9 never go to it, and a terminal of the
+window that waits for a number takes it at once (else the next session you start or resume does);
+it keeps running, and its terminal shows when you select its row. Back under Open it takes the
+lowest free number, which need not be its old one (none while all nine are in use: then it waits
+for the next number freed, and is moved like any session without one). A restore never starts it; resume it from its row (Enter), and it stays parked. It comes back under
 Open by itself once you send it a prompt (in the window or in any terminal; starting or resuming it
 alone, or a key typed and not sent, does not), or with `w` on its row or `Unpark` (no toast; it stays
 selected and the list follows it). Marking a parked session done ends its parking, and its `Undo`

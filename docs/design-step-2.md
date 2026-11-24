@@ -1125,8 +1125,9 @@ both in memory: the **expected session**. Which session it shows is decided agai
 ### 7.6 Slots
 
 A terminal gets the lowest slot 1–9 that no open terminal has, when it is opened, and keeps it
-until it ends; the tenth and later terminals get none. The slot it was opened with is part of the
-keeper's spec and `hello` (its meta), which never changes (7.7).
+until it ends; the tenth and later terminals get none when they open, and wait for one (issue
+#189, below). The slot it was opened with is part of the keeper's spec and `hello` (its meta),
+which never changes (7.7).
 
 Follow-up F43: a slot belongs only to a terminal whose program may run. It is free as soon as the
 program is known to be over: when the keeper's `exit` is applied (ended, or not started), at a
@@ -1138,8 +1139,9 @@ without its terminal while its session still counts as running, else under Recen
 Ctrl+Shift+N still reaches it (12.9). A keeper that only stops answering (`reconnecting`) keeps
 its slot and comes back with it. The ended terminal stays listed, with its
 last screen, without a slot, and never takes one again (not at a later `hello`, not after a
-restart); the next new or resumed terminal takes the freed slot by the lowest-free rule, and the
-other terminals keep theirs. A row under Recent or Earlier never shows a number (12.1), so
+restart); the freed slot goes to a terminal that waits for one (issue #189, below), else the next
+new or resumed terminal takes it by the lowest-free rule, and the other terminals keep theirs. A
+row under Recent or Earlier never shows a number (12.1), so
 Ctrl+Shift+N never goes to an ended terminal (12.9).
 
 Follow-up F37: the user moves a session of Open up or down (12.9), and the slots of Open's
@@ -1152,8 +1154,48 @@ slot can gain one (the tenth moved above the ninth takes 9) and the one it passe
 session that does not run in the window never has a slot, wherever it sits. The server computes the
 move (`src/window/view/slot-moves.ts`) and gives the registry the new slots in one synchronous step,
 so no terminal opens between the reading of the slots and their change. Without a move nothing is
-renumbered: a slot freed by a terminal that ends stays free, and a new or resumed terminal still
-takes the lowest free slot.
+renumbered: a slot freed by a terminal that ends stays free while no terminal waits for one (issue
+#189, below), and a new or resumed terminal still takes the lowest free slot.
+
+Issue #189 (2026-11-24): no slot stays free while a terminal of the window whose program may run has
+none. The first terminal on a row of Open that has no slot, in Open's order as the server draws it
+(done ones shown, every block open, 12.1), takes the lowest free slot, the next one the next, until
+none is free or none waits; a terminal that has a slot keeps it, and no slot is taken from one. The
+server gives them (`src/window/freed-numbers.ts`, the registry's `giveSlots`) at every change of the
+registry — so at each moment a slot becomes free: an exit applied, a `hello` that says the program
+exited, a lost terminal's program that may no longer run, the close of a lost terminal that still
+held one — and after every refresh that worked, so that the gaps a start finds are filled at its
+first refresh. It gives none while a keeper of terms/ is still being found (7.3): that keeper's slot
+is known only at its `hello`, so a slot that looks free may be its own; once every keeper has
+answered or was given up, the true gaps are filled. The server's log says once `freed numbers: none
+given while a keeper is still being found` while that holds a free slot back (a limit: a keeper that
+is never given up and never answers holds it back for as long as it is being found). Never to a
+terminal whose program ended, never started or was lost, whose exit came and waits to be applied, or
+whose `hello` said it exited (F43). Free is `nextSlot`'s rule, so a slot held for another terminal
+(moved to a keeper being found, or held otherwise) is never given, and none is taken away from a
+terminal whose keeper only stopped answering. Follow-up F44 meets it: a terminal whose slot the
+server withholds (its session is parked, its row under Parked) never waits, whatever its state, and
+is given none; a slot a parking frees is handed out like any freed slot, once the parked sessions
+have left Open's kept order (the server gives it right after it set the parked numbers, never in the
+middle); an un-parked terminal takes the lowest free slot by F44's rule (which need not be its old
+one), or waits while all nine are held. A give writes the withheld set as the registry holds it with the slots, so
+that neither write undoes the other's part. A terminal on no row of Open waits until it has one: the
+second terminal of the window that shows a session the first one has the row of (a `/resume` inside
+it), and a running terminal whose row is under Recent (its session ended a moment before its
+program). Where its row goes: while Open's order is kept (12.1), a row drawn in no block goes to its
+slot's place, exactly as a new terminal with that slot is placed, and a row drawn in a group's block
+of two or more rows keeps its place and only takes the slot, so the block's slots can read out of
+order until the next move (12.2); every other row keeps its place, and at a hand-out the rows nobody
+touched never change their order among themselves. Without a kept order nothing is stored and a
+hand-out never starts one: Open is computed by slot as before, so the row goes to its slot's place
+and a block follows its first row's slot, as for a new terminal (12.2). A given slot is kept in
+`window_slots` as a moved one, with Open's new kept order when one is kept, in one store transaction
+with the withheld set (F44), all or none, before it is applied; every window shows it, and it
+survives a page reload and a server restart. A write that fails gives nothing, is logged once by
+kind and is tried again at the next change or refresh; meanwhile the slot is free, and a new or
+resumed terminal may take it. Nothing is said: the number and the row's place are the whole effect.
+With more than nine terminals an ended session's slot is taken at once by a waiting terminal, so a
+later resume of that session takes another free slot, or none.
 
 A moved slot is kept in the store's kv key `window_slots` (10.2): a JSON object from terminal id to
 slot, holding every live terminal whose slot is not its meta's; null (F42) is a slot a move took
@@ -1173,8 +1215,9 @@ The map is written (whole, pruned to the terminals listed or being found) before
 applied — a store that cannot be written refuses the move, nothing changed —, when a moved
 terminal's slot is freed at the end of its program (F43: its entry goes, so no later server
 applies it, and its close has nothing left to write; no null is written for it, since the `hello`
-of its keeper says its program exited), at the close of a moved terminal, and at a `hello` that
-changed an entry. A write outside a move that fails is logged once by kind and tried again after
+of its keeper says its program exited), at the close of a moved terminal, at a `hello` that
+changed an entry, and before a free slot is given to a terminal that waits (issue #189: with Open's
+kept order, in one transaction, when one is kept). A write outside a move that fails is logged once by kind and tried again after
 the next refresh; a close answers ok whatever the write does. Once the server is stopping nothing is
 written to `window_slots` and no `hello` changes a slot. An entry of a keeper never found again
 (another boot) goes at the next write.
@@ -1188,7 +1231,8 @@ the registry knows no session, and never uses the word for one). The registry ke
 terminals beside the moved slots, and one operation, `withholdSlots(ids)`, which names the whole
 set each time: the listed terminals withheld are from then on exactly those named (an id not
 listed, and a terminal whose program is over, are ignored). One that enters gives its slot up at
-once — no slot, its moved entry gone —, so its number is the lowest free one for the next terminal
+once — no slot, its moved entry gone —, so its number is the lowest free one: the first terminal
+that waits takes it (issue #189, given after this operation, above), else the next terminal
 (`nextSlot` is unchanged). One that leaves takes the lowest free slot — every listed terminal's slot
 and the slots moved to keepers still being found count as held, less those of the terminals
 entering in the same call —, none while all nine are held; several take theirs by opening time,
@@ -2120,9 +2164,11 @@ In memory only:
 - the last status the server saw in each live-session file (10.3);
 - a running restore (12.7).
 
-Nothing of a terminal is stored but a slot moved by hand (follow-up F37, 7.6: `window_slots`,
-10.2) and, from follow-up F44, whether its slot is withheld (`window_slots_withheld`): a server restart rediscovers terminals from `<runtimeDir>/terms/` and their keepers'
-`hello`. Follow-up F42: once a move made Open's order the server's, every refresh that worked
+Nothing of a terminal is stored but a slot moved by hand, or given to it when it waited for one
+(follow-up F37, issue #189, 7.6: `window_slots`, 10.2) and, from follow-up F44, whether its slot is
+withheld (`window_slots_withheld`): a server restart rediscovers terminals from
+`<runtimeDir>/terms/` and their keepers' `hello`. Follow-up F42: once a move made Open's order the
+server's, every refresh that worked
 takes the order drawn then as the kept one (`window_open_order`, 12.1), and the restore memory takes
 it too (design 7.8); neither runs once the stop began, and neither makes a refresh count as
 failed.
@@ -2306,10 +2352,10 @@ way back is the copy kept before the migration (install.md, "Going back").
 | `window_restore_dismissed` | The boot id whose restore the user dismissed with "Not now" (12.7): written only when it is the earlier boot the banner offers; while it names that boot the banner is not shown. |
 | `window_pages_open` | `1` while the server has pages connected (5.1, plan C20): each refresh that works makes it agree with the server's page count, the first one after the start whatever the store holds; at an orderly stop the server writes it once more as its pages are, and when it dies it stays as the last refresh left it, so that the next server knows that a window may come back (ruled by the plan owner, plan task 74). |
 | `window_favourites` | The new form's favourite flags (12.6, follow-up F15): a JSON array of their texts, in the order they were added, at most 12; absent while there is none (the last one removed takes the entry away). One write is one transaction that reads the list first. A value that is not such an array is read as no favourite, and of an array only the entries 12.6's rule takes are read; the next save writes the list afresh. An older skydeck reads only the keys it knows and leaves this one alone. |
-| `window_slots` | Follow-up F37 (7.6): the slots moved by hand, a JSON object from terminal id (12 lower-case hex characters) to slot 1–9 or, from follow-up F42, null (a slot a move took away; only a move writes one), holding every live terminal whose slot is not the one of its keeper's meta; absent while there is none. Written whole at a move (before it is applied, in one transaction with `window_open_order`), when a moved terminal's slot is freed at the end of its program (follow-up F43, 7.6), at the close of a moved terminal, at a `hello` that changed an entry and, from follow-up F44, whenever the withheld terminals change (with `window_slots_withheld`, in one transaction: a terminal that enters loses its entry, one that leaves gets one when its slot is not its meta's, 7.6); pruned to the terminals listed or being found. A write that failed outside a move is tried again after the next refresh (7.6). Read tolerantly: an entry with another key or value is left out. An older skydeck leaves it alone and goes by the meta slots. |
-| `window_slots_withheld` | Follow-up F44 (7.6, 12.15): the terminals whose slot the server withholds (their sessions are parked), a JSON array of terminal ids (12 lower-case hex characters) in id order; absent while there is none. Written whole with `window_slots`, in one transaction, at every write of the slots outside a move (a move's own write leaves it alone); pruned to the terminals listed or being found. Applied at each `hello`: such a terminal takes no slot. Read tolerantly: what is not a terminal id is left out. An older skydeck never sees it: after migration 5 it refuses the database. |
+| `window_slots` | Follow-up F37 (7.6): the slots moved by hand, a JSON object from terminal id (12 lower-case hex characters) to slot 1–9 or, from follow-up F42, null (a slot a move took away; only a move writes one), holding every live terminal whose slot is not the one of its keeper's meta; absent while there is none. Written whole at a move (before it is applied, in one transaction with `window_open_order`), when a moved terminal's slot is freed at the end of its program (follow-up F43, 7.6), at the close of a moved terminal, at a `hello` that changed an entry, from follow-up F44 whenever the withheld terminals change (with `window_slots_withheld`, in one transaction: a terminal that enters loses its entry, one that leaves gets one when its slot is not its meta's, 7.6), and when a free slot is given to a terminal that waits (issue #189, 7.6: before it is applied, with `window_slots_withheld` and, when an order is kept, `window_open_order`, in one transaction); pruned to the terminals listed or being found. A write that failed outside a move is tried again after the next refresh (7.6). Read tolerantly: an entry with another key or value is left out. An older skydeck leaves it alone and goes by the meta slots. |
+| `window_slots_withheld` | Follow-up F44 (7.6, 12.15): the terminals whose slot the server withholds (their sessions are parked), a JSON array of terminal ids (12 lower-case hex characters) in id order; absent while there is none. Written whole with `window_slots`, in one transaction, at every write of the slots outside a move (a move's own write leaves it alone), a free slot given to a terminal that waits too (issue #189); pruned to the terminals listed or being found. Applied at each `hello`: such a terminal takes no slot. Read tolerantly: what is not a terminal id is left out. An older skydeck never sees it: after migration 5 it refuses the database. |
 | `window_restore_order` | Follow-up F37, F42 (design 7.8): the order the sessions last had under Open in the window, a JSON array of at most two parts, the newest boot first, each `{ "bootId", "order": [<session id>, …] }`: Open's drawn order (done ones shown) in that boot, with each session that left Open while still a restore's candidate put back after the nearest earlier session still there; at most 500 ids a part. The server takes Open into its own boot's part after each refresh that worked and after a move, writing only when that changes it; nothing changes while Open is empty, so a reboot that ends the keepers first cannot empty it. Read tolerantly: a part F37 wrote, `{ "bootId", "sessions": { <session id>: <slot> } }`, is read as its sessions in the order of their slots. The command's restore reads it too. A limit: an F37 skydeck reads an F42 part as none, restores in list order and drops the part at its next write. |
-| `window_open_order` | Follow-up F42 (12.1): Open's kept order, a JSON array of session ids (at most 500 read, each once); absent until the first move by hand, and while it is absent Open is computed and nothing is written. Written whole at a move (with `window_slots`, one transaction) and, from then on, at every refresh that worked where Open's drawn order changed (the freeze): the drawn order with done ones shown, plus the place held for a process's next session after `/clear`, an in-session `/resume` or a fork in that process (12.9; at most one per running process). A refresh that sees Open empty and holds no place removes it: the kept order ends. A failed write is logged once by kind and tried again at the next refresh. Read tolerantly. An older skydeck leaves it alone; a limit: after a switch back to a version before F42 and forward again, the old kept order wins over the older version's moves until the next move or until a refresh sees Open empty (7.6). |
+| `window_open_order` | Follow-up F42 (12.1): Open's kept order, a JSON array of session ids (at most 500 read, each once); absent until the first move by hand, and while it is absent Open is computed and nothing is written. Written whole at a move (with `window_slots`, one transaction), when a free slot is given to a terminal that waits while an order is kept (issue #189, 7.6: its row at its slot's place, with `window_slots`, one transaction) and, from then on, at every refresh that worked where Open's drawn order changed (the freeze): the drawn order with done ones shown, plus the place held for a process's next session after `/clear`, an in-session `/resume` or a fork in that process (12.9; at most one per running process). A refresh that sees Open empty and holds no place removes it: the kept order ends. A failed write is logged once by kind and tried again at the next refresh. Read tolerantly. An older skydeck leaves it alone; a limit: after a switch back to a version before F42 and forward again, the old kept order wins over the older version's moves until the next move or until a refresh sees Open empty (7.6). |
 | `window_update_check` | Follow-up F38 (16.5): what the window's server's last look for a newer skydeck said, as JSON: `{ v: 1, root, lookedAtNs, checkedAtNs, fetchedAtNs, failure, head, outcome }` — `root` the checkout it looked at (its real path: one database serves every checkout of the user), `checkedAtNs` when the last check ended, whatever it found (null: none yet), `fetchedAtNs` when the last fetch that worked ended (null: never), `failure` `{ atNs, line }` while the last check failed, `head` HEAD's full id at the look, and `outcome` one of `{ kind: 'cannot', line }`, `{ kind: 'current', line }` and `{ kind: 'available', upstream, count, to, lines, blocked }`. Written by the server only, after each check and look; read by it and by `doctor`. Every line in it clipped to 300 characters. A value that is not exactly such a record is read as none, and so is one of another root, which the next look writes over. |
 | `window_update_run` | Follow-up F38 (16.5, "Update now"): the one update started from a window, as JSON: `{ v: 1, root, state, to, atNs }`, and `line` for `failed` — `state` `applying` (written by the server that starts the updater), then `applied` or `failed` (written by `skydeck update --from-window` once the merge's outcome is known, before the window is brought back; nothing after it), `root` the checkout (its real path), `to` the commit the window listed, `atNs` when it was written, `line` the command's line without the bring-back's tail, clipped to 600 characters. Read and removed by the next server of that checkout (its result), or by the server whose updater ended while it ran; an entry of another root is left as it is. A value that is not exactly such a record is read as none. |
 | `window_carry_over_since` | Follow-up F40 (design 7.1): the server's clock at its first start with F40 on this store, a decimal number of nanoseconds (canonical: no sign, no leading zero). Written at the server's start, before its first tick, in one transaction that writes only when there is no usable entry; when that write fails, the tick tries again once a second until it works. A usable entry is never changed or removed. Without one, and with a damaged one (replaced by the next try's time), no `clear` link makes an offer. |
@@ -2635,10 +2681,12 @@ bar at the bottom. The list has four sections (from follow-up F44; three before 
   window terminal with a higher slot, else before the first window terminal), so that a terminal
   a block draws out of its slot's order (one without a slot, or a higher one above lower ones)
   does not stop it; one without a slot after the window's terminals, a session of another
-  terminal last. The kept order
-  ends when a refresh sees Open empty and holds no place (every reboot, or closing every session):
-  Open is then computed again until the next move. Every window and a reloaded page show the kept
-  order, and it survives a server restart while the sessions run.
+  terminal last. Issue #189: the row of a terminal given a freed slot (7.6) that no block draws
+  is placed again by that rule, at its slot's place, also when it had a kept place; one a group's
+  block draws keeps its place and only takes the slot; every other row keeps its place. The kept
+  order ends when a refresh sees Open empty and holds no place (every reboot, or closing every
+  session): Open is then computed again until the next move. Every window and a reloaded page show
+  the kept order, and it survives a server restart while the sessions run.
 - **Parked** (follow-up F44, 12.15): every session that is parked now (design 7.1), running or
   not, whatever its age: it never sinks into Recent or Earlier, and is in no other section, on
   every page. The most recently parked first, ties by id. It never folds as a whole section (only
@@ -2956,7 +3004,11 @@ head (8.2.3), but in the card no row is special. So the slot numbers of Open can
 block gathers a later slot under its first row; the first move by hand (12.9, follow-up F37) gives
 Open's slots out again in drawn order, and a move keeps a block together. Follow-up F42: a new row
 of a group is drawn with its block, also a block that was moved, and a block can draw a terminal
-without a slot above slotted ones; the next move hands the slots out again from the top. A row whose
+without a slot above slotted ones (since issue #189 one that waits while all nine are held, 7.6);
+the next move hands the slots out again from the top. Issue #189: a waiting terminal drawn in a
+block that takes a freed slot keeps its place while Open's order is kept, so the block's slots can
+read out of order (`7 8 6`) until the next move; before the first move Open is computed by slot, and
+the block follows its first row's slot, as for a new terminal (7.6). A row whose
 group no other row of its section has, and a row without a group, are drawn as before; during a
 typed search (a word in the filter, 12.8) no block is formed. Under chips alone (follow-up F35) the
 blocks are formed by this rule over the rows the chips leave: a block of fewer than two of them is
@@ -4060,8 +4112,8 @@ handed out again from the top among the window's terminals, ascending, so the te
 ninth takes 9 and the ninth loses its own; a session that does not run in the window never has a
 number, wherever it sits. Ctrl+Shift+N then goes to the row that shows N. Follow-up F43: a
 terminal whose program ended has no number, its row under Recent or Earlier shows none, and the
-next new or resumed terminal takes the freed number, so Ctrl+Shift+N never goes to an ended
-terminal. A terminal that still holds its number while its row is under Recent — a lost one in
+freed number goes to the first terminal on a row of Open that has none (issue #189, 7.6), else to
+the next new or resumed terminal, so Ctrl+Shift+N never goes to an ended terminal. A terminal that still holds its number while its row is under Recent — a lost one in
 its 60 seconds (7.6), or a running one whose session ended a moment before its program — is still
 reached by Ctrl+Shift+N, through the window's terminals, though its row shows no number.
 Follow-up F44: a parked session's terminal has no number (its number is free at once, 12.15), and
@@ -4071,7 +4123,9 @@ hands every number out again from the top: when a block draws a terminal without
 numbered ones (12.2), any move — also of another row — gives that terminal a number and takes one
 from the last numbered terminal; the first move after a block made the numbers read out of order
 (`1 3 2`) renumbers all of Open once, rows that did not move too. Nothing is renumbered when a
-session ends (a gap stays a gap), and a new or resumed terminal still takes the lowest free number.
+session ends: a gap stays a gap while no terminal waits for a number (issue #189: else the first
+terminal on a row of Open without one takes it, and its row goes to that number's place, 7.6), and
+a new or resumed terminal still takes the lowest free number.
 
 Blocks stay together: inside a block a row trades places with the neighbouring row of the block,
 whatever either's kind; at the block's edge the whole block passes the next row or block; a single
@@ -4488,7 +4542,8 @@ lead's decisions under the user's go-ahead to proceed.
 8. A session whose window terminal crashed needs you until seen.
 9. Slots 1–9 in opening order; since follow-up F37 reordered by hand (12.9), the numbers following
    the order; since follow-up F42 any row of Open moves, and the numbers are handed out from the
-   top among the window's terminals.
+   top among the window's terminals; since issue #189 a freed number goes to the first terminal on
+   a row of Open that has none.
 
 ### 12.12 The icon
 
@@ -4909,9 +4964,12 @@ The key help names `w` after `d`, and the tour's line of the list's keys ends `d
 
 **The numbers** (the owner's decision of 2026-11-24, "parking frees it"). Parking a session that
 runs in a terminal of the window frees its number 1-9 at once: the terminal holds none, and the
-next new or resumed terminal takes it by the lowest-free rule; `Ctrl+Shift+N` never goes to a
-parked session. Back under Open while it runs (an `unpark`, a prompt, `done`), it takes the lowest
-free number, none while all nine are taken (then it is moved like any row without one, 12.9). Its
+first terminal under Open that waits for a number takes it at once (issue #189, 7.6), else the
+next new or resumed terminal by the lowest-free rule; `Ctrl+Shift+N` never goes to a parked
+session. Back under Open while it runs (an `unpark`, a prompt, `done`), it takes the lowest free
+number, which need not be its old one, none while all nine are taken (then it waits like any
+terminal without one, takes the next number freed, issue #189, and is moved like any row without
+one, 12.9). Its
 terminal is otherwise untouched: it runs, and its pane shows when its row is selected. A parked
 session resumed from its row gets no number. No two terminals ever hold one number, also at a
 reconnect, a restart and a write that fails (7.6 has the rules and the races). Back under Open it
@@ -5889,7 +5947,16 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
   parked session resumed from its row (born with a number, withheld in the same step, no list
   carrying it), the registry's write held failing (the server's `beforeSlotsWrite` seam, a test
   option `serve` never sets) and the mark's write busy; before the first refresh nothing is
-  withheld or written, and a stored set is never pruned against an empty registry.
+  withheld or written, and a stored set is never pruned against an empty registry;
+- issue #189, a freed number to a terminal that waits (`test/window/server-freed-number.test.ts`;
+  who waits and where its row goes in `test/window/freed-numbers.test.ts`, the registry's
+  `giveSlots` and each moment a number becomes free with real keepers in
+  `test/window/terminals-freed-numbers.test.ts`): the report's case live and at a start, on every
+  page and after a restart, no list with a free number and a waiting terminal, a kept order and a
+  move after, a write that fails, a slow keeper at a start keeps its number; with Parked (F44): a
+  parked session's terminal never waits, a number a parking frees goes to the first that waits
+  (also in a block of a kept order, which keeps its place), an un-parked one takes the lowest free
+  number by F44's rule or waits, and the two writes keep each other's part.
 
 ### 17.4 The page
 
@@ -6117,7 +6184,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W38 | A ticket's status on the throwaway session (follow-up F19), asking no real tracker: a stand-in program the owner writes in a throwaway folder (`~/skydeck-try/status`, its three lines given) answers for a `ticketStatus` rule whose `match` is `https://example.com/try/`; the ticket `https://example.com/try/TRY-1` on the throwaway session shows `TRY-1 · In Progress ↗` in blue in the header and `In Progress` in the row's small chip; the answer changed to each category and ↻ pressed in the ticket dialog: `blocked` red, `review` amber, `doing` blue, `done` green, `todo` and `closed` grey; a failure (the program made not executable) keeps the old status and its tooltip says `status not read: …`; `skydeck show` prints `ticket:` with ` · <status>`. Every step checks the header's short id or the dialog's heading first; at the end the ticket is removed, `config.json` is as it was (restored from a copy), and the stand-in is deleted. | F19 | 12.5, 12.2, 12.3, 10.2 |
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
 | W41 | The settings screen's Advanced on the owner's own `config.json`, copied aside first: the title bar's gear opens it, `Advanced (14 more settings)` opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36, F39 | 12.13 |
-| W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last row and under a filter; follow-up F42: a fourth session of another terminal moved above a numbered one, the numbers unchanged, `/clear` in it keeps its place; `skydeck window --restart` keeps the order; follow-up F43: `/exit` in a numbered terminal gives its number up (its row under Recent without one, Ctrl+Shift+1 reaches no session), the next new session takes it, also after `Mark done, keep it running`. The restore order only where W16's drill runs anyway. | F37, F42, F43 | 7.6, 12.1, 12.9 |
+| W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last row and under a filter; follow-up F42: a fourth session of another terminal moved above a numbered one, the numbers unchanged, `/clear` in it keeps its place; `skydeck window --restart` keeps the order; follow-up F43: `/exit` in a numbered terminal gives its number up (its row under Recent without one, Ctrl+Shift+1 reaches no session), the next new session takes it, also after `Mark done, keep it running`; issue #189: with nine numbered terminals, a tenth session without a number takes the number a numbered one gives up at its `/exit`, at that number's place, also after a restart. The restore order only where W16's drill runs anyway. | F37, F42, F43, #189 | 7.6, 12.1, 12.9 |
 | W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Update now` and `Close`; `doctor`'s `update:` line; the group's switch `Check for updates every day` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
 | W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links, The window and (F38) Updates with eight plain labels (from issue #184 `Copy on select` in The window) and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
 | W45 | The tour of the window in the owner's Edge (follow-up F41): it starts by itself at the first opening after the update, over the real list; each step's region stands out and its words read well; Enter, → and ← walk it, a click on the page does nothing, Ctrl+Shift+L says `close the tour first (Esc)`; `Done` gives the keyboard back and a reload shows it no more; the key help's `Take the tour` and the switcher's `> tour` start it again and Esc ends it; an InPrivate window with `--print-url`'s address shows it by itself once, in a tab's words. | F41 | 12.9, 12.14 |
@@ -6223,9 +6290,9 @@ page's own icon (12.12). Checks W30, W31, and W3's icon on the taskbar button.
 - **Turn hooks** (`Stop`, `UserPromptSubmit`, `Notification`): 10.3.
 - **Turn ends while no server runs** (10.3).
 - **A "by ticket" view, more than nine slots.** Since follow-up F37 the user reorders Open by key
-  (12.9), since follow-up F42 every row of it; dragging a row with the mouse, sort modes,
-  reordering Recent or Earlier, and giving a freed number to a terminal that has none are left
-  out.
+  (12.9), since follow-up F42 every row of it, and since issue #189 a freed number goes to a
+  terminal that has none (7.6); dragging a row with the mouse, sort modes and reordering Recent or
+  Earlier are left out.
 - **Stopping a session from the window** (principle 6).
 - **Carrying fields over after `/clear` without asking** (follow-up F40: no setting for it), an
   offer after a fork, a copy or an in-session `/resume`, and undoing a carry over (the old session
