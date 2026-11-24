@@ -537,6 +537,20 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
       await toastIs(page, 'Restarted.');
       assert.equal(await active(page), '#list');
       assert.equal(await selectedRow(page), S1);
+      // The next dialog's line is no longer marked as waiting.
+      await page.keyboard.press('r');
+      await shown(page, true);
+      assert.equal(
+        await page.evaluate(
+          () =>
+            (document.querySelector('#restart-dialog .restart-lines') as HTMLElement).dataset[
+              'pending'
+            ] ?? null,
+        ),
+        null,
+      );
+      await page.keyboard.press('Escape');
+      await shown(page, false);
     },
   );
 

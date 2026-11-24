@@ -201,6 +201,7 @@ export function createRestartDialog(root, deps) {
     closeEditor(false);
     current = null;
     said.textContent = '';
+    delete said.dataset['pending']; // the next dialog's line is a refusal's until it waits again
     // The keyboard leaves the dialog before it is hidden: app.js gives it back.
     const holder = document.activeElement;
     if (holder instanceof HTMLElement && root.contains(holder)) {
