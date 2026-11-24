@@ -5,12 +5,14 @@ import {
   formatChip,
   formatNoteLines,
   formatPrLine,
+  formatParked,
   formatPrStatus,
   formatRow,
   stateDetailSuffix,
 } from '../../src/cli/row.ts';
 import { NS_PER_DAY, NS_PER_MINUTE } from '../../src/platform/time.ts';
 import type { PrView } from '../../src/sessions/list.ts';
+import { ds } from '../helpers/derived.ts';
 import { S1, T0 } from '../helpers/platform.ts';
 import { listRow } from '../helpers/rows.ts';
 
@@ -189,6 +191,58 @@ test('formatRow: a time in state in the future counts as 0s; days past two show 
   assert.equal(formatRow(future, T0, 200), 'running     x    0s  0b5f3c1e');
   const old = listRow({ id: S1, state: 'running', title: 'x', sinceNs: T0 - 3n * NS_PER_DAY });
   assert.equal(formatRow(old, T0, 200), 'running     x    3d  0b5f3c1e');
+});
+
+// --- the parked mark (follow-up F44) ---------------------------------------------------------------
+
+/** A row parked six days before T0, with every other part a row can show. */
+const PARKED_ROW = listRow({
+  id: S1,
+  state: 'not-running',
+  title: 'Waiting for the review of the retry loop',
+  sinceNs: T0 - 3n * HOUR,
+  marks: ['ended-unexpectedly', 'was-working'],
+  chip: { level: 'checks-failing', count: 2 },
+  hasNote: true,
+  parked: true,
+  session: ds({ id: S1, parked: true, parkedAtNs: T0 - 6n * NS_PER_DAY }),
+});
+
+test('formatParked: "parked <age>" while parked, the age since the parking; nothing otherwise', () => {
+  assert.equal(formatParked(PARKED_ROW, T0), 'parked 6d');
+  assert.equal(formatParked(PARKED_ROW, T0 + 2n * NS_PER_DAY), 'parked 8d');
+  const ended = listRow({
+    id: S1,
+    parked: false,
+    session: ds({ id: S1, parked: false, parkedAtNs: T0 - MIN }),
+  });
+  assert.equal(formatParked(ended, T0), '', 'a parking that ended');
+  assert.equal(formatParked(listRow({ id: S1 }), T0), '');
+});
+
+test('formatRow: a parked row shows "parked 6d" first after the time in state', () => {
+  assert.equal(
+    formatRow(PARKED_ROW, T0, 200),
+    'not-running Waiting for the review of the retry loop    3h  parked 6d  ended-unexpectedly,was-working  2pr:checks-failing  note  0b5f3c1e',
+  );
+  const plain = listRow({ id: S1, state: 'working', title: 'Fix', sinceNs: T0 - 5n * MIN });
+  assert.equal(
+    formatRow(plain, T0, 200),
+    'working     Fix    5m  0b5f3c1e',
+    'no mark when not parked',
+  );
+});
+
+test('formatRow: the parked mark is kept when columns are dropped, as the short id is', () => {
+  for (const width of [120, 100, 90, 80, 60, 40, 10]) {
+    const line = formatRow(PARKED_ROW, T0, width);
+    assert.ok(line.includes('  parked 6d  '), `${width}: ${line}`);
+    assert.ok(line.endsWith('  0b5f3c1e'), `${width}: ${line}`);
+  }
+  assert.equal(
+    formatRow(PARKED_ROW, T0, 60),
+    'not-running W…  parked 6d  ended-unexpectedly+1  pr:checks-failing  0b5f3c1e',
+  );
 });
 
 // --- formatChip ------------------------------------------------------------------------------------

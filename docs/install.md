@@ -16,7 +16,7 @@ No. skydeck works in any terminal. Only one thing needs a terminal program: star
 | What you do | Needs terminal support? |
 |---|---|
 | Recording sessions (the hook) | No. It is a Claude Code hook. It records a session whatever terminal `claude` runs in. |
-| `skydeck`, `ls`, `show`, `label`, `group`, `note`, `done`, `undone`, `pr ...` | No. They read and write skydeck's own database and call `gh`. |
+| `skydeck`, `ls`, `show`, `label`, `group`, `note`, `done`, `undone`, `park`, `unpark`, `pr ...` | No. They read and write skydeck's own database and call `gh`. |
 | `install`, `uninstall`, `doctor` | No. (`doctor` runs a WezTerm check only when the configuration says `"terminal": "wezterm"`.) |
 | `resume`, `new`, `restore`, and `R` in the interactive list | They start `claude`. By default they do it in the terminal you are in: skydeck ends and `claude` takes its place. That works in any terminal. With `--window` (`resume`, `new`) or `"terminal": "window"` the window's server starts it in the skydeck window instead ("Starting sessions in the window from a terminal (stage C)"). |
 | Starting a session in a **new tab** (`--tab`, or `"terminal": "wezterm"`) | Yes. WezTerm is the only terminal skydeck can open tabs in. There are two adapters, `here` and `wezterm`, in `src/terminals/`. |

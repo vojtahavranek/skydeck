@@ -428,21 +428,21 @@ Marks are shown next to the state.
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the
   transcript is not activity.
 - **Parked** (follow-up F44). Sets the session aside: alive, but not the user's to move now (it
-  waits for a review, a person or another part of the work). The user parks it and un-parks it;
-  nothing parks by itself, and it never stops a process. The time it was parked is kept
-  (`session_meta.parked_at_ns`, 9.2). Open, Parked and Done exclude one another, each mark one
-  statement that sets its own column and clears the other: parking a done session makes it parked
-  and no longer done, marking a parked session done ends its parking, and a session that is un-done
-  is not parked (un-doing a parked one that is not done changes nothing). Parking a session that is
-  parked already writes nothing and keeps the first time. A session is parked while it has the mark
-  and no `user` input (5.6) in its transcript later than the time, the signal by which Done shows a
-  session again: a prompt sent ends the parking, the stored time stays and nothing clears it by
-  itself. Unlike Done, a `start` event (`startup` or `resume`) does not end it, nor does a key typed
-  in a terminal and not sent. The time stored is the later of the clock and one nanosecond after the
-  last input the transcript held at the parking: the transcript's times are Claude Code's clock and
-  the wall clock of WSL steps back (7.6), so a parking right after a prompt is never dated before
-  that prompt. A limit: a prompt sent within such a step back of the clock right after a parking can
-  be dated before it and then does not end it; the next prompt does.
+  waits for a review, a person or another part of the work). The user parks it and un-parks it
+  (`skydeck park`, `skydeck unpark`, 7.5); nothing parks by itself, and it never stops a process.
+  The time it was parked is kept (`session_meta.parked_at_ns`, 9.2). Open, Parked and Done exclude
+  one another, each mark one statement that sets its own column and clears the other: parking a done
+  session makes it parked and no longer done, marking a parked session done ends its parking, and a
+  session that is un-done is not parked (un-doing a parked one that is not done changes nothing).
+  Parking a session that is parked already writes nothing and keeps the first time. A session is
+  parked while it has the mark and no `user` input (5.6) in its transcript later than the time, the
+  signal by which Done shows a session again: a prompt sent ends the parking, the stored time stays
+  and nothing clears it by itself. Unlike Done, a `start` event (`startup` or `resume`) does not end
+  it, nor does a key typed in a terminal and not sent. The time stored is the later of the clock and
+  one nanosecond after the last input the transcript held at the parking: the transcript's times are
+  Claude Code's clock and the wall clock of WSL steps back (7.6), so a parking right after a prompt
+  is never dated before that prompt. A limit: a prompt sent within such a step back of the clock
+  right after a parking can be dated before it and then does not end it; the next prompt does.
 - **First run.** `skydeck install` offers to mark as done every listed session whose last
   activity is older than `firstRunDoneAfterDays` (default 7) and that is not running and not
   parked (follow-up F44: a parking is a mark the user set on purpose, which a bulk yes must not
@@ -636,8 +636,12 @@ otherwise it behaves like `skydeck ls`.
   row that takes its place, not to the top, and the message line says which session left.
 - The title line counts the sessions shown and how many of them are in each state, so that a
   session that starts waiting out of view is still seen.
-- A row shows: state, title, time in state, marks, the pull-request chip, a note mark, and the
-  short id (first 8 characters of the session id).
+- A row shows: state, title, time in state, the parked mark with its age (follow-up F44, 7.1:
+  `parked 6d`, the time since the parking, in the one age format; only while the session is parked),
+  marks, the pull-request chip, a note mark, and the short id (first 8 characters of the session
+  id). A parked session stays in its own group at its usual place; when a row is too wide, the
+  parked mark is never dropped, as the short id is not. `ls` and the interactive list show it alike
+  (the interactive list has no key for it).
 - Every string that comes from a transcript, a live-session file or GitHub passes through the
   sanitiser, which removes control characters and escape sequences, when the list model is built.
   So do the label and the group, although setting them refuses such characters (7.1): the
@@ -657,11 +661,12 @@ The interactive list is built as two pure functions — `reduce(model, key)` and
 |---|---|
 | `skydeck` | Interactive list. |
 | `skydeck ls [--all] [--json] [--refresh]` | Print the list. `--refresh` first fetches the pull requests of the sessions it prints that are not merged or closed (7.3). |
-| `skydeck show <ref> [--json] [--refresh]` | One session: state, marks, project directory, its `ticket:` — the ticket set on it (7.1), else the address `ticketUrl` gives its group (design-step-2.md 12.5; that one not in `--json`), with ` · <status>` when its status is known (7.3) and, after a failed read, a line under it with the failure's words —, launch command (and the flags in it that skydeck does not know, which a resume does not pass on), links, note, whether it is done and since when, pull requests, holders. `--refresh` as for `ls`, for this session's pull requests. |
+| `skydeck show <ref> [--json] [--refresh]` | One session: state, marks, project directory, its `ticket:` — the ticket set on it (7.1), else the address `ticketUrl` gives its group (design-step-2.md 12.5; that one not in `--json`), with ` · <status>` when its status is known (7.3) and, after a failed read, a line under it with the failure's words —, launch command (and the flags in it that skydeck does not know, which a resume does not pass on), links, note, whether it is done and since when, whether it is parked and since when (a line `parked:    since <ISO>` after the state, only while it is parked; follow-up F44), pull requests, holders. `--refresh` as for `ls`, for this session's pull requests. |
 | `skydeck label <ref> [<text>]` / `group <ref> [<text>]` | Set; without text (or with an empty text), clear. The text is all the arguments after `<ref>`, joined by one space. |
 | `skydeck note <ref> [--set <text>]` | Edit in `$VISUAL` / `$EDITOR` (7.1), or set directly. |
 | `skydeck ticket set <ref> <link-or-key>` / `ticket clear <ref>` / `ticket refresh [<ref>]` | Set the session's ticket from a link or a key, replacing the one before; remove it (7.1; F18). An empty text removes it too. `set` reads no status (ruled, as F18 left it): the window's server reads it for a session it lists, or `refresh` reads it; `refresh` reads the status of the session's ticket, or without `<ref>` of every session's, done ones included, as `pr refresh` reads every session's pull requests, now, whatever its age (7.3; F19). |
 | `skydeck done <ref>` / `undone <ref>` | Hide / show. |
+| `skydeck park <ref>` / `unpark <ref>` | Park / un-park (follow-up F44, 7.1): the session stays listed with its mark; nothing is stopped. Parking a session that is parked already keeps its first time; parking a done one shows it again. |
 | `skydeck pr add <ref> <url>` / `pr rm <ref> <url>` / `pr refresh` | Attach, detach, fetch status. |
 | `skydeck new [--label <text>] [--group <text>] [--here \| --tab \| --window] [-- <claude flags>]` | Start a new session in the current directory (7.7); `--window` in the skydeck window (design-step-2.md 11.4). |
 | `skydeck resume <ref> [--here \| --tab \| --window] [-- <claude flags>]` | Resume one session (7.6); with `--`, with the flags after it in place of the recorded ones (7.6 "Other flags"); `--window` in the skydeck window (design-step-2.md 11.4). |
@@ -689,6 +694,7 @@ A reader that closes standard output early (`skydeck ls | head -1`) is not an er
                   "label": null, "group": null, "state": "working|waiting|running|not-running",
                   "stateDetail": null, "since": "<ISO>", "lastActivity": "<ISO>", "dir": "",
                   "marks": [], "hasNote": false, "continuedFrom": null, "done": false,
+                  "parked": false, "parkedAt": null,
                   "prs": [ { "url": "", "repo": "<owner>/<repo>", "number": 0, "state": "",
                              "review": null, "checks": null, "okAt": null, "error": null } ] } ] }
 ```
@@ -706,7 +712,10 @@ still version 1, an addition only: `marks` can hold `empty-copy` (6.3) — the s
 that has had no message yet and neither works nor asks, listed only with `--all` unless the user
 kept it (7.2) —, and then, as for every copy, `marks`
 holds `continued` and `continuedFrom` is the id of the session it is a copy of; `show --json`'s
-`links` can hold a link of kind `copy` (5.3), from that id to the session. Since F32
+`links` can hold a link of kind `copy` (5.3), from that id to the session. Follow-up F44, still
+version 1, an addition only: `parked` (`true` while the session is parked, 7.1) and `parkedAt`
+(the time it was parked, ISO, while it is; else null), after `done`, in `ls --json` and `show
+--json` alike. Since F32
 `review` is no longer GitHub's decision alone: an approved pull request that has open
 conversations or that GitHub will not merge exports `unresolved-comments` or `blocked`, so a
 reader that looks for `approved` no longer finds it there. `show --json` prints one
