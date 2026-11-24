@@ -30,7 +30,8 @@ window (follow-up F41), at "The tour of the window"; W46 checks copy on select i
 terminal (issue #184), at "Copy on select"; W47 checks the carry over after `/clear` (follow-up
 F40), at "Carry over after /clear"; W48 checks the list's width set by a drag (issue #192), at "The
 list's width"; W49 checks resuming a session with other flags (issue #188), at "Resuming with other
-flags"; W50 checks parking a session (follow-up F44), at "Parked".
+flags"; W50 checks parking a session (follow-up F44), at "Parked"; W51 checks how often the window
+checks for a newer skydeck by itself (follow-up F38's choice), at "How often updates are checked".
 
 Setup:
 
@@ -2917,7 +2918,7 @@ The check of the window's notice of a newer skydeck (follow-up F38; design-step-
 12.13; [install.md](install.md), "Updating", its part "The window says when there is one"): W43,
 in your window, on your own checkout. Its first half (steps 1–6) applies nothing: it presses
 `Check now`, reads the settings screen's group `Updates`, the title bar and `skydeck doctor`,
-turns its switch `Check for updates every day` (`window.updateCheck`) off and on again, and, only where you have such a remote, looks at
+turns its choice `Check for updates` (`window.updateCheck`) off and back, and, only where you have such a remote, looks at
 what a check does with a remote that needs a passphrase or a login. Its second half (steps 7–9)
 applies the update with `Update now`, on your own installation, and only when the dialog lists
 commits. The tests run all of it against a test server, a throwaway checkout and a remote that is
@@ -2934,7 +2935,7 @@ In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git rem
 (write down the line, or that there is none).
 
 1. **Check now.** Click the gear. Expected: the short screen's fourth group, `Updates`, after
-   `The window`: the switch `Check for updates every day`, then one line — `Last check: <age> ago —
+   `The window`: the choice `Check for updates`, then one line — `Last check: <age> ago —
    skydeck is up to date (main at <id>, as origin/main)`, or `… — <n> new commits on origin/main` —
    and `Check now`. Click `Check now`. Expected: `Checking…` for a moment, then `Last check: 0s ago
    — …` (or `1s`). When it says that new commits are there, the title bar shows `Update available`
@@ -2950,11 +2951,12 @@ In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git rem
    commits on origin/main (fetched <age> ago); skydeck update applies them`, or `update: skydeck is
    up to date (…) (fetched <age> ago)` — and no `problem` line that step 1's setup did not have.
    doctor used no network for it (it reads what the window's server stored).
-4. **The switch.** In Settings (the gear), turn `Check for updates every day` off: `Saved.` beside
+4. **The choice.** In Settings (the gear), choose `Off` in `Check for updates`: `Saved.` beside
    it, no button pressed; in W, `grep -n updateCheck ~/.config/skydeck/config.json` prints
-   `"off"`. `Check now` still checks (`Last check: 0s ago — …`). Then turn it on again: `Saved.`,
-   and the grep prints `"daily"` (when the setup found no line, the key now stays in the file with
-   its default value, which is the same).
+   `"off"`. `Check now` still checks (`Last check: 0s ago — …`). Then choose the one the setup's
+   line names again (`Every hour` when it found none, `Every day` for `"daily"`): `Saved.`, and the
+   grep prints that value (`"hourly"` when the setup found no line: the key now stays in the file
+   with its default value, which is the same).
 5. **A remote that needs a passphrase**, only when you have an ssh key with a passphrase that this
    checkout's remote host takes (else write down "left out: no such remote"). In W: `git remote
    set-url origin <the ssh address of the same repository>`. In Settings' group `Updates`, `Check
@@ -3039,7 +3041,7 @@ with the terminal of a session shown (any running one; no prompt is typed into i
    its hint about `{key}`), `The window` (`Keep WSL running`, a switch with `after a restart`
    beside it; `Typed commands start sessions in` and its hint; from issue #184 `Copy on select`,
    a switch, and its hint `In a session’s terminal; Ctrl+Shift+C copies either way.`),
-   `Updates` (follow-up F38: the switch `Check for updates every day`, the line of the last check
+   `Updates` (follow-up F38: the choice `Check for updates`, the line of the last check
    and `Check now`; W43 tries them), and at the end `Advanced (14 more settings)` and `Close`. No `Save`, no `Default`, no file name. The keyboard
    is on `Mode`. Write down what Mode and Colour theme show.
 4. **The theme.** Choose the other of `Light` and `Dark` in Mode (from `Auto`, `Dark`). Expected:
@@ -3406,3 +3408,51 @@ Write down: for each step whether it went as expected, and the words where they 
 version and your two layouts; whether Windows showed any notification in step 7.
 
 Not tried before this check was written: all of it, in Edge and with real Claude Code.
+
+## How often updates are checked
+
+The check of how often the window's server looks for a newer skydeck by itself (follow-up F38's
+choice; design-step-2.md 10.1, 12.13, 16.5; [install.md](install.md), "Updating", its part "The
+window says when there is one"): W51, in your window, on your own checkout and `config.json`. It
+applies nothing: it picks each value of `Check for updates` in Settings' group `Updates`, waits
+for one check that the clock makes, and puts the setting back. The tests run the waits with a fake
+clock against a test server; only here does the check meet the real clock, your remote and your
+network for a quarter of an hour. Commands are typed in W, a WSL terminal of your own (never a `!`
+command inside Claude Code).
+
+## W51. Every 15 minutes, every hour, every day
+
+Setup: skydeck updated to a commit that has this choice (`skydeck update`, W32), then the window
+open; in W, `grep -n updateCheck ~/.config/skydeck/config.json` (write down the line, or that there
+is none). Throughout, the age of the last check is read in Settings' group `Updates` (the gear),
+in its line `Last check: <age> ago — …`; close Settings (Esc) and open it again to read it anew.
+
+1. **The choice.** Open Settings. Expected: the group `Updates`, after `The window`, shows `Check
+   for updates` with `Every hour` when the setup found no line or `"hourly"` (`Every day` for
+   `"daily"`, `Off` for `"off"`); its list holds `Off`, `Every 15 minutes`, `Every hour`, `Every
+   day`, in that order. With a setup that found no line or a value other than `"off"`, the line's
+   age is about the time since the window's server started (the update restarted it, and every
+   start checks).
+2. **Every 15 minutes.** Choose `Every 15 minutes`. Expected: `Saved.` beside it, no button
+   pressed; the grep prints `"15min"`. When the line's age was 15 minutes or more, it says `Last
+   check: 0s ago` (or `1s`, `2s`) within two seconds, without a click; else leave the window
+   alone until 16 minutes after the age it showed, open Settings again: the age is under a minute
+   or two, and `skydeck doctor`'s `update:` line says `fetched <age> ago` with the same age.
+3. **Every day.** Choose `Every day`: `Saved.`, the grep prints `"daily"`. Write down the line's
+   age. Twenty minutes later, open Settings again: the age has grown by twenty minutes (no check
+   was made by the clock).
+4. **Off.** Choose `Off`: `Saved.`, the grep prints `"off"`; `Check now` still checks (`Last check:
+   0s ago — …`).
+5. **Back.** Choose the value of the setup again (`Every hour` when it found no line): `Saved.`,
+   and the grep prints it (`"hourly"` when the setup found no line: the key now stays in the file
+   with its default value, which is the same). With `Every hour`, the line's age is under an hour
+   whenever you open Settings from now on.
+
+Leaves behind: `window.updateCheck` as it was (or in the file with its default value), the
+remote-tracking refs as the checks' `git fetch` leaves them, and `kv window_update_check` with the
+last check.
+
+Write down: for each step whether it went as expected, and the words where they differ; how long
+after the 15 minutes step 2's check came.
+
+Not tried before this check was written: all of it, in Edge, with the real clock and your remote.
