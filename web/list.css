@@ -161,12 +161,16 @@
 .list-row:hover {
   background: var(--panel2);
 }
+/* The selected line (a row, a row in a block, a closed caption below) is outlined in --selline in
+   both zones, in the 1 px border every line has, transparent until then (nothing moves). While the
+   list has the keyboard it also keeps its --sel fill; while the terminal has it, the outline stands
+   alone. */
 .list-row[data-selected='true'] {
   background: var(--sel);
+  border-color: var(--selline);
 }
 .list[data-zone='terminal'] .list-row[data-selected='true'] {
   background: none;
-  border-color: var(--selline);
 }
 .row-main {
   min-width: 0;
@@ -466,10 +470,10 @@
 }
 .block-head[data-selected='true'] {
   background: var(--sel);
+  border-color: var(--selline);
 }
 .list[data-zone='terminal'] .block-head[data-selected='true'] {
   background: none;
-  border-color: var(--selline);
 }
 .block-twist {
   flex: none;
