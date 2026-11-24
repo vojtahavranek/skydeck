@@ -11,6 +11,8 @@ import { describe, test } from 'node:test';
 
 import { isoFromNs, NS_PER_MINUTE } from '../../src/platform/time.ts';
 import type { Ns, Platform } from '../../src/platform/types.ts';
+import { loadRows } from '../../src/sessions/load.ts';
+import { markParked } from '../../src/sessions/meta.ts';
 import { readLock } from '../../src/sessions/resume.ts';
 import type { ListMessage, RestoreStreamLine } from '../../src/window/protocol.ts';
 import { procStartOf, stillRuns, until, within } from '../helpers/keeper.ts';
@@ -336,6 +338,54 @@ describe('a restore from a page (S2 12.7, plan C6, C7)', () => {
       'restore finished: 1 failed',
     ]);
     assert.equal(r.waiting(old), false, 'nothing opened for it');
+  });
+});
+
+describe('a parked session (follow-up F44, design 7.8, S2 12.15)', () => {
+  test('is not in the banner, and neither act restore nor POST /restore starts it; it stays under Parked, not running', async (t) => {
+    const r = restoreSandbox(t);
+    const { d } = r;
+    threeSessions(r);
+    // Parked as the command parks it, on the test's own connection.
+    const row = loadRows(d.deck).find((one) => one.id === X2);
+    assert.ok(row !== undefined);
+    assert.equal(markParked(d.deck, row), true);
+    const test = await d.start();
+    const page = await connectTestPage(t, d, test.server);
+    const offer = await offering(page, [X1, X3]);
+    assert.equal(offer.banner?.entries.length, 2, 'the banner counts two');
+    assert.equal(
+      offer.sections.find((section) => section.rows.some((one) => one.id === X2))?.name,
+      'parked',
+    );
+
+    const result = await page.act({ kind: 'restore', sessionIds: [X2] });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    await noticed(page, FINISHED);
+    assert.deepEqual(notices(page), [
+      `failed ${X2.slice(0, 8)}: no longer offered for restore`,
+      'restore finished: 1 failed',
+    ]);
+    const command = postRestore(d, { sessionIds: [X2], all: true });
+    assert.equal((await command.ended).status, 200);
+    assert.deepEqual(command.lines, [
+      { line: `failed ${X2.slice(0, 8)}: no longer offered for restore` },
+      { line: 'restore finished: 1 failed' },
+      { outcome: { code: 1, started: 0, timedOut: 0, failed: 1, notStarted: 0 } },
+    ]);
+    assert.equal(r.waiting(X2), false, 'nothing opened for it');
+    assert.deepEqual(test.server.hub.list(), []);
+    // The last list the page got (a ping's pong comes after everything sent before it).
+    page.send({ t: 'ping', n: 4401 });
+    while ((await page.next('pong', 'the pong')).n !== 4401);
+    const list = page.all
+      .flatMap((item) => ('text' in item && item.text.t === 'list' ? [item.text] : []))
+      .at(-1);
+    const parked = list?.sections.find((section) => section.name === 'parked');
+    assert.deepEqual(
+      parked?.rows.map((one) => [one.id, one.state]),
+      [[X2, 'not-running']],
+    );
   });
 });
 

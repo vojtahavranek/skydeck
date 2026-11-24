@@ -96,6 +96,16 @@ async function aRefresh(d: ServerSandbox, page: TestPage): Promise<void> {
   await page.list((list) => rowOf(list, probe) !== undefined, `the refresh that lists ${probe}`);
 }
 
+/** The last `list` the page got. */
+function latest(page: TestPage): ListMessage {
+  const lists = page.all.flatMap((item) =>
+    'text' in item && item.text.t === 'list' ? [item.text] : [],
+  );
+  const last = lists.at(-1);
+  assert.ok(last !== undefined, 'a list');
+  return last;
+}
+
 /** Every `notify` the page got so far. */
 function notifies(page: TestPage): NotifyMessage[] {
   return page.all.flatMap((item) =>
@@ -208,5 +218,84 @@ describe('a parked session is quiet (S2 12.4, 13)', () => {
       [[S1, 'asks']],
       'only the control was notified',
     );
+  });
+});
+
+describe('the acts park and unpark (S2 8.2.3, 12.15)', () => {
+  test("page A's park is in page B's next list, and its unpark too; a second park answers ok and keeps the first time", async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    d.resumable(S2);
+    const test = await d.start();
+    const a = await connectTestPage(t, d, test.server);
+    const b = await connectTestPage(t, d, test.server);
+    for (const page of [a, b]) {
+      await page.list((list) => sectionOf(list, S1) === 'week', 'S1 under Recent');
+    }
+    const parked = await a.act({ kind: 'park', sessionId: S1 });
+    assert.deepEqual(
+      { ok: parked.ok, lines: parked.lines, error: parked.error, sessionId: parked.sessionId },
+      { ok: true, lines: [], error: null, sessionId: null },
+    );
+    const at = String(parkedAt(d, S1));
+    for (const page of [a, b]) {
+      const list = await page.list((one) => sectionOf(one, S1) === 'parked', 'S1 under Parked');
+      assert.equal(rowOf(list, S1)?.parkedAtNs, at);
+    }
+    const again = await b.act({ kind: 'park', sessionId: S1 });
+    assert.equal(again.ok, true, JSON.stringify(again));
+    assert.equal(String(parkedAt(d, S1)), at, 'the first time is kept');
+
+    const unparked = await b.act({ kind: 'unpark', sessionId: S1 });
+    assert.equal(unparked.ok, true, JSON.stringify(unparked));
+    for (const page of [a, b]) {
+      const list = await page.list((one) => sectionOf(one, S1) === 'week', 'S1 back');
+      assert.equal(rowOf(list, S1)?.parked, false);
+    }
+    assert.equal(d.deck.store.meta(S1)?.parkedAtNs, null);
+  });
+
+  test('the mark survives a restart of the server', async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    const first = await d.start();
+    const page = await connectTestPage(t, d, first.server);
+    await page.list((list) => sectionOf(list, S1) === 'week', 'S1 under Recent');
+    assert.equal((await page.act({ kind: 'park', sessionId: S1 })).ok, true);
+    await page.list((list) => sectionOf(list, S1) === 'parked', 'S1 under Parked');
+    await first.server.stop('the test restarts the server');
+    const second = await d.start();
+    const later = await connectTestPage(t, d, second.server);
+    const list = await later.list((one) => rowOf(one, S1) !== undefined, "the new server's list");
+    assert.equal(sectionOf(list, S1), 'parked');
+    assert.equal(rowOf(list, S1)?.parkedAtNs, String(parkedAt(d, S1)));
+  });
+
+  test('a parked session resumed from its row runs under Parked, still parked, with no number shown', async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    d.resumable(S2);
+    const test = await d.start();
+    const page = await connectTestPage(t, d, test.server);
+    await page.list((list) => sectionOf(list, S1) === 'week', 'S1 under Recent');
+    assert.equal((await page.act({ kind: 'park', sessionId: S1 })).ok, true);
+    await page.list((list) => sectionOf(list, S1) === 'parked', 'S1 under Parked');
+    const term = await resumed(page, test, S1);
+    const running = await page.list(
+      (list) => rowOf(list, S1)?.state !== 'not-running' && rowOf(list, S1) !== undefined,
+      'S1 runs',
+    );
+    assert.equal(sectionOf(running, S1), 'parked');
+    assert.equal(rowOf(running, S1)?.parked, true);
+    assert.equal(rowOf(running, S1)?.slot, null);
+    assert.equal(rowOf(running, S1)?.terminal, term);
+    assert.equal(running.terminals.find((one) => one.id === term)?.slot, null);
+    // A key typed into it and not sent does not end the parking (the stand-in writes no prompt).
+    assert.equal(test.server.hub.input(term, Buffer.from('typed, not sent', 'utf8')), 'ok');
+    await aRefresh(d, page);
+    await aRefresh(d, page);
+    await roundTrip(page);
+    const still = latest(page);
+    assert.equal(sectionOf(still, S1), 'parked');
   });
 });

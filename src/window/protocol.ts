@@ -177,7 +177,11 @@ export interface ResizeMessage {
  *  F40 (design 7.1, S2 12.6): `carry-over` answers the offer of `list.selected.carryOver` for the
  *  new session `sessionId`: `rev` is the offer as drawn, `fields` the ticked fields, `done` the
  *  tick of `mark the old one done`; the server computes the offer again in one transaction and
- *  copies or refuses (src/window/carry-over.ts). `dismiss-carry-over` ends that offer for good. */
+ *  copies or refuses (src/window/carry-over.ts). `dismiss-carry-over` ends that offer for good.
+ *
+ *  F44 (S2 12.15): `park` parks the session (`markParked`: nothing written when it is parked
+ *  already, the time it was parked kept) and `unpark` ends its parking (`markUnparked`); each names
+ *  only the session. Absolute, never a toggle: the page picks the act from its row's `parked`. */
 export type ActMessage =
   | {
       t: 'act';
@@ -208,7 +212,7 @@ export type ActMessage =
   | {
       t: 'act';
       id: number;
-      kind: 'done' | 'undone' | 'pr-refresh' | 'ticket-refresh';
+      kind: 'done' | 'undone' | 'park' | 'unpark' | 'pr-refresh' | 'ticket-refresh';
       sessionId: string;
     }
   | { t: 'act'; id: number; kind: 'pr-add' | 'pr-rm'; sessionId: string; url: string }
@@ -1124,6 +1128,9 @@ const ACTS: Readonly<Record<string, Check>> = {
   note: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, text: NOTE, base: NOTE }),
   done: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   undone: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  // Follow-up F44: the session alone, as done and undone.
+  park: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  unpark: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   'pr-refresh': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   'pr-add': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
   'pr-rm': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),

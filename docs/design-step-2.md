@@ -1632,6 +1632,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `label`, `group` | `sessionId`, `text` (empty clears) | 12.5. |
 | `note` | `sessionId`, `text`, `base` (the note the edit started from) | 12.5. |
 | `done`, `undone` | `sessionId` | 12.5, 12.10. |
+| `park`, `unpark` | `sessionId` | Follow-up F44, 12.15: `park` parks the session (design 7.1: the time it is parked, its done mark cleared, in one write; a session parked already is not written and keeps its first time, answered `ok` all the same), `unpark` ends its parking. Absolute, never a toggle: the page picks the act from its row's `parked`, as it picks `done` or `undone`. Refused as `done` is: a session the store does not know, a `new` terminal's session not started yet, a busy store. Every page's `list` follows a write. |
 | `pr-add`, `pr-rm` | `sessionId`, `url` | 12.5. |
 | `pr-refresh` | `sessionId` | An explicit refresh of that session's pull requests (design 7.3). |
 | `ticket` | `sessionId`, `text` (a link or a key as typed; empty removes the ticket) | 12.5 (follow-up F18): the server reads `text` by design 7.1's rule (`readTicket`) and stores the address, replacing the ticket before; a refusal's words are the result's error, nothing stored. `text` is held to the URL limit, so that a link of 2,048 characters is sent whole. Every page's `list` follows. |
@@ -4294,7 +4295,9 @@ a double click that slips still resets. Resizing with the keyboard is not offere
 ### 12.10 Done
 
 A session marked done disappears as in design 7.1, except that a running session marked done
-stays under Open with a `done` mark until it stops (then it is hidden). Marking done shows an Undo
+stays under Open with a `done` mark until it stops (then it is hidden). Marking a parked session
+done ends its parking (follow-up F44, 12.15): it leaves Parked, under Open with its `done` mark while
+it runs, else hidden. Marking done shows an Undo
 toast. An empty copy (12.1, follow-up F33) is not kept under Open by running: done or not, it is
 hidden until it has a message or a terminal of the window shows it.
 
@@ -4738,6 +4741,41 @@ none: no made-up data.
 - **Tests.** Every browser context of the page suite is made by `newContext`
   (`test-page/helpers/browser.ts`), which marks the tour seen in each page's storage, so that no
   case but the tour's own meets it; those ask for a context without the mark, or with an older one.
+
+### 12.15 Parked
+
+Follow-up F44 (issue #193; the owner's decisions of 2026-11-23 and 2026-11-24). Some sessions are
+alive but not the user's to move right now: the work is sent to review, waits for a person, or for
+another part of the work. The user sets them aside with one manual mark, **Parked**, the sibling of
+Done (design 7.1), and the list shows them in a section of their own after Open (12.1).
+
+**What the acts write.** `park` (8.2.3) stores the time the session is parked
+(`session_meta.parked_at_ns`, 10.2's migration 5: the later of the clock and one nanosecond after
+the last input known then, design 7.1) and clears its done mark in the same statement; `unpark`
+clears the time.
+Parking a session that is parked already writes nothing and keeps its first time (a second page's
+act, the command's). Nothing parks by itself, and parking never stops or moves a process: a running
+session goes on running, under Parked.
+
+**The three states.** Open, Parked and Done exclude one another: parking a done session makes it
+parked and no longer done; marking a parked session done ends its parking (12.10); a session that is
+un-done is not parked. `skydeck park` and `skydeck unpark` (design 7.5) write the same mark from the
+command line; the window follows within a refresh.
+
+**What brings a session back.** Whether a session is parked now is derived, as Done is: it is parked
+while it has the mark and no prompt of the user's in its transcript later than the time (design 7.1;
+the transcript's `lastUserNs`, the signal Done's return uses, so a session outside the window comes
+back too). So sending it a prompt brings it back under Open (Recent or Earlier when it does not run)
+by itself, at the next refresh that reads the transcript (about 2 s); a start or a resume alone does
+not, and neither does a key typed and not sent. The stored time stays: nothing clears it by itself.
+`unpark` brings it back at once. A session left by `/clear` stays parked, and the session the
+program goes on with is not parked: the mark is not carried (design 7.1, F40's offer is unchanged).
+
+**Where it shows.** Under Parked on every page, running or not, whatever its age, the most recently
+parked first (12.1), its row with `parked 6d` and no number (12.2); quiet (12.4, 13); ranked
+`Parked` in the switcher (12.8). Restore leaves it ended (design 7.8, 12.7): no banner, switcher
+offer, `act restore` or `skydeck restore` starts it; resumed from its row it runs under Parked,
+still parked.
 
 ## 13. Notifications
 
