@@ -152,7 +152,9 @@ export function createFill(deps: FillDeps): Fill {
   let held = false;
 
   const give = (): Outcome => {
-    // Cheap first: nothing is built while no number is free or no program may take one.
+    // Cheap first: nothing is built while no number is free or no terminal without one may run.
+    // (A withheld one, a parked session's, passes this check: Open is built, under 2 ms at 1,000
+    // rows, and the registry gives it nothing.)
     if (deps.registry.nextSlot() === null) return 'none';
     const terminals = deps.registry.list();
     if (!terminals.some((one) => one.slot === null && MAY_START.has(one.state))) return 'none';

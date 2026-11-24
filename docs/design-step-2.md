@@ -1177,25 +1177,25 @@ terminal whose keeper only stopped answering. Follow-up F44 meets it: a terminal
 server withholds (its session is parked, its row under Parked) never waits, whatever its state, and
 is given none; a slot a parking frees is handed out like any freed slot, once the parked sessions
 have left Open's kept order (the server gives it right after it set the parked numbers, never in the
-middle); an un-parked terminal takes its slot back by F44's rule, or waits while all nine are held.
-A give writes the withheld set as the registry holds it with the slots, so that neither write undoes
-the other's part. A terminal on no row of Open waits until it has one: the second terminal of the
-window that shows a session the first one has the row of (a `/resume` inside it), and a running
-terminal whose row is under Recent (its session ended a moment before its program). Where its row
-goes: while Open's order is kept (12.1), a row drawn in no block goes to its slot's place, exactly
-as a new terminal with that slot is placed, and a row drawn in a group's block of two or more rows
-keeps its place and only takes the slot, so the block's slots can read out of order until the next
-move (12.2); every other row keeps its place, and at a hand-out the rows nobody touched never change
-their order among themselves. Without a kept order nothing is stored and a hand-out never starts
-one: Open is computed by slot as before, so the row goes to its slot's place and a block follows its
-first row's slot, as for a new terminal (12.2). A given slot is kept in `window_slots` as a moved
-one, with Open's new kept order when one is kept, in one store transaction, both or neither, before
-it is applied; every window shows it, and it survives a page reload and a server restart. A write
-that fails gives nothing, is logged once by kind and is tried again at the next change or refresh;
-meanwhile the slot is free, and a new or resumed terminal may take it. Nothing is said: the number
-and the row's place are the whole effect. With more than nine terminals an ended session's slot is
-taken at once by a waiting terminal, so a later resume of that session takes another free slot, or
-none.
+middle); an un-parked terminal takes the lowest free slot by F44's rule (not its old one), or waits
+while all nine are held. A give writes the withheld set as the registry holds it with the slots, so
+that neither write undoes the other's part. A terminal on no row of Open waits until it has one: the
+second terminal of the window that shows a session the first one has the row of (a `/resume` inside
+it), and a running terminal whose row is under Recent (its session ended a moment before its
+program). Where its row goes: while Open's order is kept (12.1), a row drawn in no block goes to its
+slot's place, exactly as a new terminal with that slot is placed, and a row drawn in a group's block
+of two or more rows keeps its place and only takes the slot, so the block's slots can read out of
+order until the next move (12.2); every other row keeps its place, and at a hand-out the rows nobody
+touched never change their order among themselves. Without a kept order nothing is stored and a
+hand-out never starts one: Open is computed by slot as before, so the row goes to its slot's place
+and a block follows its first row's slot, as for a new terminal (12.2). A given slot is kept in
+`window_slots` as a moved one, with Open's new kept order when one is kept, in one store transaction
+with the withheld set (F44), all or none, before it is applied; every window shows it, and it
+survives a page reload and a server restart. A write that fails gives nothing, is logged once by
+kind and is tried again at the next change or refresh; meanwhile the slot is free, and a new or
+resumed terminal may take it. Nothing is said: the number and the row's place are the whole effect.
+With more than nine terminals an ended session's slot is taken at once by a waiting terminal, so a
+later resume of that session takes another free slot, or none.
 
 A moved slot is kept in the store's kv key `window_slots` (10.2): a JSON object from terminal id to
 slot, holding every live terminal whose slot is not its meta's; null (F42) is a slot a move took
@@ -1231,7 +1231,8 @@ the registry knows no session, and never uses the word for one). The registry ke
 terminals beside the moved slots, and one operation, `withholdSlots(ids)`, which names the whole
 set each time: the listed terminals withheld are from then on exactly those named (an id not
 listed, and a terminal whose program is over, are ignored). One that enters gives its slot up at
-once — no slot, its moved entry gone —, so its number is the lowest free one for the next terminal
+once — no slot, its moved entry gone —, so its number is the lowest free one: the first terminal
+that waits takes it (issue #189, given after this operation, below), else the next terminal
 (`nextSlot` is unchanged). One that leaves takes the lowest free slot — every listed terminal's slot
 and the slots moved to keepers still being found count as held, less those of the terminals
 entering in the same call —, none while all nine are held; several take theirs by opening time,
@@ -4963,9 +4964,11 @@ The key help names `w` after `d`, and the tour's line of the list's keys ends `d
 
 **The numbers** (the owner's decision of 2026-11-24, "parking frees it"). Parking a session that
 runs in a terminal of the window frees its number 1-9 at once: the terminal holds none, and the
-next new or resumed terminal takes it by the lowest-free rule; `Ctrl+Shift+N` never goes to a
-parked session. Back under Open while it runs (an `unpark`, a prompt, `done`), it takes the lowest
-free number, none while all nine are taken (then it is moved like any row without one, 12.9). Its
+first terminal under Open that waits for a number takes it at once (issue #189, 7.6), else the
+next new or resumed terminal by the lowest-free rule; `Ctrl+Shift+N` never goes to a parked
+session. Back under Open while it runs (an `unpark`, a prompt, `done`), it takes the lowest free
+number, not its old one, none while all nine are taken (then it waits like any terminal without
+one, takes the next number freed, issue #189, and is moved like any row without one, 12.9). Its
 terminal is otherwise untouched: it runs, and its pane shows when its row is selected. A parked
 session resumed from its row gets no number. No two terminals ever hold one number, also at a
 reconnect, a restart and a write that fails (7.6 has the rules and the races). Back under Open it
@@ -5951,8 +5954,8 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
   page and after a restart, no list with a free number and a waiting terminal, a kept order and a
   move after, a write that fails, a slow keeper at a start keeps its number; with Parked (F44): a
   parked session's terminal never waits, a number a parking frees goes to the first that waits
-  (also in a block of a kept order, which keeps its place), an un-parked one takes its number back
-  by F44's rule or waits, and the two writes keep each other's part.
+  (also in a block of a kept order, which keeps its place), an un-parked one takes the lowest free
+  number by F44's rule or waits, and the two writes keep each other's part.
 
 ### 17.4 The page
 

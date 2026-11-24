@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
+import { readMovedSlots, readWithheldSlots } from '../../src/window/moved-slots.ts';
 import { writeOpenOrder } from '../../src/window/open-order.ts';
 import type { ListMessage } from '../../src/window/protocol.ts';
 import { stillRuns, until } from '../helpers/keeper.ts';
@@ -44,6 +45,17 @@ async function openReads(
     }, what);
   } catch {
     assert.fail(`${what}: Open read ${last.join(' ')}, not ${order.join(' ')}`);
+  }
+}
+
+/** Returns once `page` got no list for a little more than a second (the pages' pace, S2 8.2.8). */
+async function quietSecond(page: TestPage): Promise<void> {
+  for (;;) {
+    try {
+      await page.list(() => true, 'a list', 1100);
+    } catch {
+      return;
+    }
   }
 }
 
@@ -285,11 +297,42 @@ describe('the hand-out meets Parked, on the server (F44, #189)', () => {
     const block = ['1:1', '2:2', '3:3', '4:4', '5:5', '6:6', '7:7', '8:8', `${w1}:-`, '9:9'];
     let list = await openReads(page, block, 'the block of 8 and the waiting one, kept');
 
-    // Parked: 5 gives its number up, and the waiting row takes it where it stands, in its block.
+    // Parked: 5 gives its number up, and the waiting row takes it where it stands, in its block,
+    // in the act itself (the registry right after its answer), and no list on the way shows the
+    // number free while a terminal that is not withheld waits.
+    const parkedTerm = second.server.hub.list().find((one) => one.sessionId === nth(5))?.id ?? '';
+    const waitingTerm = second.server.hub.list().find((one) => one.slot === null)?.id ?? '';
+    const seen: string[] = [];
+    const watch = (candidate: ListMessage): void => {
+      const parkedRows = new Set(
+        (candidate.sections.find((one) => one.name === 'parked')?.rows ?? []).map((row) => row.id),
+      );
+      const held = candidate.terminals.filter((one) => one.slot !== null).length;
+      const waits = candidate.terminals.some(
+        (one) =>
+          one.slot === null && one.state === 'running' && !parkedRows.has(one.sessionId ?? ''),
+      );
+      if (held < 9 && waits) seen.push(openOf(candidate).join(' '));
+    };
+    // A list goes to a page at most once a second (a later one waits for that second to end): the
+    // parking comes after a second with none, so that a list it pushed on the way would be seen.
+    await quietSecond(page);
     const parked = await page.act({ kind: 'park', sessionId: nth(5) });
     assert.equal(parked.ok, true, JSON.stringify(parked));
+    assert.deepEqual(
+      [parkedTerm, waitingTerm].map(
+        (id) => second.server.hub.list().find((one) => one.id === id)?.slot,
+      ),
+      [null, 5],
+      'given in the act',
+    );
+    // The give's write kept the withheld set (a restart would otherwise give the parked one its
+    // number back over the one that took it).
+    assert.deepEqual(readWithheldSlots(d.deck.store), new Set([parkedTerm]));
+    assert.equal(readMovedSlots(d.deck.store).get(waitingTerm), 5);
     const taken = ['1:1', '2:2', '3:3', '4:4', '6:6', '7:7', '8:8', `${w1}:5`, '9:9'];
-    list = await openReads(page, taken, 'the parked number taken in the block');
+    list = await openReads(page, taken, 'the parked number taken in the block', watch);
+    assert.deepEqual(seen, [], 'a list with a free number and a waiting terminal');
     assertNumbersSound(list);
     assert.equal(
       list.terminals.find((one) => one.sessionId === nth(5))?.slot,
@@ -307,5 +350,39 @@ describe('the hand-out meets Parked, on the server (F44, #189)', () => {
     page.send({ t: 'input', term: termWith(list, 1), data: '/exit\r' });
     const after = ['5:1', '2:2', '3:3', '4:4', '6:6', '7:7', '8:8', `${w1}:5`, '9:9'];
     assertNumbersSound(await openReads(page, after, 'the un-parked one takes 1'));
+  });
+  test("the give's write goes through the server's seam for the slots' writes: failing there, nothing is given and it is logged once; released, the next refresh gives", async (t) => {
+    const { d, server, waits } = await resumedMany(t, 10);
+    const [w1] = waits as [number];
+    await server.server.stop('the test restarts it with the seam');
+    // Armed, the seam lets its first write through (the parking's own) and fails the others.
+    const seam = { armed: false, calls: 0 };
+    const second = await d.start({
+      beforeSlotsWrite: () => {
+        if (!seam.armed) return;
+        seam.calls += 1;
+        if (seam.calls >= 2) throw new Error('the test holds the write');
+      },
+    });
+    const page = await connectTestPage(t, d, second.server);
+    const nine = ['1:1', '2:2', '3:3', '4:4', '5:5', '6:6', '7:7', '8:8', '9:9'];
+    await openReads(page, [...nine, `${w1}:-`], 'restarted, the tenth waits');
+    const waitingTerm = second.server.hub.list().find((one) => one.slot === null)?.id ?? '';
+    seam.armed = true;
+    const parked = await page.act({ kind: 'park', sessionId: nth(5) });
+    assert.equal(parked.ok, true, JSON.stringify(parked));
+    assert.equal(
+      second.server.hub.list().find((one) => one.id === waitingTerm)?.slot,
+      null,
+      'its write failed: nothing given',
+    );
+    assert.ok(seam.calls >= 2, `the give's write went through the seam (${seam.calls} calls)`);
+    const failed = 'freed numbers: a free number was not given (Error)';
+    seam.armed = false;
+    const given = ['1:1', '2:2', '3:3', '4:4', `${w1}:5`, '6:6', '7:7', '8:8', '9:9'];
+    assertNumbersSound(await openReads(page, given, 'given at a later refresh'));
+    const logged = second.logs().filter((line) => line.includes('freed numbers:'));
+    assert.equal(logged.length, 1, logged.join('\n'));
+    assert.ok(logged[0]?.endsWith(failed), logged[0]);
   });
 });

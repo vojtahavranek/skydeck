@@ -630,10 +630,14 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       openOrder,
       log: quietLog,
     });
-    /** #189 meets F44: the parked numbers' setting is on (the fill waits for its end). */
+    /** #189 meets F44: the parked numbers' setting is on (the fill, and the pages' lists, wait for
+     *  its end). */
     let parkedSyncing = false;
+    /** A change came while it was on: the lists are pushed once after it. */
+    let pushHeld = false;
     /** F44: the registry made to agree with what is parked now; then (#189) a number it freed goes
-     *  to a terminal that waits. It never throws. */
+     *  to a terminal that waits, and only then do the pages get their lists (none with a number
+     *  free while a terminal waits). It never throws. */
     const parkedNow = (): void => {
       parkedSyncing = true;
       try {
@@ -642,6 +646,10 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         parkedSyncing = false;
       }
       fillFreedNumbers('parked');
+      if (pushHeld) {
+        pushHeld = false;
+        pages.pushList();
+      }
     };
     // F37, F42 (design 7.8): the order of Open in this boot, a restore's order.
     const restoreMemory = createRestoreMemory({
@@ -925,7 +933,9 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     });
     created.onChange(() => {
       fillFreedNumbers('change'); // #189: a number this change freed goes to one that waits first
-      pages.pushList();
+      // #189 meets F44: a change inside the parked numbers' setting is pushed after its fill.
+      if (parkedSyncing) pushHeld = true;
+      else pages.pushList();
     });
     const notices = keepAliveNotices();
     keepAlive.onChange((state) => {

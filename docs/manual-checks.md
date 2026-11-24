@@ -3337,7 +3337,9 @@ a desktop notification.
 
 Setup: skydeck updated to a commit that has follow-up F44 (`skydeck update`, W32), then the window
 open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Close every other
-terminal of the window first, or read the numbers below as the free ones, ascending. Throughout:
+terminal of the window first, or read the numbers below as the free ones, ascending. If a row of a
+terminal of the window under Open has no number, skip W50 for now: from issue #189 that row takes a
+parked session's number at once, and steps 2 to 6 and 8 would read otherwise. Throughout:
 type a word only where the step says the keyboard is (the key bar names the zone, `Focus: list` or
 `Focus: terminal`; Ctrl+Shift+L switches it). In the list a letter is a key: `w` parks, `d` marks
 done, `l`, `n` and `t` open a dialog.
