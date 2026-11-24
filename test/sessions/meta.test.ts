@@ -26,7 +26,12 @@ import { refresh } from '../../src/sessions/refresh.ts';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { S1, S2, SEC, T0 } from '../helpers/platform.ts';
-import { startRunning, twoSessions, writeTranscript } from '../helpers/session-files.ts';
+import {
+  startRunning,
+  twoSessions,
+  userRecord,
+  writeTranscript,
+} from '../helpers/session-files.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
 import type { SpoolFields } from '../helpers/spool.ts';
 
@@ -183,6 +188,51 @@ describe('markDone, markUndone', () => {
     assert.notEqual(d.proc.stat(4242), null, 'its process is still there');
     assert.deepEqual(d.runner.calls, []);
     assert.deepEqual(d.runner.interactiveCalls, []);
+  });
+});
+
+describe('markDone after the wall clock stepped back (#207)', () => {
+  /** A start of S1 by process 4242 with `source`, stamped `atNs` by its hook, ingested. */
+  function startAt(d: TestDeck, source: string, atNs: bigint, seq: number): void {
+    const fields = {
+      event: 'SessionStart' as const,
+      timeNs: atNs,
+      pid: 4242,
+      input: hookInput('SessionStart', S1, { source }),
+    };
+    writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, seq)), spoolText(fields));
+    assert.equal(ingestSpool(d.deck).ingested, 1);
+  }
+
+  test("a resume stamped after the clock now: the done time is that start's, and the session is hidden", (t) => {
+    const d = known(t);
+    startAt(d, 'resume', T0 + 3n * SEC, 1);
+    markDone(d.deck, S1);
+    assert.equal(meta(d, S1)?.doneAtNs, T0 + 3n * SEC);
+    assert.equal(loadRows(d.deck).find((row) => row.id === S1)?.session.hidden, true);
+  });
+
+  test("a transcript's input stamped after the clock now: the done time is that input's", (t) => {
+    const d = testDeck(t);
+    writeTranscript(d, S1, [userRecord(S1, T0 + 4n * SEC)]);
+    refresh(d.deck);
+    markDone(d.deck, S1);
+    assert.equal(meta(d, S1)?.doneAtNs, T0 + 4n * SEC);
+  });
+
+  test('only what makes a session active again counts: a /clear start or an end ahead of the clock does not', (t) => {
+    const d = known(t);
+    startAt(d, 'clear', T0 + 3n * SEC, 1);
+    startAt(d, 'compact', T0 + 4n * SEC, 2);
+    markDone(d.deck, S1);
+    assert.equal(meta(d, S1)?.doneAtNs, T0, 'the clock');
+  });
+
+  test('a start before the clock leaves the done time at the clock', (t) => {
+    const d = known(t);
+    startAt(d, 'startup', T0 - 3n * SEC, 1);
+    markDone(d.deck, S1);
+    assert.equal(meta(d, S1)?.doneAtNs, T0);
   });
 });
 
