@@ -3299,11 +3299,13 @@ was started with (below), and buttons Note, from issue #166 Restart (12.10: only
 `endable` and not marked done), Done / Undone and, from follow-up F44, Park / Unpark (12.15:
 tooltips `park it: it waits under Parked (w)` and `back under Open (w)`). The buttons give way, none
 is cut (ruled for #166): Restart is not shown while the header is 382 px wide inside or less, and
-Park / Unpark while it is 274 px or less (measured: the first line needs 366 px with Restart and
-Unpark, and 258 px with Unpark, before the state would lie under Note; 16 px of slack each for
-other fonts). With the list 400 px wide a window up to about 810 px wide shows no Restart and one up
-to about 700 px no Park / Unpark (at 640 px Park was cut before); `r`, `w` and `skydeck park`
-remain. Then
+Park / Unpark while it is 290 px or less (measured in the suite's font: with Restart and Unpark a
+button is cut below 307 px and the state lies under Note below 338 px; with Unpark alone, below
+242 and 273 px; the rules leave slack for other fonts). With the list 400 px wide a window up to
+about 810 px wide shows no Restart and one up to about 718 px no Park / Unpark (at 640 px Park was
+cut before); `r`, `w` and `skydeck park` remain. A done row at the narrowest windows (below about
+650 px, with the list at 400 px) is the one case where the state may lie under Note (`Undone` is
+wider than `Done`); no button is cut there. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
 F18 the session's ticket first (below, with its status from F19), then the window's chip (12.3),

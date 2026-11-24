@@ -15,17 +15,19 @@
      moves it, #192), below. */
   container: card-header / inline-size;
 }
-/* Issue #166: the buttons give way when the first line is short of room, none is cut (ruled):
-   Restart first — below this width (measured: 366 px with Unpark, 16 px of slack for other fonts)
-   another button would be cut with it or the state would lie under Note; `r` in the list remains. */
+/* Issue #166: the buttons give way when the first line is short of room, none is cut (ruled).
+   Restart first: with it (and Unpark) a button is cut below 307 px of the header's width inside,
+   and the state lies under Note below 338 px; the rule, with slack for other fonts, is 382 px.
+   `r` in the list remains. */
 @container card-header (max-width: 382px) {
   .header-restart {
     display: none;
   }
 }
-/* Then Park / Unpark (F44), which was cut at a window of 640 px with the list 400 px wide: below
-   this width (measured: 258 px with Unpark, and 16 px of slack) it gives way too; `w` remains. */
-@container card-header (max-width: 274px) {
+/* Then Park / Unpark (F44), which was cut at a window of 640 px with the list 400 px wide: with
+   Unpark a button is cut below 242 px, and the state lies under Note below 273 px; the rule, with
+   slack, is 290 px. `w` remains. */
+@container card-header (max-width: 290px) {
   .header-park {
     display: none;
   }

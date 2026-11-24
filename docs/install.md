@@ -1014,7 +1014,7 @@ is one line, cut with an ellipsis when it is long:
 1. the title, the group chip with its ✎ (or `+ group`), the state, `Note`, `Restart` (only for a
    session running in a terminal of the window that is not marked done; see below), `Done` and
    `Park`. In a narrow right side the buttons give way rather than being cut: with the list 400 px
-   wide, a window up to about 810 px wide shows no `Restart`, and one up to about 700 px no `Park`
+   wide, a window up to about 810 px wide shows no `Restart`, and one up to about 718 px no `Park`
    or `Unpark`; `r`, `w` and `skydeck park` still work;
 2. the directory (whole in its tooltip), `opened today at 14:02 · last active 3m` (`opened` while
    the window shows the session's terminal), where the title comes from (`title: your label`,

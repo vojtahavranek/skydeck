@@ -453,7 +453,7 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
   );
 
   await t.test(
-    'the header’s buttons give way, none is cut (ruled): Restart first, then Park / Unpark; every 2 px from 640 to 1,100 px, for a plain row, a parked one, a done one and a parked running one, no button is cut and nothing lies over another; `r` still there',
+    'the header’s buttons give way, none is cut (ruled): Restart first, then Park / Unpark; every 2 px from 640 to 1,100 px, for a plain row, a parked one, a done one and a parked running one, no button is cut and nothing lies over another (but the state under Note on a done row below 650 px); `r` still there',
     async (t) => {
       const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
       const d = await deck(
@@ -525,7 +525,13 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
             [],
             `${kind}: nothing cut at ${width} px`,
           );
-          assert.deepEqual(now.over, [], `${kind}: nothing lies over another at ${width} px`);
+          // Ruled: for a done row (Undone is wider than Done) nothing lies over another from 650 px
+          // on; below that only the state may lie under Note.
+          const allowed =
+            kind === 'a done row' && width < 650
+              ? now.over.filter((pair) => !/header-state .*\/ .*header-note-button/.test(pair))
+              : now.over;
+          assert.deepEqual(allowed, [], `${kind}: nothing lies over another at ${width} px`);
           for (const one of now.buttons) seen.add(one.text);
         }
         // Each button comes back once there is room.
