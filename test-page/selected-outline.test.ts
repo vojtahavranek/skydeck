@@ -234,6 +234,8 @@ test('the selected line keeps its outline in both zones, and its fill while the 
     return '#list .block-head[data-selected="true"]';
   };
 
+  /** The plain row's look while selected (the list zone's), for what it looked like before. */
+  let selectedRow: Look | null = null;
   for (const scheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: scheme });
     const { fill, line } = await selColours(page);
@@ -241,13 +243,28 @@ test('the selected line keeps its outline in both zones, and its fill while the 
     for (const how of ['row', 'row in a card', 'caption'] as const) {
       const selector = await select(how);
       const which = `${scheme}, ${how}`;
-      // The pointer of the click is off the line: a hovered line is another state of it.
+      // Read with the pointer off the line, then on it, where a click leaves it: the same look.
       await page.mouse.move(0, 0);
 
       await toZone(page, 'list');
       const inList = await lookOf(page, selector);
+      await page.locator(selector).hover();
+      assert.deepEqual(
+        await lookOf(page, selector),
+        inList,
+        `${which}: the list has the keyboard, the pointer on the line: the same`,
+      );
+      await page.mouse.move(0, 0);
       await toZone(page, 'terminal');
       const inTerminal = await lookOf(page, selector);
+      await page.locator(selector).hover();
+      assert.deepEqual(
+        await lookOf(page, selector),
+        inTerminal,
+        `${which}: the terminal has it, the pointer on the line: the same`,
+      );
+      await page.mouse.move(0, 0);
+      if (how === 'row') selectedRow = inList;
 
       const outline = Array.from({ length: 4 }, () => `1px solid ${line}`);
       assert.deepEqual(
@@ -274,6 +291,11 @@ test('the selected line keeps its outline in both zones, and its fill while the 
     assert.ok(
       other.edges.every((edge) => edge.endsWith(NONE)),
       `${wanted}: a row that is not selected has no outline: ${other.edges.join(' | ')}`,
+    );
+    assert.deepEqual(
+      { box: other.box, text: other.text },
+      { box: selectedRow?.box, text: selectedRow?.text },
+      `${wanted}: the row has the box and the text's place it had while selected`,
     );
   }
   assert.deepEqual(problems, []);
