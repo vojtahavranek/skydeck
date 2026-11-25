@@ -1103,13 +1103,15 @@ within 10 seconds, `Parked. It has not ended yet: end it inside claude if it sta
 listed under Parked, not running, and you resume it from its row as any other. **Park, keep it
 running** (where the keyboard starts in every other state, with a line that says why: it is
 working, it is asking you something, or skydeck cannot tell whether it is working; → or Tab takes
-it there) parks it and leaves it running; **Cancel** or Esc does nothing. On `End session and
-park` where the dialog put the keyboard, only Enter presses it: Space does not. Once you type a
-letter (or any character, that Space too) while the dialog asks, the keyboard stays on `Cancel`
+it there) parks it and leaves it running; **Cancel** or Esc does nothing. On the button where the
+dialog put the keyboard, only Enter presses it: Space does not. Once you type a letter (or any
+character, that Space too) while the dialog asks, the keyboard stays on `Cancel`
 until it closes: the arrows and Tab move nothing, and Enter or Space cancel; a click still presses
 any button. So `w` and then Enter, typed at once, end an idle session and park it — the quick way,
 on purpose: resume it from its row if you did not mean it — but a word with a `w` typed into the
-list by mistake (`wow`, `now `, `wow what a show `) ends nothing. skydeck learns that a session
+list by mistake (`wow`, `now `, `wow what a show `) ends and parks nothing. A `w` held a little
+long does nothing more than `w`. After you move the keyboard yourself (Tab, an arrow), Enter and
+Space press the button it is on. skydeck learns that a session
 started working a moment after it did, so `w` and Enter in that moment can still end it. Every other session is parked at once: one that does not
 run, and one that runs where skydeck cannot end it, whose toast says so (`Parked. skydeck cannot end
 this one: end it in its terminal.`). The toast says `Parked: listed under Parked. It comes back when

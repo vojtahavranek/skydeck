@@ -160,7 +160,8 @@ free for the next session) and stays quiet (no notification, not counted as need
 in a terminal of the window, a dialog asks first: **End session and park** (Enter, when it waits
 for your next prompt) ends it too, so that it holds nothing while it waits; **Park, keep it
 running** (where the keyboard starts while it works or asks you something; else →, then Enter)
-leaves it running. A letter typed while the dialog asks puts the keyboard on Cancel. A message with **Undo** shows
+leaves it running. Space, or a letter typed while the dialog asks, presses nothing and puts the
+keyboard on Cancel. A message with **Undo** shows
 for 5 seconds. Send it a prompt and it comes back under Open by itself; `w` on its row (or
 **Unpark**) brings it back at once.
 

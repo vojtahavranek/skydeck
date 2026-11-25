@@ -3439,7 +3439,10 @@ open a dialog. In that dialog the outlined button has the keyboard: → moves it
     leave it open with `Cancel` outlined (press Esc); nothing is ended and nothing is parked; the
     `a` shows the done sessions (press `a` again). Then `w` and in the dialog type `x`:
     `Cancel` is outlined; press ← and Tab: the outline stays on `Cancel`; press Enter: the dialog
-    closes, nothing done. Then `w` and Space: `Cancel` is outlined, the dialog stays; Esc.
+    closes, nothing done. Then `w` and Space: `Cancel` is outlined, the dialog stays; Esc. Then
+    hold `w` for a second and release it: the dialog shows with `End session and park` outlined
+    (not `Cancel`); press Tab, then Space: `Park, keep it running` is pressed, the session is
+    parked and keeps running; click `Undo` in the toast.
 16. **A session that asks.** In a session under Open, Enter (`Focus: terminal`), type `Use the Bash
     tool to run the command date.` and Enter, and wait until Claude Code asks for the permission.
     Ctrl+Shift+L (`Focus: list`), `w`. Expected: the dialog also says `It is asking you something:

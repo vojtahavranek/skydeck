@@ -669,7 +669,7 @@ test('F44: parking a session in the window', async (t) => {
   // it types chains from one session to the next.
   for (const working of [false, true]) {
     await t.test(
-      `words with a \`w\` typed into the list, fast and slow, over ${working ? 'working' : 'idle'} sessions: nothing ended${working ? '; only a `w` directly followed by Space parks one, kept running' : ', nothing parked'}`,
+      `words with a \`w\` typed into the list, fast and slow, over ${working ? 'working' : 'idle'} sessions: nothing ended, nothing parked`,
       async (t) => {
         const w = await world(t, chromium, { running: [S1, S2, S3] });
         if (working) {
@@ -709,15 +709,7 @@ test('F44: parking a session in the window', async (t) => {
             }
             assert.equal(await dialogShown(), false, `${typed} (${delay} ms): closed`);
             const sent = (await acts(w.page)).slice(before);
-            const parks =
-              working && typed === 'wow what a show ' ? [{ kind: 'park', sessionId: S1 }] : [];
-            assert.deepEqual(sent, parks, `${typed} (${delay} ms)`);
-            if (parks.length > 0) {
-              await under(w.page, S1, 'parked');
-              const back = await w.api.act({ kind: 'unpark', sessionId: S1 });
-              assert.equal(back.ok, true, JSON.stringify(back));
-              await under(w.page, S1, 'open');
-            }
+            assert.deepEqual(sent, [], `${typed} (${delay} ms): nothing sent`);
           }
         }
         assert.equal(

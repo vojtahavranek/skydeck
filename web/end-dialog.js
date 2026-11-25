@@ -27,8 +27,9 @@
 // on `Park, keep it running`, and the warning line says why (working, asking, cannot tell); a change
 // away from idle while it is shown moves a keyboard on End to Keep, nothing moves it towards End
 // (the owner's choice, ruled on review 1). And a typed character (ruled on review 1, in the manner
-// of the restart dialog): on End by the dialog's own start only a fresh Enter presses it, Space
-// there counts as typed; once a key that types a character came while it asks, the keyboard is on
+// of the restart dialog): on the button where the dialog itself put the keyboard (End or Keep) only
+// a fresh Enter presses it, Space there counts as typed; an auto-repeat is never typed (a held `w`
+// does nothing); once a key that types a character came while it asks, the keyboard is on
 // `Cancel` until it closes (Tab and the arrows move nothing, Enter and Space cancel, a click still
 // presses); after the user's own Tab or arrow, with nothing typed, Enter and Space press as for
 // Done. So a word typed into the list by mistake never ends a session: only `w` directly followed
@@ -301,13 +302,14 @@ export function createEndDialog(root, deps) {
       const isArrow = (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.shiftKey;
       let isPress = PRESS_KEYS.has(event.key) && !event.shiftKey;
       // The dialog "Park" (ruled on review 1): a key that types a character is text typed into the
-      // list by mistake — Space too while the keyboard is on End by the dialog's own start, where
-      // only a fresh Enter presses —; the dialog takes it, so that the rest of a word reaches no
-      // list key, and from then on the keyboard stays on Cancel.
+      // list by mistake — Space too while the keyboard is where the dialog itself put it (End when
+      // idle, Keep otherwise: the user has not moved it), where only a fresh Enter presses —; the
+      // dialog takes it, so that the rest of a word reaches no list key, and from then on the
+      // keyboard stays on Cancel. An auto-repeat is no typed character (ruled): the `w` that
+      // opened the dialog, or a key held since before it opened, held on, does nothing.
       let isTyped = false;
       if (current.mark === 'park') {
-        const onEndByStart = document.activeElement === endButton && !current.moved;
-        if (event.key === ' ' && onEndByStart) {
+        if (event.key === ' ' && !current.moved) {
           isPress = false;
         }
         isTyped = !isPress && typesCharacter(event);
@@ -317,15 +319,21 @@ export function createEndDialog(root, deps) {
       }
       event.preventDefault();
       event.stopPropagation();
-      if (isTyped) {
+      // Enter or Space after a typed character cancel; the Space that is itself the first typed
+      // character presses nothing.
+      const cancels = isEscape || (current.typed && PRESS_KEYS.has(event.key) && !event.shiftKey);
+      if (isTyped && !event.repeat) {
         current.typed = true;
       }
       if (current.typed) {
         cancelButton.focus(); // Tab and the arrows move nothing, Enter and Space cancel
-        if (!event.repeat && (isEscape || isPress)) {
+        if (!event.repeat && cancels) {
           press('cancel');
         }
         return true;
+      }
+      if (isTyped) {
+        return true; // a held key's auto-repeat: nothing
       }
       const at = buttons.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement));
       if (at === -1) {

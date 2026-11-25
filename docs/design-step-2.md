@@ -4615,8 +4615,8 @@ gone after `d` (a row of Open: nothing else is selected).
 session and mark done` does and parks it in place of marking it done. Two rules differ (12.15 says
 them and why): there the keyboard starts on the End button when the session is known to be idle,
 with a warning line for every other state, and a typed character sends the keyboard to `Cancel`
-until the dialog closes, as in the dialog "Restart" (Space too, while the keyboard is on End by the
-dialog's own start).
+until the dialog closes, as in the dialog "Restart" (Space too, while the keyboard is where the
+dialog itself put it).
 
 A session ended so is an ordinary ended one: once its program has exited the server stores an `end`
 of detail `exit` for each of its holders that belonged to the terminal (no spool file, raw detail
@@ -5167,19 +5167,20 @@ skydeck can no longer tell) moves a keyboard on the End button to the second but
 it by itself towards the End button, so a session that becomes idle meanwhile leaves the keyboard
 where it is. A named limit: the page learns that a session turned working a moment after it did
 (the next list), so `w` and Enter in that moment can still end it. **Typed characters** (ruled on
-review 1, in the manner of the dialog "Restart"): while the keyboard is on the End button by the
-dialog's own start, only a fresh Enter presses it, and Space there counts as a typed character;
-once a key that types a character comes while the dialog asks (a letter, a digit, a sign, that
-Space; not with Ctrl, Alt or Meta; an auto-repeat of the `w` that opened it too), the keyboard goes
-to `Cancel` and stays there until the dialog closes: Tab and the arrows move nothing, Enter and
-Space cancel, Esc closes, and a click still presses any button. After the user's own Tab,
-Shift+Tab or arrow, with nothing typed, Enter and Space press the button that has the keyboard, as
-in 12.10; on `Park, keep it running` where the keyboard starts, a fresh Enter or Space with nothing
-typed presses it. So the whole cost the owner accepted is this: `w` directly followed by a fresh
-Enter ends one idle session (the quick path, on purpose), and nothing typed chains — after `wow`,
-`would`, `now ` or `wow what a show ` typed into the list by mistake no session is ended, and an
-idle one is not parked either (a working one is parked and kept running when a `w` that opens the
-dialog is directly followed by Space, as `w`, Space parked it before the dialog). The session ended
+review 1, in the manner of the dialog "Restart"): while the keyboard is where the dialog itself
+put it — on End for an idle session, on `Park, keep it running` otherwise, also after a change
+away from idle moved it there — and the user has not moved it, only a fresh Enter presses that
+button, and Space there counts as a typed character; once a key that types a character comes
+while the dialog asks (a letter, a digit, a sign, that Space; not with Ctrl, Alt or Meta), the
+keyboard goes to `Cancel` and stays there until the dialog closes: Tab and the arrows move
+nothing, Enter and Space cancel, Esc closes, and a click still presses any button. An auto-repeat
+is no typed character: the `w` that opened the dialog held a little long, or a key held since
+before it opened, does nothing, and a repeat of a key first pressed while it asks changes nothing
+more. After the user's own Tab, Shift+Tab or arrow, with nothing typed, Enter and Space press the
+button that has the keyboard, as in 12.10. So the whole cost the owner accepted is this: `w`
+directly followed by a fresh Enter ends one idle session (the quick path, on purpose), and nothing
+typed chains — after `wow`, `would`, `now `, `w ` or `wow what a show ` typed into the list by
+mistake no session is ended and none is parked, idle or working. The session ended
 so is listed under Parked and resumed from its row. Everything else is 12.10's: Esc is Cancel; Tab
 and →, Shift+Tab and ← walk the three and stay inside; Enter or Space press at a fresh press only
 (an auto-repeat, or a key held since before it opened, presses nothing); Ctrl+Shift+H is refused
