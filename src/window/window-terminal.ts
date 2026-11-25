@@ -161,7 +161,7 @@ export function windowTerminal(
           sessionId: spec.sessionId,
           kind: spec.kind,
           slot: hold === undefined ? registry.nextSlot() : hold.take(id),
-          openedNs: String(platform.clock.nowNs()),
+          openedNs: String(registry.nextOpenedNs()), // never one another terminal has (#213)
           build: deps.build,
           label: spec.label,
           dir: spec.cwd,

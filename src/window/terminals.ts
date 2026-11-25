@@ -15,7 +15,7 @@
  */
 import { dirname } from 'node:path';
 
-import type { Platform } from '../platform/types.ts';
+import type { Ns, Platform } from '../platform/types.ts';
 import {
   decodeSnapshot,
   encodeResize,
@@ -99,6 +99,15 @@ export interface Registry extends TerminalHub {
    *  without one. A terminal is opened with it in its keeper's meta; a slot moved later
    *  (`setSlots`, `giveSlots`), or none, wins over the meta's. */
   nextSlot(): number | null;
+  /**
+   * Issue #213 (S2 7.1): the opening stamp (`openedNs` of a keeper's meta) for the terminal about
+   * to be spawned: the clock's value when it is later than every opening stamp this registry
+   * knows — each one it gave, each spawn's meta, each hello's (so also every terminal found again
+   * after a restart) —, else the highest of them plus 1 ns. So no two terminals of one server share
+   * a stamp, and the stamps rise in opening order also while the clock holds (it never goes back:
+   * while the wall clock is behind its last value it gives that value again).
+   */
+  nextOpenedNs(): Ns;
   /**
    * #189 (S2 7.6): gives the free slots, lowest first, one each to the first of `candidates`
    * (terminal ids in the caller's order: Open's) that may take one — listed, without a slot, its
@@ -349,6 +358,11 @@ export function createRegistry(deps: RegistryDeps): Registry {
   /** Issue #166: the place among the terminals without a number that a terminal about to be
    *  spawned takes from the terminal a restart held (`take`), by the new terminal's id. */
   const placed = new Map<string, bigint>();
+  /** Issue #213: the highest opening stamp known (`nextOpenedNs`), 0 before any. */
+  let lastOpenedNs: Ns = 0n;
+  const knowOpened = (openedNs: Ns): void => {
+    if (openedNs > lastOpenedNs) lastOpenedNs = openedNs;
+  };
   /** F37: the slots moved by hand, by terminal id: every live terminal whose slot is not its
    *  meta's, and those the store kept for keepers still being found. F42: null is a slot a move
    *  took away (only a move writes one). */
@@ -800,6 +814,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
   function newTerm(id: string, meta: KeeperSpec['meta'], cols: number, rows: number): Term {
     const placeNs = placed.get(id);
     placed.delete(id);
+    knowOpened(BigInt(meta.openedNs)); // a spawn's stamp (a found keeper's is known at its hello)
     return {
       metaSlot: meta.slot,
       slotFreed: false,
@@ -1043,6 +1058,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     info.label = hello.meta.label;
     info.dir = hello.meta.dir;
     info.openedNs = BigInt(hello.meta.openedNs);
+    knowOpened(info.openedNs); // issue #213: also a keeper found again after a restart
     info.program =
       hello.pid !== null && hello.procStart !== null
         ? { pid: hello.pid, procStart: hello.procStart }
@@ -1730,6 +1746,11 @@ export function createRegistry(deps: RegistryDeps): Registry {
     },
     nextSlot() {
       return lowestFree(takenSlots(null));
+    },
+    nextOpenedNs() {
+      const nowNs = clock.nowNs();
+      lastOpenedNs = nowNs > lastOpenedNs ? nowNs : lastOpenedNs + 1n;
+      return lastOpenedNs;
     },
     holdSlot(termId) {
       const term = terms.get(termId);
