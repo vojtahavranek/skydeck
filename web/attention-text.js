@@ -78,13 +78,20 @@ export const UNREAD_TEXTS = {
  * S2 12.4: the act `u` and the header's control send for a row — `read` while its `attention` is
  * one seeing clears (ended, finished, unread), else `unread` — and the header control's words,
  * `Read` or `Unread`, with its tooltip. The server decides the rest: an ask, a done session and a
- * session not started yet are refused there, in the words of the toast.
+ * session not started yet are refused there, in the words of the toast. `answered`: this page's own
+ * act on the session that the server took and that no list since shows yet (the answer comes
+ * before the list): the next act is its opposite, so that `u` again is its undo at once.
  * @param {Pick<RowPayload, 'attention'>} row
+ * @param {'unread' | 'read' | null} [answered]
  * @returns {{ kind: 'unread' | 'read', label: string, tip: string }}
  */
-export function unreadAct(row) {
+export function unreadAct(row, answered = null) {
   const reason = row.attention?.reason;
-  return reason === 'ended' || reason === 'finished' || reason === 'unread'
+  const read =
+    answered === null
+      ? reason === 'ended' || reason === 'finished' || reason === 'unread'
+      : answered === 'unread';
+  return read
     ? { kind: 'read', label: 'Read', tip: 'mark it read (u)' }
     : {
         kind: 'unread',

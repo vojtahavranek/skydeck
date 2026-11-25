@@ -1396,10 +1396,11 @@ describe("never throws (ruled: it is the tick and Seen's listener, and neither m
 });
 
 describe('the mark unread (S2 12.4)', () => {
-  /** A page as the server makes it: `start` with no selection, then its first selection. */
+  /** A page as the server makes it: `start` with no selection, then the selection it makes by
+   *  itself as it loads or reconnects (`byPage`). */
   function arrive(w: World, page: object, sessionId: string | null): void {
     w.seen.focus(page, true, null);
-    w.seen.focus(page, true, sessionId);
+    w.seen.focus(page, true, sessionId, true);
   }
 
   /** The world, with Seen's listener wired as the server wires it (seenNow at once). */
@@ -1613,5 +1614,87 @@ describe('the mark unread (S2 12.4)', () => {
         [S2, 2],
       ],
     );
+  });
+
+  test('`clearUnread` (the `done` act) clears the stored mark at once, so an undone at once does not bring it back; nothing written without a mark', (t) => {
+    const rows = [running(S1), running(S2)];
+    const w = wired(t, rows);
+    w.attention.mark(running(S1), 'unread');
+    const before = w.writes.length;
+    w.attention.clearUnread(S2);
+    assert.equal(w.writes.length, before, 'S2 holds no mark: nothing written');
+
+    w.attention.clearUnread(S1);
+    assert.deepEqual(stored(w.d), [row({ sessionId: S1 })]);
+    // Undone before any look: no mark comes back.
+    assert.equal(reasonOf(w, S1), null);
+    w.attention.look();
+    assert.equal(reasonOf(w, S1), null);
+  });
+
+  test('a write of the mark that fails (but for a busy store) is refused with its words and logged once by kind; nothing is kept', (t) => {
+    const d = testDeck(t);
+    const failing = deckWith(d.deck, {
+      store: {
+        recordAttention: () => {
+          throw sqliteError(11); // a damaged database, no busy store
+        },
+      },
+    });
+    const w = world(t, { d, deck: failing });
+    w.attention.look();
+    for (const kind of ['unread', 'unread'] as const) {
+      assert.deepEqual(w.attention.mark(running(S1), kind), {
+        ok: false,
+        error: 'skydeck could not write the mark; try again',
+      });
+    }
+    assert.deepEqual(w.logs, [
+      'attention: a write failed and is dropped (Error (ERR_SQLITE_ERROR))',
+    ]);
+    assert.deepEqual(stored(d), []);
+  });
+
+  test('after the store was migrated under the server, `mark` is refused and `clearUnread` writes nothing', (t) => {
+    const d = testDeck(t);
+    d.deck.store.recordAttention([{ sessionId: S1, unreadNs: T0 }]);
+    const w = world(t, { d, deck: guardedDeck(t, d) });
+    w.attention.look();
+    rawExec(d, `UPDATE kv SET value = '${SCHEMA_VERSION + 1}' WHERE key = 'schema_version'`);
+    assert.deepEqual(w.attention.mark(running(S2), 'unread'), {
+      ok: false,
+      error: 'skydeck could not write the mark; try again',
+    });
+    assert.deepEqual(w.storeNewer, ['skydeck was updated; run skydeck window']);
+    const calls = w.writes.length;
+    assert.deepEqual(w.attention.mark(running(S2), 'unread'), {
+      ok: false,
+      error: 'skydeck could not write the mark; try again',
+    });
+    w.attention.clearUnread(S1);
+    assert.equal(w.writes.length, calls, 'nothing tried after it');
+  });
+
+  test('a busy store keeps one clear of a done row, not one more at every look; `clearUnread` adds none to a kept one', (t) => {
+    const d = testDeck(t);
+    d.deck.store.recordAttention([{ sessionId: S1, unreadNs: T0 }]);
+    const rows = [running(S1)];
+    const w = world(t, { d, deck: guardedDeck(t, d), rows });
+    w.attention.look(); // reads the marks: S1 unread, not done
+    rows[0] = listRow({ id: S1, state: 'running', done: true });
+    const lock = lockStore(t, d);
+    w.attention.look();
+    w.attention.look();
+    w.attention.clearUnread(S1);
+    w.attention.look();
+    lock.release();
+    w.attention.look();
+    const clear = [{ sessionId: S1, unreadCleared: true }];
+    assert.deepEqual(
+      w.writes,
+      [clear, clear, clear, clear],
+      'the one kept clear, tried at each look',
+    );
+    assert.deepEqual(stored(d), [row({ sessionId: S1 })]);
   });
 });

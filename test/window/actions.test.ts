@@ -143,6 +143,8 @@ function harness(
     fetch?: () => void;
     /** S2 12.4's `mark` dep; absent: the kinds `unread` and `read` have none. */
     mark?: ActionDeps['mark'];
+    /** S2 12.4's `doneUnread` dep. */
+    doneUnread?: ActionDeps['doneUnread'];
   } = {},
 ): Harness {
   const events: Events = [];
@@ -181,6 +183,7 @@ function harness(
       refresh: (sessionId) => told.push(`refresh ${sessionId}`),
     },
     ...(options.mark === undefined ? {} : { mark: options.mark }),
+    ...(options.doneUnread === undefined ? {} : { doneUnread: options.doneUnread }),
   });
   return {
     d,
@@ -1559,6 +1562,27 @@ describe('unread and read (S2 12.4)', () => {
       );
     }
     assert.deepEqual(marked, []);
+  });
+});
+
+describe('done clears the mark unread (S2 12.4)', () => {
+  test('`done` calls doneUnread with the session after it marked it done; `undone`, a refused done and the other kinds do not', async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const cleared: string[] = [];
+    const h = harness(d, {
+      doneUnread: (sessionId) => {
+        cleared.push(
+          `${sessionId} done ${String(d.deck.store.meta(sessionId)?.doneAtNs !== null)}`,
+        );
+      },
+    });
+    assert.deepEqual(await h.act({ t: 'act', id: 70, kind: 'done', sessionId: S1 }), ok(70));
+    assert.deepEqual(cleared, [`${S1} done true`]);
+    assert.deepEqual(await h.act({ t: 'act', id: 71, kind: 'undone', sessionId: S1 }), ok(71));
+    await h.act({ t: 'act', id: 72, kind: 'park', sessionId: S1 });
+    await h.act({ t: 'act', id: 73, kind: 'done', sessionId: S3 });
+    assert.deepEqual(cleared, [`${S1} done true`]);
   });
 });
 

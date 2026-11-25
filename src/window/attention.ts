@@ -85,6 +85,10 @@ export interface Attention {
    *  kept, the write joins them for the next look. `changed`: the facts changed now. Never throws:
    *  a write that failed but for a busy store is refused with its kind. */
   mark(row: ListRow, kind: 'unread' | 'read'): MarkOutcome;
+  /** S2 12.4: the session was marked done by the `done` act: its stored mark unread goes now (both
+   *  columns NULL), not at the next look, so that an undone at once does not bring it back.
+   *  Nothing written when it holds none. With writes kept, it joins them. Never throws. */
+  clearUnread(sessionId: string): void;
   /** B12: true once the marks have been read, a refresh has worked since (refreshed() was called)
    *  and nothing is kept, so that the window ends of that refresh are in the first judgement also
    *  when a busy store kept them (ruled); once true, it stays true. */
@@ -364,8 +368,11 @@ export function createAttention(deps: AttentionDeps): Attention {
 
   /**
    * S2 12.4: a done session needs nothing, so its stored mark unread goes (both columns NULL), once
-   * — an undone later does not bring it back. Looked for only among the sessions whose marks hold
-   * the mark after the kept writes and `writes`, so that nothing is written while none does.
+   * — an undone later does not bring it back. The `done` act clears it at once (`clearUnread`);
+   * this catches every other way of marking done (the command line's, an end, a carry over).
+   * Looked for only among the sessions whose marks hold the mark after the kept writes and
+   * `writes` (marksAfter, which reads a kept clear too), so that nothing is written while none
+   * does and a busy store keeps one clear per session, not one more at every look.
    */
   const addCleared = (writes: AttentionWrite[]): void => {
     let rows: ReadonlyMap<string, ListRow> | null = null;
@@ -539,6 +546,18 @@ export function createAttention(deps: AttentionDeps): Attention {
       } catch (error) {
         markFailed.failed(error);
         return { ok: false, error: MARK_FAILED };
+      }
+    },
+
+    clearUnread(sessionId) {
+      if (stopped) return;
+      try {
+        readMarks();
+        if (!marksAfter(marks.get(sessionId), kept, sessionId).unread) return;
+        writeAs([{ sessionId, unreadCleared: true }]);
+        markFailed.worked();
+      } catch (error) {
+        markFailed.failed(error);
       }
     },
 

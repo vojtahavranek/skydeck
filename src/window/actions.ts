@@ -113,6 +113,10 @@ export interface ActionDeps {
   /** S2 12.4: `act unread` and `act read` on the session's row (attention.ts's `mark`, the lists
    *  pushed when it changed the facts). Absent: the kinds answer "skydeck cannot do that action". */
   mark?(row: ListRow, kind: 'unread' | 'read'): { ok: true } | { ok: false; error: string };
+  /** S2 12.4: `act done` clears the session's mark unread at once (attention.ts's `clearUnread`;
+   *  every other way of marking done is cleared at the next look); the lists follow the act's own
+   *  `changed()`. */
+  doneUnread?(sessionId: string): void;
 }
 
 /** A result without its `t` and `id`, which `act` adds. */
@@ -433,6 +437,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
         // Issue #166: a restart that fails leaves the session ended; ended and done it would hide.
         if (restarting(sessionId)) return refusal(RESTARTING);
         markDone(deck, sessionId);
+        deps.doneUnread?.(sessionId); // S2 12.4: a done session needs nothing
         return wrote(action.kind);
       case 'undone':
         markUndone(deck, sessionId);

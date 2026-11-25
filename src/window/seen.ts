@@ -5,12 +5,12 @@
  * only keeps the holds, on the server's clock.
  *
  * The mark unread (S2 12.4) is read only by coming back to the session: each hold also keeps
- * whether its page's selection came to the session anew — moved there from another session, or
- * from none after the page had reported one — or the session was typed into. A page's first
- * selection (a page that loads selects its first row by itself, one that reconnects reports what
- * it had: both after a `start` without one) is not anew, a change of focus alone keeps what it
- * was, and `unmark` (the user marked the session unread) makes every hold of it not anew. Which
- * session is unread is attention's; this module only says which sights are anew.
+ * whether its page's selection came to the session anew — moved there from another session or
+ * from none — or the session was typed into. A selection the page reports as its own (`byPage`:
+ * the first row a page that loads selects by itself, the selection a page that reconnects reports
+ * again) is not anew, a change of focus alone keeps what it was, and `unmark` (the user marked the
+ * session unread) makes every hold of it not anew. Which session is unread is attention's; this
+ * module only says which sights are anew.
  */
 import type { Clock } from '../platform/types.ts';
 
@@ -57,8 +57,9 @@ export function isTyping(data: string, binary: boolean): boolean {
 export interface Seen {
   /** A page's focus and selection now (its `start`: selected null; its `focus`). A change of
    *  either starts the page's 1.5 s again (Clock.after: a timer, which no wall-clock step moves);
-   *  the same two again (a new area) change nothing. */
-  focus(page: object, focused: boolean, selected: string | null): void;
+   *  the same two again (a new area) change nothing. A changed selection is anew unless `byPage`
+   *  (the page's `focus.byPage`: it selected it by itself at its load or reconnect). */
+  focus(page: object, focused: boolean, selected: string | null, byPage?: boolean): void;
   /** Typing (isTyping; pages.ts calls it for no other input) into a terminal that shows
    *  `sessionId`: seen at once, and anew — held, when it is the page's selection and the page has
    *  focus; else once, in the next take(). */
@@ -91,11 +92,9 @@ interface Hold {
   selected: string | null;
   /** The hold completed (1.5 s, or a typing): `selected` is being seen. */
   held: boolean;
-  /** `selected` came anew (moved there from another session, or from none after this page had
-   *  one) or was typed into, and no `unmark` of it came since. */
+  /** `selected` came anew (the selection moved there, not by the page itself) or was typed into,
+   *  and no `unmark` of it came since. */
   anew: boolean;
-  /** This page has reported a selection: from then on a move from none is anew too. */
-  hadSelection: boolean;
   /** Cancels the running 1.5 s; null when none runs. */
   cancel: (() => void) | null;
 }
@@ -145,27 +144,20 @@ export function createSeen(clock: Clock): Seen {
   };
 
   return {
-    focus(page, focused, selected) {
+    focus(page, focused, selected, byPage = false) {
       if (stopped || ended.has(page)) return;
       let hold = holds.get(page);
       if (hold !== undefined && hold.focused === focused && hold.selected === selected) return;
       if (hold === undefined) {
-        hold = {
-          focused,
-          selected,
-          held: false,
-          anew: false,
-          hadSelection: selected !== null,
-          cancel: null,
-        };
+        // The server makes a hold at the page's `start`, with no selection.
+        hold = { focused, selected, held: false, anew: false, cancel: null };
         holds.set(page, hold);
       } else {
         release(hold);
         if (hold.selected !== selected) {
-          // The mark unread: a move to a session, from another one or from none after the page
-          // had one, is a coming back; a page's first selection is not.
-          hold.anew = selected !== null && (hold.selected !== null || hold.hadSelection);
-          hold.hadSelection ||= selected !== null;
+          // The mark unread: a move to a session is a coming back, but for the page's own
+          // selection at its load or reconnect.
+          hold.anew = selected !== null && !byPage;
         }
         hold.focused = focused;
         hold.selected = selected;

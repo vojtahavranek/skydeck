@@ -190,6 +190,13 @@ const state = {
    * @type {Set<string>}
    */
   unlisted: new Set(),
+  /**
+   * S2 12.4: this page's `unread` or `read` that the server took, by session, while no list since
+   * has come (the answer comes before the list that shows it): `u` again, and the header's
+   * control, pick the opposite (`unreadAct`).
+   * @type {Map<string, 'unread' | 'read'>}
+   */
+  unreadAnswered: new Map(),
   /** @type {string | null} */
   selected: null,
   /**
@@ -360,6 +367,7 @@ const cards = createCards(dom.cards, {
   restart: (sessionId) => askRestart(sessionId, false),
   park: (sessionId) => markParked(sessionId, false),
   unread: (sessionId) => markUnread(sessionId),
+  unreadAnswered: (sessionId) => state.unreadAnswered.get(sessionId) ?? null,
   say: (text) => say(text),
   watchFavourites: (listener) => {
     favouritesListener = listener;
@@ -789,7 +797,13 @@ function sendView() {
   send({ t: 'view', ...state.view, selected: state.selected });
 }
 
-function sendFocus() {
+/**
+ * `byPage` (S2 12.4): the selection is the page's own, not the user's — the first row it selects
+ * by itself at its first list, or the selection it reports again once (re)connected. A fact for
+ * the server's mark unread, which takes no such selection as a coming back.
+ * @param {boolean} [byPage]
+ */
+function sendFocus(byPage = false) {
   const message = {
     t: 'focus',
     focused: document.hasFocus(),
@@ -797,7 +811,7 @@ function sendFocus() {
     area: area(),
   };
   state.lastFocus = JSON.stringify(message);
-  send(message);
+  send(byPage ? { ...message, byPage: true } : message);
 }
 
 /** Sends `focus` when something it carries changed (S2 8.2.3: on every change). */
@@ -1733,10 +1747,14 @@ function markUnread(sessionId) {
   if (state.marking.has(sessionId)) {
     return;
   }
-  const { kind } = unreadAct(row);
+  const { kind } = unreadAct(row, state.unreadAnswered.get(sessionId) ?? null);
   state.marking.add(sessionId);
   void act({ kind, sessionId }).then((result) => {
     state.marking.delete(sessionId);
+    if (result.ok) {
+      state.unreadAnswered.set(sessionId, kind);
+      render(); // the header's control says the opposite at once
+    }
     toast.show(
       result.ok ? UNREAD_TEXTS[kind] : (result.error ?? 'skydeck could not do that'),
       null,
@@ -2254,7 +2272,7 @@ function welcomed(welcome, change, lostSince) {
       : [...attached.filter((id) => id === shown), ...attached.filter((id) => id !== shown)];
   state.welcomed = true;
   sendView();
-  sendFocus();
+  sendFocus(true); // the selection the page had, reported again: its own (S2 12.4)
 }
 
 /** @param {ServerMessage} message */
@@ -2275,6 +2293,7 @@ function received(message) {
       state.listAt = performance.now();
       state.lists++;
       state.unlisted.clear(); // a list after the answer holds the result
+      state.unreadAnswered.clear(); // and the mark unread or read (S2 12.4)
       dom.tick.hidden = true;
       if (state.selected === null && state.caption === null && state.mru.length === 0) {
         // Nothing selected yet: the first row (Open's first slot when there is one). Only before
@@ -2286,7 +2305,7 @@ function received(message) {
           state.selected = first.id;
           state.mru = [first.id];
           sendView();
-          sendFocus();
+          sendFocus(true); // selected by the page itself, not the user (S2 12.4)
         }
       }
       followDone();
@@ -2434,7 +2453,11 @@ function render() {
   const lines = pane.kind === 'resume' ? (state.lines.get(pane.row.id) ?? []) : [];
   // Issue #166: the line a restart put on the ended bar of the pane's terminal.
   const said = pane.kind === 'terminal' ? (state.restartSaid.get(pane.term.id) ?? '') : '';
-  const key = JSON.stringify(pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines, said]);
+  // S2 12.4: the header's Unread / Read follows this page's answered act before the next list.
+  const answered = paneRow === null ? null : (state.unreadAnswered.get(paneRow.id) ?? null);
+  const key = JSON.stringify(
+    pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines, said, answered],
+  );
   state.pane = pane;
   // F22: the right side's line while nothing is shown there and the list holds no session at all.
   const blank = pane.kind === 'none' && holdsNoSession(state.list, state.view.filter);

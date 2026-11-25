@@ -284,6 +284,10 @@ describe('parsePageMessage: what is refused', () => {
     refused(page({ ...VALID['act read'], mark: 'done' }));
     refused(page({ t: 'act', id: 1, kind: 'unread' }));
     refused(page({ t: 'act', id: 1, kind: 'Read', sessionId: S1 }));
+    // S2 12.4: focus's `byPage` is true or absent.
+    assert.equal(page({ ...VALID['focus'], byPage: true }).ok, true);
+    refused(page({ ...VALID['focus'], byPage: false }));
+    refused(page({ ...VALID['focus'], byPage: 'yes' }));
     refused(page({ ...VALID['act pr-refresh'], url: 'https://github.com/a/b/pull/7' }));
     refused(page({ ...VALID['act label'], base: '' }));
     refused(page({ ...VALID['act group'], url: 'https://github.com/a/b/pull/7' }));

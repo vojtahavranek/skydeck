@@ -1753,7 +1753,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 |---|---|---|
 | `ping` | `n` | `pong` with the same `n`, `bootId`, `serverId`. |
 | `view` | `filter`, `unfolded`, `showDone`, `selected` (null while the page's selection is a closed block's caption, 12.2: from follow-up F9 no session is selected then); from stage E, each optional (a page before stage E sends none): `chips` (12.8's Running, Open PR, Has note and, from follow-up F35, Done as `running`, `open-pr`, `note`, `done`, each once — a page before F35 sends no `done`: not set; Show done is `showDone`, no chip), `closed` (the blocks the user closed, 12.2: at most 64 entries, each exactly a `section` — `open`, `week` or `earlier`, from follow-up F44 also `parked` — and a `group`, a text, each section and group once; absent: no block closed. It replaced stage E's `opened` on 2026-11-16, follow-up F3: a view that still names `opened` is refused as any view with a field it does not know, and the server closes the page's connection, 1008 `message refused: view: unknown field`; the page and the server are one build, 8.2.2), `switcher` (the quick switcher's text while it is shown, else null; each change of it is a `view`) | The page's view state; the server answers with `list` at once and keeps sending `list` when it changes (12). |
-| `focus` | `focused`, `selected` (null then too), `area` (`cols`, `rows`: what the terminal area holds at the page's font) | Window focus, selection and terminal area, for seen (12.4), notifications (13), the size owner and the first size of a terminal the command line or a restore opens (8.2.6). Sent on every change and after `start`. |
+| `focus` | `focused`, `selected` (null then too), `area` (`cols`, `rows`: what the terminal area holds at the page's font), optional `byPage` (`true`) | Window focus, selection and terminal area, for seen (12.4), notifications (13), the size owner and the first size of a terminal the command line or a restore opens (8.2.6). Sent on every change and after `start`. `byPage` (the mark unread, 12.4): the selection is the page's own, not the user's — the first row it selects by itself at its first list, or the selection it reports again once (re)connected; absent, the user's. |
 | `attach` | `term`, `cols`, `rows` | Start a terminal stream (8.2.4). The page's size is a proposal (8.2.6). |
 | `detach` | `term` | Stop it. |
 | `input` | `term`, `data` | Typed text (UTF-8) for the terminal; `binary: true` when `data` is a byte string from xterm.js's binary channel (mouse reports). Makes this page the size owner. |
@@ -3433,18 +3433,21 @@ hold above, and it applies only while the session is unread: the other marks kee
 
 How the server decides it (S2 4.3; `src/window/seen.ts`, `src/window/attention.ts`). Each page's
 hold also keeps whether its selection came to the session **anew**: moved there from another
-session, or from none after the page had reported a selection before; a page's first selection
-after its `start` (a page that loads selects its first row by itself, one that reconnects reports
-what it had) is not anew. A change of focus alone keeps what it was; typing makes it anew; marking
+session or from none, but for a selection the page reports as its own (`focus.byPage`, 8.2.3: the
+first row a page that loads selects by itself at its first list, and the selection a page that
+reconnects reports again; a fact the page states, from which the server judges). A page that loads
+or reconnects with none selected and whose user then selects the session comes back to it. A
+change of focus alone keeps what it was; typing makes it anew; marking
 the session unread makes every hold of it not anew and drops a typing not yet taken. A selection
 the page moves by itself after a key (the next row after `w` or `d`, a selection that follows
 `/clear`) counts as a move. Attention writes no seen for a session that will be unread after its
 writes unless it is seen anew, not even in the write of its turn end (10.3); for every other session
 nothing changes. A server restart forgets the holds; the mark is in the store, and the pages come
-back with a `start` and their first selection: not anew. A done session needs nothing: the view
-model gives no `unread` to a done row, and the next look sets the stored mark's columns NULL, so
-that an undone later does not bring it back (the command line's `done` too, at the look after the
-server's next reload of the rows). The mark sends no notification (13).
+back with a `start` and their own selection (`byPage`): not anew. A done session needs nothing: the
+view model gives no `unread` to a done row, the `done` act sets the stored mark's columns NULL at
+once, and the look does so for every other way of marking done (the command line's `done`, at the
+look after the server's next reload of the rows; an end, a carry over), so that an undone later
+does not bring it back. The mark sends no notification (13).
 
 Ctrl+Shift+J selects the next session that needs you: those that ask, the longest-waiting first;
 then those that ended; then those that finished, oldest first; then those marked unread, the
@@ -3466,7 +3469,9 @@ A row that needs you has a coloured left bar, a bold title and the reason on its
 
 The page's marks and words (stage B, plan B13): the bar and the reason's line are in the reason's
 colour — an ask in the waiting colour, a finished turn in green, an end of the window in the crash
-colour (the mockup's) —, the line is 12.2's, and the title bar's counts start with `3 need you`
+colour (the mockup's), the mark unread in a blue of its own whose line reads at least 4.5 : 1 on
+a plain row and on the selected one in every scheme and colour theme (the themes' accent does not:
+3.8 : 1 on the selected row in two of them) —, the line is 12.2's, and the title bar's counts start with `3 need you`
 (`1 needs you`), with a dot before it that the style sheet draws in the colour of an ask (a mark,
 not a character of the text); the window title is `(3) skydeck`, and `skydeck` while none needs
 you. A list without `needYou`, or a row without `attention` (a server of stage A), shows no count

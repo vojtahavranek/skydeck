@@ -361,3 +361,78 @@ test('the mark unread on the row of a session not started yet: the server says w
   w.answer(act, { ok: false, error: 'this session has not started yet; mark it once it runs' });
   await toastSays(page, 'this session has not started yet; mark it once it runs');
 });
+
+test('u again at once is its undo: the answered act counts until the next list; one act at a time', async (t) => {
+  const chromium = await browser(t);
+  const page = await newPage(t, chromium);
+  const listWith = (attention: Record<string, unknown> | null): Record<string, unknown> => {
+    const list = scriptedList([{ id: S1, terminal: null, slot: null, title: 'one' }], []);
+    const sections = list['sections'] as { rows: Record<string, unknown>[] }[];
+    const first = sections[0]?.rows[0];
+    assert.ok(first !== undefined);
+    first['attention'] = attention;
+    return list;
+  };
+  const w = await editWorld(t, page, listWith(null));
+  await drawnRow(page, S1);
+  await pick(page, S1);
+  await page.keyboard.press('u');
+  const first = await w.act(1);
+  assert.equal(first['kind'], 'unread');
+  await page.keyboard.press('u'); // while the first waits: nothing
+  await sleep(200);
+  assert.equal(w.acts().length, 1, 'one act at a time');
+
+  w.answer(first, { ok: true });
+  await toastSays(page, MARKED);
+  // No list yet: the header and `u` go by the answer.
+  await until(async () => (await headerUnread(page)).text === 'Read', 'Read at the answer');
+  await page.keyboard.press('u');
+  const second = await w.act(2);
+  assert.equal(second['kind'], 'read', 'u again undoes it');
+  w.answer(second, { ok: true });
+  await toastSays(page, READ);
+  await until(async () => (await headerUnread(page)).text === 'Unread', 'Unread at the answer');
+
+  // The next list decides again: here it shows the mark (another page marked it meanwhile).
+  w.list(listWith({ reason: 'unread', detail: null, sinceNs: '1794474000000000000' }));
+  await untilRow(page, S1, (row) => row.attention === 'unread', 'the list shows it');
+  assert.equal((await headerUnread(page)).text, 'Read');
+  await page.keyboard.press('u');
+  const third = await w.act(3);
+  assert.equal(third['kind'], 'read');
+});
+
+test("the page says which selection is its own (`focus.byPage`): the first row it selects at its first list and the one it reports again once reconnected, never the user's", async (t) => {
+  const chromium = await browser(t);
+  const page = await newPage(t, chromium);
+  const list = scriptedList(
+    [
+      { id: S1, terminal: null, slot: null },
+      { id: S2, terminal: null, slot: null },
+    ],
+    [],
+  );
+  const w = await editWorld(t, page, list);
+  await drawnRow(page, S2);
+  const focuses = (): { selected: unknown; byPage: unknown }[] =>
+    w.sent
+      .filter((one) => one['t'] === 'focus')
+      .map((one) => ({ selected: one['selected'], byPage: one['byPage'] }));
+  await until(() => focuses().some((one) => one.selected === S1), 'the first row selected');
+  assert.deepEqual(
+    focuses().find((one) => one.selected === S1),
+    { selected: S1, byPage: true },
+    'the first row, selected by the page',
+  );
+
+  await clickRow(page, S2);
+  await until(() => focuses().at(-1)?.selected === S2, 'S2 selected');
+  assert.equal(focuses().at(-1)?.byPage, undefined, "the user's click");
+
+  const before = focuses().length;
+  w.drop();
+  await connection(page, 'open');
+  await until(() => focuses().length > before, 'the focus after the reconnect');
+  assert.deepEqual(focuses()[before], { selected: S2, byPage: true }, 'reported again: its own');
+});

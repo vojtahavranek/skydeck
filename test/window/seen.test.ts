@@ -501,15 +501,16 @@ test('a page told gone stays gone: a later focus or typing for it holds nothing'
 
 // --- the mark unread (S2 12.4): which sights are anew ----------------------------------------------
 
-/** A page as the server makes it: `start` (no selection), then the page's first `focus`. */
+/** A page as the server makes it: `start` (no selection), then the page's first `focus`, with the
+ *  selection the page made by itself as it loaded or reconnected (`byPage`). */
 function started(seen: ReturnType<typeof createSeen>, selected: string | null): object {
   const p = page();
   seen.focus(p, true, null);
-  seen.focus(p, true, selected);
+  seen.focus(p, true, selected, true);
   return p;
 }
 
-test("takeAll: a page's first selection, held, is seen but not anew (a page that loads or reconnects with it selected)", (t) => {
+test("takeAll: the page's own selection, held, is seen but not anew (a page that loads or reconnects with it selected)", (t) => {
   const { clock } = testPlatform(t);
   const seen = createSeen(clock);
   started(seen, S1);
@@ -529,16 +530,29 @@ test('takeAll: a selection moved from another session, held 1.5 s, is anew; not 
   assert.deepEqual(seen.take(), new Set([S1]), 'take() is the same call');
 });
 
-test('takeAll: a move from none is anew once the page has had a selection, not before', (t) => {
+test("takeAll: a move from none is anew when the user makes it, also as the page's first selection; the page's own is not", (t) => {
   const { clock } = testPlatform(t);
   const seen = createSeen(clock);
-  const fresh = started(seen, null);
-  seen.focus(fresh, true, S1); // the first row the page selects by itself
-  const back = started(seen, S2);
+  const loaded = started(seen, null);
+  seen.focus(loaded, true, S1, true); // the first row the page selects by itself at its first list
+  const fresh = started(seen, null); // a page that loads, or reconnects, with none selected
+  seen.focus(fresh, true, S2); // then the user selects S2
+  const back = started(seen, S3);
   seen.focus(back, true, null); // a caption, or the last row parked
-  seen.focus(back, true, S3);
+  const caption = page();
+  seen.focus(caption, true, null);
+  seen.focus(caption, true, S3);
   clock.advanceMs(SEEN_AFTER_MS);
-  assert.deepEqual(seen.takeAll(), { seen: new Set([S1, S3]), anew: new Set([S3]) });
+  assert.deepEqual(seen.takeAll(), { seen: new Set([S1, S2, S3]), anew: new Set([S2, S3]) });
+});
+
+test('takeAll: a selection the page reports as its own is not anew, also when it moved (a reconnect that reports another selection)', (t) => {
+  const { clock } = testPlatform(t);
+  const seen = createSeen(clock);
+  const p = started(seen, S2);
+  seen.focus(p, true, S1, true);
+  clock.advanceMs(SEEN_AFTER_MS);
+  assert.deepEqual(seen.takeAll(), { seen: new Set([S1]), anew: new Set() });
 });
 
 test('takeAll: focus lost and regained with the selection kept keeps what it was, anew or not', (t) => {

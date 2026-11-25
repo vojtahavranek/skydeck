@@ -91,12 +91,17 @@ export interface ClosedBlock {
 export const MAX_CLOSED = 64;
 /** F15: the most favourite flags skydeck keeps (S2 12.6); `favourite-add`'s `at` is below it. */
 export const MAX_FAVOURITES = 12;
-/** Window focus, selection and the terminal area at the page's font (S2 8.2.3, 8.2.6). */
+/** Window focus, selection and the terminal area at the page's font (S2 8.2.3, 8.2.6). `byPage`
+ *  (S2 12.4, the mark unread): the selection is the page's own, not the user's — the first row a
+ *  page that loads selects by itself, or the selection a page that reconnects reports again; a
+ *  fact the page reports, from which the server judges that it is no coming back. Absent: the
+ *  user's. */
 export interface FocusMessage {
   t: 'focus';
   focused: boolean;
   selected: string | null;
   area: { cols: number; rows: number };
+  byPage?: true;
 }
 /** `term`: a terminal id, 12 lower-case hex characters (plan A21). The size is a proposal (S2 8.2.6). */
 export interface AttachMessage {
@@ -1281,7 +1286,10 @@ const MESSAGES: Readonly<Record<string, Check>> = {
     },
     ['chips', 'closed', 'switcher'],
   ),
-  focus: object({ t: ANY, focused: BOOLEAN, selected: nullable(SESSION), area: AREA }),
+  focus: object(
+    { t: ANY, focused: BOOLEAN, selected: nullable(SESSION), area: AREA, byPage: TRUE },
+    ['byPage'],
+  ),
   attach: object({ t: ANY, term: TERM, cols: SIZE, rows: SIZE }),
   detach: object({ t: ANY, term: TERM }),
   input: (value, where) => {

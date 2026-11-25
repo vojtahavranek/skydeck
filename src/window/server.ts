@@ -209,7 +209,7 @@ export function keepAliveNotices(): (state: KeepAlivePayload) => {
 const NOTIFIER_VIEW = { filter: '', unfolded: ['earlier'], showDone: false, selected: null };
 
 /** Stage B's parts of the server (plan B 2.7): what `runServer` wires into the tick and the pages. */
-interface AttentionParts {
+export interface AttentionParts {
   seen: Seen;
   attention: Attention;
   /** The tick's `attention`: each call followed by the notifier's check. */
@@ -226,7 +226,7 @@ interface AttentionParts {
  * check never stops the tick (contract 2.6: it throws what its deps throw): a failure is logged by
  * kind, once until a check works again.
  */
-function attentionParts(deps: {
+export function attentionParts(deps: {
   deck: Deck;
   hub: TerminalHub;
   tick: () => Tick | null;
@@ -302,6 +302,9 @@ function attentionParts(deps: {
       if (!outcome.ok) return outcome;
       if (outcome.changed) {
         deps.pages().pushList();
+        // S2 13: a `read` makes the session stop needing you now, so that a later reason (a
+        // window end at the next refresh) starts to need you and notifies, not a reason that
+        // changed.
         check();
       }
       return { ok: true };
@@ -789,6 +792,9 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       carryOver,
       // S2 12.4: the mark unread, attention's (made below, before any action can come).
       mark: (row, kind) => attending.mark(row, kind),
+      doneUnread: (sessionId) => {
+        attending.attention.clearUnread(sessionId);
+      },
     });
     // Plan C7, S2 8.2.6: what a terminal the server opens for a command or a restore starts at —
     // the area the page that had focus last reported, read when the terminal is opened.

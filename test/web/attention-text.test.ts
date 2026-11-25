@@ -326,6 +326,18 @@ describe('the mark unread (S2 12.4): its line, the act and the words of `u` and 
     assert.deepEqual(unreadAct({} as { attention: null }), unread, 'a row of stage A');
   });
 
+  test('an act the server took that no list shows yet decides: the next is its opposite, whatever the row says', () => {
+    const unread = attention({ reason: 'unread' });
+    assert.equal(unreadAct({ attention: null }, 'unread').kind, 'read');
+    assert.equal(unreadAct({ attention: null }, 'unread').label, 'Read');
+    assert.equal(unreadAct({ attention: unread }, 'read').kind, 'unread');
+    assert.equal(
+      unreadAct({ attention: attention({ reason: 'finished' }) }, 'read').label,
+      'Unread',
+    );
+    assert.equal(unreadAct({ attention: unread }, null).kind, 'read', 'none: by the row');
+  });
+
   test("the toasts' words", () => {
     assert.deepEqual(UNREAD_TEXTS, {
       unread: 'Marked unread: it needs you until you come back to it.',

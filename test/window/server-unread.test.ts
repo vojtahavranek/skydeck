@@ -90,16 +90,32 @@ async function resumed(page: TestPage, test: TestServer, sessionId: string): Pro
   return term;
 }
 
-/** A page that comes as a loaded or reconnected one does: `start`, then its view and focus. */
+/**
+ * A page that comes as a loaded or reconnected one does: `start`, then its view and its focus with
+ * the selection it made by itself (`byPage`, S2 8.2.3); `focused` false: a window not in front.
+ */
 async function arrive(
   t: Parameters<typeof connectTestPage>[0],
   d: ServerSandbox,
   test: TestServer,
-  selected: string,
+  selected: string | null,
+  focused = true,
 ): Promise<TestPage> {
-  const page = await connectTestPage(t, d, test.server, { view: { selected } });
-  show(page, true, selected);
+  const page = await connectTestPage(t, d, test.server, { view: { selected }, focused });
+  page.view({ selected });
+  page.send({ t: 'focus', focused, selected, area: { cols: 80, rows: 24 }, byPage: true });
   return page;
+}
+
+/** Whether `items` (what a page got) hold a `list` in which `sessionId` has `reason` before a
+ *  `result`. */
+function listBeforeResult(items: TestPage['all'], sessionId: string, reason: string): boolean {
+  for (const item of items) {
+    if (!('text' in item)) continue;
+    if (item.text.t === 'result') return false;
+    if (item.text.t === 'list' && reasonOf(item.text, sessionId) === reason) return true;
+  }
+  return false;
 }
 
 describe('the mark unread on the server (S2 12.4)', () => {
@@ -217,5 +233,90 @@ describe('the mark unread on the server (S2 12.4)', () => {
     assert.equal(answer.ok, false);
     assert.equal(answer.error, 'it is marked done: a done session needs nothing');
     assert.equal(stored(d, S1)?.unreadSeq ?? null, null);
+  });
+
+  test('a page that reconnects or loads with none selected, and whose user then selects the session, comes back to it: read after 1.5 s', async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    d.resumable(S2);
+    const test = await d.start();
+    const marker = await arrive(t, d, test, S2);
+    assert.equal((await marker.act({ kind: 'unread', sessionId: S1 })).ok, true);
+    await marker.list((list) => reasonOf(list, S1) === 'unread', 'S1 unread');
+    show(marker, false, S2);
+
+    const page = await arrive(t, d, test, null); // a reconnect with a caption (or nothing) selected
+    await pastAHold(page);
+    show(page, true, S1); // the user's click: the page's first selection, and a coming back
+    await roundTrip(page);
+    await sleep(SEEN_AFTER_MS - 500);
+    assert.ok(unread(d, S1), 'not before the 1.5 s');
+    await page.list(
+      (list) => rowOf(list, S1) !== undefined && reasonOf(list, S1) === null,
+      'S1 read by the user’s selection',
+    );
+
+    // The same for a fresh page whose list selected nothing, after a new mark.
+    assert.equal((await marker.act({ kind: 'unread', sessionId: S1 })).ok, true);
+    await marker.list((list) => reasonOf(list, S1) === 'unread', 'S1 unread again');
+    show(page, false, null);
+    await page.close();
+    const fresh = await arrive(t, d, test, null);
+    show(fresh, true, S1);
+    await pastAHold(fresh);
+    assert.equal(unread(d, S1), false, 'read by the user of a fresh page');
+  });
+
+  test('a page whose window is not in front: marking unread sends no notification; a turn that ends on the unread session notifies `finished` as before', async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    d.resumable(S2);
+    const test = await d.start();
+    const page = await arrive(t, d, test, S2, false);
+    const term = await resumed(page, test, S1);
+    const say = (line: string): void => {
+      assert.equal(test.server.hub.input(term, Buffer.from(`${line}\r`, 'utf8')), 'ok');
+    };
+    assert.equal((await page.act({ kind: 'unread', sessionId: S1 })).ok, true);
+    await page.list((list) => reasonOf(list, S1) === 'unread', 'S1 unread');
+    await sleep(2500); // a look and a refresh, each with the notifier's check
+    await roundTrip(page);
+    assert.deepEqual(notifies(page), [], 'the mark notifies nothing');
+
+    say('/busy');
+    await sleep(1500); // a look reads it busy
+    say('/idle');
+    await page.list((list) => reasonOf(list, S1) === 'finished', 'S1 finished');
+    await until(() => notifies(page).length > 0, 'a notify', WAIT_MS);
+    assert.deepEqual(
+      notifies(page).map((one) => [one.sessionId, one.reason]),
+      [[S1, 'finished']],
+    );
+  });
+
+  test('`done` and `undone` at once: the mark does not come back; a mark pushes the lists before its answer', async (t) => {
+    const d = serverSandbox(t);
+    d.resumable(S1);
+    d.resumable(S2);
+    const test = await d.start();
+    const page = await arrive(t, d, test, S2);
+    await pastAHold(page);
+    await sleep(1100); // no list sent in the last second: the next one goes out at once
+    await roundTrip(page);
+    const from = page.all.length;
+    assert.equal((await page.act({ kind: 'unread', sessionId: S1 })).ok, true);
+    assert.ok(
+      listBeforeResult(page.all.slice(from), S1, 'unread'),
+      'the list with the mark came before the answer',
+    );
+
+    assert.equal((await page.act({ kind: 'done', sessionId: S1 })).ok, true);
+    assert.equal(stored(d, S1)?.unreadSeq ?? null, null, 'cleared in the act itself');
+    assert.equal((await page.act({ kind: 'undone', sessionId: S1 })).ok, true);
+    await sleep(2500); // a look and a refresh after the undone
+    await roundTrip(page);
+    assert.equal(unread(d, S1), false);
+    const list = await page.list((l) => rowOf(l, S1) !== undefined, 'S1 listed');
+    assert.equal(reasonOf(list, S1), null);
   });
 });
