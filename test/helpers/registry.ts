@@ -351,7 +351,11 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
     process.kill(keeper.pid, signal);
   };
 
-  const shellSpec = (r: TestRegistry, of: string, overrides: Partial<ShellSpec> = {}): ShellSpec => {
+  const shellSpec = (
+    r: TestRegistry,
+    of: string,
+    overrides: Partial<ShellSpec> = {},
+  ): ShellSpec => {
     const base = kb.shellSpec(overrides);
     return {
       ...base,
