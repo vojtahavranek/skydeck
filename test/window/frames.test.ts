@@ -10,13 +10,20 @@ import {
   encodeResize,
   encodeSnapshot,
   frameReader,
+  isShellHello,
   keeperEnds,
   parseExit,
   parseHello,
   parseResize,
   parseStarted,
 } from '../../src/window/frames.ts';
-import type { Frame, FrameType, KeeperExit, KeeperHello } from '../../src/window/frames.ts';
+import type {
+  Frame,
+  FrameType,
+  KeeperExit,
+  KeeperHello,
+  ShellHello,
+} from '../../src/window/frames.ts';
 
 const S1 = '11111111-1111-4111-8111-111111111111';
 const TERM = '0123456789ab';
@@ -444,6 +451,100 @@ describe('parseHello', () => {
     refused(parseHello(utf8('null')));
     refused(parseHello(new Uint8Array(0)));
   });
+});
+
+describe("parseHello: keeper version 4, a session's shell (S2 7.10)", () => {
+  const SHELL_META = {
+    kind: 'shell',
+    of: TERM,
+    openedNs: '1700000000000000001',
+    build: '0123456789abcdef',
+    dir: '/home/u/project',
+  } as const;
+  const SHELL: ShellHello = {
+    ...HELLO,
+    keeper: '4',
+    id: 'ba9876543210',
+    lock: null,
+    meta: { ...SHELL_META },
+  };
+
+  test("a shell's hello → ok, and isShellHello tells it from a session terminal's", () => {
+    const parsed = parseHello(json(SHELL));
+    assert.deepEqual(parsed, { ok: true, value: SHELL });
+    assert.ok(parsed.ok);
+    assert.equal(isShellHello(parsed.value), true);
+    const session = parseHello(json(HELLO));
+    assert.ok(session.ok);
+    assert.equal(isShellHello(session.value), false);
+  });
+
+  test("a shell meta's other fields are not read: no session, no slot, no label", () => {
+    const parsed = parseHello(json({ ...SHELL, meta: { ...SHELL_META, sessionId: S1, slot: 1 } }));
+    assert.deepEqual(parsed, { ok: true, value: SHELL });
+  });
+
+  test("a session terminal's meta with shell (a restart moved one to it) → read", () => {
+    const hello: KeeperHello = { ...HELLO, keeper: '4', meta: { ...META, shell: 'ba9876543210' } };
+    assert.deepEqual(parseHello(json(hello)), { ok: true, value: hello });
+  });
+
+  test('hellos of keepers of version 2 and 3 parse as they did', () => {
+    for (const keeper of ['2', '3']) {
+      const hello: KeeperHello = { ...HELLO, keeper };
+      const parsed = parseHello(json(hello));
+      assert.deepEqual(parsed, { ok: true, value: hello });
+      assert.ok(parsed.ok);
+      assert.equal('shell' in parsed.value.meta, false);
+    }
+  });
+
+  const bad: [string, unknown, string][] = [
+    ['of missing', { ...SHELL, meta: { ...SHELL_META, of: undefined } }, 'hello.meta.of: missing'],
+    [
+      'of not a terminal id',
+      { ...SHELL, meta: { ...SHELL_META, of: MARKER } },
+      'hello.meta.of: wrong value',
+    ],
+    [
+      'of upper case',
+      { ...SHELL, meta: { ...SHELL_META, of: TERM.toUpperCase() } },
+      'hello.meta.of: wrong value',
+    ],
+    ['of a number', { ...SHELL, meta: { ...SHELL_META, of: 1 } }, 'hello.meta.of: wrong type'],
+    [
+      'openedNs missing',
+      { ...SHELL, meta: { ...SHELL_META, openedNs: undefined } },
+      'hello.meta.openedNs: missing',
+    ],
+    [
+      'build a number',
+      { ...SHELL, meta: { ...SHELL_META, build: 1 } },
+      'hello.meta.build: wrong type',
+    ],
+    ['dir null', { ...SHELL, meta: { ...SHELL_META, dir: null } }, 'hello.meta.dir: wrong type'],
+    ['a lock', { ...SHELL, lock: '1700000000000000000:42' }, 'hello.lock: wrong value'],
+    [
+      'kind other',
+      { ...SHELL, meta: { ...SHELL_META, kind: 'other' } },
+      'hello.meta.sessionId: missing',
+    ],
+    [
+      "a session meta's shell not a terminal id",
+      { ...HELLO, meta: { ...META, shell: MARKER } },
+      'hello.meta.shell: wrong value',
+    ],
+    [
+      "a session meta's shell null",
+      { ...HELLO, meta: { ...META, shell: null } },
+      'hello.meta.shell: wrong type',
+    ],
+  ];
+  for (const [name, value, kind] of bad) {
+    test(`${name} → refused (${kind})`, () => {
+      assert.deepEqual(parseHello(json(value)), { ok: false, kind });
+    });
+  }
 });
 
 describe('parseStarted (T)', () => {

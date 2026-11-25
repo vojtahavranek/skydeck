@@ -1,16 +1,21 @@
 #!/usr/bin/env python3
-KEEPER_VERSION = "3"
+KEEPER_VERSION = "4"
 PROTOCOL = 1
 # skydeck keeper: owns one terminal's pty and program (design-step-2 7.1, 7.8, 8.1; plan task 9).
 #
 # The server starts it as `python3 -I <runtimeDir>/keeper-<build>.py`, detached, with its spec on
 # stdin (one JSON object, plan contract 2.3). It makes itself non-dumpable, listens on the spec's
-# socket (mode 600) and writes terms/<id>.pid ("<pid> <process start> <boot id> <version> 0|1").
+# socket (mode 600) and writes terms/<id>.pid ("<pid> <process start> <boot id> <version> 0|1", and
+# " shell" after it for a session's shell, version 4).
 # Only G from the connection that claimed it (C), before the spec's startBy, starts the program in
 # a new pty; N, or the deadline, ends the terminal as not started. It keeps every chunk the program
 # writes and every resize as a numbered record, the snapshot a server parked, and the records since;
 # it never interprets them. E (version 3) sends SIGHUP and SIGCONT to the program it started, as a
-# terminal's closed window would, and changes nothing else. It writes only its own errors to stderr, one line each,
+# terminal's closed window would, and changes nothing else. Version 4 holds a second kind of
+# terminal, a session's shell (S2 7.10): its meta is of kind "shell" and names the session terminal
+# it was opened under ("of"), and its spec alone carries "file", the program to run with the spec's
+# argv (so that argv[0] can be "-<name>", a login shell); a session's meta may name its shell
+# ("shell"). It writes only its own errors to stderr, one line each,
 # "keeper <id>: <kind>": never output, input, or a message that could quote them (S2 2).
 #
 # Standard library only, nothing newer than python3 3.9. For tests only (plan A31):
@@ -127,12 +132,31 @@ def is_session_id(value):
     )
 
 
+def is_terminal_id(value):
+    """A terminal id: 12 lowercase hex digits (S2 7.1)."""
+    return is_text(value) and len(value) == 12 and all(c in HEX for c in value)
+
+
 META_FIELDS = ("sessionId", "kind", "slot", "openedNs", "build", "label", "dir")
+SHELL_META_FIELDS = ("kind", "of", "openedNs", "build", "dir")
+
+
+def is_shell_meta(meta):
+    """A session's shell's meta (version 4): kind "shell", the terminal it was opened under."""
+    return (
+        type(meta) is dict
+        and meta.get("kind") == "shell"
+        and is_terminal_id(meta.get("of"))
+        and is_ns(meta.get("openedNs"))
+        and is_text(meta.get("build"))
+        and is_text(meta.get("dir"))
+    )
 
 
 def is_meta(meta):
-    """What the codec accepts as a hello's meta (contract 2.3): the keeper echoes it there."""
-    return (
+    """What the codec accepts as a hello's meta (contract 2.3): the keeper echoes it there. A
+    session terminal's, with its shell's id when a restart moved one to it, or a shell's."""
+    return is_shell_meta(meta) or (
         type(meta) is dict
         and is_session_id(meta.get("sessionId"))
         and meta.get("kind") in ("resume", "new")
@@ -143,7 +167,15 @@ def is_meta(meta):
         and "label" in meta
         and (meta["label"] is None or is_text(meta["label"]))
         and is_text(meta.get("dir"))
+        and ("shell" not in meta or is_terminal_id(meta["shell"]))
     )
+
+
+def meta_fields(meta):
+    """The names of the meta's fields the hello echoes: those of its form."""
+    if is_shell_meta(meta):
+        return SHELL_META_FIELDS
+    return META_FIELDS + (("shell",) if "shell" in meta else ())
 
 
 def read_spec():
@@ -162,7 +194,7 @@ def read_spec():
     if type(spec) is not dict:
         return None
     ident = spec.get("id")
-    if not (is_text(ident) and len(ident) == 12 and all(c in HEX for c in ident)):
+    if not is_terminal_id(ident):
         return None
     _tag = ident
     argv, env, core = spec.get("argv"), spec.get("env"), spec.get("coreSoft")
@@ -185,6 +217,11 @@ def read_spec():
         and (core is None or core == "unlimited" or (is_text(core) and 0 < len(core) <= 20 and core.isascii() and core.isdigit()))
         and is_meta(spec.get("meta"))
     )
+    # A shell's spec names the program to run, and holds no lock; a session's never names one.
+    if valid and is_shell_meta(spec["meta"]):
+        valid = is_path(spec.get("file")) and spec["lock"] is None
+    elif valid:
+        valid = "file" not in spec
     return spec if valid else None
 
 
@@ -274,10 +311,11 @@ def run_program(go_r, spec):
             if spec["coreSoft"] is not None:
                 set_core_soft(spec["coreSoft"])
             argv = spec["argv"]
+            file = spec.get("file") or argv[0]  # a shell's spec names its program (version 4)
             try:
-                os.execvpe(argv[0], argv, spec["env"])
+                os.execvpe(file, argv, spec["env"])
             except (OSError, ValueError) as error:
-                say("cannot run %s: %s" % (argv[0], reason(error)))
+                say("cannot run %s: %s" % (file, reason(error)))
     finally:
         os._exit(127)
 
@@ -327,7 +365,8 @@ class Keeper:
 
     # The pid line (S2 4.2), through a temporary name and a rename.
     def write_pid_line(self, started):
-        line = "%s %s %d\n" % (self.line_head, KEEPER_VERSION, 1 if started else 0)
+        shell = " shell" if is_shell_meta(self.spec["meta"]) else ""
+        line = "%s %s %d%s\n" % (self.line_head, KEEPER_VERSION, 1 if started else 0, shell)
         tmp = os.path.join(os.path.dirname(self.pid_path), ".%s.%d.tmp" % (_tag, os.getpid()))
         try:
             fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
@@ -362,7 +401,7 @@ class Keeper:
             # the first record the tail holds: after the snapshot, or after what the cap dropped
             "tailFrom": self.tail[0][0] if self.tail else self.seq + 1,
             "gap": self.dropped > self.snap_seq,
-            "meta": {name: spec["meta"][name] for name in META_FIELDS},
+            "meta": {name: spec["meta"][name] for name in meta_fields(spec["meta"])},
             "exited": self.exit,
         }
 

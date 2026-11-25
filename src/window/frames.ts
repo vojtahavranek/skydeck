@@ -181,6 +181,23 @@ export interface KeeperMeta {
   build: string;
   label: string | null;
   dir: string; // for a new session's own row after a server restart (S2 7.5)
+  /**
+   * Keeper version 4 (S2 7.10): the id of the session's shell that a restart moved to this
+   * terminal; written only into the meta of the terminal a restart opens while the terminal it
+   * replaces has a shell. Absent otherwise.
+   */
+  shell?: string;
+}
+
+/** The meta of a session's shell (keeper version 4, S2 7.10): no session, no slot, no label. */
+export interface ShellMeta {
+  kind: 'shell';
+  /** The session terminal it was opened under (a terminal id). */
+  of: string;
+  openedNs: string;
+  build: string;
+  /** The folder it was started in: its session terminal's. */
+  dir: string;
 }
 
 /** Written to the keeper's stdin (S2 7.1). */
@@ -198,6 +215,16 @@ export interface KeeperSpec {
   coreSoft: string | null;
   meta: KeeperMeta;
 }
+
+/**
+ * A session's shell's spec (S2 7.10): `file` is the program the keeper runs with `argv` (whose
+ * first word may then be `-<name>`, a login shell); no lock. Only a shell's spec has `file`.
+ */
+export type ShellSpec = Omit<KeeperSpec, 'meta' | 'lock'> & {
+  lock: null;
+  file: string;
+  meta: ShellMeta;
+};
 
 export interface KeeperExit {
   code: number | null;
@@ -225,6 +252,14 @@ export interface KeeperHello {
   gap: boolean;
   meta: KeeperMeta;
   exited: KeeperExit | null;
+}
+
+/** The hello of a session's shell's keeper: its meta is a shell's, and it holds no lock. */
+export type ShellHello = Omit<KeeperHello, 'lock' | 'meta'> & { lock: null; meta: ShellMeta };
+
+/** Whether the hello is a session's shell's. */
+export function isShellHello(hello: KeeperHello | ShellHello): hello is ShellHello {
+  return hello.meta.kind === 'shell';
 }
 
 export interface KeeperStarted {
@@ -336,9 +371,18 @@ function readExit(where: string, fields: Fields): KeeperExit {
   return exit;
 }
 
-function readMeta(fields: Fields): KeeperMeta {
+function readMeta(fields: Fields): KeeperMeta | ShellMeta {
   const where = 'hello.meta';
-  return {
+  if (fields['kind'] === 'shell') {
+    return {
+      kind: 'shell',
+      of: field(where, fields, 'of', 'string', (v: string) => TERMINAL_ID.test(v)),
+      openedNs: field(where, fields, 'openedNs', 'string', isNsText),
+      build: field(where, fields, 'build', 'string'),
+      dir: field(where, fields, 'dir', 'string'),
+    };
+  }
+  const meta: KeeperMeta = {
     sessionId: field(where, fields, 'sessionId', 'string', isSessionId),
     kind: field(where, fields, 'kind', 'string', (v: string) => v === 'resume' || v === 'new'),
     slot: field(
@@ -354,15 +398,23 @@ function readMeta(fields: Fields): KeeperMeta {
     label: field(where, fields, 'label', 'string', () => true, true),
     dir: field(where, fields, 'dir', 'string'),
   };
+  if (Object.hasOwn(fields, 'shell')) {
+    meta.shell = field(where, fields, 'shell', 'string', (v: string) => TERMINAL_ID.test(v));
+  }
+  return meta;
 }
 
+/**
+ * A keeper's hello: a session terminal's (`KeeperHello`) or, from keeper version 4 on, a session's
+ * shell's (`ShellHello`, `isShellHello`), told apart by the meta's kind.
+ */
 export function parseHello(
   payload: Uint8Array,
-): { ok: true; value: KeeperHello } | { ok: false; kind: string } {
+): { ok: true; value: KeeperHello | ShellHello } | { ok: false; kind: string } {
   return parse(() => {
     const where = 'hello';
     const fields = payloadObject(where, payload);
-    const hello: KeeperHello = {
+    const hello: { -readonly [K in keyof KeeperHello]: KeeperHello[K] | ShellHello[K] } = {
       protocol: field(where, fields, 'protocol', 'number', isCount),
       keeper: field(where, fields, 'keeper', 'string'),
       id: field(where, fields, 'id', 'string', (v: string) => TERMINAL_ID.test(v)),
@@ -403,7 +455,10 @@ export function parseHello(
     if (hello.exited !== null && hello.started !== (hello.exited.notStarted === null)) {
       throw new Refusal(`${where}.exited: wrong value`);
     }
-    return hello;
+    if (hello.meta.kind === 'shell' && hello.lock !== null) {
+      throw new Refusal(`${where}.lock: wrong value`); // a shell holds no lock
+    }
+    return hello as KeeperHello | ShellHello;
   });
 }
 

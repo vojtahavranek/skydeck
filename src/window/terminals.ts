@@ -24,7 +24,7 @@ import {
   keeperEnds,
   MAX_PAYLOAD,
 } from './frames.ts';
-import { parseExit, parseHello, parseResize, parseStarted } from './frames.ts';
+import { isShellHello, parseExit, parseHello, parseResize, parseStarted } from './frames.ts';
 import type { Frame, KeeperExit, KeeperHello, KeeperSpec, KeeperStarted } from './frames.ts';
 import type { SlotHold, StreamSink, TerminalHub, TerminalInfo, TerminalState } from './hub.ts';
 import { isBusy } from './busy.ts';
@@ -964,6 +964,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
       const parsed = parseHello(frame.payload);
       if (!parsed.ok) {
         drop(term, claim, `bad hello (${parsed.kind})`);
+        return;
+      }
+      if (isShellHello(parsed.value)) {
+        drop(term, claim, 'hello of a shell'); // no shell is spawned yet
         return;
       }
       onHello(term, claim, parsed.value);
