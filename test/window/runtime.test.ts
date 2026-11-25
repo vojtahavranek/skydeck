@@ -32,6 +32,7 @@ import type { Deck } from '../../src/sessions/deck.ts';
 import { formatPidLine } from '../../src/window/pidline.ts';
 import type { PidLine } from '../../src/window/pidline.ts';
 import {
+  keepersThatMayLive,
   listKeeperLines,
   prepareRuntimeDir,
   readServerJson,
@@ -709,6 +710,56 @@ test('listKeeperLines reads every terms/<id>.pid with its state, ignoring other 
   assert.deepEqual(lines, [
     { id: ID_A, line: alive, state: 'alive' },
     { id: ID_B, line: dead, state: 'dead' },
+  ]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// keepersThatMayLive (S2 7.10)
+
+test("keepersThatMayLive: every keeper not held that may live, with its line's kind; a dead line and a held id are not", async (t) => {
+  const d = testDeck(t, { real: true });
+  const boot = bootOf(d.proc);
+  const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
+  prepareRuntimeDir(d.platform, files);
+  const live = await liveSleep(t, d.sandbox, d.proc);
+  const session = keeperLine(live.pid, live.procStart, boot);
+  const shell: PidLine = { ...session, keeper: { version: '4', started: true, shell: true } };
+  writePidLine(files, ID_A, session);
+  writePidLine(files, ID_B, shell);
+  writePidLine(files, ID_C, { ...shell, bootId: `${boot}-earlier` }); // dead
+  writePidLine(files, 'c0ffee000004', shell); // held
+  writeFileSync(files.termPid('c0ffee000000'), 'not a pid line\n');
+  writeFileSync(join(files.termsDir, `.${ID_A}.pid.4f2a.tmp`), formatPidLine(shell));
+  mkdirSync(files.termPid('c0ffee000002'));
+
+  const got = keepersThatMayLive(
+    cannotRead(d.platform, files.termPid('c0ffee000004')),
+    files,
+    new Set(['c0ffee000004']),
+  );
+
+  assert.deepEqual(got, [
+    { id: ID_A, kind: 'session' },
+    { id: ID_B, kind: 'shell' },
+    { id: 'c0ffee000000', kind: 'unknown' }, // no line this build reads
+  ]);
+});
+
+test('keepersThatMayLive: a file it cannot read is unknown; without a boot id every line may live; [] without terms/', (t) => {
+  const d = testDeck(t);
+  const files = runtimeFiles(join(d.sandbox.skydeckHome, 'run'));
+  assert.deepEqual(keepersThatMayLive(d.platform, files, new Set()), []);
+  prepareRuntimeDir(d.platform, files);
+  const line = keeperLine(4242, 51234567, BOOT_A); // no process 4242 on the fake /proc: dead
+  writePidLine(files, ID_A, line);
+  writePidLine(files, ID_B, line);
+
+  const got = keepersThatMayLive(cannotRead(d.platform, files.termPid(ID_A)), files, new Set());
+
+  assert.deepEqual(got, [{ id: ID_A, kind: 'unknown' }]);
+  d.proc.setBootId(null); // every line cannot be judged: it may live
+  assert.deepEqual(keepersThatMayLive(d.platform, files, new Set([ID_A])), [
+    { id: ID_B, kind: 'session' },
   ]);
 });
 

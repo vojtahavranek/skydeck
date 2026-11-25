@@ -25,15 +25,32 @@ import {
   MAX_PAYLOAD,
 } from './frames.ts';
 import { isShellHello, parseExit, parseHello, parseResize, parseStarted } from './frames.ts';
-import type { Frame, KeeperExit, KeeperHello, KeeperSpec, KeeperStarted } from './frames.ts';
-import type { SlotHold, StreamSink, TerminalHub, TerminalInfo, TerminalState } from './hub.ts';
+import type {
+  Frame,
+  KeeperExit,
+  KeeperHello,
+  KeeperMeta,
+  KeeperSpec,
+  KeeperStarted,
+  ShellHello,
+  ShellMeta,
+  ShellSpec,
+} from './frames.ts';
+import type {
+  ShellInfo,
+  SlotHold,
+  StreamSink,
+  TerminalHub,
+  TerminalInfo,
+  TerminalState,
+} from './hub.ts';
 import { isBusy } from './busy.ts';
 import { claimKeeper } from './keeper-link.ts';
 import { lostProgramMayRun } from './mapping.ts';
 import type { KeeperLink } from './keeper-link.ts';
 import { parsePidLine, pidLineState } from './pidline.ts';
 import type { ThemePayload } from './protocol.ts';
-import { listKeeperLines, removeDeadKeeperFiles } from './runtime.ts';
+import { keepersThatMayLive, listKeeperLines, removeDeadKeeperFiles } from './runtime.ts';
 import type { RuntimeFiles } from './runtime.ts';
 import { createScreen } from './screen.ts';
 import type { ScreenSide } from './screen.ts';
@@ -167,10 +184,26 @@ export interface Registry extends TerminalHub {
   end(termId: string): 'ok' | 'cannot' | 'unknown';
   /** Issue #166: the hub's `holdSlot`, which the registry always has. */
   holdSlot(termId: string): SlotHold | null;
+  /**
+   * Issue #199 (S2 7.10): the sessions' shells, each while the session terminal it belongs to is
+   * listed and it starts, runs or is reconnected to. Never in `list()` nor in `rediscover`'s
+   * answer; it has no slot, no session and no event.
+   */
+  shells(): readonly ShellInfo[];
+  /**
+   * Issue #199: spawns a session's shell's keeper as `spawn` spawns a terminal's (the same checks
+   * and errors, and sends no G), the shell belonging to `spec.meta.of`. Rejects with
+   * KeeperStartError kind 'unseen', before anything is started, while a keeper of terms/ that may
+   * live and that the registry does not hold is a shell's or cannot be told (it could be that
+   * terminal's own shell). `ended` is called once, with the exit, when the shell is forgotten at
+   * its exit (or the loss of its keeper).
+   */
+  spawnShell(spec: ShellSpec, ended?: (exit: KeeperExit) => void): Promise<ShellInfo>;
 }
 
 export class KeeperStartError extends Error {
-  readonly kind: 'python-missing' | 'path-too-long' | 'spawn-failed' | 'stopping' | 'no-hello';
+  readonly kind:
+    'python-missing' | 'path-too-long' | 'spawn-failed' | 'stopping' | 'no-hello' | 'unseen';
   constructor(kind: KeeperStartError['kind'], message: string) {
     super(message);
     this.name = 'KeeperStartError';
@@ -255,6 +288,12 @@ function errorCode(error: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
+/** A hello of either kind of terminal: a session terminal's, or a session's shell's (S2 7.10). */
+type AnyHello = KeeperHello | ShellHello;
+
+/** A shell's states that `shells()` lists. */
+const SHELL_STATES: ReadonlySet<TerminalState> = new Set(['starting', 'running', 'reconnecting']);
+
 /** A sink and where its stream starts: records after `from` (the internal count) reach it. */
 interface Attached {
   sink: StreamSink;
@@ -266,7 +305,7 @@ interface Attached {
 /** One connection's progress through the claim's answer (S2 8.1). */
 interface Claim {
   link: KeeperLink;
-  hello: KeeperHello | null;
+  hello: AnyHello | null;
   /** 'hello': nothing yet; 'snapshot': S must come next; 'maybe': S may come next; 'records'. */
   phase: 'hello' | 'snapshot' | 'maybe' | 'records';
   /** Whether a snapshot that comes rebuilds the screen (false: the screen is built already). */
@@ -295,7 +334,14 @@ interface Term {
   lostHold: (() => void) | null;
   /** Issue #166: a restart's hold on its number (`holdSlot`), null while none. */
   hold: Hold | null;
-  hello: KeeperHello | null;
+  /**
+   * Issue #199: what makes the terminal a session's shell (S2 7.10), null for a session terminal.
+   * Its `info` is the registry's own then: no slot, no session, and it never leaves the registry.
+   */
+  shell: Shell | null;
+  /** Whether it is known which kind it is: from the spawn, else from the first hello. */
+  kindKnown: boolean;
+  hello: AnyHello | null;
   claim: Claim | null;
   screen: ScreenSide | null;
   /** Records handed to the screen side so far (internal count, never reset). */
@@ -331,6 +377,14 @@ interface Term {
   cooling: boolean;
   /** The size the forced redraw goes back to, until it has or a page resized. */
   redrawTo: { cols: number; rows: number; due: boolean } | null;
+}
+
+/** Issue #199: what the registry keeps of a session's shell. */
+interface Shell {
+  /** The session terminal it belongs to. */
+  of: string | null;
+  /** The listener `spawnShell` was given, told once at the shell's exit; null once told. */
+  ended: ((exit: KeeperExit) => void) | null;
 }
 
 /** Issue #166: what the registry keeps of a restart's hold (`holdSlot`). */
@@ -430,7 +484,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
   function takenSlots(exceptId: string | null): Set<number> {
     const taken = new Set<number>();
     for (const [id, term] of terms) {
-      if (id !== exceptId && term.info.slot !== null) taken.add(term.info.slot);
+      if (id !== exceptId && term.shell === null && term.info.slot !== null) {
+        taken.add(term.info.slot);
+      }
     }
     for (const id of finding) {
       const slot = moved.get(id);
@@ -811,23 +867,36 @@ export function createRegistry(deps: RegistryDeps): Registry {
   // -------------------------------------------------------------------------------------------
   // Claims: the hello, the snapshot, the tail (S2 7.3, 8.1)
 
-  function newTerm(id: string, meta: KeeperSpec['meta'], cols: number, rows: number): Term {
+  /**
+   * A terminal of either kind from its meta; `kindKnown` false for one known only by its id (a
+   * found keeper, `unknownMeta`) until its first hello. A shell's `info` holds no session.
+   */
+  function newTerm(
+    id: string,
+    meta: KeeperMeta | ShellMeta,
+    cols: number,
+    rows: number,
+    kindKnown: boolean,
+  ): Term {
     const placeNs = placed.get(id);
     placed.delete(id);
     knowOpened(BigInt(meta.openedNs)); // a spawn's stamp (a found keeper's is known at its hello)
+    const shell = meta.kind === 'shell';
     return {
-      metaSlot: meta.slot,
+      metaSlot: shell ? null : meta.slot,
       slotFreed: false,
       lostHold: null,
       hold: null,
+      shell: shell ? { of: meta.of, ended: null } : null,
+      kindKnown,
       info: {
         id,
-        slot: meta.slot,
+        slot: shell ? null : meta.slot,
         state: 'starting',
-        expectedSessionId: meta.sessionId,
+        expectedSessionId: shell ? '' : meta.sessionId,
         sessionId: null,
-        kind: meta.kind,
-        label: meta.label,
+        kind: shell ? 'resume' : meta.kind,
+        label: shell ? null : meta.label,
         dir: meta.dir,
         program: null,
         openedNs: BigInt(meta.openedNs),
@@ -966,15 +1035,11 @@ export function createRegistry(deps: RegistryDeps): Registry {
         drop(term, claim, `bad hello (${parsed.kind})`);
         return;
       }
-      if (isShellHello(parsed.value)) {
-        drop(term, claim, 'hello of a shell'); // no shell is spawned yet
-        return;
-      }
       onHello(term, claim, parsed.value);
       return;
     }
     if (frame.type === 'S' && (claim.phase === 'snapshot' || claim.phase === 'maybe')) {
-      const hello = claim.hello as KeeperHello;
+      const hello = claim.hello as AnyHello;
       const snap = decodeSnapshot(frame.payload);
       if (
         snap === null ||
@@ -1003,7 +1068,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
         // No snapshot was ever parked: the tail starts from the first record, at the hello's
         // size. The first size is in no frame (the server parks record 0 at once, so this is a
         // keeper that lost its first server before that park): the hello's is the best known.
-        const hello = claim.hello as KeeperHello;
+        const hello = claim.hello as AnyHello;
         newScreen(term, hello.cols, hello.rows, null);
         setSize(term, hello.cols, hello.rows);
       }
@@ -1042,7 +1107,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     }
   }
 
-  function onHello(term: Term, claim: Claim, hello: KeeperHello): void {
+  function onHello(term: Term, claim: Claim, hello: AnyHello): void {
     const id = term.info.id;
     if (hello.id !== id) {
       drop(term, claim, 'hello of another terminal');
@@ -1053,14 +1118,26 @@ export function createRegistry(deps: RegistryDeps): Registry {
       drop(term, claim, 'hello with a size above 1000 x 500');
       return;
     }
+    // Issue #199: a terminal's kind never changes: a keeper that says otherwise is not its own.
+    if (term.kindKnown && (term.shell !== null) !== isShellHello(hello)) {
+      drop(term, claim, isShellHello(hello) ? 'hello of a shell' : 'hello of a session terminal');
+      return;
+    }
+    term.kindKnown = true;
     claim.hello = hello;
     term.hello = hello;
     const info = term.info;
-    slotAtHello(term, hello.meta.slot, hello.exited !== null);
-    info.expectedSessionId = hello.meta.sessionId;
-    info.kind = hello.meta.kind;
-    info.label = hello.meta.label;
-    info.dir = hello.meta.dir;
+    if (isShellHello(hello)) {
+      // S2 7.10: no slot, no session; it belongs to the terminal it was opened under.
+      if (term.shell === null) term.shell = { of: hello.meta.of, ended: null };
+      info.dir = hello.meta.dir;
+    } else {
+      slotAtHello(term, hello.meta.slot, hello.exited !== null);
+      info.expectedSessionId = hello.meta.sessionId;
+      info.kind = hello.meta.kind;
+      info.label = hello.meta.label;
+      info.dir = hello.meta.dir;
+    }
     info.openedNs = BigInt(hello.meta.openedNs);
     knowOpened(info.openedNs); // issue #213: also a keeper found again after a restart
     info.program =
@@ -1088,7 +1165,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       changed();
       term.claim = null;
       claim.link.destroy();
-      emit('hello', () => events.hello(copy(term), hello, origin));
+      if (!isShellHello(hello)) emit('hello', () => events.hello(copy(term), hello, origin));
       claim.settle?.(true);
       return;
     }
@@ -1145,7 +1222,14 @@ export function createRegistry(deps: RegistryDeps): Registry {
       });
       redraw(term, claim, hello.cols, hello.rows);
     }
-    emit('hello', () => events.hello(copy(term), hello, origin));
+    if (!isShellHello(hello)) {
+      emit('hello', () => events.hello(copy(term), hello, origin));
+    } else if (origin !== 'spawned' && !hello.started && hello.exited === null) {
+      // A shell's keeper whose start nobody waits for any more (a spawn that gave up, a server
+      // that restarted before G): it is never started; forgotten at its X.
+      log(id, 'a shell not started is refused');
+      claim.link.send('N', cutUtf8('the shell was not started in time', MAX_REASON));
+    }
     watchTail(term, claim);
     replayed(term, claim);
   }
@@ -1232,7 +1316,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     term.info.program = { pid: started.pid, procStart: started.procStart };
     if (term.info.state === 'starting') term.info.state = 'running';
     changed();
-    emit('started', () => events.started(copy(term), started));
+    if (term.shell === null) emit('started', () => events.started(copy(term), started));
   }
 
   function onExit(term: Term, claim: Claim, exit: KeeperExit): void {
@@ -1247,6 +1331,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
     void term.last.then(() => {
       if (term.forgotten) return;
       term.info.state = exit.notStarted === null ? 'ended' : 'not-started';
+      if (term.shell !== null) {
+        shellGone(term, exit, false, claim);
+        return;
+      }
       freeSlot(term); // F43: the keeper reaped the program; announced with the state below
       // The sinks first, then the announcement: a sink attached inside it has the exit from the
       // state already (shown), and must not get it twice.
@@ -1372,6 +1460,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
     void term.last.then(() => {
       if (term.forgotten) return;
       term.info.state = 'lost';
+      if (term.shell !== null) {
+        shellGone(term, exit, true, null);
+        return;
+      }
       holdLostSlot(term);
       toAllSinks(term, (sink) => {
         sink.exit(exit, true);
@@ -1384,6 +1476,39 @@ export function createRegistry(deps: RegistryDeps): Registry {
     });
   }
 
+  /**
+   * Issue #199 (S2 7.10): a shell's exit, or the loss of its keeper. The registry keeps no ended
+   * shell: the sinks get the exit, the keeper its `A` (the link ended, not destroyed, so that the
+   * `A` is written), the shell is forgotten — a lost keeper's files with it when its line is dead,
+   * as `close` removes a lost terminal's — and `spawnShell`'s listener is told. No event.
+   */
+  function shellGone(term: Term, exit: KeeperExit, lost: boolean, claim: Claim | null): void {
+    const id = term.info.id;
+    toAllSinks(term, (sink) => {
+      sink.exit(exit, lost);
+    });
+    for (const restart of term.waiting.splice(0)) restart();
+    if (claim !== null) {
+      claim.link.send('A');
+      if (term.claim === claim) term.claim = null; // so that forget does not destroy it
+      void claim.link.end();
+    }
+    const removeFiles = lost && lineIsDead(id);
+    const ended = term.shell?.ended ?? null;
+    if (term.shell !== null) term.shell.ended = null;
+    forget(term);
+    if (removeFiles) {
+      for (const path of [files.termSock(id), files.termPid(id)]) {
+        try {
+          platform.files.remove(path);
+        } catch (error) {
+          log(id, `keeper file not removed (${errorCode(error) ?? 'error'})`);
+        }
+      }
+    }
+    if (ended !== null) emit('shell ended', () => ended(exit));
+  }
+
   // -------------------------------------------------------------------------------------------
   // Spawning (S2 7.1)
 
@@ -1394,11 +1519,16 @@ export function createRegistry(deps: RegistryDeps): Registry {
       'spawn-failed': `the terminal's keeper could not be started${detail === '' ? '' : ` (${detail})`}`,
       stopping: "the server stopped while the terminal's keeper was starting",
       'no-hello': `the terminal's keeper did not answer within ${HELLO_MS / 1000} seconds`,
+      unseen: 'a terminal of this window does not answer; a shell cannot be opened until it does',
     };
     return new KeeperStartError(kind, messages[kind]);
   }
 
-  async function spawn(spec: KeeperSpec): Promise<TerminalInfo> {
+  /** The body of `spawn` and `spawnShell`: resolves to the terminal once its hello came. */
+  async function spawnKeeper(
+    spec: KeeperSpec | ShellSpec,
+    ended: ((exit: KeeperExit) => void) | null,
+  ): Promise<Term> {
     const pathBytes = Buffer.byteLength(spec.socket);
     if (pathBytes >= SOCKET_PATH_LIMIT) {
       throw startError('path-too-long', String(pathBytes));
@@ -1414,8 +1544,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
     // The registry claims terms/<id>.sock: a keeper told to listen elsewhere could never be found.
     if (spec.socket !== own) throw startError('spawn-failed', "not the terminal's socket");
     const size = clampSize(spec.cols, spec.rows) ?? { cols: 120, rows: 40 };
-    const sent: KeeperSpec = { ...spec, ...size };
-    const term = newTerm(spec.id, spec.meta, size.cols, size.rows);
+    const sent: KeeperSpec | ShellSpec = { ...spec, ...size };
+    const term = newTerm(spec.id, spec.meta, size.cols, size.rows, true);
+    if (term.shell !== null) term.shell.ended = ended;
     term.origin = 'spawned';
     terms.set(spec.id, term);
     changed();
@@ -1486,7 +1617,36 @@ export function createRegistry(deps: RegistryDeps): Registry {
       void findLate(term, () => keeperEnded);
       throw startError('no-hello');
     }
-    return copy(term);
+    return term;
+  }
+
+  async function spawn(spec: KeeperSpec): Promise<TerminalInfo> {
+    return copy(await spawnKeeper(spec, null));
+  }
+
+  /**
+   * Issue #199 (S2 7.10): whether a keeper of terms/ may live that this registry does not hold and
+   * that is a shell's or cannot be told: no shell is opened then (it may be that terminal's own).
+   * Every key of `terms` is held, shells and session terminals alike, in any state. A read that
+   * fails is such a doubt too.
+   */
+  function shellUnseen(): boolean {
+    try {
+      return keepersThatMayLive(platform, files, new Set(terms.keys())).some(
+        (keeper) => keeper.kind !== 'session',
+      );
+    } catch {
+      return true;
+    }
+  }
+
+  async function spawnShell(
+    spec: ShellSpec,
+    ended?: (exit: KeeperExit) => void,
+  ): Promise<ShellInfo> {
+    if (!stopped && shellUnseen()) throw startError('unseen');
+    const term = await spawnKeeper(spec, ended ?? null);
+    return shellCopy(term, term.shell?.of ?? spec.meta.of);
   }
 
   /** After 'no-hello': goes on claiming the keeper's socket until its hello comes (origin 'late'). */
@@ -1533,14 +1693,15 @@ export function createRegistry(deps: RegistryDeps): Registry {
       .filter((keeper) => keeper.state !== 'dead' && !terms.has(keeper.id))
       .map((keeper) => keeper.id);
     const found = await Promise.all(ids.map((id) => find(id)));
-    return found.filter((term): term is Term => term !== null).map(copy);
+    // Issue #199: a shell found is held, never a terminal of the answer.
+    return found.filter((term): term is Term => term !== null && term.shell === null).map(copy);
   }
 
   /** Claims a keeper found in terms/; it is listed once its hello came (origin 'found'). */
   async function find(id: string): Promise<Term | null> {
     if (finding.has(id)) return null;
     finding.add(id);
-    const term = newTerm(id, unknownMeta, 1, 1);
+    const term = newTerm(id, unknownMeta, 1, 1, false);
     try {
       await connect(term, HELLO_MS);
     } catch {
@@ -1669,8 +1830,36 @@ export function createRegistry(deps: RegistryDeps): Registry {
     };
   }
 
+  /** Issue #199: a session terminal of the list (no shell), known by its id. */
+  const listedSession = (id: string): boolean => {
+    const term = terms.get(id);
+    return term !== undefined && term.shell === null;
+  };
+
+  /** A shell as `shells()` gives it, belonging to `of`. */
+  const shellCopy = (term: Term, of: string): ShellInfo => ({
+    id: term.info.id,
+    of,
+    state: term.info.state as ShellInfo['state'],
+    dir: term.info.dir,
+    program: term.info.program === null ? null : { ...term.info.program },
+    openedNs: term.info.openedNs,
+    cols: term.info.cols,
+    rows: term.info.rows,
+  });
+
   const registry: Registry = {
-    list: () => [...terms.values()].map(copy),
+    list: () => [...terms.values()].filter((term) => term.shell === null).map(copy),
+    shells: () =>
+      [...terms.values()].flatMap((term) =>
+        term.shell !== null &&
+        term.shell.of !== null &&
+        listedSession(term.shell.of) &&
+        SHELL_STATES.has(term.info.state)
+          ? [shellCopy(term, term.shell.of)]
+          : [],
+      ),
+    spawnShell,
     attach,
     input(termId, data) {
       const term = terms.get(termId);
@@ -1695,7 +1884,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     },
     close(termId) {
       const term = terms.get(termId);
-      if (term === undefined) return 'unknown';
+      if (term === undefined || term.shell !== null) return 'unknown'; // only exit ends a shell
       // Issue #166: a terminal a restart holds is the session's until the next one is open.
       if (!isOver(term.info.state) || term.hold !== null) return 'running';
       const removeFiles = term.info.state === 'lost' && lineIsDead(termId);
@@ -1715,7 +1904,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     },
     end(termId) {
       const term = terms.get(termId);
-      if (term === undefined) return 'unknown';
+      if (term === undefined || term.shell !== null) return 'unknown'; // the registry's alone
       const claim = usable(term);
       if (claim === null || !endable(term)) return 'cannot';
       log(termId, 'hang-up sent');
@@ -1759,6 +1948,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     holdSlot(termId) {
       const term = terms.get(termId);
       if (stopped || term === undefined || term.hold !== null || term.forgotten) return null;
+      if (term.shell !== null) return null; // a shell has no number
       if (isOver(term.info.state) || term.info.exit !== null) return null;
       const hold: Hold = { over: false, taken: false, newId: null };
       term.hold = hold;
@@ -1797,7 +1987,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
       const given = new Map<string, number>();
       for (const id of candidates) {
         const term = terms.get(id);
-        if (term === undefined || given.has(id) || term.info.slot !== null) continue;
+        if (term === undefined || term.shell !== null || given.has(id) || term.info.slot !== null) {
+          continue; // a shell never takes a number
+        }
         // Its program is over: its slot was freed (also by a hello that said it exited, before its
         // exit frame), or it has its exit — ended, not started, lost (also one in its 60 s that never
         // had a slot), or an exit that came and waits to be applied (every one of those is stored
@@ -1835,7 +2027,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       const after: (number | null)[] = [];
       for (const [id, slot] of changes) {
         const term = terms.get(id);
-        if (term === undefined) return 'changed';
+        if (term === undefined || term.shell !== null) return 'changed';
         // F43: a terminal whose program is over never gains a slot again (one whose hello said its
         // program exited is still drawn under Open until its exit frame is applied).
         if (term.slotFreed && slot !== null) return 'changed';
@@ -1854,6 +2046,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
           .join(' ');
       if (sorted(before) !== sorted(after)) return 'changed';
       const ending = [...terms].flatMap(([id, term]) => {
+        if (term.shell !== null) return [];
         // `has`, not `??`: a null change is no slot, not the terminal's old one.
         const slot = changes.has(id) ? (changes.get(id) ?? null) : term.info.slot;
         return slot === null ? [] : [slot];
@@ -1884,7 +2077,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       const entering: Term[] = [];
       const leaving: Term[] = [];
       for (const [id, term] of terms) {
-        if (term.slotFreed) continue; // its program is over: it never gains a slot again
+        if (term.slotFreed || term.shell !== null) continue; // over, or a shell: no slot
         if (termIds.has(id) && !withheld.has(id)) entering.push(term);
         else if (!termIds.has(id) && withheld.has(id)) leaving.push(term);
       }
@@ -1947,7 +2140,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     },
     setSession(termId, sessionId, notReported) {
       const term = terms.get(termId);
-      if (term === undefined) return;
+      if (term === undefined || term.shell !== null) return; // a shell shows no session
       if (term.info.sessionId !== sessionId || term.info.notReported !== notReported) {
         term.info.sessionId = sessionId;
         term.info.notReported = notReported;

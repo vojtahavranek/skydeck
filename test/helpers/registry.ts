@@ -18,6 +18,7 @@ import type {
   KeeperHello,
   KeeperSpec,
   KeeperStarted,
+  ShellSpec,
 } from '../../src/window/frames.ts';
 import type { StreamSink, TerminalInfo } from '../../src/window/hub.ts';
 import { runtimeFiles, writeKeeperFile } from '../../src/window/runtime.ts';
@@ -26,7 +27,7 @@ import { createRegistry } from '../../src/window/terminals.ts';
 import type { Registry } from '../../src/window/terminals.ts';
 import { loadXterm } from '../../src/window/xterm.ts';
 import type { XtermModules } from '../../src/window/xterm.ts';
-import { frameReader, parseHello } from '../../src/window/frames.ts';
+import { frameReader, parseHello, parseStarted } from '../../src/window/frames.ts';
 import { parsePidLine } from '../../src/window/pidline.ts';
 import { KEEPER, keeperSandbox, procStartOf, stillRuns, until } from './keeper.ts';
 import type { KeeperBox } from './keeper.ts';
@@ -56,13 +57,19 @@ export interface TestRegistry {
   /** Every state each terminal went through, as onChange saw it (consecutive repeats dropped). */
   states: Map<string, string[]>;
   /**
+   * Issue #199: the program of every keeper this registry heard of, by terminal id — from the T
+   * frames and hellos its connections read, and from `shells()` at each change — also of a shell
+   * that was never listed.
+   */
+  programs: Map<string, { pid: number; procStart: number }>;
+  /**
    * Drops the registry as a crashed server would leave it: every connection destroyed, nothing
    * parked; its further connects are refused. Its timers are stopped at the test's end.
    */
   drop(): void;
 }
 
-export interface RegistryBox extends KeeperBox {
+export interface RegistryBox extends Omit<KeeperBox, 'shellSpec'> {
   files: RuntimeFiles;
   keeperFile: string;
   modules: XtermModules;
@@ -85,6 +92,11 @@ export interface RegistryBox extends KeeperBox {
   }): TestRegistry;
   /** A spec for the stand-in in this box (argv, env, record), as keeperSandbox makes it. */
   spec(overrides?: Partial<KeeperSpec>): KeeperSpec;
+  /**
+   * Issue #199: a session's shell's spec for the stand-in shell (`file`, argv `-shell-standin`, no
+   * lock), belonging to terminal `of`, its opening stamp from `r`'s registry (`nextOpenedNs`).
+   */
+  shellSpec(r: TestRegistry, of: string, overrides?: Partial<ShellSpec>): ShellSpec;
   /**
    * The keeper of terminal `id`, checked before a test may signal it (hard rule): its .pid line
    * parses, its pid is a whole number above 1 that is neither this process nor its parent, it is a
@@ -150,6 +162,7 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
     const base = options.platform ?? kb.tp.platform;
     const sockets: Socket[] = [];
     const spawned: number[] = [];
+    const byId = new Map<string, { pid: number; procStart: number }>();
     /** Bytes of output records handed to a screen side, and the newest record number per terminal. */
     let handed = 0;
     const newest = new Map<string, number>();
@@ -193,6 +206,11 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
           const reader = frameReader();
           let position = 0;
           let id = '';
+          const program = (pid: number | null, procStart: number | null): void => {
+            if (pid === null || procStart === null || id === '') return;
+            programs.set(pid, procStart);
+            byId.set(id, { pid, procStart });
+          };
           const emit = socket.emit.bind(socket) as (event: string, ...args: unknown[]) => boolean;
           socket.emit = ((event: string, ...args: unknown[]) => {
             if (event === 'data' && args[0] instanceof Uint8Array) {
@@ -203,7 +221,11 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
                   if (hello.ok) {
                     id = hello.value.id;
                     position = hello.value.tailFrom - 1;
+                    program(hello.value.pid, hello.value.procStart);
                   }
+                } else if (frame.type === 'T') {
+                  const started = parseStarted(frame.payload);
+                  if (started.ok) program(started.value.pid, started.value.procStart);
                 } else if (frame.type === 'D' || frame.type === 'R') {
                   position += 1;
                   if (position > (newest.get(id) ?? 0)) {
@@ -274,6 +296,12 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
       },
     });
     created.onChange(() => {
+      for (const shell of created.shells()) {
+        if (shell.program !== null) {
+          programs.set(shell.program.pid, shell.program.procStart);
+          byId.set(shell.id, { ...shell.program });
+        }
+      }
       for (const term of created.list()) {
         remember(term);
         const seen = states.get(term.id) ?? [];
@@ -292,6 +320,7 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
       spawned,
       maxBacklog: () => worst,
       states,
+      programs: byId,
       drop() {
         refusing = true;
         for (const socket of sockets) {
@@ -322,7 +351,29 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
     process.kill(keeper.pid, signal);
   };
 
-  return { ...kb, files, keeperFile, modules, registry, spec: kb.spec, keeperOf, signalKeeper };
+  const shellSpec = (r: TestRegistry, of: string, overrides: Partial<ShellSpec> = {}): ShellSpec => {
+    const base = kb.shellSpec(overrides);
+    return {
+      ...base,
+      meta: {
+        ...base.meta,
+        of,
+        ...(overrides.meta === undefined ? { openedNs: String(r.registry.nextOpenedNs()) } : {}),
+      },
+    };
+  };
+
+  return {
+    ...kb,
+    files,
+    keeperFile,
+    modules,
+    registry,
+    spec: kb.spec,
+    shellSpec,
+    keeperOf,
+    signalKeeper,
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
