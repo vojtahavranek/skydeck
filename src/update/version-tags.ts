@@ -45,14 +45,15 @@ export function tagName(version: Version): string {
 }
 
 /**
- * `for-each-ref` of every tag: its full name, its object's type and id, and, for an annotated tag,
- * the type and id of the object it peels to; each field ends with a NUL, so no name can break a
- * record.
+ * `for-each-ref` of the tags whose name starts with `v` (no other tag can be a version tag, so none
+ * other uses up a reader's cap): the full name, the object's type and id, and, for an annotated
+ * tag, the type and id of the object it peels to; each field ends with a NUL, so no name can break
+ * a record.
  */
 export const TAGS_ARGS: readonly string[] = [
   'for-each-ref',
   '--format=%(refname)%00%(objecttype)%00%(objectname)%00%(*objecttype)%00%(*objectname)%00',
-  'refs/tags/',
+  'refs/tags/v*',
 ];
 
 /** A full object id: 40 hexadecimal digits (SHA-1), or 64 (SHA-256). */
@@ -61,14 +62,14 @@ const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 /**
  * The version tags of TAGS_ARGS' answer, by the commit they name: the highest of each commit's (a
  * tag whose object is not a commit, or whose name is not a version tag's, is none), and every
- * version tag's name (`names`, whatever its commit).
+ * version tag's name with the commit it names (`names`; null: its object is not a commit).
  */
 export function versionTagsOf(out: string): {
   byCommit: Map<string, Version>;
-  names: Set<string>;
+  names: Map<string, string | null>;
 } {
   const byCommit = new Map<string, Version>();
-  const names = new Set<string>();
+  const names = new Map<string, string | null>();
   // Five fields of a record, each ended by a NUL; records are separated by a line break.
   const fields = out.split('\0');
   for (let i = 0; i + 4 < fields.length; i += 5) {
@@ -83,9 +84,12 @@ export function versionTagsOf(out: string): {
     const name = refname.slice('refs/tags/'.length);
     const version = parseVersionTag(name);
     if (version === null) continue;
-    names.add(name);
     const commit = type === 'commit' ? id : peeledType === 'commit' ? peeledId : null;
-    if (commit === null || !OBJECT_ID.test(commit)) continue;
+    if (commit === null || !OBJECT_ID.test(commit)) {
+      names.set(name, null);
+      continue;
+    }
+    names.set(name, commit);
     const known = byCommit.get(commit);
     if (known === undefined || compareVersions(version, known) > 0) byCommit.set(commit, version);
   }
@@ -105,4 +109,19 @@ export function nearestVersion(
     if (version !== undefined) return { version, distance, commit };
   }
   return null;
+}
+
+/** The highest version tag on a first-parent history (`chain`); null when none carries one. */
+export function highestVersion(
+  chain: readonly string[],
+  byCommit: ReadonlyMap<string, Version>,
+): Version | null {
+  let highest: Version | null = null;
+  for (const commit of chain) {
+    const version = byCommit.get(commit);
+    if (version !== undefined && (highest === null || compareVersions(version, highest) > 0)) {
+      highest = version;
+    }
+  }
+  return highest;
 }

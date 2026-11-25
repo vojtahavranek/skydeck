@@ -158,6 +158,22 @@ describe("the version of a commit, on the real git (D1'')", () => {
     }
   });
 
+  test('only tags whose name starts with v are read: others neither count nor use up the cap', async (t) => {
+    const r = repo(t);
+    r.tag('v0.9.0');
+    for (const name of ['nightly', 'release-1', '1.0.0', 'x/v9.9.9']) r.tag(name);
+    assert.equal(TAGS_ARGS.at(-1), 'refs/tags/v*');
+    const listed = r.c.git(r.c.root, ...TAGS_ARGS);
+    assert.deepEqual(
+      listed
+        .split('\n')
+        .filter((line) => line !== '')
+        .map((line) => line.split('\0')[0]),
+      ['refs/tags/v0.9.0'],
+    );
+    assert.equal(await r.version(), '0.9.0');
+  });
+
   test('not a checkout, or a commit that is not there: no version', async (t) => {
     const r = repo(t);
     r.tag('v0.9.0');
@@ -300,7 +316,9 @@ describe('the helpers', () => {
     assert.deepEqual(byCommit.get(a), { major: 0, minor: 9, patch: 10 });
     assert.deepEqual(byCommit.get(b), { major: 1, minor: 0, patch: 0 });
     assert.equal(byCommit.size, 2);
-    assert.deepEqual([...names].sort(), ['v0.9.1', 'v0.9.10', 'v1.0.0', 'v2.0.0']);
+    assert.deepEqual([...names.keys()].sort(), ['v0.9.1', 'v0.9.10', 'v1.0.0', 'v2.0.0']);
+    assert.equal(names.get('v1.0.0'), b, 'the commit an annotated tag names');
+    assert.equal(names.get('v2.0.0'), null, 'a tag of a tree names no commit');
   });
 
   test('versionName: the version, else the short id', () => {

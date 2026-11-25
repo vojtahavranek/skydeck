@@ -11,7 +11,7 @@ import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { bumpOf, nextVersionTag, START } from '../../scripts/version-tag.ts';
+import { bumpOf, MAIN_REF, nextVersionTag, Refusal, START } from '../../scripts/version-tag.ts';
 import type { Bump } from '../../scripts/version-tag.ts';
 import { gitCheckout, insideSandbox } from '../helpers/git-checkout.ts';
 import type { GitCheckout } from '../helpers/git-checkout.ts';
@@ -149,34 +149,125 @@ describe("the tag a push makes (D1')", () => {
     assert.equal(await r.next(), 'v0.9.3');
   });
 
-  test('the tag it would make exists already (on another commit): none, nothing moved', async (t) => {
+  test('versions never go backwards: the next is after the HIGHEST tag of the history, the notes searched after the NEAREST tagged commit', async (t) => {
+    // The owner tags v1.0.0 by hand on a commit older than the nearest tag (the review's S1).
+    const r = repo(t);
+    const old = r.plain('old');
+    r.tag('v0.9.1');
+    r.plain('a');
+    r.tag('v0.9.2');
+    r.tag('v1.0.0', old);
+    r.plain('b');
+    assert.equal(await r.next(), 'v1.0.1');
+    r.c.commit(r.c.root, 'a note', { 'docs/news/2026-11-25-thing.md': note('A thing') });
+    assert.equal(
+      await r.next(),
+      'v1.1.0',
+      'a note after the nearest tag: the next minor of the highest',
+    );
+
+    // The head tagged v1.0.0 by hand while a run had already named v0.9.8 for the next commit (S1b).
+    const q = repo(t);
+    q.tag('v0.9.7');
+    q.plain('x');
+    q.tag('v1.0.0');
+    q.plain('y');
+    q.tag('v0.9.8');
+    q.plain('z');
+    assert.equal(await q.next(), 'v1.0.1', 'not v0.9.9');
+  });
+
+  test("a note added in a folder whose name holds a line break is no note (git's -z output is split at NUL only)", async (t) => {
     const r = repo(t);
     r.tag('v0.9.0');
-    const a = r.plain('a');
+    r.c.commit(r.c.root, 'odd', { 'docs/news/x\ndocs/news/2026-11-29-g.md': note('G') });
+    assert.equal(await r.next(), 'v0.9.1');
+  });
+
+  test('the name it computes stands on a commit later on main (this one was passed over): none', async (t) => {
+    const r = repo(t);
+    r.tag('v0.9.0');
+    const passed = r.plain('passed over');
+    r.plain('later');
+    r.tag('v0.9.1'); // the run of the later push came first
+    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main'); // main as the run fetches it
+    r.c.git(r.c.root, 'checkout', '--quiet', '--detach', passed);
+    assert.equal(await r.next(), null);
+  });
+
+  test('the name it computes stands on another commit (a stray tag, main rewritten): refused, the tag and the commit named, never a silent stall', async (t) => {
+    const r = repo(t);
+    r.tag('v0.9.0');
+    r.plain('a');
     r.c.git(r.c.root, 'checkout', '--quiet', '-b', 'elsewhere');
-    r.plain('x');
+    const stray = r.plain('x');
     r.tag('v0.9.1');
     r.c.git(r.c.root, 'checkout', '--quiet', 'main');
-    assert.equal(r.c.id(), a);
-    assert.equal(await r.next(), null);
+    for (let push = 0; push < 2; push += 1) {
+      await assert.rejects(r.next(), (error: unknown) => {
+        assert.ok(error instanceof Refusal);
+        assert.match(
+          error.message,
+          new RegExp(`tag v0\\.9\\.1 stands already on commit ${stray.slice(0, 7)}`),
+        );
+        assert.match(error.message, /git push --delete origin v0\.9\.1/);
+        assert.match(error.message, /run the workflow by hand with bump minor/);
+        return true;
+      });
+      r.plain(`another ${push}`);
+    }
+    // Stepping past it by hand: the next minor.
+    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main');
+    assert.equal(await r.next('minor'), 'v0.10.0');
   });
 });
 
 describe("a bump by hand (D1')", () => {
-  test('minor and major from the nearest tag; also on a tagged head (the higher one counts); none at all: the start', async (t) => {
+  /** The tag a run by hand names, once main as fetched is at HEAD (as the workflow's checkout has it). */
+  async function byHand(r: Repo, bump: Bump): Promise<string | null> {
+    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main');
+    return r.next(bump);
+  }
+
+  test('minor and major from the highest tag; also on a tagged head (the higher one counts); none at all: the start', async (t) => {
     const r = repo(t);
-    assert.equal(await r.next('minor'), 'v0.9.0');
-    assert.equal(await r.next('major'), 'v0.9.0');
+    assert.equal(await byHand(r, 'minor'), 'v0.9.0');
+    assert.equal(await byHand(r, 'major'), 'v0.9.0');
     r.tag('v0.9.5');
     r.plain('a');
-    assert.equal(await r.next('minor'), 'v0.10.0');
-    assert.equal(await r.next('major'), 'v1.0.0');
+    assert.equal(await byHand(r, 'minor'), 'v0.10.0');
+    assert.equal(await byHand(r, 'major'), 'v1.0.0');
     r.tag('v0.9.6');
     assert.equal(await r.next(), null, 'a push: tagged already');
-    assert.equal(await r.next('minor'), 'v0.10.0', 'by hand on a tagged head');
+    assert.equal(await byHand(r, 'minor'), 'v0.10.0', 'by hand on a tagged head');
     r.tag('v0.10.0');
-    assert.equal(await r.next('minor'), 'v0.11.0', 'the higher of the head');
-    assert.equal(await r.next('major'), 'v1.0.0');
+    assert.equal(await byHand(r, 'minor'), 'v0.11.0', 'the higher of the head');
+    assert.equal(await byHand(r, 'major'), 'v1.0.0');
+  });
+
+  test('refused unless the commit is the head of main as fetched: main moved, or an old run is run again', async (t) => {
+    const r = repo(t);
+    r.tag('v0.9.0');
+    const old = r.plain('a');
+    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main');
+    assert.equal(await r.next('minor'), 'v0.10.0');
+    r.plain('b');
+    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main');
+    r.c.git(r.c.root, 'checkout', '--quiet', '--detach', old); // the old run's commit
+    for (const bump of ['minor', 'major'] as const) {
+      await assert.rejects(r.next(bump), (error: unknown) => {
+        assert.ok(error instanceof Refusal);
+        assert.match(
+          error.message,
+          /^this run is not on the head of main .*start the workflow by hand again, on main$/,
+        );
+        return true;
+      });
+    }
+    r.c.git(r.c.root, 'checkout', '--quiet', 'main');
+    r.c.git(r.c.root, 'update-ref', '-d', MAIN_REF);
+    await assert.rejects(r.next('minor'), Refusal, 'no main fetched at all');
+    assert.equal(await r.next(), 'v0.9.1', 'a push does not need it');
   });
 
   test('bumpOf: empty, minor or major; anything else is none', () => {
@@ -225,5 +316,29 @@ describe('the entry the workflow runs', () => {
     assert.equal(outside.status, 1);
     assert.equal(outside.stdout, '');
     assert.match(outside.stderr, /^next-version-tag: git /);
+  });
+
+  test('a refusal: exit 1, nothing on standard output, its line on standard error', (t) => {
+    const s = sandbox(t);
+    const c = gitCheckout(s);
+    c.git(c.root, 'tag', 'v0.9.0');
+    c.git(c.root, 'checkout', '--quiet', '-b', 'elsewhere');
+    c.commit(c.root, 'x', { 'x.txt': 'x\n' });
+    c.git(c.root, 'tag', 'v0.9.1'); // the next name on a commit of another branch
+    c.git(c.root, 'checkout', '--quiet', 'main');
+    c.commit(c.root, 'a', { 'a.txt': 'a\n' });
+    const refused = entry(c, s);
+    assert.equal(refused.status, 1);
+    assert.equal(refused.stdout, '');
+    assert.match(
+      refused.stderr,
+      /^next-version-tag: the next version's tag v0\.9\.1 stands already on commit /,
+    );
+
+    // By hand on a commit that is not main's head as fetched (origin/main is behind HEAD here).
+    const moved = entry(c, s, 'minor');
+    assert.equal(moved.status, 1);
+    assert.equal(moved.stdout, '');
+    assert.match(moved.stderr, /^next-version-tag: this run is not on the head of main /);
   });
 });

@@ -14,8 +14,15 @@ name: Version
 # - no text of the event (a commit message, a branch name, the input) in a `run:` line: the input
 #   reaches the script through `env:`, the script takes only `minor`, `major` or nothing, and the
 #   tag's name is made of numbers alone; it reaches the push through the step's output and `env:`;
-# - a tag is only ever created: never `--force`, never a delete, never a branch written; when the
-#   tag exists already the script names none and the run ends green having done nothing.
+# - a tag is only ever created: never `--force`, never a delete, never a branch written; the push
+#   step refuses a name that is not exactly `v<n>.<n>.<n>` before it makes anything;
+# - only in this repository: a fork that turns Actions on makes no version tags of its own (they
+#   would clash with this repository's when the fork fetches them);
+# - versions never go backwards (the next one follows the highest version tag of the history), and
+#   a run never stalls in silence: when the next version's tag stands already on another commit,
+#   the run ends green only when that commit is later on main (this one was passed over), else it
+#   fails with a line that names the tag and says what to do; a run by hand fails when main has
+#   moved since it was started (an old run run again).
 # Runs queue in one group and are never cancelled. GitHub keeps at most one run waiting in a group:
 # a push that comes while one waits takes its place. Nothing is lost by it: the next run tags its
 # own commit by the rule over everything since the nearest tag.
@@ -40,8 +47,8 @@ concurrency:
 jobs:
   tag:
     name: tag
-    # Run by hand on another branch: nothing (a version tag is only ever on main).
-    if: github.ref == 'refs/heads/main'
+    # Only this repository, only main (run by hand on another branch: nothing).
+    if: github.repository == 'vojtahavranek/skydeck' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -52,6 +59,7 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
+          package-manager-cache: false
       - name: Name the tag
         id: next
         env:
@@ -64,5 +72,6 @@ jobs:
         env:
           TAG: ${{ steps.next.outputs.tag }}
         run: |
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "not a version tag: $TAG"; exit 1; }
           git tag "$TAG" HEAD
           git push origin "refs/tags/$TAG"
