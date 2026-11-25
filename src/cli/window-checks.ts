@@ -362,7 +362,7 @@ function checkUpdate(view: WindowView, report: Report): void {
   if (entry.head !== null && commit !== null && entry.head !== commit) {
     report(
       'info',
-      `update: last looked ${ago(entry.lookedAtNs)} at ${short(entry.head)}, which is not the commit this checkout is at now; the window's server checks again when it starts`,
+      `update: last looked ${ago(entry.lookedAtNs)} at ${entry.headVersion === null ? short(entry.head) : `${entry.headVersion} (${short(entry.head)})`}, which is not the commit this checkout is at now; the window's server checks again when it starts`,
     );
     return;
   }

@@ -9,6 +9,7 @@ import type { TestContext } from 'node:test';
 import type { Platform } from '../../src/platform/types.ts';
 import { gitOn } from '../../src/update/git.ts';
 import { lookForUpdate, report } from '../../src/update/look.ts';
+import { TAGS_ARGS } from '../../src/update/version-tags.ts';
 import type { Fetch, Looked } from '../../src/update/look.ts';
 import { testPlatform } from '../helpers/platform.ts';
 import {
@@ -19,6 +20,7 @@ import {
   scriptedGit,
   scriptedRepo,
   subCommand,
+  VERSION_CALLS,
 } from '../helpers/update.ts';
 import type { ScriptedRepo } from '../helpers/update.ts';
 
@@ -198,7 +200,55 @@ describe("lookForUpdate, the window's order (tolerant)", () => {
       'log',
       'ls-tree',
       'ls-tree',
+      ...VERSION_CALLS,
     ]);
+  });
+
+  test("the versions of both commits, each from its own history's nearest tag; the header of the report names them beside the ids", async (t) => {
+    const l = looker(t, {
+      versions: {
+        [OLD]: { tag: 'v0.9.16', distance: 0 },
+        [NEW]: { tag: 'v0.9.16', distance: 2 },
+      },
+    });
+
+    const { update } = known(await l.look('none', true));
+
+    assert.equal(update.oldVersion, '0.9.16');
+    assert.equal(update.newVersion, '0.9.16+2', 'its tag has not arrived yet');
+    assert.equal(
+      report(update)[0],
+      '1 new commit on origin/main (0.9.16 → 0.9.16+2, 0123456..fedcba9):',
+    );
+  });
+
+  test('a version whose calls fail or time out costs the look nothing: no version, the rest as it was', async (t) => {
+    const versions = {
+      [OLD]: { tag: 'v0.9.16', distance: 0 },
+      [NEW]: { tag: 'v0.9.19', distance: 0 },
+    };
+    const read = known(await looker(t, { versions }).look('none', true)).update;
+    assert.equal(read.newVersion, '0.9.19');
+    const expected = { ...read, oldVersion: null, newVersion: null };
+    for (const answer of [
+      { code: 128, stderr: 'fatal: no\n' },
+      { code: null, timedOut: true },
+    ]) {
+      for (const failing of [
+        {
+          [`rev-list --first-parent --max-count=10000 ${OLD}`]: answer,
+          [`rev-list --first-parent --max-count=10000 ${NEW}`]: answer,
+        },
+        { [TAGS_ARGS.join(' ')]: answer },
+      ]) {
+        const looked = await looker(t, { versions, answers: failing }).look('none', true);
+        assert.deepEqual(known(looked).update, expected, 'no version; nothing else changed');
+        assert.equal(looked.kind === 'known' && looked.blocked, null);
+      }
+    }
+    const none = known(await looker(t).look('none', true)).update;
+    assert.equal(none.oldVersion, null, 'no version tag reachable');
+    assert.equal(report(none)[0], '1 new commit on origin/main (0123456..fedcba9):', 'as before');
   });
 
   test('a quiet fetch that fails or times out: known, with its line, the facts those of the ref as it was', async (t) => {

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { dispatch, main } from '../../src/cli/main.ts';
-import pkg from '../../package.json' with { type: 'json' };
 import { testContext } from '../helpers/context.ts';
 
 const commandsDir = new URL('../fixtures/commands/', import.meta.url);
@@ -18,7 +17,7 @@ describe('main', () => {
       const code = await main([flag], c.ctx);
 
       assert.equal(code, 0);
-      assert.equal(c.stdout(), `${pkg.version} (commit unknown)\n`);
+      assert.equal(c.stdout(), 'unversioned (commit unknown)\n');
       assert.equal(c.stderr(), '');
     });
   }

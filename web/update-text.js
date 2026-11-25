@@ -38,25 +38,21 @@ export function offersUpdateNow(check) {
 
 /**
  * The dialog's running form while an update runs (every page, connected and told `applying`), in
- * runs: the commit's short id in the terminal's font.
- * @param {string} to the commit's full id
+ * runs: the name the server gives the commit (its version, else its short id).
+ * @param {string} name `applying.name`
  * @returns {TextRun[]}
  */
-export function runningRuns(to) {
-  return [
-    plain('skydeck is being updated to '),
-    code(to.slice(0, 7)),
-    plain('. The window comes back by itself.'),
-  ];
+export function runningRuns(name) {
+  return [plain(`skydeck is being updated to ${name}. The window comes back by itself.`)];
 }
 
 /**
  * The running form's line as text.
- * @param {string} to the commit's full id
+ * @param {string} name `applying.name`
  * @returns {string}
  */
-export function runningLine(to) {
-  return runningRuns(to)
+export function runningLine(name) {
+  return runningRuns(name)
     .map((run) => run.text)
     .join('');
 }
@@ -82,7 +78,7 @@ export function awayParts(since, log) {
 
 /**
  * The result bar's text: how the last update from the window ended, in the server's words
- * (`updated to <id>`, or why not).
+ * (`updated to <version>`, or why not).
  * @param {{ ok: boolean; text: string }} result
  * @returns {string}
  */
@@ -170,7 +166,8 @@ const SET_RIGHT_RUNS = [
  * note (`<n> changes`, open from the start, when it brings no note; none when every commit adds
  * one); the database note when it changes the database's upgrade steps; why it cannot be applied
  * as it is and the command once that is set right, for one that is blocked; a refusal of `Update
- * now`; and small at the bottom `<old> → <new> on <upstream>` and, for one that can be applied,
+ * now`; and small at the bottom `<old version> → <new version> on <upstream> (<old> → <new>)`, the
+ * ids in brackets (the ids alone when the server knows neither version) and, for one that can be applied,
  * the command for a terminal. Up to date: its summary; one that cannot tell: why, and the command
  * once that is set right; none yet: that no check was made.
  * @param {UpdateCheckPayload | null} check
@@ -244,9 +241,19 @@ export function dialogModel(check, refusal = null) {
       { kind: 'line', runs: SET_RIGHT_RUNS },
     );
   }
+  const to = check.to.slice(0, 7);
   after.push(...refused, {
     kind: 'meta',
-    runs: [code(from), plain(' → '), code(check.to.slice(0, 7)), plain(` on ${check.upstream}`)],
+    runs:
+      check.versions === null
+        ? [code(from), plain(' → '), code(to), plain(` on ${check.upstream}`)]
+        : [
+            plain(`${check.versions} on ${check.upstream} (`),
+            code(from),
+            plain(' → '),
+            code(to),
+            plain(')'),
+          ],
   });
   if (check.blocked === null) {
     after.push({ kind: 'meta', runs: [plain('In a terminal instead: '), code('skydeck update')] });
@@ -269,9 +276,10 @@ export function blockText(block) {
 }
 
 /**
- * The settings screen's block: when the last check ended and what it says; with a failed last
- * check, first when and why, then what is known and from when (the last fetch that worked);
- * `Checking…` while one runs.
+ * The settings screen's block: first `skydeck <version>`, the version the server gives (none
+ * before it does); then when the last check ended and what it says; with a failed last check,
+ * first when and why, then what is known and from when (the last fetch that worked); `Checking…`
+ * while one runs.
  * `nowNs`: the server's time now, as the list gives it ('' before the first list: no age).
  * @param {UpdatePayload | null} update
  * @param {string} nowNs
@@ -285,6 +293,7 @@ export function settingsLines(update, nowNs) {
   };
   /** @type {string[]} */
   const lines = [];
+  if (update != null && update.version !== null) lines.push(`skydeck ${update.version}`);
   const check = update?.check ?? null;
   if (update === null || check === null) {
     lines.push(UPDATE_TEXTS.never);

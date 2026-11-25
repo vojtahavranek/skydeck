@@ -36,7 +36,8 @@
 // DOM as text, a value only as a control's value or as text, each isolated for right-to-left text.
 //
 // Follow-up F38 (S2 12.13, 16.5): the group Updates holds, after its choice, the extra block of the
-// check for a newer skydeck — when the window's server last looked and what it found, a failed
+// check for a newer skydeck — the version it runs (`skydeck 0.9.16`, the server's), when the
+// window's server last looked and what it found, a failed
 // last check and why, `Checking…` while one runs (web/update-text.js) —, and `Check now`
 // (`deps.checkNow`, `act update-check`), which works whatever the choice `window.updateCheck`
 // says. It follows every state the page is given (`updateState`), also while the screen is closed,

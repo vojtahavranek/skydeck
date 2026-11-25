@@ -127,8 +127,11 @@ export interface OutputOptions {
 export interface Git {
   /** The checkout (`platform.appRoot`). */
   root: string;
-  /** `git -C <root> <args>` with a timeout (GIT_MS unless given); a SkydeckError when git is not found. */
-  run(args: readonly string[], timeoutMs?: number): Promise<RunResult>;
+  /**
+   * `git -C <root> <args>` with a timeout (GIT_MS unless given) and `options` as for output(); a
+   * SkydeckError when git is not found.
+   */
+  run(args: readonly string[], timeoutMs?: number, options?: OutputOptions): Promise<RunResult>;
   /**
    * From now on every call runs in a session of its own (RunOptions.newSession): the terminal's
    * Ctrl+C and hang-up reach none of them. `skydeck update` calls it right before the merge, so that
@@ -183,7 +186,7 @@ export function gitOn(platform: Platform, root: string, gitOptions: GitOptions =
   };
   return {
     root,
-    run: (args, timeoutMs) => run(args, timeoutMs),
+    run: (args, timeoutMs, options) => run(args, timeoutMs, options),
     ownSessions() {
       ownSessions = true;
     },

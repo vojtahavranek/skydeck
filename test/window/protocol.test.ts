@@ -1615,6 +1615,7 @@ describe("parsePageMessage: F38's acts (S2 16.5)", () => {
         summary: '1 new commit on origin/main',
         from: '0'.repeat(40),
         to: 'f'.repeat(40),
+        versions: '0.9.16 → 0.9.17',
         upstream: 'origin/main',
         notes: [
           {
@@ -1635,9 +1636,10 @@ describe("parsePageMessage: F38's acts (S2 16.5)", () => {
       },
       fetchedAtNs: '1794474000000000000',
       failure: { atNs: '1794474000000000001', line: 'git fetch from origin failed: x' },
-      applying: { to: 'f'.repeat(40), sinceNs: '1794474000000000002' },
+      applying: { to: 'f'.repeat(40), sinceNs: '1794474000000000002', name: '0.9.17' },
+      version: '0.9.16',
       log: '/home/you/.local/state/skydeck/update.log',
-      result: { ok: true, text: 'updated to fffffff' },
+      result: { ok: true, text: 'updated to 0.9.17' },
     };
     const messages: ServerMessage[] = [
       { t: 'update', update } satisfies UpdateMessage,

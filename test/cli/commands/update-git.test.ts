@@ -136,6 +136,45 @@ describe('skydeck update with the real git: applying (U5, U8)', () => {
     );
   });
 
+  test('the versions: the header and the up-to-date line name them beside the ids, the result line names the new one; a tag the remote made arrives with the fetch', async (t) => {
+    const r = real(t);
+    // The workflow's tag on the remote, fetched by the checkout.
+    r.c.git(r.c.other, 'tag', 'v0.9.1');
+    r.c.git(r.c.other, 'push', '--quiet', 'origin', 'v0.9.1');
+    const old = r.c.id();
+
+    const up = await r.update();
+    assert.equal(up.code, 0, up.stderr);
+    assert.equal(
+      up.stdout,
+      `skydeck is up to date (main at 0.9.1, ${short(old)}, as origin/main)\n`,
+    );
+
+    const first = r.c.push('a note', { 'docs/news/2026-11-25-a.md': '# A\n\nIt says so.\n' });
+    r.c.git(r.c.other, 'tag', 'v0.10.0');
+    r.c.git(r.c.other, 'push', '--quiet', 'origin', 'v0.10.0');
+    const made = r.c.push('a fix', { 'c.txt': 'c\n' }); // its own tag not made yet
+    const checked = await r.update(['--check']);
+    assert.equal(checked.code, 0, checked.stderr);
+    assert.equal(
+      checked.stdout,
+      `2 new commits on origin/main (0.9.1 → 0.10.0+1, ${short(old)}..${short(made)}):\n` +
+        `  ${short(made)}  a fix\n  ${short(first)}  a note\n` +
+        'what is new:\n  A\n' +
+        'run skydeck update to apply it\n',
+    );
+    assert.equal(
+      r.c.id(),
+      old,
+      'the version of the new commit was read before anything was applied',
+    );
+
+    const u = await r.update();
+    assert.equal(u.code, 0, u.stderr);
+    assert.match(u.stdout, /\nupdated to 0\.10\.0\+1\n$/);
+    assert.equal(r.c.id(), made);
+  });
+
   test('the upstream on a remote not named origin', async (t) => {
     const r = real(t, { remoteName: 'upstream', branch: 'trunk' });
     const old = r.c.id();

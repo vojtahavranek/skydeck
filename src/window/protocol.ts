@@ -824,9 +824,9 @@ export interface NotePayload {
 }
 /**
  * F38 (S2 16.5): what the last look for a newer skydeck says. `summary`: the look's line for
- * `cannot`; `skydeck is up to date (<branch> at <id>, as <upstream>)` or `nothing new on …` for
- * `current`; `<n> new commits on <upstream>` for `available`, with `from` and `to` HEAD's and the
- * new commit's full ids, `upstream` its short name, `notes` the notes of what is new it brings
+ * `cannot`; `skydeck is up to date (<branch> at <version>, <id>, as <upstream>)` or `nothing new on
+ * …` for `current`; `<n> new commits on <upstream>` for `available`, with `from` and `to` HEAD's
+ * and the new commit's full ids, `versions` theirs, `upstream` its short name, `notes` the notes of what is new it brings
  * (newest first, at most 20) and `moreNotes` how many more, `others` the subjects of the newest
  * commits that add none (at most 20) and `otherCount` how many there are, `upgradesDatabase`
  * whether it changes the database's upgrade steps, and `blocked` why it cannot be applied as it
@@ -840,6 +840,8 @@ export type UpdateCheckPayload =
       summary: string;
       from: string;
       to: string;
+      /** The versions it goes between, `0.9.16 → 0.9.19`; null: neither is known. */
+      versions: string | null;
       upstream: string;
       notes: NotePayload[];
       moreNotes: number;
@@ -862,11 +864,14 @@ export interface UpdatePayload {
    *  clipped); null once a check ended without a failure. */
   failure: { atNs: NsText; line: string } | null;
   /** Milestone 2: an update started from a window runs — to which commit (its full id), since
-   *  when; null: none. */
-  applying: { to: string; sinceNs: NsText } | null;
+   *  when, and its name for the running form (its version, else its short id); null: none. */
+  applying: { to: string; sinceNs: NsText; name: string } | null;
+  /** The version of the server's checkout (`0.9.16`, or `0.9.16+2` past its tag), for the settings
+   *  screen: read at the server's first tick, then each look's; null until then, and without one. */
+  version: string | null;
   /** The update's log, `<stateDir>/update.log`: where a page that loses its server sends the user. */
   log: string;
-  /** How the last update from the window ended (`updated to <id>`, or why not), until a page
+  /** How the last update from the window ended (`updated to <version>`, or why not), until a page
    *  dismisses it (`update-seen`); null: nothing to say. */
   result: { ok: boolean; text: string } | null;
 }

@@ -25,6 +25,7 @@ import {
   OLD,
   scriptedGit,
   scriptedRepo,
+  VERSION_CALLS,
 } from '../helpers/update.ts';
 import type { ScriptedRepo } from '../helpers/update.ts';
 
@@ -375,8 +376,8 @@ describe('the limits of the notes, on the scripted git', () => {
     const offline = l.all.filter((call) => call.options?.env?.['GIT_NO_LAZY_FETCH'] === '1');
     assert.deepEqual(
       offline.map((call) => `${sub(call)} ${call.args.includes('blob') ? 'blob' : ''}`.trim()),
-      ['cat-file', 'ls-tree', 'cat-file blob', 'log'],
-      'the old commit has no tree of notes: one listing',
+      ['cat-file', 'ls-tree', 'cat-file blob', 'log', ...VERSION_CALLS],
+      'the old commit has no tree of notes: one listing; then the versions, offline too',
     );
     assert.ok(
       l.all

@@ -1,0 +1,81 @@
+name: Version
+
+# The version tags (design.md 8, the version line; design-step-2.md 17.5): at every push to main,
+# this workflow tags the pushed commit `v<major>.<minor>.<patch>`, the next version after the
+# highest version tag on its first-parent history: the next minor when the commits since the
+# nearest tagged one add a note in docs/news/, else the next patch; the start, v0.9.0, when there is
+# none. Run by hand
+# (Actions > Version > Run workflow, on main) with `bump` it makes the next minor or major. The
+# rules are scripts/version-tag.ts, which the suite tests; this file only runs its entry and pushes
+# the one tag it names.
+#
+# Safe by construction, and held so by test/version-workflow.test.ts:
+# - only these two triggers (never a pull request's): the code run is always main's own;
+# - `contents: write` and nothing else, the job's own token, no other secret, no cache;
+# - no text of the event (a commit message, a branch name, the input) in a `run:` line: the input
+#   reaches the script through `env:`, the script takes only `minor`, `major` or nothing, and the
+#   tag's name is made of numbers alone; it reaches the push through the step's output and `env:`;
+# - a tag is only ever created: never `--force`, never a delete, never a branch written; the push
+#   step refuses a name that is not exactly `v<n>.<n>.<n>` before it makes anything;
+# - only in this repository: a fork that turns Actions on makes no version tags of its own (they
+#   would clash with this repository's when the fork fetches them);
+# - versions never go backwards (the next one follows the highest version tag of the history), and
+#   a run never stalls in silence: a pushed commit after which main already carries a version tag
+#   (it was passed over) gets none, green; when the next version's tag stands already on another
+#   commit, the run fails with a line that names the tag and says what to do; a run by hand fails
+#   when main has moved since it was started (an old run run again), and every run fails when its
+#   checkout cannot see main.
+# The file holds printable ASCII and line feeds only (the test refuses anything else: a carriage
+# return or another line break YAML takes could hide a line from it).
+# Runs queue in one group and are never cancelled. GitHub keeps at most one run waiting in a group:
+# a push that comes while one waits takes its place. Nothing is lost by it: the next run tags its
+# own commit by the rule over everything since the nearest tagged commit, after the highest tag.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'The version to make on the head of main'
+        type: choice
+        options: [minor, major]
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: version
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    name: tag
+    # Only this repository, only main (run by hand on another branch: nothing).
+    if: github.repository == 'vojtahavranek/skydeck' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Name the tag
+        id: next
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          tag="$(node scripts/next-version-tag.ts)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Make the tag and push it
+        if: steps.next.outputs.tag != ''
+        env:
+          TAG: ${{ steps.next.outputs.tag }}
+        run: |
+          [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || { echo "not a version tag: $TAG"; exit 1; }
+          git tag "$TAG" HEAD
+          git push origin "refs/tags/$TAG"

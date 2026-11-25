@@ -1268,8 +1268,8 @@ describe('real platform', () => {
 
     assert.equal(result.code, 0, result.stderr);
     // No git on the sandbox's PATH, so this checkout's own history is never asked (follow-up
-    // F20; the commit is test/cli/version.test.ts's, on throwaway checkouts).
-    assert.match(result.stdout, /^\d+\.\d+\.\d+ \(commit unknown\)\n$/);
+    // F20; the commit is test/cli/version.test.ts's, on throwaway checkouts): no version either.
+    assert.match(result.stdout, /^unversioned \(commit unknown\)\n$/);
   });
 
   test('appRoot is the checkout: no trailing slash, with bin/skydeck inside', () => {

@@ -2137,6 +2137,7 @@ describe("F38's update acts (S2 16.5)", () => {
     fetchedAtNs: '1',
     failure: null,
     applying: null,
+    version: '0.9.16',
     log: '/state/update.log',
     result: null,
   };
@@ -2169,7 +2170,7 @@ describe("F38's update acts (S2 16.5)", () => {
           calls.push(`apply ${to}`);
           return Promise.resolve(
             to === TO
-              ? { ok: true, update: { ...STATE, applying: { to, sinceNs: '3' } } }
+              ? { ok: true, update: { ...STATE, applying: { to, sinceNs: '3', name: '0.9.17' } } }
               : { ok: false, error: 'an update is already running', update: STATE },
           );
         },
@@ -2196,7 +2197,7 @@ describe("F38's update acts (S2 16.5)", () => {
     assert.deepEqual(looked, { ...ok(42), update: STATE });
     assert.deepEqual(applied, {
       ...ok(43),
-      update: { ...STATE, applying: { to: TO, sinceNs: '3' } },
+      update: { ...STATE, applying: { to: TO, sinceNs: '3', name: '0.9.17' } },
     });
     assert.deepEqual(refusedApply, {
       ...refused(44, 'an update is already running'),

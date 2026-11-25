@@ -12,6 +12,7 @@ import {
   CHECK_KEY,
   checkoutRoot,
   checkPayload,
+  nameOf,
   clearRun,
   readCheck,
   readCheckEntry,
@@ -37,6 +38,8 @@ function outcome(over: Partial<Available> = {}): Available {
     count: 2,
     from: OLD,
     to: NEW,
+    fromVersion: '0.9.16',
+    toVersion: '0.9.18',
     notes: [{ title: 'Parked: set a session aside', paragraphs: ['Press `w` on it.', 'More.'] }],
     moreNotes: 0,
     others: ['the new commit'],
@@ -49,16 +52,64 @@ function outcome(over: Partial<Available> = {}): Available {
 
 function available(over: Partial<CheckRecord> = {}): CheckRecord {
   return {
-    v: 2,
+    v: 3,
     root: ROOT,
     lookedAtNs: '1794474000000000000',
     checkedAtNs: '1794474000000000000',
     fetchedAtNs: '1794474000000000000',
     failure: null,
     head: OLD,
+    headVersion: '0.9.16',
     outcome: outcome(),
     ...over,
   };
+}
+
+/** The record of version 2, as the code before the versions wrote it (no version anywhere). */
+function version2(record: CheckRecord): Record<string, unknown> {
+  const { headVersion: _head, outcome: kept, ...rest } = record;
+  if (kept.kind !== 'available') return { ...rest, v: 2, outcome: kept };
+  const { fromVersion: _from, toVersion: _to, ...outcomeRest } = kept;
+  return { ...rest, v: 2, outcome: outcomeRest };
+}
+
+/**
+ * The strict reader of version 2 (src/update/record.ts at d92341b: the record's own keys, its
+ * version, the available outcome's keys), kept here to show that the code before the versions
+ * reads a record of version 3 as none.
+ */
+function readerOfVersion2(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const exactly = (of: object, keys: string[]): boolean =>
+    Object.keys(of).length === keys.length && keys.every((key) => Object.hasOwn(of, key));
+  const record = value as { v?: unknown; outcome?: { kind?: unknown } };
+  const keys = [
+    'v',
+    'root',
+    'lookedAtNs',
+    'checkedAtNs',
+    'fetchedAtNs',
+    'failure',
+    'head',
+    'outcome',
+  ];
+  if (!exactly(value, keys) || record.v !== 2) return false;
+  const { outcome: was } = record;
+  if (typeof was !== 'object' || was === null) return false;
+  if (was.kind !== 'available') return exactly(was, ['kind', 'line']);
+  return exactly(was, [
+    'kind',
+    'upstream',
+    'count',
+    'from',
+    'to',
+    'notes',
+    'moreNotes',
+    'others',
+    'otherCount',
+    'upgradesDatabase',
+    'blocked',
+  ]);
 }
 
 /** The record of the shape before (version 1), as the code before this change wrote it. */
@@ -97,8 +148,10 @@ function readerBefore(value: unknown): boolean {
 }
 
 describe('the check entry in kv', () => {
-  test('a round trip: what is written is read back, by its root', (t) => {
+  test('a round trip: what is written is read back, by its root (a version past its tag too)', (t) => {
     const d = testDeck(t);
+    writeCheck(d.deck.store, available({ headVersion: '0.9.16+3' }));
+    assert.equal(readCheckEntry(d.deck.store)?.headVersion, '0.9.16+3');
     const record = available({
       failure: { atNs: '1794474000000000001', line: 'git fetch failed' },
     });
@@ -125,7 +178,21 @@ describe('the check entry in kv', () => {
       '[]',
       'null',
       { ...good, v: 1 },
-      { ...good, v: 3 },
+      { ...good, v: 2 },
+      { ...good, v: 4 },
+      { ...good, headVersion: undefined },
+      { ...good, headVersion: 9 },
+      { ...good, headVersion: '0.9.16.1' },
+      { ...good, headVersion: 'v0.9' },
+      { ...good, headVersion: '0.09.1' },
+      { ...good, headVersion: '0.9' },
+      { ...good, headVersion: '0.9.16+0' },
+      { ...good, headVersion: '0.9.16+' },
+      { ...good, headVersion: '0.9.16-3' },
+      { ...good, head: null }, // a version without its commit
+      { ...good, outcome: { ...good.outcome, fromVersion: '1' } },
+      { ...good, outcome: { ...good.outcome, toVersion: 0.9 } },
+      { ...good, outcome: { ...good.outcome, toVersion: undefined } },
       { ...good, extra: 1 },
       { ...good, root: 5 },
       { ...good, root: '' },
@@ -210,7 +277,7 @@ describe('the check entry in kv', () => {
   });
 });
 
-describe('the shape before (version 1) and the code before', () => {
+describe('the shapes before (versions 1 and 2) and the code before', () => {
   test('a record of the shape before, of each outcome, reads as none (the server then makes its own check; doctor says what it says for none)', (t) => {
     const d = testDeck(t);
     for (const outcomeBefore of [
@@ -228,6 +295,24 @@ describe('the shape before (version 1) and the code before', () => {
       d.deck.store.setKv(CHECK_KEY, JSON.stringify(before(outcomeBefore)));
       assert.equal(readCheckEntry(d.deck.store), null, JSON.stringify(outcomeBefore));
       assert.equal(readCheck(d.deck.store, ROOT), null);
+    }
+  });
+
+  test('a record of version 2 (before the versions), of each outcome, reads as none; the reader of version 2 takes none of version 3', (t) => {
+    const d = testDeck(t);
+    for (const record of [
+      available(),
+      available({ headVersion: null, outcome: outcome({ fromVersion: null, toVersion: null }) }),
+      available({ outcome: { kind: 'current', line: 'up to date' } }),
+      available({ outcome: { kind: 'cannot', line: 'no' } }),
+    ]) {
+      const old = version2(record);
+      assert.equal(readerOfVersion2(old), true, 'the shape the code before wrote and read');
+      d.deck.store.setKv(CHECK_KEY, JSON.stringify(old));
+      assert.equal(readCheckEntry(d.deck.store), null, JSON.stringify(old));
+      writeCheck(d.deck.store, record);
+      assert.deepEqual(readCheckEntry(d.deck.store), record);
+      assert.equal(readerOfVersion2(JSON.parse(d.deck.store.getKv(CHECK_KEY) ?? 'null')), false);
     }
   });
 
@@ -333,12 +418,13 @@ describe('checkoutRoot', () => {
 });
 
 describe('checkPayload', () => {
-  test('each outcome: its state and summary; for an update its ids, the notes in runs, the other changes, the database and blocked', () => {
+  test('each outcome: its state and summary; for an update its ids and versions, the notes in runs, the other changes, the database and blocked', () => {
     assert.deepEqual(checkPayload(available()), {
       state: 'available',
       summary: '2 new commits on origin/main',
       from: OLD,
       to: NEW,
+      versions: '0.9.16 → 0.9.18',
       upstream: 'origin/main',
       notes: [
         {
@@ -374,6 +460,29 @@ describe('checkPayload', () => {
       state: 'cannot',
       summary: 'no',
     });
+  });
+
+  test("the versions: one not known is the commit's short id; neither known, none (the ids alone)", () => {
+    const versions = (fromVersion: string | null, toVersion: string | null): string | null => {
+      const payload = checkPayload(available({ outcome: outcome({ fromVersion, toVersion }) }));
+      return payload.state === 'available' ? payload.versions : 'not available';
+    };
+    assert.equal(versions('0.9.16+2', '0.10.0'), '0.9.16+2 → 0.10.0');
+    assert.equal(versions('0.9.16', null), '0.9.16 → fedcba9');
+    assert.equal(versions(null, '0.9.17'), '0123456 → 0.9.17');
+    assert.equal(versions(null, null), null);
+  });
+
+  test("nameOf: the version of `to` the record's available outcome names, else its short id", () => {
+    assert.equal(nameOf(available(), NEW), '0.9.18');
+    assert.equal(
+      nameOf(available({ outcome: outcome({ toVersion: '0.9.18+2' }) }), NEW),
+      '0.9.18+2',
+    );
+    assert.equal(nameOf(available({ outcome: outcome({ toVersion: null }) }), NEW), 'fedcba9');
+    assert.equal(nameOf(available(), OLD), '0123456', 'another commit than the one it lists');
+    assert.equal(nameOf(available({ outcome: { kind: 'current', line: 'x' } }), NEW), 'fedcba9');
+    assert.equal(nameOf(null, NEW), 'fedcba9');
   });
 
   test('texts are sanitised and clipped, a note to its limits', () => {

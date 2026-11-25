@@ -44,9 +44,10 @@ import {
   untrackedFiles,
 } from '../../update/git.ts';
 import type { Git } from '../../update/git.ts';
-import { lookForUpdate, report, short } from '../../update/look.ts';
+import { lookForUpdate, report, short, upToDateLine } from '../../update/look.ts';
 import type { Update } from '../../update/look.ts';
 import { checkoutRoot, COMMIT_ID, writeRun } from '../../update/record.ts';
+import { versionName } from '../../update/version.ts';
 import { parseCommandArgs } from '../args.ts';
 import type { ArgSpec } from '../args.ts';
 import type { Command } from '../command.ts';
@@ -120,9 +121,7 @@ async function update(
   const say = (line: string): void => ctx.io.stdout(`${line}\n`);
   const found = await whatIsNew(ctx, git, to);
   if (found.newId === found.oldId) {
-    say(
-      `skydeck is up to date (${sanitize(found.branch)} at ${short(found.oldId)}, as ${sanitize(found.upstream)})`,
-    );
+    say(upToDateLine(found));
     // F38: the window's server would otherwise say that the update ended without saying how.
     await record({
       state: 'failed',
@@ -349,13 +348,13 @@ async function apply(
     // 3. The window's server again, only when the stopped one had a page.
     await record({ state: 'applied' });
     const done = await bringBack(ctx, hold, step1, launcher, cwd, env, fromWindow);
-    // 4. The result.
-    const id = short(update.newId);
+    // 4. The result: the version the update brought (its short id when it has none).
+    const name = versionName(update.newVersion, update.newId);
     if (done === 'ok') {
-      hold.out(`updated to ${id}`);
+      hold.out(`updated to ${name}`);
       return EXIT.ok;
     }
-    hold.err(`updated to ${id}${unlessBack(done)}`);
+    hold.err(`updated to ${name}${unlessBack(done)}`);
     return EXIT.failure;
   } finally {
     hold.release();

@@ -67,7 +67,9 @@ async function world(
   const l = await launched(t, chromium, {
     window: { updateCheck: 'off' },
     server: (d) => {
+      // Its first commit carries the version tag v0.9.0: HEAD is 0.9.0, each commit past it +1.
       const c = gitCheckout(d.s);
+      c.git(c.root, 'tag', 'v0.9.0');
       prepare(c);
       made = c;
       return {
@@ -99,8 +101,8 @@ async function noticeIs(page: Page, shown: boolean, what: string): Promise<void>
   await until(async () => (await noticeShown(page)) === shown, what);
 }
 
-/** The lines of the settings screen's group Updates. */
-function blockLines(page: Page): Promise<string[]> {
+/** Every line of the settings screen's group Updates. */
+function allBlockLines(page: Page): Promise<string[]> {
   return readPage(
     page,
     () =>
@@ -109,6 +111,12 @@ function blockLines(page: Page): Promise<string[]> {
       ),
     null,
   );
+}
+
+/** The lines of the group Updates about the checks: those after its first, the version, once shown. */
+async function blockLines(page: Page): Promise<string[]> {
+  const lines = await allBlockLines(page);
+  return /^skydeck /.test(lines[0] ?? '') ? lines.slice(1) : lines;
 }
 
 /**
@@ -206,9 +214,19 @@ async function closeDialog(page: Page): Promise<void> {
   );
 }
 
-/** The bottom lines for the checkout's HEAD and its upstream now. */
+/** The version of `rev` in the world's checkout: 0.9.0, and `+n` n commits past the first. */
+function versionAt(w: World, rev: string): string {
+  const first = w.c.git(w.c.root, 'rev-list', '--max-parents=0', 'HEAD').trim();
+  const n = w.c.git(w.c.root, 'rev-list', '--first-parent', '--count', `${first}..${rev}`).trim();
+  return n === '0' ? '0.9.0' : `0.9.0+${n}`;
+}
+
+/**
+ * The bottom lines for the checkout's HEAD and its upstream now: their versions on the upstream,
+ * then the two ids.
+ */
 function bottom(w: World, blocked = false): string[] {
-  const range = `${w.c.id().slice(0, 7)} → ${w.c.id('origin/main').slice(0, 7)} on origin/main`;
+  const range = `${versionAt(w, 'HEAD')} → ${versionAt(w, 'origin/main')} on origin/main (${w.c.id().slice(0, 7)} → ${w.c.id('origin/main').slice(0, 7)})`;
   return blocked ? [range] : [range, 'In a terminal instead: skydeck update'];
 }
 
@@ -225,6 +243,11 @@ test('the update notice (F38, S2 16.5)', async (t) => {
       const w = await world(t, chromium);
       await openSettings(w.l.page);
       assert.deepEqual(await blockLines(w.l.page), ['No check was made yet.']);
+      // Above the lines of the checks, the version of the server's checkout.
+      await until(
+        async () => (await allBlockLines(w.l.page))[0] === 'skydeck 0.9.0',
+        'the group Updates names the version',
+      );
       const current = await checkNow(w.l.page, /^Last check: [01]s ago — skydeck is up to date/);
       assert.equal(current.length, 1);
       assert.equal(await noticeShown(w.l.page), false);
@@ -659,7 +682,7 @@ test('the update notice (F38, S2 16.5)', async (t) => {
       assert.equal(merged.length, 1);
       assert.match(
         merged[0] ?? '',
-        /^skydeck is up to date \(main at [0-9a-f]{7}, as origin\/main\)$/,
+        /^skydeck is up to date \(main at 0\.9\.0\+[0-9]+, [0-9a-f]{7}, as origin\/main\)$/,
       );
       await closeDialog(w.l.page);
       await noticeIs(w.l.page, false, 'the control goes on the first page');
