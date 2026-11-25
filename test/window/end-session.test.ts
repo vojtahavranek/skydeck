@@ -1,12 +1,13 @@
 // `act end-session` (follow-up F30; src/window/end-session.ts): every refusal, with nothing done;
 // done first, then the hang-up; the answer once the program ended (the end recorded, the terminal
-// closed) or after the wait; one hang-up while a request waits. A fake hub the test drives, on a
+// closed) or after the wait; one hang-up while a request waits. With `mark` `park` (the dialog
+// "Park", S2 12.15): its own refusal, parked first, then Done's end. A fake hub the test drives, on a
 // test deck whose session runs (a live holder in fake /proc, ingested from the spool).
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { loadRows } from '../../src/sessions/load.ts';
-import { markDone, markUndone } from '../../src/sessions/meta.ts';
+import { markDone, markParked, markUndone } from '../../src/sessions/meta.ts';
 import { refresh } from '../../src/sessions/refresh.ts';
 import { ENDED_IN_WINDOW } from '../../src/store/types.ts';
 import { createActions } from '../../src/window/actions.ts';
@@ -57,17 +58,22 @@ interface FakeHub extends TerminalHub {
   listeners(): number;
 }
 
-function fakeHub(d: TestDeck, terminals: TerminalInfo[]): FakeHub & { doneAtEnd: unknown[] } {
+function fakeHub(
+  d: TestDeck,
+  terminals: TerminalInfo[],
+): FakeHub & { doneAtEnd: unknown[]; parkedAtEnd: unknown[] } {
   const listeners = new Set<() => void>();
   const unused = (): never => {
     throw new Error('not used here');
   };
   const doneAtEnd: unknown[] = [];
-  const hub: FakeHub & { doneAtEnd: unknown[] } = {
+  const parkedAtEnd: unknown[] = [];
+  const hub: FakeHub & { doneAtEnd: unknown[]; parkedAtEnd: unknown[] } = {
     terminals,
     asked: [],
     endAnswer: 'ok',
     doneAtEnd,
+    parkedAtEnd,
     list: () => hub.terminals.map((term) => ({ ...term })),
     close(termId) {
       hub.asked.push(`close ${termId}`);
@@ -82,6 +88,7 @@ function fakeHub(d: TestDeck, terminals: TerminalInfo[]): FakeHub & { doneAtEnd:
     end(termId) {
       hub.asked.push(`end ${termId}`);
       doneAtEnd.push(d.deck.store.meta(S1)?.doneAtNs ?? null);
+      parkedAtEnd.push(d.deck.store.meta(S1)?.parkedAtNs ?? null);
       return hub.endAnswer;
     },
     onChange(listener) {
@@ -538,5 +545,168 @@ describe('act end-session: done, then the hang-up', () => {
       h.hub.terminals.map((term) => term.id),
       ['f6e5d4c3b2a1'],
     );
+  });
+});
+
+/**
+ * The answer of `pending`, never a hang: once the act's own steps have run (a macrotask), the fake
+ * clock passes the wait, so a request that should have been refused and was not answers (`ended`
+ * false) and fails its assertion instead of waiting for ever.
+ */
+async function noHang(d: TestDeck, pending: Promise<ResultMessage>): Promise<ResultMessage> {
+  await new Promise((resolve) => setImmediate(resolve));
+  d.clock.advanceMs(10_000);
+  return pending;
+}
+
+const endAndPark = (id = 9, term = TERM, sessionId = S1): ActMessage => ({
+  t: 'act',
+  id,
+  kind: 'end-session',
+  term,
+  sessionId,
+  mark: 'park',
+});
+
+describe('act end-session with the mark `park` (the dialog "Park")', () => {
+  test("Done's refusals, nothing parked: a terminal that cannot end it, one that shows another session, a holder that is not its", async (t) => {
+    for (const [terminals, error] of [
+      [[info({ endable: false })], 'skydeck cannot end this one: end it in its terminal'],
+      [[info({ sessionId: S2 })], 'that terminal shows another session now'],
+      [[info({ program: { pid: 6262, procStart: 77 } })], 'it does not run in that terminal'],
+    ] as [TerminalInfo[], string][]) {
+      const d = running(t);
+      const h = harness(d, terminals);
+      assert.deepEqual(await noHang(d, h.act(endAndPark())), refused(9, error));
+      assert.equal(d.deck.store.meta(S1)?.parkedAtNs ?? null, null, 'not parked');
+      assert.deepEqual(h.hub.asked, [], 'nothing sent');
+      assert.deepEqual(h.told, []);
+    }
+  });
+
+  test('a session parked already (from another page) is not ended, and keeps its first time', async (t) => {
+    const d = running(t);
+    const row = loadRows(d.deck).find((one) => one.id === S1);
+    assert.ok(row !== undefined);
+    markParked(d.deck, row);
+    const first = d.deck.store.meta(S1)?.parkedAtNs;
+    const h = harness(d);
+    assert.deepEqual(await noHang(d, h.act(endAndPark())), refused(9, 'it was parked meanwhile'));
+    assert.deepEqual(h.hub.asked, []);
+    assert.equal(d.deck.store.meta(S1)?.parkedAtNs, first);
+  });
+
+  test('a busy store: refused as busy, nothing sent', async (t) => {
+    const d = running(t);
+    const deck = deckWith(d.deck, {
+      store: {
+        updateMeta: () => {
+          throw Object.assign(new Error('database is locked'), {
+            code: 'ERR_SQLITE_ERROR',
+            errcode: 5,
+          });
+        },
+      },
+    });
+    const h = harness(d, [info()], deck);
+    assert.deepEqual(
+      await noHang(d, h.act(endAndPark())),
+      refused(9, "skydeck's database is busy; try again"),
+    );
+    assert.deepEqual(h.hub.asked, []);
+  });
+
+  test('another mark, or a mark that is no text, is not a well-formed action', async (t) => {
+    const d = running(t);
+    const h = harness(d);
+    for (const mark of ['parked', 'Park', '', null, true, 1]) {
+      assert.deepEqual(
+        await noHang(d, h.act({ ...endAndPark(), mark } as unknown as ActMessage)),
+        refused(9, 'skydeck cannot do that action'),
+      );
+    }
+    assert.deepEqual(h.hub.asked, []);
+  });
+
+  for (const done of [false, true]) {
+    test(`the program ends${done ? ' (a session marked done)' : ''}: parked before the one hang-up${done ? ', no longer done' : ', not done'}; \`ended\`, the end recorded as an exit, the terminal closed; it reads under Parked, not running`, async (t) => {
+      const d = running(t);
+      if (done) markDone(d.deck, S1);
+      const h = harness(d);
+      const answer = h.act(endAndPark());
+      await Promise.resolve();
+      assert.deepEqual(h.hub.asked, [`end ${TERM}`]);
+      assert.notEqual(h.hub.parkedAtEnd[0], null, 'parked before the hang-up was sent');
+      assert.equal(h.hub.doneAtEnd[0], null, 'not marked done');
+      assert.deepEqual(h.told, ['changed']);
+      h.hub.exitNow();
+      assert.deepEqual(await answer, {
+        t: 'result',
+        id: 9,
+        ok: true,
+        lines: [],
+        error: null,
+        sessionId: null,
+        ended: true,
+      });
+      await Promise.resolve();
+      assert.deepEqual(h.hub.asked, [`end ${TERM}`, `close ${TERM}`]);
+      assert.deepEqual(h.hub.terminals, [], 'closed: its slot is free');
+      assert.equal(windowEnds(d).length, 1);
+      assert.equal(windowEnds(d)[0]?.detail, 'exit');
+      assert.equal(h.hub.listeners(), 0);
+      d.proc.setProcess(PID, null);
+      const row = loadRows(d.deck).find((one) => one.id === S1);
+      assert.deepEqual(
+        [row?.state, row?.parked, row?.done, row?.marks, row?.session.lastHolding?.endDetail],
+        ['not-running', true, false, [], 'exit'],
+      );
+    });
+  }
+
+  test('a program that ends only after the wait: `ended` false at 10 s, still parked and running; its later end recorded and closed', async (t) => {
+    const d = running(t);
+    const h = harness(d);
+    const answer = h.act(endAndPark());
+    await Promise.resolve();
+    d.clock.advanceMs(10_000);
+    const result = await answer;
+    assert.deepEqual([result.ok, result.ended], [true, false]);
+    assert.notEqual(d.deck.store.meta(S1)?.parkedAtNs ?? null, null);
+    assert.equal(d.deck.store.meta(S1)?.doneAtNs ?? null, null);
+    assert.deepEqual(h.hub.asked, [`end ${TERM}`], 'one hang-up, no close');
+    d.clock.advanceMs(60_000);
+    h.hub.exitNow();
+    await Promise.resolve();
+    assert.deepEqual(h.hub.asked, [`end ${TERM}`, `close ${TERM}`]);
+    assert.equal(windowEnds(d).length, 1);
+  });
+
+  test('a second request for the same terminal while one waits, of either mark, sends no second hang-up', async (t) => {
+    const d = running(t);
+    const h = harness(d);
+    const first = h.act(endAndPark(9));
+    assert.deepEqual(
+      await h.act(endSession(10)),
+      refused(10, 'skydeck is ending this session already'),
+    );
+    assert.deepEqual(
+      await h.act(endAndPark(11)),
+      refused(11, 'skydeck is ending this session already'),
+    );
+    assert.deepEqual(h.hub.asked, [`end ${TERM}`]);
+    h.hub.exitNow();
+    assert.equal((await first).ended, true);
+  });
+
+  test("Done's end with the mark `done` named is the end without a mark", async (t) => {
+    const d = running(t);
+    const h = harness(d);
+    const answer = h.act({ ...endSession(), mark: 'done' } as ActMessage);
+    await Promise.resolve();
+    assert.notEqual(h.hub.doneAtEnd[0], null);
+    assert.equal(h.hub.parkedAtEnd[0], null);
+    h.hub.exitNow();
+    assert.equal((await answer).ended, true);
   });
 });

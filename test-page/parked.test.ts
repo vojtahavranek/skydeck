@@ -1,12 +1,14 @@
 // Follow-up F44 (S2 12.9, 12.15) on the page: `w` and the header's Park / Unpark, the toast with
 // Undo, where the selection goes after `w` (the owner's decision: the next row of the section the
 // row left, decided at the list that shows it gone, so the list never jumps), the one guard for
-// `w`, `d` and the end dialog, and the key help's line. Against a real test server (real keepers
+// `w`, `d` and the end dialog, and the key help's line. A running session the window can end is
+// parked through the dialog "Park" (its `Park, keep it running`, and its End button where the
+// selection and the keys after it are the case; the dialog itself: test-page/end-session.test.ts). Against a real test server (real keepers
 // running the stand-in), and for the cases that need the moment a list comes held still, against
 // a scripted stand-in (`editWorld`). The page decides no rule: which rows are parked, where they
 // go and which one needs you are the server's.
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -348,6 +350,8 @@ async function inOneTask(page: Page, keys: KeyboardEventInit[]): Promise<void> {
 
 const KEY_W = { key: 'w', code: 'KeyW' };
 const KEY_D = { key: 'd', code: 'KeyD' };
+const KEY_RIGHT = { key: 'ArrowRight', code: 'ArrowRight' };
+const KEY_ENTER = { key: 'Enter', code: 'Enter' };
 
 /**
  * Types `text` on the page and returns the sessions whose programs (the stand-ins of the window's
@@ -377,6 +381,24 @@ async function typedReaches(w: World, text: string): Promise<string[]> {
     .map(([pid]) => sessionOf.get(pid) ?? `pid ${pid}`);
 }
 
+/**
+ * The dialog "Park" (S2 12.15) that `w` or the header's Park opens for a running session the
+ * window can end: by the keyboard from where it starts (on `End session and park`: the stand-in
+ * waits), → and Enter press `Park, keep it running`, today's park.
+ */
+async function keepIt(page: Page): Promise<void> {
+  await page.waitForSelector('#end-dialog:not([hidden])', {
+    state: 'attached',
+    timeout: PAGE_WAIT_MS,
+  });
+  const focus = () => readPage(page, () => document.activeElement?.textContent ?? '', null);
+  assert.equal(await focus(), 'End session and park', 'the keyboard starts on End');
+  await page.keyboard.press('ArrowRight');
+  assert.equal(await focus(), 'Park, keep it running');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#end-dialog[hidden]', { state: 'attached', timeout: PAGE_WAIT_MS });
+}
+
 /** The header's Park / Unpark button: its text. */
 async function headerPark(page: Page): Promise<string> {
   return shownText(page, '#cards .header-park');
@@ -392,7 +414,7 @@ test('F44: parking a session in the window', async (t) => {
     await until(
       async () =>
         (await shownText(w.page, '#help')).includes(
-          'park: the session waits under Parked until you send it a prompt; on a parked one, unpark (an Undo follows a park)',
+          'park: the session waits under Parked until you send it a prompt; one running in a terminal of this window asks first whether to end it; on a parked one, unpark (an Undo follows a park)',
         ),
       'the help names w',
     );
@@ -408,6 +430,7 @@ test('F44: parking a session in the window', async (t) => {
       await pick(w.page, S1);
       assert.equal((await drawn(w.page)).find((row) => row.id === S1)?.slot, '1');
       await w.page.keyboard.press('w');
+      await keepIt(w.page);
       const row = await under(w.page, S1, 'parked');
       assert.equal(row.slot, '', 'no number');
       assert.match(row.marks.join(' '), /^parked \d+s$/);
@@ -431,6 +454,7 @@ test('F44: parking a session in the window', async (t) => {
       // The header's control: Park, then Unpark; the selection stays with the session.
       assert.equal(await headerPark(w.page), 'Park');
       await w.page.locator('#cards .header-park').click();
+      await keepIt(w.page);
       await under(w.page, S1, 'parked');
       assert.equal(await selectedRow(w.page), S1, 'the header leaves the selection with it');
       await until(async () => (await headerPark(w.page)) === 'Unpark', 'Unpark');
@@ -473,9 +497,10 @@ test('F44: parking a session in the window', async (t) => {
       assert.equal((await acts(w.page)).length, 1);
 
       // d on a parked running row: under Open, marked done (a parked running row is no row gone).
-      // First w on the only row of Open: none is selected.
+      // First w on the only row of Open (the dialog: keep it running): none is selected.
       await pick(w.page, S1);
       await w.page.keyboard.press('w');
+      await keepIt(w.page);
       await under(w.page, S1, 'parked');
       await selectionIs(w.page, null, 'the only row of Open: none');
       assert.equal(await zone(w.page), 'Focus: list');
@@ -502,6 +527,7 @@ test('F44: parking a session in the window', async (t) => {
       await pick(w.page, S2);
       assert.equal((await drawn(w.page)).find((row) => row.id === S2)?.slot, '2');
       await w.page.keyboard.press('w');
+      await keepIt(w.page);
       const parked = await under(w.page, S2, 'parked');
       assert.equal(parked.slot, '', 'no number');
       await selectionIs(w.page, S3, 'the next row');
@@ -531,6 +557,7 @@ test('F44: parking a session in the window', async (t) => {
       const w = await world(t, chromium, { running: [S1, S2], stopped: [S3] });
       await pick(w.page, S1);
       await w.page.keyboard.press('w');
+      await keepIt(w.page);
       await under(w.page, S1, 'parked');
       const term1 = w.server.hub.list().find((info) => info.expectedSessionId === S1)?.id;
       const term2 = w.server.hub.list().find((info) => info.expectedSessionId === S2)?.id;
@@ -583,31 +610,38 @@ test('F44: parking a session in the window', async (t) => {
     ['Esc', { key: 'Escape', code: 'Escape' }, false],
     ['Ctrl+Shift+N', { key: 'N', code: 'KeyN', ctrlKey: true, shiftKey: true }, true],
   ] as [string, KeyboardEventInit, boolean][]) {
-    await t.test(
-      `w then ${name} before the list that decides: the selection stays with the parked session (the user moved), and typed text reaches no other session's program${form ? '; the new form stays open' : ''}`,
-      async (t) => {
-        const w = await world(t, chromium, { running: [S1, S2, S3] });
-        await pick(w.page, S1);
-        await inOneTask(w.page, [KEY_W, key]);
-        await under(w.page, S1, 'parked');
-        await aRefresh(w); // the list that decides, and the next
-        assert.equal(await selectedRow(w.page), S1, 'the selection stays');
-        if (form) {
-          assert.equal(await pane(w.page), 'new', 'the form stays open');
-        } else {
-          assert.equal(await zone(w.page), 'Focus: terminal');
-        }
-        const reached = await typedReaches(w, 'zqzq');
-        assert.deepEqual(
-          reached.filter((id) => id !== S1),
-          [],
-          'no other session got the text',
-        );
-        if (form) assert.deepEqual(reached, [], 'the form took it');
-        assert.deepEqual(await acts(w.page), [{ kind: 'park', sessionId: S1 }]);
-        assert.deepEqual(w.problems, []);
-      },
-    );
+    // The dialog "Park" asks for these running sessions: its End button has the keyboard (Enter
+    // presses it), → takes it to `Park, keep it running`.
+    for (const [button, presses, kind] of [
+      ['Park, keep it running', [KEY_RIGHT, KEY_ENTER], 'park'],
+      ['End session and park', [KEY_ENTER], 'end-session'],
+    ] as [string, KeyboardEventInit[], string][]) {
+      await t.test(
+        `w, the dialog's ${button}, then ${name} before the list that decides: the selection stays with the parked session (the user moved), and typed text reaches no other session's program${form ? '; the new form stays open' : ''}`,
+        async (t) => {
+          const w = await world(t, chromium, { running: [S1, S2, S3] });
+          await pick(w.page, S1);
+          await inOneTask(w.page, [KEY_W, ...presses, key]);
+          await under(w.page, S1, 'parked');
+          await aRefresh(w); // the list that decides, and the next
+          assert.equal(await selectedRow(w.page), S1, 'the selection stays');
+          if (form) {
+            assert.equal(await pane(w.page), 'new', 'the form stays open');
+          } else if (kind === 'park') {
+            assert.equal(await zone(w.page), 'Focus: terminal');
+          }
+          const reached = await typedReaches(w, 'zqzq');
+          assert.deepEqual(
+            reached.filter((id) => id !== S1),
+            [],
+            'no other session got the text',
+          );
+          if (form) assert.deepEqual(reached, [], 'the form took it');
+          assert.deepEqual(await acts(w.page), [{ kind, sessionId: S1 }]);
+          assert.deepEqual(w.problems, []);
+        },
+      );
+    }
   }
 
   await t.test(
@@ -627,6 +661,188 @@ test('F44: parking a session in the window', async (t) => {
       await aRefresh(w);
       assert.notEqual(await selectedRow(w.page), S2, 'not the running row');
       assert.deepEqual(await typedReaches(w, 'zqzq'), [], 'no program got the text');
+      assert.deepEqual(w.problems, []);
+    },
+  );
+
+  // Ruled on review 1: a word typed into the list by mistake never ends a session, and nothing
+  // it types chains from one session to the next.
+  for (const working of [false, true]) {
+    await t.test(
+      `words with a \`w\` typed into the list, fast and slow, over ${working ? 'working' : 'idle'} sessions: nothing ended, nothing parked`,
+      async (t) => {
+        const w = await world(t, chromium, { running: [S1, S2, S3] });
+        if (working) {
+          for (const id of [S1, S2, S3]) {
+            const term = w.server.hub.list().find((info) => info.expectedSessionId === id)?.id;
+            assert.ok(term !== undefined);
+            assert.equal(w.server.hub.input(term, Buffer.from('/busy\r')), 'ok');
+          }
+          await w.api.list(
+            (list) =>
+              [S1, S2, S3].every((id) =>
+                list.sections.some((section) =>
+                  section.rows.some((row) => row.id === id && row.state === 'working'),
+                ),
+              ),
+            'the three work',
+          );
+          await sleep(500); // the page's list too
+        }
+        const dialogShown = (): Promise<boolean> =>
+          readPage(
+            w.page,
+            () =>
+              document.getElementById('end-dialog')?.hidden === false ||
+              [...document.querySelectorAll('.editor')].some((one) => !(one as HTMLElement).hidden),
+            null,
+          );
+        for (const delay of [0, 150]) {
+          for (const typed of ['wow', 'would', 'now ', 'wow what a show ']) {
+            const before = (await acts(w.page)).length;
+            await pick(w.page, S1);
+            await w.page.keyboard.type(typed, { delay });
+            await sleep(400);
+            for (let i = 0; i < 3 && (await dialogShown()); i++) {
+              await w.page.keyboard.press('Escape');
+              await sleep(150);
+            }
+            assert.equal(await dialogShown(), false, `${typed} (${delay} ms): closed`);
+            const sent = (await acts(w.page)).slice(before);
+            assert.deepEqual(sent, [], `${typed} (${delay} ms): nothing sent`);
+          }
+        }
+        assert.equal(
+          (await acts(w.page)).some((one) => one.kind === 'end-session'),
+          false,
+          'nothing ended',
+        );
+        assert.equal(
+          readRecords(w.d.record).filter((one) => one.ev === 'hup').length,
+          0,
+          'no program hung up',
+        );
+        assert.deepEqual(await idsIn(w.page, 'open'), [S1, S2, S3]);
+        assert.deepEqual(w.problems, []);
+      },
+    );
+  }
+
+  await t.test(
+    'the run `w`, Enter over three idle rows ends and parks one row each time, the selection moving on',
+    async (t) => {
+      const w = await world(t, chromium, { running: [S1, S2, S3] });
+      await pick(w.page, S1);
+      for (const [id, next] of [
+        [S1, S2],
+        [S2, S3],
+        [S3, null],
+      ] as const) {
+        assert.equal(await selectedRow(w.page), id);
+        await w.page.keyboard.press('w');
+        await w.page.waitForSelector('#end-dialog:not([hidden])', {
+          state: 'attached',
+          timeout: PAGE_WAIT_MS,
+        });
+        await w.page.keyboard.press('Enter');
+        await selectionIs(w.page, next, `after ${id}`);
+        assert.equal(await zone(w.page), 'Focus: list');
+      }
+      assert.deepEqual(
+        (await acts(w.page)).map((one) => `${one.kind} ${one.sessionId}`),
+        [S1, S2, S3].map((id) => `end-session ${id}`),
+      );
+      await untilDrawn(
+        w.page,
+        (rows) =>
+          [S1, S2, S3].every((id) => rows.some((row) => row.id === id && row.section === 'parked')),
+        'the three under Parked',
+      );
+      await until(
+        () => readRecords(w.d.record).filter((one) => one.ev === 'hup').length === 3,
+        'three hang-ups',
+      );
+      assert.deepEqual(w.problems, []);
+    },
+  );
+
+  // Ruled on review 2: any other key between `w` and Enter sends the keyboard to Cancel.
+  await t.test(
+    '`w`, ↓, Enter and `w`, Backspace, Enter on an idle session, fast and slow: nothing ended, nothing parked, no program hung up',
+    async (t) => {
+      const w = await world(t, chromium, { running: [S1, S2, S3] });
+      for (const delay of [0, 150]) {
+        for (const between of ['ArrowDown', 'Backspace']) {
+          await pick(w.page, S1);
+          for (const key of ['w', between, 'Enter']) {
+            await w.page.keyboard.press(key);
+            if (delay > 0) await sleep(delay);
+          }
+          await sleep(400);
+          assert.equal(
+            await readPage(w.page, () => document.getElementById('end-dialog')?.hidden, null),
+            true,
+            `w ${between} Enter (${delay} ms): the dialog closed`,
+          );
+        }
+      }
+      assert.deepEqual(await acts(w.page), [], 'nothing sent');
+      assert.equal(readRecords(w.d.record).filter((one) => one.ev === 'hup').length, 0);
+      assert.deepEqual(await idsIn(w.page, 'open'), [S1, S2, S3]);
+      assert.deepEqual(w.problems, []);
+    },
+  );
+
+  await t.test(
+    'review 2: a session that asks with no detail (its live file `waiting` with no `waitingFor`): the dialog starts on Keep with the asking warning, and `w`, Enter parks it and keeps it running',
+    async (t) => {
+      const w = await world(t, chromium, { running: [S1, S2] });
+      const term = w.server.hub.list().find((info) => info.expectedSessionId === S1);
+      const pid = term?.program?.pid;
+      assert.ok(pid !== undefined);
+      const file = join(w.d.s.claudeHome, 'sessions', `${pid}.json`);
+      const live = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      delete live['waitingFor'];
+      live['status'] = 'waiting';
+      live['statusUpdatedAt'] = Date.now();
+      live['updatedAt'] = Date.now();
+      writeFileSync(file, `${JSON.stringify(live)}\n`);
+      await w.api.list(
+        (list) =>
+          list.sections.some((section) =>
+            section.rows.some(
+              (row) =>
+                row.id === S1 && row.stateDetail === null && row.attention?.reason === 'asks',
+            ),
+          ),
+        'S1 asks with no detail',
+      );
+      await sleep(500);
+      await pick(w.page, S1);
+      await w.page.keyboard.press('w');
+      await w.page.waitForSelector('#end-dialog:not([hidden])', {
+        state: 'attached',
+        timeout: PAGE_WAIT_MS,
+      });
+      const dialog = await readPage(
+        w.page,
+        () => ({
+          focus: document.activeElement?.textContent ?? '',
+          warning: (document.querySelector('#end-dialog .end-warning') as HTMLElement).hidden
+            ? null
+            : document.querySelector('#end-dialog .end-warning')?.textContent,
+        }),
+        null,
+      );
+      assert.deepEqual(dialog, {
+        focus: 'Park, keep it running',
+        warning: 'It is asking you something: ending it now stops the current turn.',
+      });
+      await w.page.keyboard.press('Enter');
+      await under(w.page, S1, 'parked');
+      await sleep(500);
+      assert.deepEqual(await acts(w.page), [{ kind: 'park', sessionId: S1 }]);
+      assert.equal(readRecords(w.d.record).filter((one) => one.ev === 'hup').length, 0);
       assert.deepEqual(w.problems, []);
     },
   );
@@ -831,6 +1047,7 @@ test('F44: parking a session in the window', async (t) => {
       const before = await scroll(w.page);
       await watchScroll(w.page);
       await w.page.keyboard.press('w');
+      await keepIt(w.page);
       await selectionIs(w.page, S2, 'the next row of Open');
       await until(async () => (await toast(w.page)).text === PARKED_RUNNING, 'the toast');
       await aRefresh(w); // and the next list
@@ -853,6 +1070,7 @@ test('F44: parking a session in the window', async (t) => {
       // The mirror: the header's Park follows the row to Parked, its Unpark back under Open.
       await w.page.waitForSelector('#toast[hidden]', { state: 'attached', timeout: 15_000 });
       await w.page.locator('#cards .header-park').click();
+      await keepIt(w.page);
       await under(w.page, S1, 'parked');
       await until(() => inView(w.page, S1), 'the list scrolled to it under Parked');
       assert.notEqual((await scroll(w.page)).top, before.top);
@@ -874,6 +1092,7 @@ test('F44: parking a session in the window', async (t) => {
       for (const id of [S6, S7, S8]) {
         await pick(w.page, id);
         await w.page.locator('#cards .header-park').click();
+        await keepIt(w.page);
         await under(w.page, id, 'parked');
         await until(async () => (await headerPark(w.page)) === 'Unpark', 'parked');
       }
@@ -918,6 +1137,7 @@ test('F44: parking a session in the window', async (t) => {
       // R-8: w again on the same session parks it again, and moves the selection on in Open: S8,
       // with its number 8, is Open's last row, so the one before it.
       await w.page.keyboard.press('w');
+      await keepIt(w.page);
       await under(w.page, S8, 'parked');
       await selectionIs(w.page, S6, "Open's last row: the one before it");
       assert.deepEqual(
@@ -1220,6 +1440,9 @@ test('F44: the one guard, and the Undo that gives back what was there', async (t
       );
       await pick(page, S2);
       await page.keyboard.press('w');
+      await until(() => enderShown(page), 'the dialog "Park"');
+      await page.keyboard.press('ArrowRight'); // Park, keep it running
+      await page.keyboard.press('Enter');
       const act = await w.act(1);
       w.holdViews(true);
       w.answer(act, { ok: true });
@@ -1245,10 +1468,12 @@ test('F44: the one guard, and the Undo that gives back what was there', async (t
     assert.deepEqual(kinds(w), ['done']);
   });
 
-  for (const [button, keys, kind] of [
-    ['Mark done, keep it running', ['Enter'], 'done'],
-    ['End session and mark done', ['ArrowLeft', 'Enter'], 'end-session'],
-  ] as [string, string[], string][]) {
+  for (const [button, opener, keys, kind] of [
+    ['Mark done, keep it running', 'd', ['Enter'], 'done'],
+    ['End session and mark done', 'd', ['ArrowLeft', 'Enter'], 'end-session'],
+    ['Park, keep it running', 'w', ['ArrowRight', 'Enter'], 'park'],
+    ['End session and park', 'w', ['Enter'], 'end-session'],
+  ] as [string, string, string[], string][]) {
     await t.test(
       `the end dialog's ${button}, answered, its list held: w and d on the session send nothing, and no dialog opens again`,
       async (t) => {
@@ -1259,7 +1484,7 @@ test('F44: the one guard, and the Undo that gives back what was there', async (t
           2,
         );
         await pick(page, S2);
-        await page.keyboard.press('d');
+        await page.keyboard.press(opener);
         await until(() => enderShown(page), 'the dialog');
         for (const key of keys) await page.keyboard.press(key);
         const act = await w.act(1);

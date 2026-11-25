@@ -3348,25 +3348,31 @@ terminal of the window first, or read the numbers below as the free ones, ascend
 terminal of the window under Open has no number, skip W50 for now: from issue #189 that row takes a
 parked session's number at once, and steps 2 to 6 and 8 would read otherwise. Throughout:
 type a word only where the step says the keyboard is (the key bar names the zone, `Focus: list` or
-`Focus: terminal`; Ctrl+Shift+L switches it). In the list a letter is a key: `w` parks, `d` marks
-done, `l`, `n` and `t` open a dialog.
+`Focus: terminal`; Ctrl+Shift+L switches it). In the list a letter is a key: `w` parks (a session
+running in the window asks first, in the dialog `Park: <title>`), `d` marks done, `l`, `n` and `t`
+open a dialog. In that dialog the outlined button has the keyboard: → moves it, Enter presses it.
 
 1. **Three throwaway sessions.** Three times: Ctrl+Shift+N, the throwaway folder's full path in the
    directory field (`/home/<you>/skydeck-try`), a label `park-1`, `park-2`, `park-3` in turn, Enter.
    In each, once Claude Code's prompt shows, type `Reply with the single word ok.` and Enter.
    Expected: under Open `park-1`, `park-2`, `park-3` with the numbers 1, 2, 3.
-2. **`w` and the toast.** Click `park-2`, then Ctrl+Shift+L until the key bar says `Focus: list`,
-   then `w`. Expected: `park-2` is under a new section **Parked**, after Open, with the mark
+2. **`w`, the dialog and the toast.** Click `park-2`, then Ctrl+Shift+L until the key bar says
+   `Focus: list`, then `w`. Expected: a dialog over the window, `Park: park-2`, `This session is
+   still running.`, the buttons `End session and park`, `Park, keep it running` and `Cancel`, the
+   first one outlined. Press →: `Park, keep it running` is outlined; press Enter. Expected: the
+   dialog closes and `park-2` is under a new section **Parked**, after Open, with the mark
    `parked 0s` (later `parked 1m`) and no number; it still runs. The toast says `Parked: listed
    under Parked, and it keeps running. It comes back when you send it a prompt.` with `Undo`. The
    selection is on `park-3` (the row after it), the key bar still says `Focus: list`, the list did
    not scroll, and `park-3`'s prompt is empty (nothing was typed into it). Ctrl+Shift+2 says `no
    session in slot 2`.
 3. **Undo.** Click `park-2` under Parked, Ctrl+Shift+L until `Focus: list`, then `w`: it is back
-   under Open with the number 2, still selected, and no toast shows. Press `w` again and, while its
-   toast shows (5 seconds), click `Undo`. Expected: `park-2` is back under Open with the number 2,
+   under Open with the number 2, still selected, and no toast shows (and no dialog: un-parking never
+   asks). Press `w` again, → and Enter in the dialog, and, while its toast shows (5 seconds), click
+   `Undo`. Expected: `park-2` is back under Open with the number 2,
    at its place by the number, and selected again.
-4. **The number taken.** With `park-2` selected, Ctrl+Shift+L until `Focus: list`, then `w` again. Then Ctrl+Shift+N,
+4. **The number taken.** With `park-2` selected, Ctrl+Shift+L until `Focus: list`, then `w` again,
+   → and Enter in the dialog. Then Ctrl+Shift+N,
    the throwaway folder, label `park-4`, Enter. Expected: `park-4` takes the number 2, and
    Ctrl+Shift+2 shows its terminal.
 5. **A key typed is not a prompt; a prompt is.** Click `park-2` under Parked, Enter (its terminal
@@ -3381,7 +3387,9 @@ done, `l`, `n` and `t` open a dialog.
    seconds `park-3` is under Open with the number 3.
 7. **A parked session that asks.** Click `park-1`, Enter (`Focus: terminal`), type `Use the Bash
    tool to run the command date.` and Enter, and wait until Claude Code asks for the permission
-   (keep the window in front). Then Ctrl+Shift+L (`Focus: list`) and `w`. Expected: `park-1` is
+   (keep the window in front). Then Ctrl+Shift+L (`Focus: list`) and `w`: the dialog says `It is
+   asking you something: ending it now stops the current turn.` with `Park, keep it running`
+   outlined; press Enter. Expected: `park-1` is
    under Parked with its `asks` mark beside `parked 0s`; the title bar's `need you` count leaves
    it out; Ctrl+Shift+J says `no session needs you` (or goes to another session that needs you,
    never to `park-1`). Click another Windows program and wait 20 seconds: no desktop notification
@@ -3390,8 +3398,9 @@ done, `l`, `n` and `t` open a dialog.
 8. **A restart.** In W: `skydeck window --restart`. Expected: once the window is back, `park-1` is
    still under Parked with no number, the other rows keep their numbers, and Ctrl+Shift+1 says `no
    session in slot 1`.
-9. **Three `w` in a row.** Click the top row of Open, Ctrl+Shift+L (`Focus: list`), then press `w`
-   three times, each once the selection has moved. Expected: three sessions parked, one per `w`;
+9. **Three `w` in a row.** Click the top row of Open, Ctrl+Shift+L (`Focus: list`), then three
+   times, each once the selection has moved: `w`, and in the dialog → and Enter. Expected: three
+   sessions parked, one per `w`;
    each time the selection is on the next row of Open (on the last, the one before it; when Open
    is empty, none), the list did not jump, the key bar said `Focus: list` throughout, and no
    session's prompt holds a `w` or anything else you did not type.
@@ -3404,9 +3413,44 @@ done, `l`, `n` and `t` open a dialog.
     type `/clear` and Enter. Expected: within a few seconds the old session is still under Parked
     (not running), and the session Claude Code goes on with is under Open with the lowest free
     number, not parked.
-12. **The Czech layout.** Switch Windows to the Czech layout (W8): `w` on a row of Open parks it,
-    and `w` on it under Parked un-parks it, as in steps 2 and 10. Switch back.
-13. **The end.** For each throwaway session: type `/exit` and Enter in its terminal, then `d` in
+12. **The Czech layout.** Switch Windows to the Czech layout (W8): `w` on a row of Open opens the
+    dialog and parks it (→, Enter), and `w` on it under Parked un-parks it, as in steps 2 and 10.
+    Switch back.
+13. **End session and park.** Start one more throwaway session (Ctrl+Shift+N, the throwaway
+    folder, label `park-5`, Enter) and, once Claude Code's prompt shows, type `Reply with the
+    single word ok.` and Enter; wait for the answer. Click its row, Ctrl+Shift+L (`Focus: list`),
+    `w`: the dialog shows with `End session and park` outlined; press Enter. Expected: the toast
+    says `Ending the session…`, then within 10 seconds `Ended and parked: listed under Parked.`
+    with `Undo`; `park-5` is under Parked, not running, with no number and no `ended` or `asks`
+    mark; its terminal is gone; the selection moved to the row after it (or before it) with
+    `Focus: list`, and nothing was typed into that row's session. No desktop notification comes
+    for it (click another Windows program and wait 20 seconds). In W: `skydeck window --restart`:
+    once the window is back, no restore banner offers `park-5`. Click `park-5`, Enter: it resumes
+    the same conversation and runs under Parked, still parked, with no number.
+14. **The dialog while it works.** Click a session that runs under Open, Enter (`Focus:
+    terminal`), type `Count slowly from 1 to 40, one number per line.` and Enter; while it answers,
+    Ctrl+Shift+L (`Focus: list`) and `w`. Expected: the dialog also says `It is working: ending it
+    now stops the current turn.`, and `Park, keep it running` is outlined (not the End button).
+    Press Esc: the dialog closes, nothing was parked, and the session goes on answering.
+15. **Words typed by mistake.** Once every session under Open waits for your next prompt (no
+    answer under way), click the top row of Open, Ctrl+Shift+L (`Focus: list`), and type `wow what
+    a show ` (with the last space). Expected: each `w` opens the dialog, a letter after it puts the
+    outline on `Cancel`, and the space after the word closes it; the last word's `w` and space
+    leave it open with `Cancel` outlined (press Esc); nothing is ended and nothing is parked; the
+    `a` shows the done sessions (press `a` again). Then `w` and in the dialog type `x`:
+    `Cancel` is outlined; press ← and Tab: the outline stays on `Cancel`; press Enter: the dialog
+    closes, nothing done. Then `w` and Space: `Cancel` is outlined, the dialog stays; Esc. Then
+    hold `w` for a second and release it: the dialog shows with `End session and park` outlined
+    (not `Cancel`); press Tab, then Space: `Park, keep it running` is pressed, the session is
+    parked and keeps running; click `Undo` in the toast. Then, on an idle row: `w`, ↓, Enter, and
+    `w`, Backspace, Enter: each time the outline goes to `Cancel` at the second key and Enter
+    closes the dialog; nothing is ended or parked, and the selection has not moved.
+16. **A session that asks.** In a session under Open, Enter (`Focus: terminal`), type `Use the Bash
+    tool to run the command date.` and Enter, and wait until Claude Code asks for the permission.
+    Ctrl+Shift+L (`Focus: list`), `w`. Expected: the dialog also says `It is asking you something:
+    ending it now stops the current turn.`, and `Park, keep it running` is outlined. Esc, then answer
+    the permission in its terminal.
+17. **The end.** For each throwaway session: type `/exit` and Enter in its terminal, then `d` in
     the list (`Focus: list`) to mark it done (done ends a parking too).
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge
@@ -3432,8 +3476,8 @@ terminal shows Claude Code's prompt and the key bar says `Focus: terminal` (else
 until it does), type `Reply with the single word ok, in this chat, with no tool and no file.` and
 Enter, and wait for the answer. Note the number before its row in Open. Throughout: type a word
 only where the step says the keyboard is (the key bar names the zone; a field shows its caret). In
-the list a letter is a key: `d` marks the session done, `w` parks it at once, `l`, `n` and `t` open
-a dialog on it.
+the list a letter is a key: `d` marks the session done, `w` parks it (for this running session it
+asks first, in the dialog `Park: <title>`), `l`, `n` and `t` open a dialog on it.
 
 1. **The dialog.** Click the throwaway's row, then press `Restart` in the header. Expected: a
    dialog over the window, `Restart: restart check`, `It ends claude and resumes this session

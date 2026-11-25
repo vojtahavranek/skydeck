@@ -39,6 +39,17 @@
  */
 
 /**
+ * Whether a keydown types a character (its `key` is one character: a letter, a digit, a sign,
+ * Space). The restart dialog and the dialog "Park" read such a key, while they ask, as text typed
+ * into the list by mistake (ruled), whatever its modifiers' own meaning elsewhere.
+ * @param {KeyboardEvent} e
+ * @returns {boolean}
+ */
+export function typesCharacter(e) {
+  return [...e.key].length === 1;
+}
+
+/**
  * The window's own chord (S2 12.9, stage A): Ctrl+Shift with a letter or a digit of the table,
  * and Ctrl+Tab. The keys of later stages were the window's from stage A on (A11): Ctrl+Shift+J
  * gives stage B's `next-attention` (S2 12.4, plan B14), Ctrl+Shift+P stage E's `switcher` (S2

@@ -10,7 +10,14 @@
  * (`TerminalInfo.endable`), the store knows the session and it is not marked done, it runs, and a
  * holder of it belongs to that terminal (S2 7.5); and while a request for the same terminal waits,
  * a second one is refused (no second signal). Then the session is marked done (as `act done`),
- * the lists are told, and the keeper is told to hang the program up. The answer comes when the
+ * the lists are told, and the keeper is told to hang the program up.
+ *
+ * The dialog "Park" (S2 12.15) asks for the same end with the mark `park`: the same checks in the
+ * same order and words, except that a session parked already is refused (`it was parked
+ * meanwhile`) where Done's refuses one marked done, and one marked done is not refused (parking
+ * ends its done mark, as `act park` does); then the session is parked (as `act park`: its number
+ * is freed by the lists' next sync, parked-slots.ts) in place of marked done, and the rest is
+ * Done's — the hang-up, the wait, the following on, the record and the close. The answer comes when the
  * program has ended — its keeper's exit, `ended` true —, or after END_WAIT_MS — `ended` false: the
  * session stays marked done and running. The end is followed on after that answer until the
  * program exits (ruled at review): a later end is recorded and closed as one within the wait; a
@@ -24,7 +31,8 @@
  * "Order"), so that the session reads as an ordinary ended one (design 6.1: never
  * `ended-unexpectedly`, so no `was-working` and no restore offer) whatever end Claude Code's own
  * hook sends after its hang-up, before or after this one; then it closes the terminal (what
- * `close-terminal` does for an ended terminal: its slot is free, and its row, done, is hidden).
+ * `close-terminal` does for an ended terminal: its slot is free, and its row, done, is hidden;
+ * parked, it is listed under Parked, not running).
  *
  * Issue #166: a restart (restart.ts) ends the program by the same means — `check`, the same
  * refusals in the same words but for a session marked done, and `hangUp`, the same hang-up, wait,
@@ -37,7 +45,7 @@ import { isBusy } from './busy.ts';
 import { failureKind } from './auth.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { loadRows } from '../sessions/load.ts';
-import { markDone } from '../sessions/meta.ts';
+import { markDone, markParked } from '../sessions/meta.ts';
 import type { ListRow } from '../sessions/list.ts';
 import type { Holder } from '../sessions/types.ts';
 import { ENDED_IN_WINDOW } from '../store/types.ts';
@@ -53,7 +61,11 @@ export interface EndingDeps {
   changed(): void;
 }
 
-/** A refusal (nothing was done), or the session marked done and whether its program ended. */
+/** The mark an end writes before its hang-up: Done's dialog's, or the dialog "Park"'s. */
+export type EndMark = 'done' | 'park';
+
+/** A refusal (nothing was done), or the session marked (done or parked) and whether its program
+ *  ended. */
 export type EndOutcome = { ok: false; error: string } | { ok: true; ended: boolean };
 
 /** Issue #166: what `check` found — a refusal, or the terminal, the session's row and its holders
@@ -66,8 +78,8 @@ export type EndCheck =
 export type HangUpOutcome = { ended: true } | { ended: false; why: string };
 
 export interface Endings {
-  /** Throws (before anything is sent) only what marking done throws: a busy store, an error. */
-  end(termId: string, sessionId: string): Promise<EndOutcome>;
+  /** Throws (before anything is sent) only what marking throws: a busy store, an error. */
+  end(termId: string, sessionId: string, mark?: EndMark): Promise<EndOutcome>;
   /**
    * Issue #166: `end`'s refusals in its order and words, with `done` the words for a session
    * marked done; nothing is done. Ok: the terminal, the row and the holders `hangUp` is given.
@@ -98,6 +110,7 @@ const NOT_RUNNING = 'its program is not running';
 const CANNOT_END = 'skydeck cannot end this one: end it in its terminal';
 const UNKNOWN = 'skydeck does not know this session';
 const ALREADY_DONE = 'it was marked done meanwhile';
+const ALREADY_PARKED = 'it was parked meanwhile';
 const NOT_HERE = 'it does not run in that terminal';
 const ENDING = 'skydeck is ending this session already';
 const NOT_AN_ACTION = 'skydeck cannot do that action';
@@ -276,9 +289,14 @@ export function createEndings(deps: EndingDeps): Endings {
    * The checks of a request, in their order (F30), nothing done: a terminal a restart holds
    * (#166), a request for the terminal that waits, a hub that cannot end, the terminal, the
    * session it shows, its program, the store's row (`done`: the words for one marked done) and
-   * the holders that belong to it.
+   * the holders that belong to it. `refused` (with `check`: a session marked done, in `done`'s
+   * words) is the mark's own refusal of the row.
    */
-  function check(termId: string, sessionId: string, done: string): EndCheck {
+  function checkFor(
+    termId: string,
+    sessionId: string,
+    refused: (row: ListRow) => string | null,
+  ): EndCheck {
     const term = hub.list().find((candidate) => candidate.id === termId);
     if (term?.restarting === true) return { ok: false, error: RESTARTING };
     // While a request waits for its answer, no second one (no second signal); once answered, a
@@ -293,11 +311,16 @@ export function createEndings(deps: EndingDeps): Endings {
     if (term.endable !== true) return { ok: false, error: CANNOT_END };
     const row = loadRows(deck).find((candidate) => candidate.id === sessionId);
     if (row === undefined) return { ok: false, error: UNKNOWN };
-    if (row.done) return { ok: false, error: done };
+    const mark = refused(row);
+    if (mark !== null) return { ok: false, error: mark };
     if (row.state === 'not-running') return { ok: false, error: NOT_RUNNING };
     const holders = holdersIn(term, row.session.holders);
     if (holders.length === 0) return { ok: false, error: NOT_HERE };
     return { ok: true, term, row, holders };
+  }
+
+  function check(termId: string, sessionId: string, done: string): EndCheck {
+    return checkFor(termId, sessionId, (row) => (row.done ? done : null));
   }
 
   /**
@@ -344,11 +367,18 @@ export function createEndings(deps: EndingDeps): Endings {
   }
 
   return {
-    end(termId, sessionId) {
-      const checked = check(termId, sessionId, ALREADY_DONE);
+    end(termId, sessionId, mark = 'done') {
+      const checked =
+        mark === 'park'
+          ? checkFor(termId, sessionId, (row) => (row.parked ? ALREADY_PARKED : null))
+          : check(termId, sessionId, ALREADY_DONE);
       if (!checked.ok) return refuse(checked.error);
-      // Done first (a busy store throws here, before anything is sent), then the hang-up.
-      markDone(deck, sessionId);
+      // The mark first (a busy store throws here, before anything is sent), then the hang-up.
+      if (mark === 'park') {
+        markParked(deck, checked.row);
+      } else {
+        markDone(deck, sessionId);
+      }
       tell();
       return new Promise<EndOutcome>((resolve) => {
         follow(termId, sessionId, checked.holders, true, (why) => {

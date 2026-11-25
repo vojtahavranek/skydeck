@@ -1665,6 +1665,25 @@ describe("parsePageMessage: F37's reorder (S2 12.9)", () => {
   });
 });
 
+describe('parsePageMessage: F30\'s end-session, with the dialog "Park"\'s mark (S2 12.15)', () => {
+  const term = 'a1b2c3d4e5f6';
+  const plain: PageMessage = { t: 'act', id: 7, kind: 'end-session', term, sessionId: S1 };
+  const park: PageMessage = { ...plain, mark: 'park' };
+  const done: PageMessage = { ...plain, mark: 'done' };
+
+  test('act end-session without a mark, with `park` and with `done` → ok and equal', () => {
+    for (const message of [plain, park, done]) {
+      assert.deepEqual(parsePageMessage(JSON.stringify(message)), { ok: true, value: message });
+    }
+  });
+
+  test('another mark, a mark that is no text → refused', () => {
+    for (const mark of ['parked', 'PARK', 'undone', '', 1, null, true, ['park']]) {
+      refused(page({ ...plain, mark }));
+    }
+  });
+});
+
 describe("parsePageMessage: F40's carry over (design 7.1, S2 12.6)", () => {
   const carry: PageMessage = {
     t: 'act',

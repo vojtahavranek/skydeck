@@ -153,7 +153,8 @@ export interface ResizeMessage {
  *  F30: `end-session` is the dialog's `End session and mark done` for the session `sessionId`
  *  that the window's terminal `term` holds: the server marks it done and hangs its program up
  *  (src/window/end-session.ts); its `result` comes once the program has ended (`ended` true) or
- *  the wait is over (`ended` false).
+ *  the wait is over (`ended` false). With `mark` `park` (the dialog "Park"'s `End session and
+ *  park`) the session is parked in place of marked done; `done`, or no `mark`, is the default.
  *
  *  Issue #166 (with #188's flags): `restart` is the restart dialog's `Restart` (or its `Other
  *  flags…`'s Start, with `flags`, the field's text as typed, as `resume` sends it) for the session
@@ -230,7 +231,14 @@ export type ActMessage =
   | { t: 'act'; id: number; kind: 'dismiss-restore'; bootId: string }
   | { t: 'act'; id: number; kind: 'favourite-add'; text: string; at?: number }
   | { t: 'act'; id: number; kind: 'favourite-remove'; text: string }
-  | { t: 'act'; id: number; kind: 'end-session'; term: string; sessionId: string }
+  | {
+      t: 'act';
+      id: number;
+      kind: 'end-session';
+      term: string;
+      sessionId: string;
+      mark?: 'done' | 'park';
+    }
   | { t: 'act'; id: number; kind: 'restart'; term: string; sessionId: string; flags?: string }
   | { t: 'act'; id: number; kind: 'settings' }
   | {
@@ -724,7 +732,8 @@ export interface ResultMessage {
   lines: string[];
   error: string | null;
   sessionId: string | null;
-  /** F30, `end-session` only: with `ok` (the session was marked done, its program hung up),
+  /** F30, `end-session` only: with `ok` (the session was marked done, or with `mark` `park`
+   *  parked, its program hung up),
    *  whether the program ended within the wait. Absent for every other kind and a refusal.
    *  Issue #166, `restart`: once its program was hung up, whether it ended (false: the restart
    *  was given up, nothing resumed; true: `ok` says whether the resume started it); absent for a
@@ -1188,8 +1197,11 @@ const ACTS: Readonly<Record<string, Check>> = {
     ['at'],
   ),
   'favourite-remove': object({ t: ANY, id: COUNT, kind: ANY, text: TEXT }),
-  // F30: the dialog's `End session and mark done`.
-  'end-session': object({ t: ANY, id: COUNT, kind: ANY, term: TERM, sessionId: SESSION }),
+  // F30: the dialog's `End session and mark done`; with `mark` `park`, `End session and park`.
+  'end-session': object(
+    { t: ANY, id: COUNT, kind: ANY, term: TERM, sessionId: SESSION, mark: oneOf('done', 'park') },
+    ['mark'],
+  ),
   // Issue #166: the restart dialog's `Restart`; #188: an optional `flags`, as `resume`'s.
   restart: object({ t: ANY, id: COUNT, kind: ANY, term: TERM, sessionId: SESSION, flags: TEXT }, [
     'flags',

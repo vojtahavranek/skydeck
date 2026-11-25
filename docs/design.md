@@ -54,8 +54,10 @@ section first.
    the user asks for it there, field by field, each time, and the old session keeps all of them
    (follow-up F40; 7.1; design-step-2.md 12.6). skydeck never stops a process by itself; the window ends a session's
    program only when the user asks for it there, in its dialog, each time (design-step-2.md 2,
-   12.5) — `End session and mark done`, or from issue #166 `Restart`, which then resumes the same
-   session (design-step-2.md 12.10). This is about the user's data (sessions, labels, groups, notes), not skydeck's own
+   12.5) — `End session and mark done`, from follow-up F44 `End session and park` (the mark
+   still stops nothing: ending is the user's separate answer in the dialog "Park",
+   design-step-2.md 12.15), or from issue #166 `Restart`, which then resumes the same session
+   (design-step-2.md 12.10). This is about the user's data (sessions, labels, groups, notes), not skydeck's own
    transient files (5.3). The one exception is the label and group skydeck itself has just stored
    for a `new` session that never started (7.7).
 7. **Never resume one session twice.** Two processes on one session interleave one transcript.
@@ -458,7 +460,9 @@ Marks are shown next to the state.
   again).
 - **Parked** (follow-up F44). Sets the session aside: alive, but not the user's to move now (it
   waits for a review, a person or another part of the work). The user parks it and un-parks it
-  (`skydeck park`, `skydeck unpark`, 7.5); nothing parks by itself, and it never stops a process.
+  (`skydeck park`, `skydeck unpark`, 7.5); nothing parks by itself, and the mark never stops a
+  process. In the window, parking a running session it can end first asks whether to end it too
+  (the dialog "Park", design-step-2.md 12.15): that end is the user's own answer, as Done's is.
   The time it was parked is kept (`session_meta.parked_at_ns`, 9.2). Open, Parked and Done exclude
   one another, each mark one statement that sets its own column and clears the other: parking a done
   session makes it parked and no longer done, marking a parked session done ends its parking, and a

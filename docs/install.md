@@ -974,7 +974,8 @@ effect.
   and `skydeck window --restart`. A session whose program ends gives its number up at once — also
   one marked done that you let keep running, and with its ended terminal still on screen; a row
   under Recent or Earlier never shows a number, and Ctrl+Shift+1…9 never go to an ended session.
-  A session you park gives its number up at once too, while it goes on running ("Parked" below).
+  A session you park gives its number up at once too, whether it goes on running or you end it
+  as you park it ("Parked" below).
   A terminal of the window that has no number (the tenth and later ones) takes a number as soon as
   one is free, a parked session's terminal never: the first such row under Open takes the lowest
   free number, and its row goes to that number's place, as a new terminal with that number would;
@@ -1093,9 +1094,32 @@ requests — …`): look at it before you save.
 
 **Parked.** Some sessions are alive but not yours to move right now: the work went to review, or
 waits for a person or for another part of the work. `w` in the list ("waits") or `Park` in the
-header parks the selected session: it moves under **Parked**, keeps running if it runs, and keeps
-its group. No dialog asks anything. The toast says `Parked: listed under Parked. It comes back when
-you send it a prompt.` (`…, and it keeps running. …` for a running one), with `Undo` for 5 seconds.
+header parks the selected session: it moves under **Parked** and keeps its group. A session that
+runs in a terminal of the window, which skydeck can end, is not parked yet: a dialog `Park: <title>`
+asks whether to end it too, since a parked session need not hold its resources. **End session and
+park** (where the keyboard starts when the session waits for your next prompt) ends it and parks it: the toast
+says `Ending the session…`, then `Ended and parked: listed under Parked.` (or, when it has not ended
+within 10 seconds, `Parked. It has not ended yet: end it inside claude if it stays open.`); it is
+listed under Parked, not running, and you resume it from its row as any other. **Park, keep it
+running** (where the keyboard starts in every other state, with a line that says why: it is
+working, it is asking you something, or skydeck cannot tell whether it is working; → or Tab takes
+it there) parks it and leaves it running; **Cancel** or Esc does nothing. On the button where the
+dialog put the keyboard, only Enter presses it: Space does not. Once you press any other key while
+the dialog asks — a letter (or any character, that Space too), Backspace, ↑ or ↓, Home, End, a
+function key, a character with AltGr, a chord with Ctrl or Alt — the keyboard stays on `Cancel`
+until it closes: the arrows and Tab move nothing, and Enter or Space cancel; a click still presses
+any button. Shift, Control, Alt or CapsLock pressed alone change nothing, and the window's chords
+and reload keys do what they do under any dialog. So `w` and then Enter, with no other key between
+them, end an idle session and park it — the quick way, on purpose: resume it from its row if you
+did not mean it — but a word with a `w` typed into the list by mistake (`wow`, `now `, `wow what a
+show `), or `w`, ↓, Enter, ends and parks nothing. A `w` held a little
+long does nothing more than `w`. After you move the keyboard yourself (Tab, an arrow), Enter and
+Space press the button it is on. skydeck learns that a session
+started working a moment after it did, so `w` and Enter in that moment can still end it. Every other session is parked at once: one that does not
+run, and one that runs where skydeck cannot end it, whose toast says so (`Parked. skydeck cannot end
+this one: end it in its terminal.`). The toast says `Parked: listed under Parked. It comes back when
+you send it a prompt.` (`…, and it keeps running. …` for one kept running), with `Undo` for 5
+seconds; the `Undo` of an ended one un-parks it, and does not start it again.
 After `w` in the list the selection goes to the row after it in the section it left, else the one
 before it, else none (the list does not move; Ctrl+Tab goes back to the parked session); the
 keyboard stays in the list, so `w` again parks the next one. `Park` in the header keeps the session
