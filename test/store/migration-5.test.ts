@@ -26,6 +26,7 @@ import {
   dumpDatabase,
   schemaDatabase,
   withoutParkedColumn,
+  withoutUnread,
   withoutUptime,
 } from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
@@ -117,7 +118,7 @@ const NEWEST = String(SCHEMA_VERSION);
  * the open goes on with migration 6, whose nullable column uptime_cs of events is left out here).
  */
 function assertMigrated(before: DatabaseDump, newest: DatabaseDump): void {
-  const after = withoutUptime(newest);
+  const after = withoutUnread(withoutUptime(newest));
   assert.deepEqual(
     after.schema,
     before.schema.map((entry) =>

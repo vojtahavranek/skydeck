@@ -327,6 +327,44 @@ export function withoutUptime(after: DatabaseDump): DatabaseDump {
   };
 }
 
+/** What migration 7 (the mark unread) appends to attention's statement in sqlite_master. */
+export const UNREAD_COLUMNS_SQL = '\n, unread_seq INTEGER, unread_ns INTEGER)';
+
+/** attention's entry of sqlite_master as SQLite writes it after migration 7's two ALTER TABLEs. */
+export function withUnreadColumns(sql: string | null): string | null {
+  return sql === null ? null : sql.replace(/\n\)$/, UNREAD_COLUMNS_SQL);
+}
+
+/**
+ * `after` without what migration 7 added (the nullable columns unread_seq and unread_ns of
+ * attention), for the tests of an older migration, after which an open goes on to the newest
+ * schema. Throws when the statement does not end in them or a row holds a value in one: a
+ * migration adds none.
+ */
+export function withoutUnread(after: DatabaseDump): DatabaseDump {
+  const schema = after.schema.map((entry) => {
+    if (entry.type !== 'table' || entry.name !== 'attention') {
+      return entry;
+    }
+    if (entry.sql === null || !entry.sql.endsWith(UNREAD_COLUMNS_SQL)) {
+      throw new Error('attention does not end in unread_seq and unread_ns');
+    }
+    return { ...entry, sql: `${entry.sql.slice(0, -UNREAD_COLUMNS_SQL.length)}\n)` };
+  });
+  const rows = after.tables['attention'];
+  if (rows === undefined) {
+    return { ...after, schema };
+  }
+  const attention = rows.map((row) => {
+    const { unread_seq: seq, unread_ns: ns, ...rest } = row;
+    if (seq !== null || ns !== null) {
+      throw new Error('an attention row is unread after a migration');
+    }
+    return rest;
+  });
+  return { schema, tables: { ...after.tables, attention } };
+}
+
 export interface DatabaseDump {
   schema: { type: string; name: string; sql: string | null }[];
   tables: Record<string, Record<string, unknown>[]>;

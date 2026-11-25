@@ -2392,6 +2392,25 @@ migration (design 9.2, install.md "Going back"). A spool file with the new key, 
 skydeck still running, parses as before: the key is not one it knows, and those are ignored.
 `test/store/migration-6.test.ts` migrates a filled schema-5 database and compares every value.
 
+**Migration 7** (the mark unread, 12.4):
+
+```sql
+ALTER TABLE attention ADD COLUMN unread_seq INTEGER;  -- order of the latest time the user marked the session unread (12.4); NULL for none
+ALTER TABLE attention ADD COLUMN unread_ns INTEGER;  -- its time, for display only; NULL for none
+```
+
+It adds two nullable columns and nothing else, as migration 3 did one: every row keeps its values
+(both columns NULL in each) and a reader of schema 6 still reads `attention`. `unread_seq` takes the
+next value of the counter, as every `*_seq` (the next value counts it too), and `unread_ns` the
+server's clock, shown only (`marked unread · 2m`): a session is unread while its `unread_seq` is
+greater than its `seen_seq`, or no `seen_seq` is stored, by the counter as the other marks. In one
+write the unread comes after a turn end and a window end and before a seen (B3's order). The two
+columns are set NULL again only for a done session (12.4: a done session needs nothing), so that
+an undone later does not bring the mark back; the row stays. **An older skydeck refuses it**, as
+for migrations 3 to 6, and the way back is the copy kept before the migration (design 9.2,
+install.md "Going back"). `test/store/migration-7.test.ts` migrates a filled schema-6 database and
+compares every value.
+
 `kv` entries (no migration; `kv` is free text):
 
 | Key | Value |

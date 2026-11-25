@@ -165,6 +165,8 @@ function row(over: Partial<AttentionRow> & { sessionId: string }): AttentionRow 
     seenSeq: null,
     windowEndSeq: null,
     windowEndNs: null,
+    unreadSeq: null,
+    unreadNs: null,
     ...over,
   };
 }

@@ -1355,7 +1355,9 @@ Step 2 adds migration 2 (the table `attention`), migration 3 (follow-up F18: the
 `ticket_url` of `session_meta`, the ticket of 7.1, by the first `ALTER TABLE`) and migration 4
 (follow-up F19: the table `ticket_status`, a cached ticket status by address, 7.3); follow-up F44
 adds migration 5 (the nullable column `parked_at_ns` of `session_meta`, the time of 7.1's Parked),
-and #207 migration 6 (the nullable column `uptime_cs` of `events`, 5.3 "Order"). Their SQL is in
+and #207 migration 6 (the nullable column `uptime_cs` of `events`, 5.3 "Order"); the mark unread
+adds migration 7 (the nullable columns `unread_seq` and `unread_ns` of `attention`, the window's
+mark of design-step-2.md 12.4, set by the user). Their SQL is in
 design-step-2.md 10.2. A migration is never undone: a database migrated by a newer skydeck is
 refused by an older one at its open ("written by a newer skydeck").
 
