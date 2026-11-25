@@ -517,8 +517,8 @@ you pick it: **Appearance** (the window's colours, "Colours" below), **Links** �
 you changed it; Esc closes Settings without saving it) — and **The window** — `Keep WSL running`
 (`window.keepAlive`; it counts `after a restart`, `skydeck window --restart`), `Typed commands
 start sessions in` (`terminal`) and `Copy on select` (`window.copyOnSelect`, "Keys" in "Using
-the window") — and **Updates** — `Check for updates every day`
-(`window.updateCheck`), with the last check and `Check now` under it ("The window says when there
+the window") — and **Updates** — `Check for updates` (`window.updateCheck`: `Off`, `Every 15
+minutes`, `Every hour`, `Every day`), with the last check and `Check now` under it ("The window says when there
 is one", in "Updating"). A value the file's rules refuse is refused beside it in their words
 (`"ticketUrl" must be null or an http or https address with {key} once, after its host`), and the
 file stays as it was.
@@ -800,7 +800,7 @@ In `config.json` ("Configuration" above), all optional; "In the window" and "App
 | `window.profileDir` | `null` | shown | `skydeck window`, at its next run | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
 | `window.keepAlive` | `"wsl"` | change, first | after the window restarts | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`: without it, WSL stops 15 seconds after its last Windows terminal closes, ending every session in the window. |
 | `window.links` | `"default"` | change, first | at once | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
-| `window.updateCheck` | `"daily"` | change, first | at once | `"daily"`: the window's server looks for a newer skydeck when it starts and once a day, with a `git fetch` of skydeck's own checkout, and the title bar says `Update available` while one is known ("Updating" below); nothing is applied without a click. `"off"`: it does not look by itself; Check now in Settings still does. Anything else: `<file>: "window.updateCheck" must be "daily" or "off"`. |
+| `window.updateCheck` | `"hourly"` | change, first | at once | How often the window's server looks for a newer skydeck by itself, with a `git fetch` of skydeck's own checkout; the title bar says `Update available` while one is known ("Updating" below), and nothing is applied without a click. `"hourly"`: when it starts, then an hour after its last check; `"15min"`: every 15 minutes; `"daily"`: once a day (each also an hour after a check that failed, 15 minutes with `"15min"`). `"off"`: it does not look by itself; Check now in Settings still does. A file that says `"daily"` or `"off"` keeps it. Anything else: `<file>: "window.updateCheck" must be "off", "15min", "hourly" or "daily"`. |
 | `window.copyOnSelect` | `true` | change, first | at once | `true`: a selection you make with the mouse in the window's terminal is copied to the clipboard as you let go of the button, the same text Ctrl+Shift+C copies ("Keys" in "Using the window"); every open window uses the new value from its next selection. `false`: only Ctrl+Shift+C copies. `true` or `false` without quotes; anything else: `<file>: "window.copyOnSelect" must be true or false`. |
 
 With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
@@ -821,8 +821,8 @@ A key inside `window` that skydeck does not know is an error, as everywhere in t
 (`skydeck: /home/you/.config/skydeck/config.json: unknown key "window.prot"`). The server reads the
 file when it starts: after a change by hand, run `skydeck window --restart`. A change in the
 window's Settings ("Configuration" above) of a key that applies at once needs none (turning
-`window.updateCheck` on checks at once when the server has not checked for a day, or for an hour
-after a check that failed); one of
+`window.updateCheck` on, or to a shorter wait, checks at once when the server's last check is
+older than the new wait, or than its wait after a check that failed); one of
 `window.keepAlive` applies after the restart (a keep-alive that runs keeps running until then).
 
 ### Keeping WSL running
@@ -898,7 +898,9 @@ effect.
   exists already. A refusal shows under Start; Esc goes back to the card. Nothing is saved for the
   session: its start is recorded as every start is, so the header shows the new flags, and every
   later Resume uses them. A start that fails before the session reports keeps the old ones.
-- **A running session** of the window: a click shows its terminal. A session that runs in another
+- **A running session** of the window: a click shows its terminal; `r` in the list (or `Restart`
+  in the header) ends `claude` and resumes it in its place, with the same flags or other ones
+  ("Restarting a session" below). A session that runs in another
   terminal shows a card instead: it cannot be shown in the window. Once you `/exit` it there, it
   can be resumed here. A session in Claude Code's background has no terminal at all. For one sent
   there with ←, its row (once it is listed: an empty copy is not, see the next point) says
@@ -1010,13 +1012,18 @@ header:
 | the pull requests | `p` | `Pull requests` (`+ PR` while none is attached) |
 | done, undone | `d` | `Done` (`Undone` for a session marked done) |
 | park, unpark | `w` | `Park` (`Unpark` for a parked session) |
+| restart (below) | `r` | `Restart` |
 
 With no session selected, a key says `no session selected`.
 
 **The header** has four lines, the same height for every session and every window width; each
 is one line, cut with an ellipsis when it is long:
 
-1. the title, the group chip with its ✎ (or `+ group`), the state, `Note`, `Done` and `Park`;
+1. the title, the group chip with its ✎ (or `+ group`), the state, `Note`, `Restart` (only for a
+   session running in a terminal of the window that is not marked done; see below), `Done` and
+   `Park`. In a narrow right side the buttons give way rather than being cut: with the list 400 px
+   wide, a window up to about 810 px wide shows no `Restart`, and one up to about 718 px no `Park`
+   or `Unpark`; `r`, `w` and `skydeck park` still work;
 2. the directory (whole in its tooltip), `opened today at 14:02 · last active 3m` (`opened` while
    the window shows the session's terminal), where the title comes from (`title: your label`,
    `title: Claude Code's name`, `title: Claude Code's summary` or `title: start time and
@@ -1142,6 +1149,45 @@ and the next key acts on it: to take the `d` back, click `Undo` first. `Undo` se
 again, unless you moved the selection meanwhile. `Done` in the header selects nothing in its place.
 `d` on a session marked done (shown with `a`), and `Undone`, mark it undone, without a toast. A held
 `d` acts once, and so does a double click on a button of the header.
+
+**Restarting a session** that runs in a terminal of the window — when `claude` must start again to
+pick something up: another `--mcp-config`, another model, changed settings, an update of Claude
+Code —: `r` in the list or `Restart` in the header asks first, in a dialog over the window:
+`Restart: <its title>` and `It ends claude and resumes this session here, with the same flags.`,
+with `Restart`, `Other flags…` and `Cancel`; while it is working the dialog also says `It is
+working: ending it now stops the current turn.` The keyboard is always on `Cancel` when it opens,
+so that an `r` and an Enter typed by mistake never restart a session. Shift+Tab and ← move towards
+`Restart` and stop there, Tab and → towards `Cancel` and stop there, so `r`, ←, ←, Enter restarts
+it (and `r`, ←, Enter opens `Other flags…`). Esc is Cancel. Once you type a letter (or any
+character) while the dialog asks, the keyboard stays on `Cancel` until it closes: the arrows and
+Tab move nothing, and Enter or Space cancel; so a command typed into the list by mistake and then
+corrected with the arrows never restarts anything. A click still presses any button. `Other flags…` puts the `Flags for claude` field in the dialog,
+with your favourite flags under it, filled with the flags a plain resume would pass on; its
+`Restart` (or Enter in the field) restarts the session with exactly the flags in the field, checked
+as `Other flags…` on a resume card checks them, and Esc goes back with nothing changed. skydeck
+checks everything it can before it ends anything: a refusal (a flag a resume cannot take, a session
+marked done — mark it undone first —, one that also runs in another terminal, a directory that is
+gone) shows in the dialog, and nothing was ended. Then it ends `claude` as `End session and mark
+done` ends it, but marks nothing done, and resumes the session at once: the same number before its
+row, the same place in Open, the same terminal size; the dialog says `Restarting…` until then and
+the toast `Restarted.` Esc meanwhile closes the dialog: the restart goes on, and nothing moves your
+selection or the keyboard when it is done. If `claude` has not ended within 10 seconds, nothing is
+restarted (`Not restarted: it has not ended within 10 seconds; if it ends later, resume it from its
+bar.`): when it ends later, its terminal shows the ordinary bar with Resume, Other flags… and Close;
+an end within a minute of the restart counts as yours, a later one as an end you did not ask for
+(ended unexpectedly, and it asks for your attention).
+If it ended but could not be resumed, its terminal shows that bar, and the bar's line and the toast
+say why (`Restart: it ended, but was not resumed: …`). The dialog warns, as the resume card does,
+of flags it was started with that skydeck does not know: a restart does not pass them on. A
+restart is not shown as ended unexpectedly and makes no notification. If skydeck's server stops
+meanwhile, the toast says so; once the window is back, the session's terminal shows where it got
+to: ended with its bar, or running again. A server stopped while `claude` was still ending did not
+record that end, so the session then reads as ended unexpectedly, as after any end the server did
+not see, and asks for your attention. A parked session that runs in the window can be restarted
+too: it stays parked and without a number (only a prompt brings a parked session back, not a
+start). `r` on any other session says in a toast why it cannot be restarted
+(not running in this window, marked done, a terminal skydeck cannot end). There is no `skydeck
+restart` command: in a terminal of your own, end `claude` and run `skydeck resume`.
 
 **The pull-request dialog** (`p` in the list, `Pull requests` or `+ PR`) lists every attached pull
 request on a line of its own: `acme/web #7 · approved, green · checked 4m ago` (or `checks failing`,
@@ -2475,8 +2521,9 @@ More ends, each with exit 1:
 
 ### The window says when there is one
 
-The window's server looks for a newer skydeck when it starts and once a day, and an hour after a
-check that failed (no network, say): a `git fetch` of skydeck's own checkout from the remote its
+The window's server looks for a newer skydeck when it starts and then every hour (or every 15
+minutes, or once a day, as Settings says below), and an hour after a check that failed (no
+network, say; 15 minutes with `Every 15 minutes`): a `git fetch` of skydeck's own checkout from the remote its
 branch follows, which writes what `skydeck update --check`'s fetch writes — the remote-tracking
 refs (`origin/main`), the tags it follows, and what your git configuration asks of a fetch —,
 never your files, the index or HEAD. The check applies nothing; `Update now` in its dialog does,
@@ -2496,20 +2543,21 @@ after your second click (below).
   when the branch follows no branch of a remote any more, `skydeck cannot tell here whether there
   is an update: …` and the same. Esc or `Close` closes it; `Update now` stands beside `Close` when
   the update can be applied as the checkout is.
-- **Settings** (the gear). The group **Updates**, after The window: the switch `Check for updates
-  every day` (`window.updateCheck`: on is `"daily"`, the default; off is `"off"`, which stops the
-  checks at the start and every day), saved as you pick it; then a line that says when the last
+- **Settings** (the gear). The group **Updates**, after The window: the choice `Check for
+  updates` (`window.updateCheck`): `Off` (`"off"`, which stops the checks at the start and by the
+  clock), `Every 15 minutes` (`"15min"`), `Every hour` (`"hourly"`, the default) or `Every day`
+  (`"daily"`), saved as you pick it and used at once; then a line that says when the last
   check ended and what it found (`Last check: 2h ago — 3 new commits on origin/main`), or, when it
   failed, when and why (`The last check failed 5m ago: git fetch from origin failed: …`) and what
   is known from the last fetch that worked (`Known from 2h ago: …`); and `Check now`, which checks
-  at once, also with the switch off.
+  at once, also with `Off`.
 - **`skydeck doctor`** prints the same in one `info` line: `update: 3 new commits on origin/main
   (fetched 2h ago); skydeck update applies them`, or `update: skydeck is up to date (…)`, and a
   failed last check beside it. doctor itself uses no network.
 - **It never asks.** The check runs with no terminal, no askpass program and no credential
   manager's dialog (`GCM_INTERACTIVE=never`), so a remote that needs a passphrase or a login is a
   check that fails (the block and doctor say so), never a prompt; it gives up after 60 seconds and
-  is tried again an hour later. A fetch that fails hides nothing: an update an earlier check found
+  is tried again an hour later (15 minutes later with `"15min"`). A fetch that fails hides nothing: an update an earlier check found
   stays shown. A git call that fails, or a check that cannot run git at all, shows no notice:
   Settings and doctor say why.
 
@@ -2820,7 +2868,7 @@ file.
 | You see | Do |
 |---|---|
 | `skydeck: the database … was not upgraded: its copy … could not be written (<reason>)` | Before an upgrade skydeck keeps a copy of the database, and this one could not be written: make room on the disk, or move away what is in the way (the reason says which), then run the command again. The database is as it was ("Going back"). |
-| Settings' group `Updates` or `doctor` says `the last check failed …: git fetch from origin failed: <git's line>` | The window's check for a newer skydeck could not fetch: git's line says why (no network, a remote that needs a login or a passphrase, which the check never asks for). Nothing else is affected, and it tries again an hour later; `skydeck update --check` in a terminal of your own fetches with your login. `window.updateCheck` `"off"` stops the daily check. |
+| Settings' group `Updates` or `doctor` says `the last check failed …: git fetch from origin failed: <git's line>` | The window's check for a newer skydeck could not fetch: git's line says why (no network, a remote that needs a login or a passphrase, which the check never asks for). Nothing else is affected, and it tries again an hour later (15 minutes later with `"15min"`); `skydeck update --check` in a terminal of your own fetches with your login. `window.updateCheck` `"off"` stops the checks by the clock. |
 | The window's bar says `an update started from the window at <time> did not record how it ended; its log says: <stateDir>/update.log` | The update ran but could not write its outcome where the window reads it (its database was busy, say). Read the log's last lines: `updated to <id>` means it worked; otherwise they say why not. `skydeck doctor`'s first line names the commit the checkout is at. |
 | After `Update now` the window does not come back (the bar says `skydeck is being updated (since …)` for more than two minutes) | Read `<stateDir>/update.log` first: its last line says what happened. When it says that the checkout may not be as it was, set it right as "Updating" says; then, in a WSL terminal of your own, `skydeck window`. |
 | `git fetch` (yours, the window's, `skydeck update`'s) says `cannot lock ref 'refs/remotes/origin/main': Unable to create '…/.git/refs/remotes/origin/main.lock': File exists` | A git that was cut off left that file: the window's check is ended with SIGTERM first (git then removes its locks) and killed only 2 seconds later, but a machine that went down in the middle of a fetch can leave one. When no git runs in the checkout, remove the file git names (`rm <path>`), then again. A `git pull` of yours at the very moment of a check can meet the check's lock once: run it again. |

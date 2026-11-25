@@ -90,17 +90,19 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   (stopping a keeper would end its session). It may stop its own server and its own keep-alive
   process (6.1). The window has no "kill" action. It ends a session's program only when the user
   asks for it, each time, in the dialog "Mark done" of a session running in a terminal of the
-  window (follow-up F30, 12.10): its keeper sends that program SIGHUP and then SIGCONT, what the
-  kernel sends when a terminal's window is closed, and nothing else — never SIGTERM or SIGKILL, and
-  never to a session in another terminal. Every other session ends when the user ends it inside
+  window (follow-up F30, 12.10), or in its dialog "Restart" (issue #166, 12.10), which ends the
+  program the same way and then resumes the same session: its keeper sends that program SIGHUP
+  and then SIGCONT, what the kernel sends when a terminal's window is closed, and nothing else —
+  never SIGTERM or SIGKILL, and never to a session in another terminal. Every other session ends when the user ends it inside
   `claude`. Nothing moves from one session to another but on the user's word in the window: from
   follow-up F40 the bar of 12.6 copies the fields the user ticks from the session `/clear` started
   out of to the new one, each time it is answered, and the old session keeps all of them (design
   7.1).
 - **Principle 8 (local only)**: the server listens on the loopback interface only (15). Its one
   network use is the check for a newer skydeck: `git fetch` of skydeck's own checkout when it
-  starts and once a day, which the setting `window.updateCheck` turns off; nothing is applied
-  without a click (16.5; the owner's decision of 2026-11-21, issue #163). The other network uses
+  starts and then every hour, or every 15 minutes or every day, as the setting
+  `window.updateCheck` says, which also turns it off; nothing is applied without a click (16.5; the
+  owner's decisions of 2026-11-21, issue #163, and of 2026-11-24 for how often). The other network uses
   are design.md's: `gh`, the ticket-status programs and `skydeck update`'s `git fetch`.
 - **Windows programs.** Step 2 is the first time skydeck starts Windows programs by itself, through
   WSL interop. It starts exactly three, and only these: `msedge.exe` (the window, 5.3, and the
@@ -1291,6 +1293,29 @@ ago) leaves the terminal its number until that refresh; a terminal whose session
 last mapping (`/clear` in it) is judged by its old session until the next refresh, and then, no
 longer a parked session's, takes the lowest free slot.
 
+Issue #166: a restart (12.10) holds its terminal's slot from before the hang-up until the
+session's next terminal is open (`holdSlot`, `src/window/terminals.ts`). While held the terminal is
+`restarting` (8.2.3's `terminals`), and its slot stays on it after its program's exit — the one
+exception to F43's rule above, for the moment between that exit and the next terminal's spawn —, so
+`nextSlot`, a `hello`'s lowest-free rule, issue #189's hand-out and every rule that reads which
+slots are taken see it taken; no move gives it or takes it (`setSlots` refuses one that touches a
+held terminal), and `close-terminal` refuses the terminal. The resume of the restart opens its
+terminal with that slot in its meta, taken from the held terminal in the same synchronous step as
+the spawn (a transfer: at no moment is the slot free, and the held terminal never gets it back),
+with its moved entry, if any, removed as F43 removes it. A held terminal without a slot (the
+tenth) waits for one as any other does until its program ends, and a slot #189 gives it meanwhile
+passes on so; without one, the next terminal is opened with none and waits. A restart that is
+given up or whose resume opens no terminal lets the hold go: a slot nobody took is freed then as
+F43 frees it (and goes to a terminal that waits, #189), and the terminal is an ordinary ended one
+(7.8). The hold is in memory only: a server that stops meanwhile frees the slot as for any
+program that ended (the next server's `hello` says it exited). A parked session's terminal holds
+no slot (F44, above), so a restart of it holds none and its next terminal is opened with none (and
+is withheld as its session's at its spawn); a session parked while a restart holds its terminal
+loses the held number at that `withholdSlots`, as any terminal does, and the next terminal then
+gets none. Un-parked after the restart while all nine are held and no move keeps Open's order
+(12.1), its terminal waits at the old one's place, which the restart kept: before a waiting
+terminal opened after the old one, so it takes the next freed slot first.
+
 A limit: an older skydeck's server reads only the meta slots, so after a move its window can show
 two terminals with one slot until one of them closes. An F37 server reads a null entry as none and
 gives that terminal its meta slot at its `hello`; its own `hello` rule still keeps any two terminals
@@ -1334,7 +1359,11 @@ The server, on `exit`:
   lock have let it through and before it opens the new one (a refused resume leaves them), and
   the tick closes an ended terminal whose session is seen running anywhere else. A terminal whose
   program may still run is never dropped this way — for a lost terminal, for 60 seconds after the
-  loss (7.5);
+  loss (7.5). Issue #166: a terminal a restart holds (12.10) is the exception while held: it keeps
+  its slot (7.6), its row stays under Open with its number, the page shows its screen without
+  the bar, neither Close nor the tick closes it, and the restart's own resume leaves it open; the
+  restart closes it once the session's next terminal is there, and when there is none (the resume
+  was refused, no terminal could be made) it is let go as an ordinary ended terminal, with its bar;
 - when the program ended **before its session reported a start** (`resumeStarted`, design 7.6,
   never became true for this launch — `exec` failed, `claude` was not found, it exited at once)
   and the session's lock is still of the take this launch made (the lock it took, or a renewal of
@@ -1747,6 +1776,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `ticket-refresh` | `sessionId` | 12.5 (follow-up F19): reads the status of the session's ticket — the one set, else the group's link — now, whatever its age, in the background, answered `ok` at once; every page's `list` follows when the result is saved. Refused with `no status is read for this session's ticket` when no provider takes its address, or the session has none. `ticket` also asks for the read when a provider takes the new address. |
 | `close-terminal` | `term` | Forgets an ended or not-started terminal's last screen (7.8). Refused for a terminal whose program runs (principle 6). |
 | `end-session` | `term`, `sessionId` | Follow-up F30, 12.10: the dialog's `End session and mark done`. Refused, nothing done, unless the window's terminal `term` shows the session, its program runs and its keeper can be ended now (version 3, connected), the store knows the session, it is not marked done, it runs and a holder of it belongs to that terminal (7.5); and while a request for the same terminal waits (`skydeck is ending this session already`: no second signal). Then the session is marked done (as `done`), every page's list follows, and the keeper is sent `E`. The result comes when the program has ended — `ok` with `ended` true; the server records the end (12.10) and closes the terminal as `close-terminal` does — or 10 seconds later, `ok` with `ended` false: the session stays marked done and running, and the server goes on following that terminal until its program exits, then records the end and closes it the same way (it stops when the terminal is lost or forgotten). Once that result came, a new request for the terminal (the session undone and asked again) is taken as the first was. |
+| `restart` | `term`, `sessionId`, and optional `flags` (the text of the dialog's `Other flags…` field as typed, as `resume` takes it) | Issue #166, with part 2 of #188; 12.10: the dialog's `Restart` (or Start of its `Other flags…`). Every refusal comes first, nothing ended: `flags` split by 12.6's rule and checked as `resume`'s (design 7.6 "Other flags", in its words); `end-session`'s refusals, in its words, except that a session marked done is refused with `it is marked done: mark it undone first` (ended and done, its terminal would be hidden); `it also runs outside this terminal, so it cannot be resumed` when a holder of the session belongs to no terminal or to another; what the resume would refuse once the program is gone, as far as it is known now (design 7.6's guard without the running check: the boot id, the transcript, the directory, in its words) and a lock another skydeck holds (`<short> is being resumed; try again in a minute`). Then the terminal's slot is held (7.6), the keeper is sent `E` exactly as for `end-session`, with its 10-second wait, and nothing is marked done. Not ended within the wait (or the keeper lost, the terminal gone, the hang-up not sent): `ok` false, `ended` false, `error` why (`it has not ended within 10 seconds; if it ends later, resume it from its bar`): the restart is given up, its program's later end is recorded as `end-session`'s is (12.10) when it comes within 60 seconds of the hang-up (after that the server follows the terminal no more, and an end is an ordinary one), and nothing is resumed, then or later. Ended: the end recorded as `end-session` records it, then the session is resumed as a plain `resume` resumes it — the guard on refreshed rows, the lock, the directory, the recorded flags, or with `flags` those in their place — in a terminal of the old one's size that takes its slot; `ended` true, and `ok`, `lines` and `sessionId` as `resume`'s result, `error` its lines as one when it did not start the session. The old terminal is closed once the session has another terminal; with none (the resume refused, no terminal made) it stays as an ordinary ended terminal (7.8). While a restart holds a terminal of a session, a second `restart`, an `end-session` of that terminal, a `resume` (also `POST /resume` and restore's check), a `done` of the session and a `close-terminal` of that terminal are refused: `skydeck is restarting this session`. |
 | `open-link` | `url` | 9.6. |
 | `dismiss-restore` | `bootId` (the earlier boot the banner offers, a lower-case UUID: the form of `/proc/sys/kernel/random/boot_id`) | 12.7. |
 | `favourite-add` | `text` (the flags field's whole text), and optional `at` (a whole number from 0 to 11: Undo's old place) | 12.6 (follow-up F15): the text, trimmed, becomes a favourite — last, or at place `at` (past the end: last) — unless 12.6's rule refuses it; the refusal's words are the result's error, nothing saved. Every page's `list` follows. |
@@ -1796,11 +1826,11 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4 — from follow-up F44 those whose `needsYou` is true, never a parked one —, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, from follow-up F44 `parked`, `week`, `earlier`, in that order, each with `folded` — false for `parked` always: only Earlier folds as a whole —, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4; from F44 by their `needsYou`), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, from follow-up F42 the order they last had under Open, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), from issue #188 `resumeFlags`, the same flags each exactly as recorded — not sanitised: the page puts them only into the value of the resume card's `Other flags…` field (12.6), as it puts `note` only into a text box — or null when one holds what that field cannot hold as it is (a line break, another control character, a bidirectional control: the favourites' rule; `[]` without a recorded launch), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); issue #184 `copyOnSelect`: `window.copyOnSelect` as the running server uses it (9.5; always sent, so a page has it from its first list and follows a change in Settings at its next; absent, as in a scripted list of the tests, is false: the page holds no default); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, from follow-up F44 `parked` (a session under Parked, never `need`), `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none; from follow-up F44 `parked`, whether the session is parked now — design 7.1's derived mark: marked, and no prompt of the user's since —, and `parkedAtNs`, the time it was parked while it is, else null, both always sent, absent, as in a list of a server before F44, false and null) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), from follow-up F44 `needsYou` (whether the row counts as needing you, 12.4: `attention` set and the session not parked; always sent; absent, as in a list of a server before F44, is `attention` not null; the page counts and closes on it and decides nothing of it), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4 — from follow-up F44 those whose `needsYou` is true, never a parked one —, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, from follow-up F44 `parked`, `week`, `earlier`, in that order, each with `folded` — false for `parked` always: only Earlier folds as a whole —, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4; from F44 by their `needsYou`), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, from follow-up F42 the order they last had under Open, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5; from issue #166 `restarting`, true while a restart holds it — 7.6, 12.10 — and absent otherwise); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), from issue #188 `resumeFlags`, the same flags each exactly as recorded — not sanitised: the page puts them only into the value of the resume card's `Other flags…` field (12.6), as it puts `note` only into a text box — or null when one holds what that field cannot hold as it is (a line break, another control character, a bidirectional control: the favourites' rule; `[]` without a recorded launch), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); issue #184 `copyOnSelect`: `window.copyOnSelect` as the running server uses it (9.5; always sent, so a page has it from its first list and follows a change in Settings at its next; absent, as in a scripted list of the tests, is false: the page holds no default); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, from follow-up F44 `parked` (a session under Parked, never `need`), `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none; from follow-up F44 `parked`, whether the session is parked now — design 7.1's derived mark: marked, and no prompt of the user's since —, and `parkedAtNs`, the time it was parked while it is, else null, both always sent, absent, as in a list of a server before F44, false and null) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), from follow-up F44 `needsYou` (whether the row counts as needing you, 12.4: `attention` set and the session not parked; always sent; absent, as in a list of a server before F44, is `attention` not null; the page counts and closes on it and decides nothing of it), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
-| `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; else null); from follow-up F36, for `settings`, `setting-set` and `setting-default` only, `settings`: the settings screen as below; from follow-up F38, for `update-check`, `update-look`, `update-apply` (also with a refusal) and `update-seen` only, `update`: the check's state as below. |
+| `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; from issue #166 also `restart`; else null); `ended`, for `end-session` (above) and from issue #166 for `restart` once its program was hung up (absent for a refusal); from follow-up F36, for `settings`, `setting-set` and `setting-default` only, `settings`: the settings screen as below; from follow-up F38, for `update-check`, `update-look`, `update-apply` (also with a refusal) and `update-seen` only, `update`: the check's state as below. |
 | `settings` | Follow-up F36, 12.13: `settings`, the settings screen, to every page after a change: `path` (the file's), `backup` (where its copy goes), `exists`, `problem` (why the window changes nothing in the file until it is mended by hand, or null) and `settings`, in the server's table's order, each with `key`, `group`, `meaning`, `kind` (`change` or `show`), `names` (`program`, `folder` or `port` for a shown one, else null), `control` (`number`, `text` or `choice`), `choices`, `nullable`, `applies` (`now`, `restart`, `commands` or `install`), `default` and `defaultText`, `inFile`, `value` (exact) and `valueText`, `pending` (the running server uses another value) and `runningText`. Every text but `value` is sanitised. |
 | `update` | Follow-up F38, 16.5: `update`, the check for a newer skydeck, to a page right after its `start` and to every page on each change: `checking` (one runs), `check` (null: this server's own first check or look has not ended — it sends no stored outcome before), `checkedAtNs` (when the last check ended, whatever it found, or null), `fetchedAtNs` (when the last fetch that worked ended, or null) and `failure` (`{ atNs, line }` when the last check failed — its fetch, a git call of its look, or the check itself —, else null). `check` is `{ state: 'cannot', summary }` (the look could not tell: its line), `{ state: 'current', summary }` (`skydeck is up to date (<branch> at <id>, as <upstream>)`, or `nothing new on <upstream>: this checkout has <n> commits that it does not have`) or `{ state: 'available', summary, from, to, upstream, notes, moreNotes, others, otherCount, upgradesDatabase, blocked }` (`<n> new commits on <upstream>`; `from` and `to` HEAD's and the new commit's full ids; `upstream` its short name; `notes` the notes of what is new the update brings, newest first, at most 20, each `{ title, paragraphs }` in runs `{ text, code }` cut by the server at the backticks, and `moreNotes` how many more; `others` the subjects of the newest commits that add none, at most 20, and `otherCount` how many there are; `upgradesDatabase` whether it changes the database's upgrade steps; `blocked` why it cannot be applied as it is, or null; 16.5 "What an update brings"). Milestone 2's three fields: `applying` (`{ to, sinceNs }` while an update started from a window runs — the commit's full id, since when —, else null), `log` (`<stateDir>/update.log`, what the page names while the server is away, 6.3) and `result` (`{ ok, text }`: how the last update from the window ended, `updated to <id>` or why not, until a page sends `update-seen`; else null). Every text sanitised and clipped to 300 characters (`result`'s to 600). |
 | `notify` | `sessionId`, `title` (the row's, sanitised), `reason` (the kind: `asks`, `ended` or `finished`, 12.4; the page writes the words), `detail` (the row's attention detail, else null) (13). |
@@ -2218,16 +2248,22 @@ a change of `ticketRefreshMinutes` in the settings screen applies at once, 12.13
 and saves nothing more of it.
 
 **The check for a newer skydeck** (follow-up F38, 16.5). Every second, after the keep-alive, the
-tick offers the checker a turn. With `window.updateCheck` `"daily"` (read at each tick, so a change
-in the settings screen applies at once) it starts a check in the background, never delaying the
-tick or the server's start, when none runs, no update from the window runs or is being started
-(milestone 2), and this server has made no check yet — the first tick
-is part of the start, so every server start checks — or its last one ended 24 hours ago or more by
-the wall clock, or the clock stepped back behind it (`CHECK_EVERY_NS`); after a check that failed
-— its fetch failed, a git call of its look failed or timed out, or the check itself threw (a git
-that could not be started) — the wait is `RETRY_AFTER_FAILURE_NS`, one hour (the owner's decision
-of 2026-11-22). So "daily" is: at every start, then every 24 hours from the last check this
-server made, a Check now included, and an hour after one that failed. With the switch `"off"` no check
+tick offers the checker a turn. With `window.updateCheck` `"15min"`, `"hourly"` (the default) or
+`"daily"` (read at each tick, so a change in the settings screen applies at once) it starts a check
+in the background, never delaying the tick or the server's start, when none runs, no update from
+the window runs or is being started (milestone 2), and this server has made no check yet — the
+first tick is part of the start, so every server start checks — or its last one ended the value's
+wait ago or more by the wall clock — 15 minutes, an hour, 24 hours (`CHECK_EVERY_NS`, the owner's
+decision of 2026-11-24) —, or the clock stepped back behind it; after a check that failed — its
+fetch failed, a git call of its look failed or timed out, or the check itself threw (a git that
+could not be started) — the wait is `RETRY_AFTER_FAILURE_NS`, one hour (the owner's decision of
+2026-11-22), and never longer than the value's own wait: 15 minutes with `"15min"`
+(`retryAfterNs`). So `"hourly"` is: at every start, then every hour from the last check this
+server made, a Check now included. A change applies at the next tick: changed to a shorter wait, a
+check due by it is made at once; to a longer one, the next check waits for it from the last one.
+Why every hour by default: an update restarts the server, which checks at once and then waits; with
+a day's wait and several merges a day, the owner found each newer version first by Check now; a
+check is one quiet fetch of a small repository. With `"off"` no check
 starts by itself; a server that finds a stored outcome of its checkout looks once without the
 network at its first tick, so that a notice does not outlive an update made by hand. A server
 sends no stored outcome before its own first check or look has ended. The checker's own promises
@@ -3358,8 +3394,17 @@ For the selected session: the title (a click edits the label, stage D), the grou
 `+ group` when none; its tooltip says when the group comes from the title; a ✎ beside it edits
 it), the state pill, the project directory, "opened <time> · last active <age>", the short id (a
 click copies the whole id), where the title comes from, from follow-up F16 the flags the session
-was started with (below), and buttons Note, Done / Undone and, from follow-up F44, Park / Unpark
-(12.15: tooltips `park it: it waits under Parked (w)` and `back under Open (w)`). Then
+was started with (below), and buttons Note, from issue #166 Restart (12.10: only while the row is
+`endable` and not marked done), Done / Undone and, from follow-up F44, Park / Unpark (12.15:
+tooltips `park it: it waits under Parked (w)` and `back under Open (w)`). The buttons give way, none
+is cut (ruled for #166): Restart is not shown while the header is 382 px wide inside or less, and
+Park / Unpark while it is 290 px or less (measured in the suite's font: with Restart and Unpark a
+button is cut below 307 px and the state lies under Note below 338 px; with Unpark alone, below
+242 and 273 px; the rules leave slack for other fonts). With the list 400 px wide a window up to
+about 810 px wide shows no Restart and one up to about 718 px no Park / Unpark (at 640 px Park was
+cut before); `r`, `w` and `skydeck park` remain. A done row at the narrowest windows (below about
+650 px, with the list at 400 px) is the one case where the state may lie under Note (`Undone` is
+wider than `Done`); no button is cut there. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
 F18 the session's ticket first (below, with its status from F19), then the window's chip (12.3),
@@ -4238,7 +4283,9 @@ F40: the keyboard to the bar of 12.6), `f` (issue #188: the selected session's r
 what that bar's `Other flags…` does (12.6); a held `f` acts once and types nothing into the
 field; with nothing selected it says `no session selected`, while the right side shows neither
 `f resumes with other flags only a session shown on its resume card or its ended bar`, for an
-expired session `its transcript is gone: it cannot be resumed`), Home, End, PgUp,
+expired session `its transcript is gone: it cannot be resumed`), `r` (issue #166: the dialog
+"Restart" of the selected row the list shows, 12.10, at its first keydown; for any other row a
+toast says why), Home, End, PgUp,
 PgDn, ← → (fold, unfold), F2
 (label) and Esc (clear the filter, then back to the terminal). `/` gives the keyboard to the filter's field, where every key but Enter and
 Esc is text; Enter and Esc there end the entry and give the keyboard back to the list (Esc also
@@ -4371,7 +4418,8 @@ selection is still where that `w` left it (that row, or none); moved meanwhile, 
 header's Park and Unpark leave the selection to the main rule (it stays with the session), and the
 list then scrolls to the row in its new section by that same rule. **One guard** for `w`, `d` and
 the end dialog: while this page's own `w`, `d` or end of a session has not been decided by its list
-yet, a `w` and a `d` on that session do nothing (the header's Park and Done too), so a second key on
+yet, a `w` and a `d` on that session do nothing (the header's Park and Done too), and from issue
+#166 an `r` (and the header's Restart) opens no dialog "Restart" for it, so a second key on
 the row just marked never un-parks what `w` parked, marks done what `w` parked, or parks what `d`
 marked. The end dialog needs no check of its own: it opens only past `d`'s, and while it is shown it
 is modal, so no list key and no header control is reachable. The second click of
@@ -4382,8 +4430,9 @@ no keyboard and resumes nothing (ruled for plan E task 97; the caption since fol
 the `+n more` line and `×n`). A held
 `d` or `w` acts once, at its first keydown, and not while its own action for that session waits. Enter changes meaning: it shows a running session's terminal, or resumes one
 that is not running (12.6), where step 1 opened a detail view (the header is the detail). Step 1's
-`R`, `r` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
-closed as any window. The focused zone has a
+`R` and `q` have no use here: Enter resumes, the window refreshes by itself, and a window is
+closed as any window; `r` is the window's own key here: it restarts a session (issue #166,
+12.10). The focused zone has a
 coloured top edge, and the key bar says `Focus: list` or `Focus: terminal`. The keyboard follows
 the zone: where what had it goes away, or a click selects nothing, the page gives it to the zone's
 holder (the terminal, else a form's first field, else the zone itself; never a button). But the
@@ -4559,6 +4608,78 @@ Code's background: end it in claude agents. Hidden once it stops.` A session
 that does not run, `d` on a session marked done, `Undone`, `close-terminal` and every command of the
 command line are unchanged; nothing ends a session from the command line.
 
+**Restarting it (issue #166, with part 2 of #188).** One action ends a session's program and
+resumes the same conversation in its place, with the flags a plain resume passes on or with others
+— for a `claude` that must start again to pick something up (another `--mcp-config`, another model,
+changed settings, an update). It is offered for a row that is `endable` and not marked done: the
+header's `Restart`, between Note and Done (12.5; tooltip `end claude and resume this session (r)`),
+and the list key `r` on the selected row the list shows (12.9). For every other row `r` shows a toast
+that says why: marked done (`r restarts no session marked done: mark it undone first (d)`), not
+running in a terminal of the window (`r restarts only a session that runs in a terminal of this
+window; Enter resumes one`, and for one in another terminal or in Claude Code's background the
+same with `this one runs in another terminal` / `this one runs in Claude Code's background`), a
+terminal skydeck cannot end (`skydeck cannot end this one, so it cannot restart it: end it in its
+terminal`), one a restart holds (`skydeck is restarting this session`). Always a modal dialog first,
+in the manner of the end dialog: `Restart: <title>` (cut to 60 characters with `…`, whole in its
+tooltip), `It ends claude and resumes this session here, with the same flags.`, while it works the
+end dialog's own `It is working: ending it now stops the current turn.`, and `Restart` (the primary
+one), `Other flags…`, `Cancel`. The keyboard always starts on `Cancel` (ruled: an `r` and then
+Enter or Space, or letters before them, typed into the list by mistake must never restart a
+session); Tab and → walk towards Cancel and stop there, Shift+Tab and ← towards Restart and stop
+there (no wrap, ruled), so `r`, ←, ← (or Shift+Tab twice), Enter restarts and `r`, ←, Enter opens
+`Other flags…`; Enter or Space press the one that has the keyboard at a fresh press only; Esc is
+Cancel. A key that types a character, while the dialog asks, is the dialog's (it reaches no list
+key) and keeps the keyboard on Cancel until the dialog closes: Tab, Shift+Tab and the arrows move
+nothing, Enter and Space cancel, Esc closes, and a click still presses any button (ruled: a command
+typed into the list by mistake and corrected with the arrows must not land on Restart). The key
+help is refused while it is shown and opening it hides the help. `Other flags…` puts the flags line
+of the New form and the resume card (`Flags for claude`, the field, the ★, the favourites) in place
+of the line and the buttons, filled with what a plain resume passes on (`selected.resumeFlags`, as
+the resume card fills it; before the list brought it the dialog says so on its line and opens
+nothing), with the button `Restart` (it ends a running program, so not `Start`) and `restarts with
+these flags · Esc goes back`; Enter in the field presses it, Tab stays in the dialog, and Esc goes
+back with nothing changed, the keyboard on `Other flags…`. Before a press the dialog follows its
+own session as the end dialog does (`It stopped by itself: nothing was restarted.`, `It was marked
+done in another window: nothing was restarted.`, `It left the list: nothing was restarted.`).
+
+A press sends `restart` (8.2.3; with the field's text as `flags` from `Other flags…`), and the
+dialog stays, its line `Restarting…` (in the muted colour: it is no refusal), until the answer. A refusal, decided before anything is
+ended, stays in the dialog's line with the field's text and the keyboard. Every other answer closes
+it: `Restarted.` in a toast once the session runs again; given up (the program did not end within
+the 10 seconds, or its keeper was lost) `Not restarted: <why>.` (`it has not ended within 10
+seconds; if it ends later, resume it from its bar`): the session runs on, and if it ends later it is
+an ordinary ended terminal with its bar, and nothing resumes it; an end within 60 seconds of the
+hang-up is recorded as the user's, as an end of the dialog "Mark done" is (a deliberate one), and a
+later end is an ordinary one, read as Claude Code's hook reports it, with its attention and
+notification (ruled: an hour later it would be a crash, not the restart's end); ended and not resumed (the resume refused, no terminal
+made) `Restart: it ended, but was not resumed: <why>` in the toast and on the line of the ended
+bar of its terminal (Resume, Other flags…, Close), or the bar of the new terminal whose program did
+not start, which says why itself. Esc while the answer is awaited closes the dialog; the answer then
+comes as a toast (a refusal too, `Restart: <why>`). Nothing is taken from the user meanwhile (ruled):
+the answer selects nothing and moves no keyboard, so a user who selected another row or went to
+another zone or window stays there, and finds the restarted session at its place. While the restart
+holds the terminal (7.6, 7.8) the row stays under Open with its number, the pane shows the terminal's
+screen without the ended bar and the header's state reads `restarting…`; once the new terminal is
+there the row shows it, and a window that showed the session shows the new terminal, the keyboard in
+it if it was in the terminal before (12.9's rule for a terminal that comes to be shown). The end
+made by a restart is recorded as the dialog "Mark done" records its end (above), so it is never
+`ended-unexpectedly`, needs no attention and raises no notification (13); the start it makes raises
+nothing a plain resume would not. The dialog shows the resume card's warnings of what a plain
+restart does not pass on (12.6: `original flags unknown; resuming with defaults`, `started with
+flags skydeck does not know, not passed on resume: <names>`), so "with the same flags" is never
+taken for more than it is. A server that stops meanwhile (5.5) leaves nothing to finish, and
+nothing resumes the session by surprise: the dialog closes with `Restart: skydeck's server stopped
+answering; the action may or may not have been done`, and after its next start the terminal is an
+ordinary ended one without a number (or, when the new one was already open, that one is found as
+any). The known limit of an end above holds for it too: a server stopped while the program it hung
+up is still ending has not recorded that end, which reads as Claude Code's own hook reports it
+(`other`): the session is then `ended-unexpectedly` (in the middle of a turn also `was-working`),
+needs you as an ended terminal and is notified, and restore offers it. A parked session (12.15)
+that runs in a terminal of the window is restarted as any other, and towards its mark the restart
+is what an end and a plain resume are: a start is no prompt, so it stays parked, its terminals
+hold no number through the restart (7.6), and its row stays under Parked. There is no `skydeck
+restart` command, and nothing new is stored for the session.
+
 ### 12.11 The nine picks
 
 Approved with the mockup on 2026-11-13. Picks 5 and 8 cannot be seen in the mockup: they are the
@@ -4716,9 +4837,9 @@ screen's describe Advanced, which keeps F36's screen whole.
     from issue #184, `Copy on select` (`window.copyOnSelect`: a switch, on `true`, off `false`; hint
     `In a session’s terminal; Ctrl+Shift+C copies either way.`, since the label alone could be read
     as the group's whole window, whose list and header text it does not copy, 9.5).
-  - **Updates** (follow-up F38): `Check for updates every day` (`window.updateCheck`: a switch, on
-    `daily`, off `off`), then the group's extra block, the last check and `Check now` (the bullet
-    Updates below).
+  - **Updates** (follow-up F38): `Check for updates` (`window.updateCheck`: a choice, `Off`,
+    `Every 15 minutes`, `Every hour`, `Every day`, the server's order), then the group's extra
+    block, the last check and `Check now` (the bullet Updates below).
 
   Which keys are there, in which group, under which words, is one table beside the server's, pure
   text: `web/settings-short.js` (a new setting or group joins by one entry; a group's extra block
@@ -4797,8 +4918,9 @@ screen's describe Advanced, which keeps F36's screen whole.
   next list, the next link, the next ticket set, the next read of a status), `prRefreshMinutes` and
   `ticketRefreshMinutes` (the next automatic read), `restoreBatch`, `restoreMinFreeMb` and
   `restoreStartTimeoutSeconds` (the next restore; the timeout also the next mapping of terminals,
-  10.1), `window.links` (the next link), `window.updateCheck` (the next tick, 16.5: turned on, it
-  checks at once when this server's last check is a day old or there was none),
+  10.1), `window.links` (the next link), `window.updateCheck` (the next tick, 16.5: turned on, or
+  to a shorter wait, it checks at once when this server's last check is that old or there was
+  none),
   `window.copyOnSelect` (every page's next list, and with it the next selection, 9.5). After the
   window restarts: `window.keepAlive` — the
   keep-alive is made from it at the server's start (6.1), and one that runs keeps running until the
@@ -4857,9 +4979,10 @@ screen's describe Advanced, which keeps F36's screen whole.
   accent ground; the short screen's labels, hints, marks and words too); every text is text, a value
   only an input's value or text: one with markup stays text, a long one wraps, a right-to-left one
   keeps its order.
-- **Updates** (follow-up F38, 16.5). The short screen's fourth group, after The window: the switch
-  `Check for updates every day` (`window.updateCheck`, on `"daily"`, off `"off"`, saved as it is
-  picked like every short setting), then the group's extra block (`makeGroup`'s one place for it),
+- **Updates** (follow-up F38, 16.5). The short screen's fourth group, after The window: the choice
+  `Check for updates` (`window.updateCheck`: `Off`, `Every 15 minutes`, `Every hour`, `Every day`
+  for `"off"`, `"15min"`, `"hourly"`, `"daily"`, saved as it is picked like every short setting;
+  how long each waits is the server's, 16.5), then the group's extra block (`makeGroup`'s one place for it),
   shown from the start like the Appearance group: it says what the window's server last found when
   it looked for a newer skydeck: `Last check: <age> ago — <summary>`, the age that of the last
   check's end, whatever it found (`No check was made yet.`); when the last check failed, first
@@ -4868,7 +4991,7 @@ screen's describe Advanced, which keeps F36's screen whole.
   (`Nothing was fetched before.`) — that first line alone when the check's own outcome is that
   line (a git call failed, the check threw); a check that ends without a failure takes that line
   away; `Checking…` while a check runs. `Check now` runs a check at once (`act update-check`),
-  whether `window.updateCheck` is `"daily"` or `"off"`, and the block follows every `update`
+  whatever `window.updateCheck` says, `"off"` too, and the block follows every `update`
   message while the screen is shown. A checkout whose branch follows no branch of a remote never
   shows the title bar's `Update available` (12.1); this block is where it says why.
 
@@ -4924,7 +5047,7 @@ none: no made-up data.
   | the list | The list | every session, one row each, of this window and of any terminal; Open, Recent (the last 7 days) and Earlier; the number 1–9 is the slot |
   | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it, also with other flags (issue #188) |
   | the key bar | Where the keyboard is | `Focus: list` or `Focus: terminal`; Ctrl+Shift+L moves it; with `Focus: terminal` a letter goes to Claude Code |
-  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park (the version is not raised for it: the tour is not shown again); `/` filter, `a` show done |
+  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park and from issue #166 `r` restart (the version is not raised for them: the tour is not shown again); `/` filter, `a` show done |
   | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+J the next session that needs you; Ctrl+Shift+N a new one |
   | the list | After a restart | a restart of the PC or of WSL ends the running sessions; run `skydeck window` again, and the top of the list offers the ones that were open (the banner, 12.7); `Restore` brings the ticked ones back, and after `Not now` `> restore` in `Switch…` offers it again |
   | the gear | Settings and every key (step 7) | the gear opens Settings; Ctrl+Shift+H shows every key; the tour again: `Take the tour` in the key help, or `> tour` in `Switch…` |
@@ -4994,8 +5117,8 @@ Where the selection goes after `w`, and the one guard for `w`, `d` and the end d
 the selection moves on only while the user stayed in the list, so going to the terminal or opening
 the new session's form before the list that decides counts as having moved, and no key reaches the
 next row's session.
-The key help names `w` after `d`, and the tour's line of the list's keys ends `d done · w park`
-(12.14).
+The key help names `w` after `d`, and the tour's line of the list's keys has `d done · w park`,
+then from issue #166 `r restart` (12.14).
 
 **The numbers** (the owner's decision of 2026-11-24, "parking frees it"). Parking a session that
 runs in a terminal of the window frees its number 1-9 at once: the terminal holds none, and the
@@ -5103,7 +5226,7 @@ still parked.
 | **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s and stops reading a keeper whose records its screen side has not applied (7.3), so the keeper closes that connection at its send cap and the server reconnects; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
 | **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. The server's own connection waits at most 250 ms for another process's write lock (the commands wait 5 s), so a lock held for long never freezes the server: the piece of work that met it is given up and tried again — the tick's store work at the next tick, an action answers `skydeck's database is busy; try again`, a `hello` is closed with 1013 and the page tries again, and a found keeper's decision (7.3) is put off to the next refresh while its deadline allows; a start that meets it fails at once (5.2), leaving nothing behind (ruled, plan task 23). |
 | **skydeck is updated** | 16.5. |
-| **The check for a newer skydeck fails** (follow-up F38: no network, a remote that needs a login, a remote gone, git missing) | No notice of its own: after a failed fetch an update an earlier fetch brought stays shown; after a git call that failed or a check that threw none is shown; either way the settings screen's block and `doctor` say that the last check failed, when, and why (12.13, 16.3). It never asks for a password or a passphrase and never waits at a prompt; it ends after 60 seconds at most, and a failed check is tried again an hour later. A check that was cut can leave a ref's `.lock`; 16.5 says what then. |
+| **The check for a newer skydeck fails** (follow-up F38: no network, a remote that needs a login, a remote gone, git missing) | No notice of its own: after a failed fetch an update an earlier fetch brought stays shown; after a git call that failed or a check that threw none is shown; either way the settings screen's block and `doctor` say that the last check failed, when, and why (12.13, 16.3). It never asks for a password or a passphrase and never waits at a prompt; it ends after 60 seconds at most, and a failed check is tried again an hour later (15 minutes later with `"15min"`). A check that was cut can leave a ref's `.lock`; 16.5 says what then. |
 | **An update from the window fails** (follow-up F38, `Update now`) | The updater records the merge's outcome before it brings the window back; the server that comes back shows it in the result bar (`the update could not be applied: …`, or a refusal's line); a server that never stopped shows the refusal at once. An updater that could not record shows `… did not record how it ended; its log says: <log>`. No server comes back: the page's bar names `<stateDir>/update.log` first and `skydeck window` second (6.3). The window comes back later than `skydeck window`'s waits with a dead `WSL_INTEROP`: no second window, the log's last line says to run `skydeck window` though the server runs (16.5's named limit). |
 | **The key is wrong** (after `--new-secret`, a launch address used too late or given up, a stale bookmark) | The page says that its key is not valid and to run `skydeck window` again (8.2.2). |
 | **A launch token is presented twice** | Another program may have the secret: the alarm (8.2.2) — the page, the waiting `skydeck window` and `doctor` all say to run `skydeck window --new-secret`. |
@@ -5173,7 +5296,8 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   mended and the window restarted (ruled by the lead: it stays changeable, with no time limit; the
   screen's line for it says that it runs on every title, and the guide's trouble table how to get
   back — the copy, or the key taken out of the file, then `skydeck window --restart`).
-  `window.updateCheck` turns the window's daily check for a newer skydeck on or off (16.5).
+  `window.updateCheck` says how often the window checks for a newer skydeck, or that it does not
+  (16.5).
   `window.copyOnSelect` decides only whether a selection the user ends with the mouse is copied
   (9.5): no value of it lets a page or a program write the clipboard without one.
   From follow-up F38 a proven connection can also make the server fetch skydeck's own checkout's
@@ -5392,7 +5516,7 @@ New keys, all optional:
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
 | `window.links` | `"default"` | Ruled by the lead. Where the links the window opens go (9.6): `"default"`, the Windows default browser (`rundll32.exe url.dll,FileProtocolHandler <url>`), or `"edge"`, `window.edge` in the user's own Edge profile. Anything else is refused as every key of the file is: `<file>: "window.links" must be "default" or "edge"`. |
-| `window.updateCheck` | `"daily"` | Follow-up F38. `"daily"`: the window's server looks for a newer skydeck when it starts and once a day (16.5, "The window's check": a `git fetch` of skydeck's own checkout; nothing is applied without a click); `"off"`: only Check now in the settings screen looks (12.13). Read at each tick, so a change in the settings screen applies at once. Anything else is refused as every key of the file is: `<file>: "window.updateCheck" must be "daily" or "off"`. |
+| `window.updateCheck` | `"hourly"` | Follow-up F38. `"15min"`, `"hourly"`, `"daily"`: the window's server looks for a newer skydeck when it starts, then 15 minutes, an hour or a day after its last check, and an hour after one that failed (15 minutes with `"15min"`) (16.5, "The window's check": a `git fetch` of skydeck's own checkout; nothing is applied without a click); `"off"`: only Check now in the settings screen looks (12.13). A file without the key checks every hour; one that says `"daily"` or `"off"` keeps it (the owner's decision of 2026-11-24). Read at each tick, so a change in the settings screen applies at once. Anything else is refused as every key of the file is: `<file>: "window.updateCheck" must be "off", "15min", "hourly" or "daily"`. |
 | `window.copyOnSelect` | `true` | Issue #184 (the owner's decisions of 2026-11-23: on by default, a switch in Settings). `true`: a selection the user ends with the mouse in the shown terminal is copied to the clipboard at its release, as Ctrl+Shift+C copies it (9.5); `false`: only Ctrl+Shift+C copies. Every list carries the value the server uses, so a change in the settings screen applies at once, to the next selection of every page (12.13). `true` or `false` only; anything else is refused as every key of the file is: `<file>: "window.copyOnSelect" must be true or false`. |
 | `ticketUrl` | `null` | The details ruled by the lead. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` without a user name or password (`skydeck show` would print it, and Edge's command line would carry it) and with the same host (a host the key went into would differ), and with no `%`, or `%` with one hex digit, right before `{key}` (a key would finish that escape): where the key stands among the address's parts is the parser's to decide, not the text's (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
 | `ticketStatus` | `[]` | Follow-up F19; the details ruled by the lead. The programs that read a ticket's status (12.5): a list of at most 8 rules, each exactly `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` is the start of a ticket's address takes it, before GitHub's own reading of an issue's address. `match`: an `http` or `https` address, printable ASCII with no white space, at most 2,048 characters, with no user name or password, that starts with `<scheme>://<host>/` exactly as the URL parser writes them — scheme and host in lower case, a default port left out —, so that `https://tickets.example.com/` never takes `https://tickets.example.com.other.net/…` and a rule whose scheme or host could never match a stored address is refused instead of silently doing nothing (the rest of its path is not checked). `command`: 1 to 16 non-empty strings without control characters; `command[0]` is the program (a name on `PATH` or a path; a relative path is relative to the home directory), and in the other words every `{url}` becomes the address and every `{key}` the ticket's key (12.5; a rule whose command uses `{key}` is not run for an address that gives none); the program is run without a shell. No credential or token belongs in a rule: a program reads its secret from a file its owner keeps. Anything else is refused as every key of the file is, after `<file>: `: `"ticketStatus" must be a list of at most 8 rules`; `"ticketStatus[N]" must be an object with "match" and "command"`; `unknown key "ticketStatus[N].<key>"`; `"ticketStatus[N].match" must be the start of an http or https address, its scheme and host in lower case and followed by "/", at most 2,048 characters`; `"ticketStatus[N].command" must be a list of 1 to 16 non-empty strings without control characters`. Read at the server's start: after a change, `skydeck window --restart`. |
@@ -5595,12 +5719,14 @@ user's second click.
   branch). Its failure line is `git fetch
   from <remote> failed: <git's first line>` (or `no answer within 60 s`), clipped to 300
   characters.
-- **When** (10.1): with `window.updateCheck` `"daily"` (the default, 16.4), at every server start —
-  in the background, never delaying it — and then 24 hours after the last check this server made,
-  a Check now included (`CHECK_EVERY_NS`); after a check that failed (its fetch, a git call of its
-  look that failed or timed out — not a state of the checkout such as a detached HEAD —, or the
-  check itself, which threw) the wait is `RETRY_AFTER_FAILURE_NS`, one hour. Check now
-  (`act update-check`) checks whatever the switch says; with the switch `"off"` a server that finds
+- **When** (10.1): with `window.updateCheck` `"15min"`, `"hourly"` (the default, 16.4) or
+  `"daily"`, at every server start — in the background, never delaying it — and then 15 minutes,
+  an hour or 24 hours after the last check this server made, a Check now included
+  (`CHECK_EVERY_NS`); after a check that failed (its fetch, a git call of its look that failed or
+  timed out — not a state of the checkout such as a detached HEAD —, or the check itself, which
+  threw) the wait is `RETRY_AFTER_FAILURE_NS`, one hour, or 15 minutes with `"15min"`. The setting
+  is read at each tick: a change applies at once. Check now (`act update-check`) checks whatever
+  the setting says; with `"off"` a server that finds
   a stored outcome looks once without the network. One check runs at a time; a request while one
   runs joins it. The dialog's look (`act update-look`) runs without the network, so that what it
   says is true now (a change made, a branch switched, a `git pull` since the check).
@@ -5612,9 +5738,10 @@ user's second click.
   an earlier check's or an earlier server's outcome is taken up again (the stored entry gives only
   the time of the last fetch that worked) — and the dialog then says why. Either way the failure —
   its line and its time — is kept for the settings screen and `doctor` until a check that ends
-  without one, and the next check comes after the hour; a failed fetch is kept also when the look
-  after it ends `this checkout changed while git fetch ran`. A failure makes no notice of its own,
-  and a look that cannot tell shows none. The dialog's look follows the same rule: one whose git
+  without one, and the next check comes after the wait after a failure (an hour, 15 minutes with
+  `"15min"`); a failed fetch is kept also when the look after it ends `this checkout changed
+  while git fetch ran`. A failure makes no notice of its own, and a look that cannot tell shows
+  none. The dialog's look follows the same rule: one whose git
   call fails is a `cannot` with git's line and replaces what was known. The
   settings screen gives the time the last check ended, whatever it found (`checkedAtNs`), and the
   time of the last fetch that worked for what is known (`fetchedAtNs`).
@@ -5659,7 +5786,7 @@ command's, because the command is what runs:
   `to` only: when HEAD was moved back to an older ancestor between the dialog and the click (a
   `git reset` or a checkout by hand), the fast-forward to `to` also brings back commits that were
   installed before and that the dialog did not list. While an update runs or is being started,
-  Check now (`act update-check`) and the daily check start nothing and answer the state as it is.
+  Check now (`act update-check`) and the check by the clock start nothing and answer the state as it is.
 - **The start.** `kv window_update_run` says `applying` (10.2) and every page is told before
   anything is started; one line goes to `<stateDir>/update.log` (`update to <id> started from the
   window`; rotated at 1 MiB as the server's logs are, 4.2); then the process, with the **server's
@@ -5820,7 +5947,7 @@ test/helpers/update.ts), which checks that the path lies inside the sandbox firs
 remote is a bare repository beside it, or an `ssh://…invalid` address whose `ssh` is a sandbox stub
 that connects nowhere. The sandbox's `config.json` has `window.updateCheck` `"off"`
 (test/helpers/window-config.ts, beside `keepAlive` `"off"`), so that no test server checks unless
-its test turns the switch on.
+its test sets another value.
 
 **Two test platforms.** Logic is tested on a platform with a fake clock, a fake `/proc` and fake
 processes. Every test that starts a keeper, the stand-in or a server, or judges a real process
@@ -5867,7 +5994,8 @@ behaves like the parts of Claude Code that skydeck depends on, and nothing else:
   temporary `claudeHome` with status changes (`idle`, `busy`, `waiting`) on command, and runs the
   real `bin/skydeck-hook` with `SessionStart` and `SessionEnd` inputs and `CLAUDE_PID` set, so
   ingest sees it as it sees `claude`; it exits on `/exit` (reason `prompt_input_exit`) and on
-  SIGHUP (reason `other`).
+  SIGHUP (reason `other`; from issue #166, after `/hup-late <s>`, only that many seconds after
+  the SIGHUP: a program slow to end).
 
 ### 17.2 The keeper
 
@@ -6241,7 +6369,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
 | W41 | The settings screen's Advanced on the owner's own `config.json`, copied aside first: the title bar's gear opens it, `Advanced (14 more settings)` opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36, F39 | 12.13 |
 | W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last row and under a filter; follow-up F42: a fourth session of another terminal moved above a numbered one, the numbers unchanged, `/clear` in it keeps its place; `skydeck window --restart` keeps the order; follow-up F43: `/exit` in a numbered terminal gives its number up (its row under Recent without one, Ctrl+Shift+1 reaches no session), the next new session takes it, also after `Mark done, keep it running`; issue #189: with nine numbered terminals, a tenth session without a number takes the number a numbered one gives up at its `/exit`, at that number's place, also after a restart. The restore order only where W16's drill runs anyway. | F37, F42, F43, #189 | 7.6, 12.1, 12.9 |
-| W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog shows what is new (the notes, the folded other changes, the bottom lines; W51), with `Update now` and `Close`; `doctor`'s `update:` line; the group's switch `Check for updates every day` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
+| W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog shows what is new (the notes, the folded other changes, the bottom lines; W53), with `Update now` and `Close`; `doctor`'s `update:` line; the group's choice `Check for updates` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
 | W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links, The window and (F38) Updates with eight plain labels (from issue #184 `Copy on select` in The window) and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
 | W45 | The tour of the window in the owner's Edge (follow-up F41): it starts by itself at the first opening after the update, over the real list; each step's region stands out and its words read well; Enter, → and ← walk it, a click on the page does nothing, Ctrl+Shift+L says `close the tour first (Esc)`; `Done` gives the keyboard back and a reload shows it no more; the key help's `Take the tour` and the switcher's `> tour` start it again and Esc ends it; an InPrivate window with `--print-url`'s address shows it by itself once, in a tab's words. | F41 | 12.9, 12.14 |
 | W46 | **Real claude**, copy on select (issue #184): a drag over text in the terminal, then Ctrl+V into Notepad, gives that text; a double click a word; `Copy on select` off in Settings, a new selection leaves the clipboard with the text copied before; on again, the next selection is copied, without a reload. | #184 | 9.5, 12.13 |
@@ -6249,7 +6377,9 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W48 | The list's width in the owner's Edge (issue #192): the handle shows its cursor and tooltip on the border, a drag changes the width live and stops at 240 and 800 px and where the right side keeps 320 px; after a reload and after the window is closed and opened again the width is there with no jump; a narrower window shows less and a wider one the kept width again; a double click gives 400 px back, also one with a slight slip; the list's scroll bar right beside the border scrolls the list and leaves its width; a drag with `Focus: terminal`, over a throwaway session's terminal, leaves the keyboard in the prompt and types nothing into it; the terminal fits its new width; a browser tab (`--print-url`) keeps its own width. At the end a double click puts 400 px back. | #192 | 12.1, 12.9 |
 | W49 | **Real claude**, issue #188 part 1: a throwaway session resumed from its card's `Other flags…` with another `--model` — the field filled with the flags it was started with, `f` from the list, the header showing the new flag once Claude Code has started, a plain `Resume here` keeping it (manual-checks.md, "Resuming with other flags"). | #188 | 12.6, 12.9, design 7.6 |
 | W50 | **Real claude**, follow-up F44: Parked on throwaway sessions — `w`, the toast and Undo; the number freed and taken by a new session, and the lowest free one back under Open; a prompt brings it back, a key typed and not sent does not; `skydeck park` and `skydeck unpark` in W show within seconds; a parked session that asks shows its mark, sends no notification and Ctrl+Shift+J passes it; `skydeck window --restart` keeps it parked without a number; after `w` the selection is on the next row and the list has not moved, three `w` in a row park three sessions and nothing is typed into the session the selection moved to; `w` on a row under Parked brings it back, still selected and in view; `/clear` in a parked session; `w` on a US and a Czech layout (manual-checks.md, "Parked"). | F44 | 7.6, 12.1, 12.4, 12.9, 12.15, design 7.1 |
-| W51 | The update dialog's notes of what is new in the owner's Edge, on the owner's own installation, at the first update after this change that brings a note (nothing is applied): the notes' titles heavier and their text under them, a code run in the terminal's font, the fold of the other changes opened and closed by a click, Enter and Space and folded again at the next open, the Tab round, the database note when there is one, the bottom lines; both schemes and the owner's colour theme read well; a window lower than the dialog scrolls its body with the heading and the buttons in view; `skydeck update --check` lists the titles under `what is new:`. | the notes of what is new | 12.1, 16.5 |
+| W51 | **Real claude**, issue #166 with part 2 of #188: a throwaway session restarted from the header's `Restart` and with `r` — the keyboard on Cancel, `Restarting…`, the same conversation, the same number and place, not done, no notification —, then with `Other flags…` and another `--model`, the header showing it once Claude Code has started, a plain restart passing it on (manual-checks.md, "Restarting a session from the window"). | #166, #188 | 12.5, 12.10, design 7.6 |
+| W52 | How often the window checks for a newer skydeck by itself (follow-up F38's choice, the owner's decision of 2026-11-24): Settings' `Check for updates` shows the setup's value and its four words in order; `Every 15 minutes` saved, and a check by the clock within 16 minutes of the last one without a click; `Every day` makes none in twenty minutes; `Off` and `Check now`; the setup's value put back (manual-checks.md, "How often updates are checked"). | F38 | 10.1, 12.13, 16.5 |
+| W53 | The update dialog's notes of what is new in the owner's Edge, on the owner's own installation, at the first update after this change that brings a note (nothing is applied): the notes' titles heavier and their text under them, a code run in the terminal's font, the fold of the other changes opened and closed by a click, Enter and Space and folded again at the next open, the Tab round, the database note when there is one, the bottom lines; both schemes and the owner's colour theme read well; a window lower than the dialog scrolls its body with the heading and the buttons in view; `skydeck update --check` lists the titles under `what is new:`. | the notes of what is new | 12.1, 16.5 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

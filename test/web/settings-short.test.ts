@@ -22,7 +22,7 @@ test('four groups, eight controls, in this order, under plain labels', () => {
       ['Appearance', ['Mode', 'Colour theme']],
       ['Links', ['Open links in', 'Ticket address']],
       ['The window', ['Keep WSL running', 'Typed commands start sessions in', 'Copy on select']],
-      ['Updates', ['Check for updates every day']],
+      ['Updates', ['Check for updates']],
     ],
   );
   assert.deepEqual(
@@ -111,15 +111,24 @@ test('every key is a changeable one of the server’s table, named once, its con
       ['window.keepAlive', 'switch'],
       ['terminal', 'choice'],
       ['window.copyOnSelect', 'switch'],
-      ['window.updateCheck', 'switch'],
+      ['window.updateCheck', 'choice'],
     ],
   );
   const keepAlive = keys.find((entry) => entry.key === 'window.keepAlive');
   assert.ok(keepAlive?.control === 'switch');
   assert.deepEqual([keepAlive.on, keepAlive.off], ['wsl', 'off'], 'on keeps WSL running');
   const updateCheck = keys.find((entry) => entry.key === 'window.updateCheck');
-  assert.ok(updateCheck?.control === 'switch');
-  assert.deepEqual([updateCheck.on, updateCheck.off], ['daily', 'off'], 'on checks every day');
+  assert.ok(updateCheck?.control === 'choice');
+  assert.deepEqual(
+    Object.entries(updateCheck.words),
+    [
+      ['off', 'Off'],
+      ['15min', 'Every 15 minutes'],
+      ['hourly', 'Every hour'],
+      ['daily', 'Every day'],
+    ],
+    'how often, in the order of the server’s table',
+  );
   const copyOnSelect = keys.find((entry) => entry.key === 'window.copyOnSelect');
   assert.ok(copyOnSelect?.control === 'switch');
   assert.deepEqual([copyOnSelect.on, copyOnSelect.off], ['true', 'false'], 'on copies');

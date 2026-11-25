@@ -6,7 +6,7 @@
 // cannot be updated as it is, or why skydeck cannot tell; its keyboard round, its scroll with the
 // heading and the buttons in view, and its colours in both schemes. On a real test server whose
 // checker looks at a throwaway checkout inside the sandbox (updateSeam), its only remote a bare
-// repository beside it; the switch off, so that only Check now fetches. Never a real home or the
+// repository beside it; the check by the clock off, so that only Check now fetches. Never a real home or the
 // network.
 import assert from 'node:assert/strict';
 import { renameSync, rmSync, writeFileSync } from 'node:fs';

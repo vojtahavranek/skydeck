@@ -99,18 +99,22 @@ export const SHORT = [
     ],
   },
   {
-    // F38: the check for a newer skydeck; web/settings.js puts its extra block (the last check,
-    // `Check now`) after the switch.
+    // F38: the check for a newer skydeck, how often (the wait is the server's, S2 16.5);
+    // web/settings.js puts its extra block (the last check, `Check now`) after the choice.
     id: 'updates',
     title: 'Updates',
     entries: [
       {
         key: 'window.updateCheck',
-        label: 'Check for updates every day',
+        label: 'Check for updates',
         hint: null,
-        control: 'switch',
-        on: 'daily',
-        off: 'off',
+        control: 'choice',
+        words: {
+          off: 'Off',
+          '15min': 'Every 15 minutes',
+          hourly: 'Every hour',
+          daily: 'Every day',
+        },
       },
     ],
   },

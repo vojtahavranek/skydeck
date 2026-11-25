@@ -11,6 +11,26 @@
   /* A line that frames the terminal under it (F2, style.css). */
   border-bottom: 1px solid var(--edge);
   min-width: 0;
+  /* Issue #166: what the header's first line can hold is asked of its own width (the list's width
+     moves it, #192), below. */
+  container: card-header / inline-size;
+}
+/* Issue #166: the buttons give way when the first line is short of room, none is cut (ruled).
+   Restart first: with it (and Unpark) a button is cut below 307 px of the header's width inside,
+   and the state lies under Note below 338 px; the rule, with slack for other fonts, is 382 px.
+   `r` in the list remains. */
+@container card-header (max-width: 382px) {
+  .header-restart {
+    display: none;
+  }
+}
+/* Then Park / Unpark (F44), which was cut at a window of 640 px with the list 400 px wide: with
+   Unpark a button is cut below 242 px, and the state lies under Note below 273 px; the rule, with
+   slack, is 290 px. `w` remains. */
+@container card-header (max-width: 290px) {
+  .header-park {
+    display: none;
+  }
 }
 .card-header [hidden] {
   display: none;

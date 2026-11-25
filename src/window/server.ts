@@ -38,7 +38,7 @@ import { openLink } from './edge.ts';
 import { serverEnvironment } from './env.ts';
 import { readFavourites } from './favourites.ts';
 import type { KeeperHello } from './frames.ts';
-import type { ActionHandler, TerminalHub } from './hub.ts';
+import type { ActionHandler, SlotHold, TerminalHub } from './hub.ts';
 import { createInteropFrom, probeSocket } from './interop.ts';
 import { createKeepAlive } from './keepalive.ts';
 import { createLaunches } from './launches.ts';
@@ -543,8 +543,9 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
     });
     registry = created;
 
-    /** The window terminal (task 21) for a launch of `size`; it spawns nothing before open(). */
-    const terminalFor = (size: { cols: number; rows: number }): Terminal => {
+    /** The window terminal (task 21) for a launch of `size`; it spawns nothing before open().
+     *  Issue #166: a restart's `hold` gives it the held number. */
+    const terminalFor = (size: { cols: number; rows: number }, hold?: SlotHold): Terminal => {
       const terminal = windowTerminal(
         {
           registry: created,
@@ -561,6 +562,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
           },
         },
         size,
+        hold,
       );
       return {
         name: terminal.name,

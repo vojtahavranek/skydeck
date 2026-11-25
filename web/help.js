@@ -80,6 +80,10 @@ const SECTIONS = [
         ['w'],
         'park: the session waits under Parked until you send it a prompt; on a parked one, unpark (an Undo follows a park)',
       ],
+      [
+        ['r'],
+        'restart a session running in a terminal of this window: it ends claude and resumes this session here, with the same flags or, with Other flags…, others (r, ←, ←, Enter)',
+      ],
       [['c'], 'carry over after /clear: to the offer of the selected session'],
       [
         ['f'],

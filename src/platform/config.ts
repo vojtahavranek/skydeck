@@ -3,6 +3,18 @@ import { isAbsolute } from 'node:path';
 import { ConfigError } from './errors.ts';
 import type { Files } from './types.ts';
 
+/**
+ * F38 (S2 16.5): how often the window's server looks for a newer skydeck by itself, in this order
+ * (the settings screens show them so): never (only Check now), every 15 minutes, every hour, every
+ * day. A config that names none means `"hourly"`.
+ */
+export const UPDATE_CHECKS = ['off', '15min', 'hourly', 'daily'] as const;
+export type UpdateCheck = (typeof UPDATE_CHECKS)[number];
+
+function isUpdateCheck(value: unknown): value is UpdateCheck {
+  return UPDATE_CHECKS.some((one) => one === value);
+}
+
 /** The keys of `window` (S2 16.4). */
 export interface WindowConfig {
   port: number; // 1..65535 (A6)
@@ -11,8 +23,8 @@ export interface WindowConfig {
   keepAlive: 'wsl' | 'off';
   /** S2 9.6: where a link the window opens goes — the Windows default browser, or `edge`. */
   links: 'default' | 'edge';
-  /** F38 (S2 16.5): whether the window's server looks for a newer skydeck at its start and daily. */
-  updateCheck: 'daily' | 'off';
+  /** F38 (S2 16.5): whether, and how often, the window's server looks for a newer skydeck by itself. */
+  updateCheck: UpdateCheck;
   /** Issue #184 (S2 9.5): a selection the user ends with the mouse in the window's terminal is
    *  written to the clipboard at once, as Ctrl+Shift+C writes it. */
   copyOnSelect: boolean;
@@ -70,7 +82,7 @@ export const DEFAULT_CONFIG: Config = {
     profileDir: null,
     keepAlive: 'wsl',
     links: 'default',
-    updateCheck: 'daily',
+    updateCheck: 'hourly',
     copyOnSelect: true,
   },
 };
@@ -216,8 +228,8 @@ function readStatusRules(value: unknown, fail: (problem: string) => never): Tick
  * `claudeCommand` empty; `ticketUrl` that isTicketUrl refuses (S2 16.4); `ticketStatus` that
  * readStatusRules refuses and `ticketRefreshMinutes` not a whole number from 1 to 1440 (F19); in `window` (S2 16.4): an
  * unknown key, `port` outside 1–65535, `edge` not absolute, `profileDir` neither null nor an absolute Windows path,
- * `keepAlive` neither "wsl" nor "off", `links` neither "default" nor "edge", `updateCheck` neither
- * "daily" nor "off" (F38), `copyOnSelect` neither true nor false (issue #184).
+ * `keepAlive` neither "wsl" nor "off", `links` neither "default" nor "edge", `updateCheck` not
+ * "off", "15min", "hourly" or "daily" (F38), `copyOnSelect` neither true nor false (issue #184).
  *
  * `claudeHome`, `ticketUrl` and `wezterm.domain` may also be `null`, which is their default; an
  * empty `wezterm.domain` is an error like an empty `claudeCommand`.
@@ -362,8 +374,8 @@ export function parseConfig(text: string, source: string): Config {
               config.window.links = item;
               break;
             case 'updateCheck':
-              if (item !== 'daily' && item !== 'off') {
-                fail('"window.updateCheck" must be "daily" or "off"');
+              if (!isUpdateCheck(item)) {
+                fail('"window.updateCheck" must be "off", "15min", "hourly" or "daily"');
               }
               config.window.updateCheck = item;
               break;

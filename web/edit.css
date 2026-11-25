@@ -226,6 +226,11 @@ textarea.edit-field {
   outline: 2px solid var(--selline);
   outline-offset: 2px;
 }
+/* Issue #166: the dialog "Restart" is one of the same kind (web/restart-dialog.js); its line while
+   the server restarts the session (`Restarting…`) is no refusal, so not in a refusal's colour. */
+.restart-dialog .card-lines[data-pending='true'] {
+  color: var(--dim);
+}
 @media (max-height: 420px) {
   .end-dialog {
     top: 16px;

@@ -54,16 +54,18 @@ section first.
    the user asks for it there, field by field, each time, and the old session keeps all of them
    (follow-up F40; 7.1; design-step-2.md 12.6). skydeck never stops a process by itself; the window ends a session's
    program only when the user asks for it there, in its dialog, each time (design-step-2.md 2,
-   12.5). This is about the user's data (sessions, labels, groups, notes), not skydeck's own
+   12.5) — `End session and mark done`, or from issue #166 `Restart`, which then resumes the same
+   session (design-step-2.md 12.10). This is about the user's data (sessions, labels, groups, notes), not skydeck's own
    transient files (5.3). The one exception is the label and group skydeck itself has just stored
    for a `new` session that never started (7.7).
 7. **Never resume one session twice.** Two processes on one session interleave one transcript.
 8. **Local only.** No network service, no account, no telemetry, and nothing is applied without
    a click. The network is used only by: the `gh` command line (the status of pull requests and
    GitHub issues); the user's own ticket-status programs; `skydeck update`'s `git fetch`; and the
-   window's server, which runs `git fetch` of skydeck's own checkout when it starts and once a day
-   to say whether a newer skydeck is there (design-step-2.md 16.5), a check that a setting turns
-   off. That last use is the owner's decision of 2026-11-21 (issue #163).
+   window's server, which runs `git fetch` of skydeck's own checkout when it starts and then every
+   hour (a setting makes it every 15 minutes or every day, or turns it off) to say whether a newer
+   skydeck is there (design-step-2.md 16.5). That last use is the owner's decision of 2026-11-21
+   (issue #163); how often, of 2026-11-24.
 9. **Everything that knows a Claude Code format lives in `src/claude/`**, so a Claude Code update
    that changes a format changes one place. Other modules see normalised values only.
 
@@ -423,7 +425,8 @@ Marks are shown next to the state.
   design-step-2.md 10.2, 12.5).
 - **Done.** Hides the session. It never stops a process (the one exception: the window's dialog
   "Mark done" for a session running in its terminal, whose `End session and mark done` ends it on
-  the user's word, design-step-2.md 12.5). A done session is shown again when it
+  the user's word, design-step-2.md 12.5; the window's `Restart`, issue #166, ends it too, but
+  marks nothing done). A done session is shown again when it
   has activity after the done time: `user` input (5.6) in its transcript, or a `start` event with
   detail `startup` or `resume`. Ending a session, an `observed` event or a re-read of the
   transcript is not activity.
@@ -781,7 +784,9 @@ set are not part of a launch command and are not restored.
 **Other flags** (issue #188, part 1). `skydeck resume <ref> [--here | --tab | --window] -- <claude
 flags>`, and the window's `Other flags…` on the resume card and on the ended bar (design-step-2.md
 12.6), resume the
-session with the given flags in place of the recorded ones: `<claudeCommand> --resume <id> [-n
+session with the given flags in place of the recorded ones (part 2: so does the `Other flags…` of
+the window's `Restart` for a session running in one of its terminals, which first ends its program,
+design-step-2.md 12.10): `<claudeCommand> --resume <id> [-n
 <label>] <the given flags, as given, in their order>`. `--` with nothing after it resumes with no
 flags at all; without `--` nothing changes. The given flags are checked as `new` checks its flags
 (7.7), with the same table and in the same words (a flag that picks a session, `--name`/`-n`), and
