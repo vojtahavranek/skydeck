@@ -5712,9 +5712,9 @@ user's second click.
   and HEAD's does not, by path — one both have, one changed or removed between them, a file of
   another name or in another folder are none —, newest first by file name. They are read from git's
   objects of the two commits, never from the work tree, through `src/update/git.ts`, each call
-  with `GIT_NO_LAZY_FETCH=1` (git 2.44 and later fetch no missing object): `config -z --get-regexp`
+  with `GIT_NO_LAZY_FETCH=1` (a git that knows the variable fetches no missing object): `config -z --get-regexp`
   of the partial-clone settings (a partial clone — `extensions.partialclone`, a `promisor` remote —
-  gets no notes, so that an older git fetches nothing either); `cat-file --batch-check` of
+  gets no notes, so that a git that does not know it fetches nothing either); `cat-file --batch-check` of
   `<commit>:docs/news` for both (no such tree in the new commit: no notes; a tree larger than 256 KiB
   in either: no notes); `ls-tree -l -z --full-tree <commit> -- docs/news/` of each (regular files
   only, at most 1 MiB of listing kept, past it no notes); then `cat-file blob` for each new one, at
@@ -5727,7 +5727,9 @@ user's second click.
   paragraphs) to 600, each with `…`; a file that is not a well-formed note (no title line, an empty
   title or text, binary: a NUL or a byte that is not UTF-8) is not shown and breaks nothing. At
   most 20 are shown (`… and <n> more`, the files not read counted among them). The other changes
-  are the update's commits that add none of its note files (read or not, well-formed or not), by their subjects as `--check` lists them
+  are the update's commits that add none of its notes (a note shown or counted in `… and <n> more`;
+  a commit whose note file was read and refused — malformed, empty, binary, over 8 KiB — is one of
+  them), by their subjects as `--check` lists them
   (newest first, at most 20, then their count), without the ids. A checkout only ahead of its upstream is up to date for the notice (`nothing new on
   <upstream>: this checkout has <n> commits that it does not have`).
 - **The fetch that never asks.** `git -C <root> -c core.askPass= fetch --quiet -- <remote>` through

@@ -109,6 +109,8 @@ export interface ScriptedRepo {
    */
   news: Record<string, string>;
   newsTreeSize: number;
+  /** The tree's size for one commit, in place of newsTreeSize. */
+  newsTreeSizes: Record<string, number>;
   /** `config --get-regexp` of the partial-clone settings: its output (default none, exit 1). */
   partialClone: string | null;
   /** `cat-file blob <id>`: the blob's content, per id. */
@@ -156,6 +158,7 @@ export function scriptedRepo(root: string, over: Partial<ScriptedRepo> = {}): Sc
     commits: [{ id: NEW, subject: 'the new commit' }],
     news: {},
     newsTreeSize: 100,
+    newsTreeSizes: {},
     partialClone: null,
     blobs: {},
     noteAdders: [],
@@ -299,7 +302,7 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
               const commit = line.split(':')[0] ?? '';
               return repo.news[commit] === undefined
                 ? `${line} missing\n`
-                : `${'7'.repeat(40)} tree ${repo.newsTreeSize}\n`;
+                : `${'7'.repeat(40)} tree ${repo.newsTreeSizes[commit] ?? repo.newsTreeSize}\n`;
             })
             .join(''),
         });

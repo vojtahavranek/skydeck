@@ -370,14 +370,14 @@ async function partialClone(git: Git): Promise<boolean> {
   const result = await git.run(args);
   if (result.code === 1 && !result.timedOut) return false; // no such setting
   if (result.code !== 0 || result.timedOut) throw gitFailure(args, result, GIT_MS);
-  // `<key> LF <value> NUL`: a partialclone that names a remote, or a promisor that is true.
-  return result.stdout
-    .split('\0')
-    .some(
-      (entry) =>
-        /^extensions\.partialclone\n./i.test(entry) ||
-        /^remote\..*\.promisor\n(true|yes|on|1)$/is.test(entry),
-    );
+  // `<key> LF <value> NUL` (`<key> NUL` without a value): a partialclone that names a remote, or
+  // a promisor that is true.
+  return result.stdout.split('\0').some(
+    (entry) =>
+      /^extensions\.partialclone\n./i.test(entry) ||
+      // A promisor key without a value is true to git.
+      /^remote\..*\.promisor(\n(true|yes|on|1))?$/is.test(entry),
+  );
 }
 
 /**
@@ -425,8 +425,9 @@ async function noteFiles(git: Git, commit: string): Promise<Map<string, NoteFile
  * The notes `newId` brings over `oldId` (S2 16.5 "What an update brings"): the note files only the
  * new commit has, newest first; of them the first NOTES_READ are read (one larger than NOTE_BYTES
  * is not), and the well-formed notes kept; `unread`: how many were not read for that limit;
- * `adders`: the commits of the update that add any of those files, read or not, well-formed or
- * not. Nothing in a partial clone; nothing when NEWS_DIR's tree is larger than NEWS_TREE_BYTES in
+ * `adders`: the commits of the update that add a note kept or one not read for that limit — a
+ * commit whose note was read and refused is one of the other changes. Nothing in a partial clone;
+ * nothing when NEWS_DIR's tree is larger than NEWS_TREE_BYTES in
  * either commit (a SkydeckError, as every failure of a call here).
  */
 async function newsOf(git: Git, oldId: string, newId: string): Promise<News> {
@@ -443,8 +444,8 @@ async function newsOf(git: Git, oldId: string, newId: string): Promise<News> {
     .filter((path) => !before.has(path))
     .sort()
     .reverse();
-  if (added.length === 0) return NO_NEWS;
   const notes: Note[] = [];
+  const kept: string[] = [];
   for (const path of added.slice(0, NOTES_READ)) {
     const file = after.get(path);
     if (file === undefined || file.size > NOTE_BYTES) continue;
@@ -453,19 +454,26 @@ async function newsOf(git: Git, oldId: string, newId: string): Promise<News> {
       maxBytes: NOTE_BYTES,
     });
     const note = parseNote(text);
-    if (note !== null) notes.push(note);
+    if (note === null) continue;
+    notes.push(note);
+    kept.push(path);
   }
-  const unread = Math.max(0, added.length - NOTES_READ);
-  return { notes, unread, adders: await noteCommits(git, oldId, newId, added) };
+  const notRead = added.slice(NOTES_READ);
+  return {
+    notes,
+    unread: notRead.length,
+    adders: await noteCommits(git, oldId, newId, [...kept, ...notRead]),
+  };
 }
 
-/** The commits of `old..new` that add one of `paths`. */
+/** The commits of `old..new` that add one of `paths` (none: no git call, which without a path would name every commit that adds a file). */
 async function noteCommits(
   git: Git,
   oldId: string,
   newId: string,
   paths: readonly string[],
 ): Promise<Set<string>> {
+  if (paths.length === 0) return new Set();
   const out = await git.output(
     [
       'log',

@@ -116,7 +116,7 @@ export interface OutputOptions {
   /** Written to git's standard input (`cat-file --batch-check`). */
   input?: string;
   /**
-   * The call fetches no object (GIT_NO_LAZY_FETCH=1, from git 2.44): in a partial clone a missing
+   * The call fetches no object (GIT_NO_LAZY_FETCH=1, for a git that knows the variable): in a partial clone a missing
    * object is a failure, not a fetch from the promisor remote. For the look's reading of the notes
    * of what is new, which must use no network.
    */

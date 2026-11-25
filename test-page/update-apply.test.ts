@@ -434,6 +434,19 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
         'Its text.',
         '▸ 2 other changes',
       ]);
+      // A click opens and closes the fold without taking the keyboard off Close.
+      assert.equal((await dialogOf(page)).focus, 'update-close');
+      await page.locator('#update-dialog .update-fold').click();
+      await until(
+        async () => (await dialogOf(page)).lines.includes('▾ 2 other changes'),
+        'a click opens the fold',
+      );
+      assert.equal((await dialogOf(page)).focus, 'update-close', 'the keyboard stays on Close');
+      await page.locator('#update-dialog .update-fold').click();
+      await until(
+        async () => (await dialogOf(page)).lines.includes('▸ 2 other changes'),
+        'a click closes it',
+      );
       await page.keyboard.press('Tab');
       assert.equal((await dialogOf(page)).focus, 'update-fold');
       await page.keyboard.press('Enter');
@@ -482,6 +495,43 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
       assert.deepEqual(blocked.buttons, ['Close']);
       await page.keyboard.press('Escape');
       await liftedOn(page);
+    },
+  );
+
+  await t.test(
+    'the running form: ↑ ↓ PageUp PageDown Home End do nothing there and reach nothing behind it (taken and cancelled)',
+    async (t) => {
+      const w = await world(t, chromium);
+      const [page] = w.pages;
+      assert.ok(page !== undefined);
+      w.tell(APPLYING);
+      await runningOn(page);
+      await page.evaluate(() => {
+        const seen = { capture: [] as string[], bubble: [] as string[] };
+        Object.assign(window, { seenKeys: seen });
+        // After app.js's own capture listener: it sees whether the key was cancelled.
+        addEventListener(
+          'keydown',
+          (event) => seen.capture.push(`${event.key}:${event.defaultPrevented}`),
+          true,
+        );
+        addEventListener('keydown', (event) => seen.bubble.push(event.key));
+      });
+      const keys = ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'End', 'Home'];
+      for (const key of keys) await page.keyboard.press(key);
+      const seen = await readPage(
+        page,
+        () => (window as unknown as { seenKeys: { capture: string[]; bubble: string[] } }).seenKeys,
+        null,
+      );
+      assert.deepEqual(
+        seen.capture,
+        keys.map((key) => `${key}:true`),
+      );
+      assert.deepEqual(seen.bubble, [], 'stopped where the dialog took them');
+      const d = await dialogOf(page);
+      assert.equal(d.lines.join('\n'), RUNNING);
+      assert.equal(d.focus, 'edit-dialog update-dialog', 'the keyboard still on the form');
     },
   );
 

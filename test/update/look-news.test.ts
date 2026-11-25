@@ -158,17 +158,38 @@ describe('the notes an update brings, on the real git', () => {
     assert.equal(update.otherCount, 0);
   });
 
-  test("a commit that adds a file of a note's name is a note's commit, also when the note is not well formed", async (t) => {
+  test('a commit whose note file was read and refused (malformed, over 8 KiB) is one of the other changes', async (t) => {
     const r = real(t, { 'README.md': 'one\n' });
-    r.c.push('a broken note', { 'docs/news/2026-05-01-bad.md': 'no title\n' });
+    const bad = r.c.push('a broken note', { 'docs/news/2026-05-01-bad.md': 'no title\n' });
+    const huge = r.c.push('a huge note', {
+      'docs/news/2026-05-02-huge.md': note('Huge', 'a'.repeat(NOTE_BYTES)),
+    });
     const plain = r.c.push('a plain change', { 'a.txt': 'a\n' });
 
     const update = await r.look();
 
     assert.deepEqual(update.notes, []);
-    assert.deepEqual(update.others, [{ id: plain, subject: 'a plain change' }]);
+    assert.equal(update.moreNotes, 0);
+    assert.deepEqual(update.others, [
+      { id: plain, subject: 'a plain change' },
+      { id: huge, subject: 'a huge note' },
+      { id: bad, subject: 'a broken note' },
+    ]);
+    assert.equal(update.otherCount, 3);
+  });
+
+  test('notes in both commits, none new: a commit that adds another file is one of the other changes', async (t) => {
+    const r = real(t, {
+      'README.md': 'one\n',
+      'docs/news/2026-01-01-both.md': note('Both', 'Old.'),
+    });
+    const plain = r.c.push('a plain file', { 'a.txt': 'a\n' });
+
+    const update = await r.look();
+
+    assert.deepEqual(update.notes, []);
+    assert.deepEqual(update.others, [{ id: plain, subject: 'a plain file' }]);
     assert.equal(update.otherCount, 1);
-    assert.equal(update.count, 2);
   });
 
   test('45 notes, each in its commit, and 3 plain commits: 20 shown, 25 more, 3 other changes — the commits of notes not read are no other changes', async (t) => {
@@ -380,6 +401,18 @@ describe('the limits of the notes, on the scripted git', () => {
     assert.ok(!l.all.some((call) => call.args.includes('ls-tree') && call.args.includes('-l')));
   });
 
+  test("the old commit's tree of notes larger than the bound: no notes either", async (t) => {
+    const l = looker(t, {
+      ...notes(2),
+      news: { ...notes(2).news, [OLD]: '' },
+      newsTreeSizes: { [OLD]: NEWS_TREE_BYTES + 1 },
+      noteAdders: [NEW],
+    });
+
+    noNotes(await l.look());
+    assert.ok(!l.all.some((call) => call.args.includes('-l')));
+  });
+
   test('a listing past its cap: no notes; it is read with the cap', async (t) => {
     const big = noteEntry('2026-06-01-a.md', 'b'.repeat(40)).repeat(30_000);
     const l = looker(t, { news: { [NEW]: big }, blobs: notes(1).blobs, noteAdders: [NEW] });
@@ -433,7 +466,11 @@ describe('the limits of the notes, on the scripted git', () => {
   });
 
   test('a partial clone (its settings): no notes, nothing of them read', async (t) => {
-    for (const setting of ['extensions.partialclone\norigin\0', 'remote.origin.promisor\ntrue\0']) {
+    for (const setting of [
+      'extensions.partialclone\norigin\0',
+      'remote.origin.promisor\ntrue\0',
+      'remote.origin.promisor\0', // a key without a value: true to git
+    ]) {
       const l = looker(t, { ...notes(1), noteAdders: [NEW], partialClone: setting });
       noNotes(await l.look());
       assert.ok(!l.all.some((call) => call.args.includes('cat-file')));
