@@ -79,11 +79,12 @@ export const PARK_TEXTS = {
  */
 
 /**
- * The dialog "Park"'s reading of a row (ruled on review 1): `idle` only when skydeck knows it waits
- * for the user's next prompt with nothing pending (state `waiting`, no detail); `asking` when it
- * waits for an answer in the middle of a turn (a permission, a question: a detail); `working`; and
- * `unknown` for `running`, where skydeck cannot tell (design 6.2). Only `idle` lets the keyboard
- * start on, or stay on, `End session and park`.
+ * The dialog "Park"'s reading of a row (ruled on review 1 and 2): `working`; `asking` when the
+ * server says it asks (its attention's reason `asks`, 12.4, decided on the raw status) or the row
+ * has a detail (a permission, a question; also an idle row with a leftover detail stays on the safe
+ * side); `idle` only for a session `waiting` with neither; and `unknown` for the rest (`running`,
+ * where skydeck cannot tell, design 6.2). Only `idle` lets the keyboard start on, or stay on, `End
+ * session and park`.
  * @param {RowPayload} row
  * @returns {ParkPhase}
  */
@@ -91,10 +92,10 @@ export function parkPhase(row) {
   if (row.state === 'working') {
     return 'working';
   }
-  if (row.state === 'waiting') {
-    return row.stateDetail === null ? 'idle' : 'asking';
+  if (row.attention?.reason === 'asks' || row.stateDetail !== null) {
+    return 'asking';
   }
-  return 'unknown';
+  return row.state === 'waiting' ? 'idle' : 'unknown';
 }
 
 /**

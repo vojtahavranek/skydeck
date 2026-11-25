@@ -8,7 +8,7 @@
 // a scripted stand-in (`editWorld`). The page decides no rule: which rows are parked, where they
 // go and which one needs you are the server's.
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -762,6 +762,87 @@ test('F44: parking a session in the window', async (t) => {
         () => readRecords(w.d.record).filter((one) => one.ev === 'hup').length === 3,
         'three hang-ups',
       );
+      assert.deepEqual(w.problems, []);
+    },
+  );
+
+  // Ruled on review 2: any other key between `w` and Enter sends the keyboard to Cancel.
+  await t.test(
+    '`w`, ↓, Enter and `w`, Backspace, Enter on an idle session, fast and slow: nothing ended, nothing parked, no program hung up',
+    async (t) => {
+      const w = await world(t, chromium, { running: [S1, S2, S3] });
+      for (const delay of [0, 150]) {
+        for (const between of ['ArrowDown', 'Backspace']) {
+          await pick(w.page, S1);
+          for (const key of ['w', between, 'Enter']) {
+            await w.page.keyboard.press(key);
+            if (delay > 0) await sleep(delay);
+          }
+          await sleep(400);
+          assert.equal(
+            await readPage(w.page, () => document.getElementById('end-dialog')?.hidden, null),
+            true,
+            `w ${between} Enter (${delay} ms): the dialog closed`,
+          );
+        }
+      }
+      assert.deepEqual(await acts(w.page), [], 'nothing sent');
+      assert.equal(readRecords(w.d.record).filter((one) => one.ev === 'hup').length, 0);
+      assert.deepEqual(await idsIn(w.page, 'open'), [S1, S2, S3]);
+      assert.deepEqual(w.problems, []);
+    },
+  );
+
+  await t.test(
+    'review 2: a session that asks with no detail (its live file `waiting` with no `waitingFor`): the dialog starts on Keep with the asking warning, and `w`, Enter parks it and keeps it running',
+    async (t) => {
+      const w = await world(t, chromium, { running: [S1, S2] });
+      const term = w.server.hub.list().find((info) => info.expectedSessionId === S1);
+      const pid = term?.program?.pid;
+      assert.ok(pid !== undefined);
+      const file = join(w.d.s.claudeHome, 'sessions', `${pid}.json`);
+      const live = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+      delete live['waitingFor'];
+      live['status'] = 'waiting';
+      live['statusUpdatedAt'] = Date.now();
+      live['updatedAt'] = Date.now();
+      writeFileSync(file, `${JSON.stringify(live)}\n`);
+      await w.api.list(
+        (list) =>
+          list.sections.some((section) =>
+            section.rows.some(
+              (row) =>
+                row.id === S1 && row.stateDetail === null && row.attention?.reason === 'asks',
+            ),
+          ),
+        'S1 asks with no detail',
+      );
+      await sleep(500);
+      await pick(w.page, S1);
+      await w.page.keyboard.press('w');
+      await w.page.waitForSelector('#end-dialog:not([hidden])', {
+        state: 'attached',
+        timeout: PAGE_WAIT_MS,
+      });
+      const dialog = await readPage(
+        w.page,
+        () => ({
+          focus: document.activeElement?.textContent ?? '',
+          warning: (document.querySelector('#end-dialog .end-warning') as HTMLElement).hidden
+            ? null
+            : document.querySelector('#end-dialog .end-warning')?.textContent,
+        }),
+        null,
+      );
+      assert.deepEqual(dialog, {
+        focus: 'Park, keep it running',
+        warning: 'It is asking you something: ending it now stops the current turn.',
+      });
+      await w.page.keyboard.press('Enter');
+      await under(w.page, S1, 'parked');
+      await sleep(500);
+      assert.deepEqual(await acts(w.page), [{ kind: 'park', sessionId: S1 }]);
+      assert.equal(readRecords(w.d.record).filter((one) => one.ev === 'hup').length, 0);
       assert.deepEqual(w.problems, []);
     },
   );

@@ -372,6 +372,24 @@ test('F44, review 1: parkPhase is idle only for a session that waits with nothin
       PARK_TEXTS.asking,
     ],
     ['running: skydeck cannot tell', row(S1, { state: 'running' }), 'unknown', PARK_TEXTS.unknown],
+    [
+      'waiting, no detail, but the server says it asks (review 2)',
+      row(S1, { attention: { reason: 'asks', detail: null, sinceNs: null } }),
+      'asking',
+      PARK_TEXTS.asking,
+    ],
+    [
+      'waiting, no detail, its attention another reason (it finished)',
+      row(S1, { attention: { reason: 'finished', detail: null, sinceNs: null } }),
+      'idle',
+      null,
+    ],
+    [
+      'running, the server says it asks',
+      row(S1, { state: 'running', attention: { reason: 'asks', detail: null, sinceNs: null } }),
+      'asking',
+      PARK_TEXTS.asking,
+    ],
   ];
   for (const [what, given, phase, warning] of cases) {
     assert.equal(parkPhase(given), phase, what);

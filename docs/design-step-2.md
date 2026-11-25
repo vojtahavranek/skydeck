@@ -4614,9 +4614,10 @@ gone after `d` (a row of Open: nothing else is selected).
 `w` and the header's `Park`, in a parking's words: `End session and park` ends the session as `End
 session and mark done` does and parks it in place of marking it done. Two rules differ (12.15 says
 them and why): there the keyboard starts on the End button when the session is known to be idle,
-with a warning line for every other state, and a typed character sends the keyboard to `Cancel`
-until the dialog closes, as in the dialog "Restart" (Space too, while the keyboard is where the
-dialog itself put it).
+with a warning line for every other state, and any key but the dialog's own (and a modifier alone,
+and the page's window chords and reload keys) sends the keyboard to `Cancel` until the dialog
+closes, in the manner of the dialog "Restart" (Space too, while the keyboard is where the dialog
+itself put it).
 
 A session ended so is an ordinary ended one: once its program has exited the server stores an `end`
 of detail `exit` for each of its holders that belonged to the terminal (no spool file, raw detail
@@ -5155,11 +5156,12 @@ parks nothing yet: the dialog "Park", 12.10's dialog in a parking's words, asks 
 (cut and isolated as there), `This session is still running.`, a warning line unless the session
 is known to be idle — `It is working: ending it now stops the current turn.`, `It is asking you
 something: ending it now stops the current turn.` (it waits for an answer in the middle of a turn: a
-permission, a question) or `skydeck cannot tell whether it is working: ending it now may stop a
+permission, a question; the server's word, 12.4's attention `asks`, or a detail on its row) or `skydeck cannot tell whether it is working: ending it now may stop a
 turn.` (state `running`, design 6.2) —, and `End session and park` (the primary one), `Park, keep it
 running`, `Cancel`. Two rules differ from Done's dialog. **Where the keyboard starts:** on `End
 session and park` only when skydeck knows the session is idle — `waiting` for the user's next
-prompt with nothing pending — as the dialog opens; in every other state on `Park, keep it running`
+prompt with nothing pending: no detail on its row and no attention `asks` (ruled on review 2: the
+page reads the server's `asks`, it derives no rule of its own, 4.3) — as the dialog opens; in every other state on `Park, keep it running`
 (the owner's choice: parking is mostly done to sessions that wait, and ending them is what saves
 their resources; ruled on review 1 that "not working" means "known idle", so that Enter never
 stops a turn by itself). Any change away from idle while the dialog is shown (it works, asks, or
@@ -5170,17 +5172,25 @@ where it is. A named limit: the page learns that a session turned working a mome
 review 1, in the manner of the dialog "Restart"): while the keyboard is where the dialog itself
 put it — on End for an idle session, on `Park, keep it running` otherwise, also after a change
 away from idle moved it there — and the user has not moved it, only a fresh Enter presses that
-button, and Space there counts as a typed character; once a key that types a character comes
-while the dialog asks (a letter, a digit, a sign, that Space; not with Ctrl, Alt or Meta), the
-keyboard goes to `Cancel` and stays there until the dialog closes: Tab and the arrows move
-nothing, Enter and Space cancel, Esc closes, and a click still presses any button. An auto-repeat
+button, and Space there counts as a typed character; once any other key is pressed while the
+dialog asks (ruled on review 2) — a letter, a digit, a sign, that Space, Backspace, Delete, ↑, ↓,
+Home, End, PageUp, PageDown, a function key, a dead key, a key of an IME composition (or a
+composition that begins), a character typed with AltGr, Shift+Enter, any chord with Ctrl, Alt or
+Meta —, the keyboard goes to `Cancel` and stays there until the dialog closes: Tab and the arrows
+move nothing, Enter and Space cancel, Esc closes, and a click still presses any button. Only the
+dialog's own keys (Tab, Shift+Tab, ← and →, Enter, Space, Esc), a modifier or lock key pressed
+alone (Shift, Control, Alt, AltGr, Meta, CapsLock), and the keys the page acts on while any dialog
+is shown leave it where it is: the window chords, which say `close the dialog first (Esc)` (the
+key help's too), and the reload keys (F5, Shift+F5, Ctrl+F5, Ctrl+R), which reload the page as
+under any dialog with nothing changed. An auto-repeat
 is no typed character: the `w` that opened the dialog held a little long, or a key held since
 before it opened, does nothing, and a repeat of a key first pressed while it asks changes nothing
 more. After the user's own Tab, Shift+Tab or arrow, with nothing typed, Enter and Space press the
 button that has the keyboard, as in 12.10. So the whole cost the owner accepted is this: `w`
-directly followed by a fresh Enter ends one idle session (the quick path, on purpose), and nothing
-typed chains — after `wow`, `would`, `now `, `w ` or `wow what a show ` typed into the list by
-mistake no session is ended and none is parked, idle or working. The session ended
+directly followed by a fresh Enter, with no other key between them, ends one idle session (the
+quick path, on purpose), and nothing typed chains — after `wow`, `would`, `now `, `w `, `wow what a
+show `, `w`, ↓, Enter or `w`, Backspace, Enter typed into the list by mistake no session is ended
+and none is parked, idle or working. The session ended
 so is listed under Parked and resumed from its row. Everything else is 12.10's: Esc is Cancel; Tab
 and →, Shift+Tab and ← walk the three and stay inside; Enter or Space press at a fresh press only
 (an auto-repeat, or a key held since before it opened, presses nothing); Ctrl+Shift+H is refused

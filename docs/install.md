@@ -1104,12 +1104,15 @@ listed under Parked, not running, and you resume it from its row as any other. *
 running** (where the keyboard starts in every other state, with a line that says why: it is
 working, it is asking you something, or skydeck cannot tell whether it is working; → or Tab takes
 it there) parks it and leaves it running; **Cancel** or Esc does nothing. On the button where the
-dialog put the keyboard, only Enter presses it: Space does not. Once you type a letter (or any
-character, that Space too) while the dialog asks, the keyboard stays on `Cancel`
+dialog put the keyboard, only Enter presses it: Space does not. Once you press any other key while
+the dialog asks — a letter (or any character, that Space too), Backspace, ↑ or ↓, Home, End, a
+function key, a character with AltGr, a chord with Ctrl or Alt — the keyboard stays on `Cancel`
 until it closes: the arrows and Tab move nothing, and Enter or Space cancel; a click still presses
-any button. So `w` and then Enter, typed at once, end an idle session and park it — the quick way,
-on purpose: resume it from its row if you did not mean it — but a word with a `w` typed into the
-list by mistake (`wow`, `now `, `wow what a show `) ends and parks nothing. A `w` held a little
+any button. Shift, Control, Alt or CapsLock pressed alone change nothing, and the window's chords
+and reload keys do what they do under any dialog. So `w` and then Enter, with no other key between
+them, end an idle session and park it — the quick way, on purpose: resume it from its row if you
+did not mean it — but a word with a `w` typed into the list by mistake (`wow`, `now `, `wow what a
+show `), or `w`, ↓, Enter, ends and parks nothing. A `w` held a little
 long does nothing more than `w`. After you move the keyboard yourself (Tab, an arrow), Enter and
 Space press the button it is on. skydeck learns that a session
 started working a moment after it did, so `w` and Enter in that moment can still end it. Every other session is parked at once: one that does not

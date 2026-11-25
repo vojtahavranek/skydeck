@@ -26,10 +26,11 @@
 // starts on `End session and park` only when skydeck knows the session is idle (`parkPhase`), else
 // on `Park, keep it running`, and the warning line says why (working, asking, cannot tell); a change
 // away from idle while it is shown moves a keyboard on End to Keep, nothing moves it towards End
-// (the owner's choice, ruled on review 1). And a typed character (ruled on review 1, in the manner
+// (the owner's choice, ruled on review 1). And typed keys (ruled on reviews 1 and 2, in the manner
 // of the restart dialog): on the button where the dialog itself put the keyboard (End or Keep) only
 // a fresh Enter presses it, Space there counts as typed; an auto-repeat is never typed (a held `w`
-// does nothing); once a key that types a character came while it asks, the keyboard is on
+// does nothing); once any key but the dialog's own, a modifier alone and the page's window chords
+// and reload keys came while it asks (`parkKey`), the keyboard is on
 // `Cancel` until it closes (Tab and the arrows move nothing, Enter and Space cancel, a click still
 // presses); after the user's own Tab or arrow, with nothing typed, Enter and Space press as for
 // Done. So a word typed into the list by mistake never ends a session: only `w` directly followed
@@ -38,7 +39,6 @@
 
 /** @import { ListMessage, RowPayload } from '../src/window/protocol.ts' */
 import { cutTitle, dialogFollows, END_TEXTS, parkPhase, parkWarning, textsOf } from './end-text.js';
-import { typesCharacter } from './keys.js';
 import { sessionRow } from './pane.js';
 
 /**
@@ -49,6 +49,8 @@ import { sessionRow } from './pane.js';
  *   a press of the End or the Keep button, after the dialog closed; `mark` says which dialog
  * @property {(text: string) => void} gone the dialog closed by itself; the toast's words
  * @property {(choice: EndChoice | 'gone') => void} closed called once whenever the dialog closes
+ * @property {(event: KeyboardEvent) => boolean} pageKey a key the page acts on while a dialog is
+ *   shown (its window chords, its reload keys): the dialog "Park" leaves it to the page
  */
 
 /**
@@ -83,6 +85,25 @@ function element(tag, className, text) {
 
 /** The keys that press a button. */
 const PRESS_KEYS = new Set(['Enter', ' ']);
+
+/** Keys that are no action pressed alone: a modifier, a lock key (the dialog "Park"). */
+const MODIFIER_KEYS = new Set([
+  'Shift',
+  'Control',
+  'Alt',
+  'AltGraph',
+  'Meta',
+  'OS',
+  'Super',
+  'Hyper',
+  'Fn',
+  'FnLock',
+  'CapsLock',
+  'NumLock',
+  'ScrollLock',
+  'Symbol',
+  'SymbolLock',
+]);
 
 /**
  * @param {HTMLElement} root  #end-dialog
@@ -218,6 +239,116 @@ export function createEndDialog(root, deps) {
     });
   }
 
+  /**
+   * ← and → walk as Shift+Tab and Tab do (ruled): End is one ← from where Done's starts.
+   * @param {number} at the button that has the keyboard, -1 for none
+   * @param {boolean} back
+   */
+  const walk = (at, back) => {
+    const from = at === -1 ? buttons.indexOf(keepButton) : at;
+    buttons[(from + (back ? -1 : 1) + buttons.length) % buttons.length]?.focus();
+  };
+
+  /** @param {number} at the button that has the keyboard */
+  const pressAt = (at) => {
+    const pressed = buttons[at];
+    if (pressed !== undefined) {
+      press(pressed === endButton ? 'end' : pressed === keepButton ? 'keep' : 'cancel');
+    }
+  };
+
+  /** The keyboard goes to Cancel, and stays there until the dialog closes (the dialog "Park"). */
+  const lock = () => {
+    if (current !== null) {
+      current.typed = true;
+      cancelButton.focus();
+    }
+  };
+
+  /**
+   * A keydown while the dialog "Park" is shown (ruled on review 1 and 2). The dialog's own keys —
+   * Tab and Shift+Tab, ← and →, Enter, Space, Esc, without Ctrl, Alt or Meta — act as for Done,
+   * but that Space where the dialog itself put the keyboard (the user has not moved it) is typed,
+   * so that only a fresh Enter presses there. Every other fresh keydown — a character, Backspace,
+   * ↑ ↓, Home, End, a function key, a dead key, a key of an IME composition, AltGr, a chord — is
+   * text typed into the list by mistake: the keyboard goes to Cancel and stays there (Tab and the
+   * arrows move nothing, Enter and Space cancel, Esc closes, a click still presses). Not so a
+   * modifier alone, a key the page acts on while a dialog is shown (`deps.pageKey`: its window
+   * chords and reload keys, which this leaves to it), a keydown with no key (Chromium's autofill),
+   * or an auto-repeat (A5: a key held, also since before the dialog opened, does nothing).
+   * @param {KeyboardEvent} event
+   * @returns {boolean}
+   */
+  const parkKey = (event) => {
+    if (current === null || typeof event.key !== 'string' || MODIFIER_KEYS.has(event.key)) {
+      return false;
+    }
+    if (deps.pageKey(event)) {
+      return false;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const plain =
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      !event.isComposing &&
+      event.keyCode !== 229 &&
+      event.key !== 'Dead';
+    const isEscape = plain && event.key === 'Escape' && !event.shiftKey;
+    const isTab = plain && event.key === 'Tab';
+    const isArrow =
+      plain && (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.shiftKey;
+    const isEnter = plain && event.key === 'Enter' && !event.shiftKey;
+    const isSpace = plain && event.key === ' ' && !event.shiftKey;
+    if (event.repeat) {
+      if (current.typed) {
+        cancelButton.focus();
+      }
+      return true; // a held key presses nothing, walks nothing and is no typed character
+    }
+    const typed = !isEscape && !isTab && !isArrow && !isEnter && !(isSpace && current.moved);
+    if (current.typed || typed) {
+      // Enter or Space after a typed key cancel; the key that is itself the first one does not.
+      const cancels = isEscape || (current.typed && (isEnter || isSpace));
+      lock();
+      if (cancels) {
+        press('cancel');
+      }
+      return true;
+    }
+    const at = buttons.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement));
+    if (at === -1) {
+      // Something outside took the keyboard (a click on the toast): it comes back to the safe
+      // button, and this key does nothing more — never a press the user did not aim.
+      keepButton.focus();
+      if (isEscape) {
+        press('cancel');
+      }
+      return true;
+    }
+    if (isEscape) {
+      press('cancel');
+    } else if (isTab || isArrow) {
+      current.moved = true; // the user's own move: Enter and Space press where it lands
+      walk(at, isTab ? event.shiftKey : event.key === 'ArrowLeft');
+    } else {
+      pressAt(at);
+    }
+    return true;
+  };
+
+  // An IME composition that begins while the dialog "Park" asks is text typed by mistake too.
+  document.addEventListener(
+    'compositionstart',
+    () => {
+      if (current?.mark === 'park') {
+        lock();
+      }
+    },
+    true,
+  );
+
   return {
     /**
      * Opens the dialog of `mark` (Done's by default) for `row`, which runs in its terminal
@@ -286,12 +417,19 @@ export function createEndDialog(root, deps) {
     },
     /**
      * A keydown while the dialog is shown, from app.js's capture phase: true when the dialog took
-     * it (Esc, Tab, ← →, Enter, Space without Ctrl, Alt or Meta), and then nothing else acts on it.
+     * it (Done's: Esc, Tab, ← →, Enter, Space without Ctrl, Alt or Meta; Park's: `parkKey`), and
+     * then nothing else acts on it.
      * @param {KeyboardEvent} event
      * @returns {boolean}
      */
     key(event) {
-      if (current === null || event.ctrlKey || event.altKey || event.metaKey) {
+      if (current === null) {
+        return false;
+      }
+      if (current.mark === 'park') {
+        return parkKey(event);
+      }
+      if (event.ctrlKey || event.altKey || event.metaKey) {
         return false;
       }
       if (event.isComposing || event.keyCode === 229) {
@@ -300,41 +438,12 @@ export function createEndDialog(root, deps) {
       const isEscape = event.key === 'Escape' && !event.shiftKey;
       const isTab = event.key === 'Tab';
       const isArrow = (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.shiftKey;
-      let isPress = PRESS_KEYS.has(event.key) && !event.shiftKey;
-      // The dialog "Park" (ruled on review 1): a key that types a character is text typed into the
-      // list by mistake — Space too while the keyboard is where the dialog itself put it (End when
-      // idle, Keep otherwise: the user has not moved it), where only a fresh Enter presses —; the
-      // dialog takes it, so that the rest of a word reaches no list key, and from then on the
-      // keyboard stays on Cancel. An auto-repeat is no typed character (ruled): the `w` that
-      // opened the dialog, or a key held since before it opened, held on, does nothing.
-      let isTyped = false;
-      if (current.mark === 'park') {
-        if (event.key === ' ' && !current.moved) {
-          isPress = false;
-        }
-        isTyped = !isPress && typesCharacter(event);
-      }
-      if (!isEscape && !isTab && !isArrow && !isPress && !isTyped) {
+      const isPress = PRESS_KEYS.has(event.key) && !event.shiftKey;
+      if (!isEscape && !isTab && !isArrow && !isPress) {
         return false;
       }
       event.preventDefault();
       event.stopPropagation();
-      // Enter or Space after a typed character cancel; the Space that is itself the first typed
-      // character presses nothing.
-      const cancels = isEscape || (current.typed && PRESS_KEYS.has(event.key) && !event.shiftKey);
-      if (isTyped && !event.repeat) {
-        current.typed = true;
-      }
-      if (current.typed) {
-        cancelButton.focus(); // Tab and the arrows move nothing, Enter and Space cancel
-        if (!event.repeat && cancels) {
-          press('cancel');
-        }
-        return true;
-      }
-      if (isTyped) {
-        return true; // a held key's auto-repeat: nothing
-      }
       const at = buttons.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement));
       if (at === -1) {
         // Something outside took the keyboard (a click on the toast): it comes back to the safe
@@ -350,17 +459,9 @@ export function createEndDialog(root, deps) {
       if (isEscape) {
         press('cancel');
       } else if (isTab || isArrow) {
-        current.moved = true; // the user's own move: Enter and Space press where it lands
-        // ← and → walk as Shift+Tab and Tab do (ruled): End is one ← from where it starts.
-        const back = isTab ? event.shiftKey : event.key === 'ArrowLeft';
-        const step = back ? -1 : 1;
-        const from = at === -1 ? buttons.indexOf(keepButton) : at;
-        buttons[(from + step + buttons.length) % buttons.length]?.focus();
+        walk(at, isTab ? event.shiftKey : event.key === 'ArrowLeft');
       } else {
-        const pressed = buttons[at];
-        if (pressed !== undefined) {
-          press(pressed === endButton ? 'end' : pressed === keepButton ? 'keep' : 'cancel');
-        }
+        pressAt(at);
       }
       return true;
     },

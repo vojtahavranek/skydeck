@@ -398,6 +398,9 @@ const ender = createEndDialog(dom.endDialog, {
   },
   gone: (text) => toast.show(text, null),
   closed: (choice) => enderClosed(choice),
+  // The keys the page acts on while a dialog is shown, which the dialog "Park" leaves to it: its
+  // window chords (refused with `close the dialog first (Esc)`, or the help's) and reload keys.
+  pageKey: (event) => windowChord(event, state.zone) !== null || listKey(event)?.kind === 'reload',
 });
 /** Issue #166: the favourites' listener a form had when the dialog "Restart" took it. */
 let favouritesBefore = /** @type {((favourites: string[]) => void) | null} */ (null);

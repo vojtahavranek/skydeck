@@ -1610,6 +1610,249 @@ test('F44: the dialog "Park" for a session the window can end', async (t) => {
   );
 
   await t.test(
+    'review 2: a session the server says asks, with no detail, starts on Keep with the asking warning; an idle row with a leftover detail stays on Keep too',
+    async (t) => {
+      const d = await one(t, chromium, {
+        attention: { reason: 'asks', detail: null, sinceNs: null },
+      });
+      const { page, w } = d;
+      await wFrom(page, S1);
+      await shown(page, true);
+      assert.deepEqual(
+        [(await ender(page)).focus, (await ender(page)).warning],
+        [PARK_KEEP, ASKING],
+      );
+      await page.keyboard.press('Escape');
+      await shown(page, false);
+      // Idle, then it asks while shown (no detail): moved off End.
+      d.set({ sections: { open: [endable(S1, TERM_A, 1)], week: [row(S2)] } });
+      await sleep(300);
+      await wFrom(page, S1);
+      await shown(page, true);
+      assert.equal((await ender(page)).focus, PARK_END);
+      d.set({
+        sections: {
+          open: [
+            endable(S1, TERM_A, 1, { attention: { reason: 'asks', detail: null, sinceNs: null } }),
+          ],
+          week: [row(S2)],
+        },
+      });
+      await eventually(async () => (await ender(page)).warning === ASKING, 'asking');
+      assert.equal((await ender(page)).focus, PARK_KEEP);
+      await page.keyboard.press('Escape');
+      await shown(page, false);
+      // A leftover detail with no attention: still on the safe side.
+      d.set({
+        sections: {
+          open: [endable(S1, TERM_A, 1, { stateDetail: 'permission' })],
+          week: [row(S2)],
+        },
+      });
+      await sleep(300);
+      await wFrom(page, S1);
+      await shown(page, true);
+      assert.deepEqual(
+        [(await ender(page)).focus, (await ender(page)).warning],
+        [PARK_KEEP, ASKING],
+      );
+      await page.keyboard.press('Escape');
+      assert.deepEqual(w.acts(), []);
+    },
+  );
+
+  await t.test(
+    'review 2: every other fresh key sends the keyboard to Cancel (Backspace, Delete, the arrows up and down, Home, End, PageUp, PageDown, a function key, Shift+Enter, Shift+Space, a chord with Ctrl or Alt, AltGr, a dead key, a key of an IME composition, a composition that starts); the next Enter cancels, nothing sent',
+    async (t) => {
+      const { page, w } = await one(t, chromium);
+      const cdp = await page.context().newCDPSession(page);
+      const cases: [string, () => Promise<void>][] = [
+        ...[
+          'Backspace',
+          'Delete',
+          'ArrowUp',
+          'ArrowDown',
+          'Home',
+          'End',
+          'PageUp',
+          'PageDown',
+          'F2',
+          'Shift+Enter',
+          'Shift+Space',
+          'Shift+ArrowLeft',
+          'Control+b',
+          'Alt+x',
+          'Control+Alt+l',
+        ].map((key): [string, () => Promise<void>] => [key, () => page.keyboard.press(key)]),
+        [
+          'a dead key',
+          async () => {
+            await cdp.send('Input.dispatchKeyEvent', {
+              type: 'keyDown',
+              key: 'Dead',
+              code: 'BracketRight',
+              windowsVirtualKeyCode: 221,
+            });
+            await cdp.send('Input.dispatchKeyEvent', {
+              type: 'keyUp',
+              key: 'Dead',
+              code: 'BracketRight',
+              windowsVirtualKeyCode: 221,
+            });
+          },
+        ],
+        [
+          'a key of an IME composition',
+          () =>
+            page.evaluate(() => {
+              document.activeElement?.dispatchEvent(
+                new KeyboardEvent('keydown', {
+                  key: 'Process',
+                  code: 'KeyA',
+                  keyCode: 229,
+                  isComposing: true,
+                  bubbles: true,
+                  cancelable: true,
+                }),
+              );
+            }),
+        ],
+        [
+          'a composition that starts',
+          () =>
+            page.evaluate(() => {
+              document.activeElement?.dispatchEvent(
+                new CompositionEvent('compositionstart', { bubbles: true }),
+              );
+            }),
+        ],
+      ];
+      for (const [what, key] of cases) {
+        await wFrom(page, S1);
+        await shown(page, true);
+        assert.equal((await ender(page)).focus, PARK_END, what);
+        await key();
+        await sleep(50);
+        assert.deepEqual(
+          [(await ender(page)).shown, (await ender(page)).focus],
+          [true, CANCEL],
+          `${what}: on Cancel`,
+        );
+        await page.keyboard.press('Enter');
+        await shown(page, false);
+        assert.deepEqual(w.acts(), [], `${what}: nothing sent`);
+      }
+    },
+  );
+
+  await t.test(
+    'review 2: a modifier alone, and the page’s own window chords, leave the keyboard where it is: `w`, Shift, Control, Alt, CapsLock, Ctrl+Shift+L, Enter still ends and parks the idle session',
+    async (t) => {
+      const { page, w } = await one(t, chromium);
+      await wFrom(page, S1);
+      await shown(page, true);
+      for (const key of ['Shift', 'Control', 'Alt', 'CapsLock']) {
+        await page.keyboard.press(key);
+        assert.equal((await ender(page)).focus, PARK_END, key);
+      }
+      await page.keyboard.press('Control+Shift+L');
+      assert.equal(await keyMessage(page), 'close the dialog first (Esc)');
+      assert.equal((await ender(page)).focus, PARK_END);
+      await page.keyboard.press('Enter');
+      await w.act(1);
+      assert.deepEqual(actsAfter(w), [
+        { kind: 'end-session', term: TERM_A, sessionId: S1, mark: 'park' },
+      ]);
+    },
+  );
+
+  await t.test(
+    'review 2: Done’s dialog keeps its own rule on an asking and on a running row (no new warning, the keyboard on its second button), and its keys are not Park’s (Backspace changes nothing)',
+    async (t) => {
+      const d = await one(t, chromium);
+      const { page, w } = d;
+      for (const more of [
+        { state: 'waiting', stateDetail: 'permission' },
+        { state: 'waiting', attention: { reason: 'asks', detail: null, sinceNs: null } },
+        { state: 'running' },
+      ] as Row[]) {
+        d.set({ sections: { open: [endable(S1, TERM_A, 1, more)], week: [row(S2)] } });
+        await sleep(300);
+        await dFrom(page, S1);
+        await shown(page, true);
+        assert.deepEqual(
+          [(await ender(page)).focus, (await ender(page)).warning],
+          [KEEP, null],
+          JSON.stringify(more),
+        );
+        await page.keyboard.press('Backspace');
+        assert.equal((await ender(page)).focus, KEEP, 'Backspace: nothing in Done’s dialog');
+        await page.keyboard.press('Escape');
+        await shown(page, false);
+      }
+      assert.deepEqual(w.acts(), []);
+    },
+  );
+
+  await t.test(
+    'review 2: the typed lock survives a list that changes the row’s state and title; a keyboard the user moved to End on a session not idle stays there through lists with no change of phase, and moves off End at a change of phase',
+    async (t) => {
+      const d = await one(t, chromium);
+      const { page, w } = d;
+      await wFrom(page, S1);
+      await shown(page, true);
+      await page.keyboard.press('x');
+      assert.equal((await ender(page)).focus, CANCEL);
+      d.set({
+        sections: {
+          open: [endable(S1, TERM_A, 1, { state: 'working', title: 'renamed meanwhile' })],
+          week: [row(S2)],
+        },
+      });
+      await eventually(async () => (await ender(page)).warning === WORKING, 'working');
+      d.set({
+        sections: { open: [endable(S1, TERM_A, 1, { title: 'idle again' })], week: [row(S2)] },
+      });
+      await eventually(async () => (await ender(page)).warning === null, 'idle again');
+      assert.equal((await ender(page)).focus, CANCEL, 'still locked');
+      await page.keyboard.press('ArrowLeft');
+      assert.equal((await ender(page)).focus, CANCEL);
+      await page.keyboard.press('Enter');
+      await shown(page, false);
+      assert.deepEqual(w.acts(), []);
+      // The user's own move to End while it works: lists with no change of phase leave it there.
+      d.set({
+        sections: { open: [endable(S1, TERM_A, 1, { state: 'working' })], week: [row(S2)] },
+      });
+      await sleep(300);
+      await wFrom(page, S1);
+      await shown(page, true);
+      await page.keyboard.press('ArrowLeft');
+      assert.equal((await ender(page)).focus, PARK_END);
+      for (const title of ['one', 'two']) {
+        d.set({
+          sections: {
+            open: [endable(S1, TERM_A, 1, { state: 'working', title })],
+            week: [row(S2)],
+          },
+        });
+        await eventually(
+          async () => (await ender(page)).heading === `Park: ${title}`,
+          `the title ${title}`,
+        );
+        assert.equal((await ender(page)).focus, PARK_END, `a list (${title}): it stays on End`);
+      }
+      d.set({
+        sections: { open: [endable(S1, TERM_A, 1, { state: 'running' })], week: [row(S2)] },
+      });
+      await eventually(async () => (await ender(page)).warning === UNKNOWN, 'cannot tell');
+      assert.equal((await ender(page)).focus, PARK_KEEP, 'a change of phase: off End');
+      await page.keyboard.press('Escape');
+      assert.deepEqual(w.acts(), []);
+    },
+  );
+
+  await t.test(
     'opened on a session marked done, it follows the mark: undone elsewhere it stays, marked done again elsewhere it closes with its toast',
     async (t) => {
       const d = await one(t, chromium, { done: true });
