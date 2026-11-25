@@ -514,6 +514,17 @@ describe('act end-session: done, then the hang-up', () => {
   });
 });
 
+/**
+ * The answer of `pending`, never a hang: once the act's own steps have run (a macrotask), the fake
+ * clock passes the wait, so a request that should have been refused and was not answers (`ended`
+ * false) and fails its assertion instead of waiting for ever.
+ */
+async function noHang(d: TestDeck, pending: Promise<ResultMessage>): Promise<ResultMessage> {
+  await new Promise((resolve) => setImmediate(resolve));
+  d.clock.advanceMs(10_000);
+  return pending;
+}
+
 const endAndPark = (id = 9, term = TERM, sessionId = S1): ActMessage => ({
   t: 'act',
   id,
@@ -532,7 +543,7 @@ describe('act end-session with the mark `park` (the dialog "Park")', () => {
     ] as [TerminalInfo[], string][]) {
       const d = running(t);
       const h = harness(d, terminals);
-      assert.deepEqual(await h.act(endAndPark()), refused(9, error));
+      assert.deepEqual(await noHang(d, h.act(endAndPark())), refused(9, error));
       assert.equal(d.deck.store.meta(S1)?.parkedAtNs ?? null, null, 'not parked');
       assert.deepEqual(h.hub.asked, [], 'nothing sent');
       assert.deepEqual(h.told, []);
@@ -546,7 +557,7 @@ describe('act end-session with the mark `park` (the dialog "Park")', () => {
     markParked(d.deck, row);
     const first = d.deck.store.meta(S1)?.parkedAtNs;
     const h = harness(d);
-    assert.deepEqual(await h.act(endAndPark()), refused(9, 'it was parked meanwhile'));
+    assert.deepEqual(await noHang(d, h.act(endAndPark())), refused(9, 'it was parked meanwhile'));
     assert.deepEqual(h.hub.asked, []);
     assert.equal(d.deck.store.meta(S1)?.parkedAtNs, first);
   });
@@ -565,7 +576,7 @@ describe('act end-session with the mark `park` (the dialog "Park")', () => {
     });
     const h = harness(d, [info()], deck);
     assert.deepEqual(
-      await h.act(endAndPark()),
+      await noHang(d, h.act(endAndPark())),
       refused(9, "skydeck's database is busy; try again"),
     );
     assert.deepEqual(h.hub.asked, []);
@@ -576,7 +587,7 @@ describe('act end-session with the mark `park` (the dialog "Park")', () => {
     const h = harness(d);
     for (const mark of ['parked', 'Park', '', null, true, 1]) {
       assert.deepEqual(
-        await h.act({ ...endAndPark(), mark } as unknown as ActMessage),
+        await noHang(d, h.act({ ...endAndPark(), mark } as unknown as ActMessage)),
         refused(9, 'skydeck cannot do that action'),
       );
     }
