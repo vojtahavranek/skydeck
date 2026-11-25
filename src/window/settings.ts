@@ -22,7 +22,7 @@
  * ONCE) are put into its configuration; a key read at the start never is (the keep-alive holds
  * `config.window` itself), so a change of one shows "applies after the window restarts".
  */
-import { DEFAULT_CONFIG, parseConfig } from '../platform/config.ts';
+import { DEFAULT_CONFIG, parseConfig, UPDATE_CHECKS } from '../platform/config.ts';
 import type { Config } from '../platform/config.ts';
 import { ConfigError } from '../platform/errors.ts';
 import type { FileInfo, Files } from '../platform/types.ts';
@@ -262,11 +262,11 @@ export const SETTINGS: Readonly<Record<SettingKey, SettingRow>> = {
   'window.updateCheck': {
     group: 'The window',
     meaning:
-      '"daily": the window\'s server looks for a newer skydeck when it starts and once a day (git fetch of skydeck\'s own checkout; nothing is applied without a click); "off": only Check now looks.',
+      '"15min", "hourly", "daily": the window\'s server looks for a newer skydeck at its start, then 15 minutes, an hour or a day after its last check (nothing is applied unasked); "off": only Check now does.',
     kind: 'change',
     names: null,
     control: 'choice',
-    choices: ['daily', 'off'],
+    choices: UPDATE_CHECKS,
     nullable: false,
     applies: 'now',
   },

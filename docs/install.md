@@ -517,8 +517,8 @@ you pick it: **Appearance** (the window's colours, "Colours" below), **Links** �
 you changed it; Esc closes Settings without saving it) — and **The window** — `Keep WSL running`
 (`window.keepAlive`; it counts `after a restart`, `skydeck window --restart`), `Typed commands
 start sessions in` (`terminal`) and `Copy on select` (`window.copyOnSelect`, "Keys" in "Using
-the window") — and **Updates** — `Check for updates every day`
-(`window.updateCheck`), with the last check and `Check now` under it ("The window says when there
+the window") — and **Updates** — `Check for updates` (`window.updateCheck`: `Off`, `Every 15
+minutes`, `Every hour`, `Every day`), with the last check and `Check now` under it ("The window says when there
 is one", in "Updating"). A value the file's rules refuse is refused beside it in their words
 (`"ticketUrl" must be null or an http or https address with {key} once, after its host`), and the
 file stays as it was.
@@ -800,7 +800,7 @@ In `config.json` ("Configuration" above), all optional; "In the window" and "App
 | `window.profileDir` | `null` | shown | `skydeck window`, at its next run | The window's Edge profile folder: an absolute Windows path (`C:\…`, every backslash doubled in JSON). `null`: found as above. |
 | `window.keepAlive` | `"wsl"` | change, first | after the window restarts | `"wsl"`: the server keeps WSL running while the window has anything running (below). `"off"`: it does not; for use with `instanceIdleTimeout=-1`: without it, WSL stops 15 seconds after its last Windows terminal closes, ending every session in the window. |
 | `window.links` | `"default"` | change, first | at once | Where the links the window opens go — a Ctrl+click on an address in a terminal, a pull request in the list or the header, the ticket chip. `"default"`: your Windows default browser, where you are logged in (skydeck runs `rundll32.exe url.dll,FileProtocolHandler <address>`). `"edge"`: your own Edge profile (`window.edge`). Anything else: `<file>: "window.links" must be "default" or "edge"`. When `rundll32.exe` cannot be started from WSL at all (the file is missing, interop is off), the key bar says `the link could not be opened: the default browser could not be started (window.links "edge" opens links in Edge)`; when Windows stops it afterwards (privilege management), nothing opens and nothing is said: then set `"edge"`. With `"default"` each link is one start of `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record; with `"edge"` skydeck starts Edge itself and does not use that program. |
-| `window.updateCheck` | `"daily"` | change, first | at once | `"daily"`: the window's server looks for a newer skydeck when it starts and once a day, with a `git fetch` of skydeck's own checkout, and the title bar says `Update available` while one is known ("Updating" below); nothing is applied without a click. `"off"`: it does not look by itself; Check now in Settings still does. Anything else: `<file>: "window.updateCheck" must be "daily" or "off"`. |
+| `window.updateCheck` | `"hourly"` | change, first | at once | How often the window's server looks for a newer skydeck by itself, with a `git fetch` of skydeck's own checkout; the title bar says `Update available` while one is known ("Updating" below), and nothing is applied without a click. `"hourly"`: when it starts, then an hour after its last check; `"15min"`: every 15 minutes; `"daily"`: once a day (each also an hour after a check that failed, 15 minutes with `"15min"`). `"off"`: it does not look by itself; Check now in Settings still does. A file that says `"daily"` or `"off"` keeps it. Anything else: `<file>: "window.updateCheck" must be "off", "15min", "hourly" or "daily"`. |
 | `window.copyOnSelect` | `true` | change, first | at once | `true`: a selection you make with the mouse in the window's terminal is copied to the clipboard as you let go of the button, the same text Ctrl+Shift+C copies ("Keys" in "Using the window"); every open window uses the new value from its next selection. `false`: only Ctrl+Shift+C copies. `true` or `false` without quotes; anything else: `<file>: "window.copyOnSelect" must be true or false`. |
 
 With `"terminal": "window"` (stage C) the commands start their sessions in the window too:
@@ -821,8 +821,8 @@ A key inside `window` that skydeck does not know is an error, as everywhere in t
 (`skydeck: /home/you/.config/skydeck/config.json: unknown key "window.prot"`). The server reads the
 file when it starts: after a change by hand, run `skydeck window --restart`. A change in the
 window's Settings ("Configuration" above) of a key that applies at once needs none (turning
-`window.updateCheck` on checks at once when the server has not checked for a day, or for an hour
-after a check that failed); one of
+`window.updateCheck` on, or to a shorter wait, checks at once when the server's last check is
+older than the new wait, or than its wait after a check that failed); one of
 `window.keepAlive` applies after the restart (a keep-alive that runs keeps running until then).
 
 ### Keeping WSL running
@@ -2518,8 +2518,9 @@ More ends, each with exit 1:
 
 ### The window says when there is one
 
-The window's server looks for a newer skydeck when it starts and once a day, and an hour after a
-check that failed (no network, say): a `git fetch` of skydeck's own checkout from the remote its
+The window's server looks for a newer skydeck when it starts and then every hour (or every 15
+minutes, or once a day, as Settings says below), and an hour after a check that failed (no
+network, say; 15 minutes with `Every 15 minutes`): a `git fetch` of skydeck's own checkout from the remote its
 branch follows, which writes what `skydeck update --check`'s fetch writes — the remote-tracking
 refs (`origin/main`), the tags it follows, and what your git configuration asks of a fetch —,
 never your files, the index or HEAD. The check applies nothing; `Update now` in its dialog does,
@@ -2535,20 +2536,21 @@ after your second click (below).
   no branch of a remote any more, `skydeck cannot tell here whether there is an update: …` and the
   same. Esc or `Close` closes it; `Update now` stands beside `Close` when the update can be
   applied as the checkout is.
-- **Settings** (the gear). The group **Updates**, after The window: the switch `Check for updates
-  every day` (`window.updateCheck`: on is `"daily"`, the default; off is `"off"`, which stops the
-  checks at the start and every day), saved as you pick it; then a line that says when the last
+- **Settings** (the gear). The group **Updates**, after The window: the choice `Check for
+  updates` (`window.updateCheck`): `Off` (`"off"`, which stops the checks at the start and by the
+  clock), `Every 15 minutes` (`"15min"`), `Every hour` (`"hourly"`, the default) or `Every day`
+  (`"daily"`), saved as you pick it and used at once; then a line that says when the last
   check ended and what it found (`Last check: 2h ago — 3 new commits on origin/main`), or, when it
   failed, when and why (`The last check failed 5m ago: git fetch from origin failed: …`) and what
   is known from the last fetch that worked (`Known from 2h ago: …`); and `Check now`, which checks
-  at once, also with the switch off.
+  at once, also with `Off`.
 - **`skydeck doctor`** prints the same in one `info` line: `update: 3 new commits on origin/main
   (fetched 2h ago); skydeck update applies them`, or `update: skydeck is up to date (…)`, and a
   failed last check beside it. doctor itself uses no network.
 - **It never asks.** The check runs with no terminal, no askpass program and no credential
   manager's dialog (`GCM_INTERACTIVE=never`), so a remote that needs a passphrase or a login is a
   check that fails (the block and doctor say so), never a prompt; it gives up after 60 seconds and
-  is tried again an hour later. A fetch that fails hides nothing: an update an earlier check found
+  is tried again an hour later (15 minutes later with `"15min"`). A fetch that fails hides nothing: an update an earlier check found
   stays shown. A git call that fails, or a check that cannot run git at all, shows no notice:
   Settings and doctor say why.
 
@@ -2859,7 +2861,7 @@ file.
 | You see | Do |
 |---|---|
 | `skydeck: the database … was not upgraded: its copy … could not be written (<reason>)` | Before an upgrade skydeck keeps a copy of the database, and this one could not be written: make room on the disk, or move away what is in the way (the reason says which), then run the command again. The database is as it was ("Going back"). |
-| Settings' group `Updates` or `doctor` says `the last check failed …: git fetch from origin failed: <git's line>` | The window's check for a newer skydeck could not fetch: git's line says why (no network, a remote that needs a login or a passphrase, which the check never asks for). Nothing else is affected, and it tries again an hour later; `skydeck update --check` in a terminal of your own fetches with your login. `window.updateCheck` `"off"` stops the daily check. |
+| Settings' group `Updates` or `doctor` says `the last check failed …: git fetch from origin failed: <git's line>` | The window's check for a newer skydeck could not fetch: git's line says why (no network, a remote that needs a login or a passphrase, which the check never asks for). Nothing else is affected, and it tries again an hour later (15 minutes later with `"15min"`); `skydeck update --check` in a terminal of your own fetches with your login. `window.updateCheck` `"off"` stops the checks by the clock. |
 | The window's bar says `an update started from the window at <time> did not record how it ended; its log says: <stateDir>/update.log` | The update ran but could not write its outcome where the window reads it (its database was busy, say). Read the log's last lines: `updated to <id>` means it worked; otherwise they say why not. `skydeck doctor`'s first line names the commit the checkout is at. |
 | After `Update now` the window does not come back (the bar says `skydeck is being updated (since …)` for more than two minutes) | Read `<stateDir>/update.log` first: its last line says what happened. When it says that the checkout may not be as it was, set it right as "Updating" says; then, in a WSL terminal of your own, `skydeck window`. |
 | `git fetch` (yours, the window's, `skydeck update`'s) says `cannot lock ref 'refs/remotes/origin/main': Unable to create '…/.git/refs/remotes/origin/main.lock': File exists` | A git that was cut off left that file: the window's check is ended with SIGTERM first (git then removes its locks) and killed only 2 seconds later, but a machine that went down in the middle of a fetch can leave one. When no git runs in the checkout, remove the file git names (`rm <path>`), then again. A `git pull` of yours at the very moment of a check can meet the check's lock once: run it again. |

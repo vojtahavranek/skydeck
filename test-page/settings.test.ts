@@ -1012,10 +1012,10 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
           group: 'Updates',
           rows: [
             {
-              label: 'Check for updates every day',
+              label: 'Check for updates',
               labelled: true,
-              control: 'checkbox switch',
-              value: false,
+              control: ['Off', 'Every 15 minutes', 'Every hour', 'Every day'],
+              value: 'off',
               hint: [],
               mark: [],
             },
@@ -1045,7 +1045,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
   );
 
   await t.test(
-    'each of the short screen’s keys is saved as it is picked and ends in the file: a choice and the switch at once, the ticket address on Enter and when it is left; an unchanged text sends nothing; a refused address keeps its text, shows the reason and changes nothing',
+    'each of the short screen’s keys is saved as it is picked and ends in the file: a choice and the switch at once (how often updates are checked, each of its four values), the ticket address on Enter and when it is left; an unchanged text sends nothing; a refused address keeps its text, shows the reason and changes nothing',
     async (t) => {
       const l = await launched(t, chromium, {
         config: { ticketUrl: 'https://t.example.com/{key}' },
@@ -1107,6 +1107,20 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
       await shortSays(l.page, 'ticketUrl', 'Saved.');
       assert.equal(Object.hasOwn(configOf(l), 'ticketUrl'), true);
       assert.equal(configOf(l)['ticketUrl'], null);
+
+      // F38: how often the check is made, each value saved at once (off in the sandbox; no check
+      // runs in it, as no checkout is named).
+      for (const value of ['15min', 'hourly', 'daily', 'off']) {
+        const saved = await sets();
+        await l.page.locator(shortControl('window.updateCheck')).selectOption(value);
+        const deadline = performance.now() + 20_000;
+        while (windowOf()['updateCheck'] !== value) {
+          assert.ok(performance.now() < deadline, `${value} is not in the file`);
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        await shortSays(l.page, 'window.updateCheck', 'Saved.');
+        assert.equal(await sets(), saved + 1, value);
+      }
       assert.deepEqual(l.problems, []);
     },
   );

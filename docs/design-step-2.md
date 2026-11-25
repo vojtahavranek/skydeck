@@ -100,8 +100,9 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   7.1).
 - **Principle 8 (local only)**: the server listens on the loopback interface only (15). Its one
   network use is the check for a newer skydeck: `git fetch` of skydeck's own checkout when it
-  starts and once a day, which the setting `window.updateCheck` turns off; nothing is applied
-  without a click (16.5; the owner's decision of 2026-11-21, issue #163). The other network uses
+  starts and then every hour, or every 15 minutes or every day, as the setting
+  `window.updateCheck` says, which also turns it off; nothing is applied without a click (16.5; the
+  owner's decisions of 2026-11-21, issue #163, and of 2026-11-24 for how often). The other network uses
   are design.md's: `gh`, the ticket-status programs and `skydeck update`'s `git fetch`.
 - **Windows programs.** Step 2 is the first time skydeck starts Windows programs by itself, through
   WSL interop. It starts exactly three, and only these: `msedge.exe` (the window, 5.3, and the
@@ -2247,16 +2248,22 @@ a change of `ticketRefreshMinutes` in the settings screen applies at once, 12.13
 and saves nothing more of it.
 
 **The check for a newer skydeck** (follow-up F38, 16.5). Every second, after the keep-alive, the
-tick offers the checker a turn. With `window.updateCheck` `"daily"` (read at each tick, so a change
-in the settings screen applies at once) it starts a check in the background, never delaying the
-tick or the server's start, when none runs, no update from the window runs or is being started
-(milestone 2), and this server has made no check yet — the first tick
-is part of the start, so every server start checks — or its last one ended 24 hours ago or more by
-the wall clock, or the clock stepped back behind it (`CHECK_EVERY_NS`); after a check that failed
-— its fetch failed, a git call of its look failed or timed out, or the check itself threw (a git
-that could not be started) — the wait is `RETRY_AFTER_FAILURE_NS`, one hour (the owner's decision
-of 2026-11-22). So "daily" is: at every start, then every 24 hours from the last check this
-server made, a Check now included, and an hour after one that failed. With the switch `"off"` no check
+tick offers the checker a turn. With `window.updateCheck` `"15min"`, `"hourly"` (the default) or
+`"daily"` (read at each tick, so a change in the settings screen applies at once) it starts a check
+in the background, never delaying the tick or the server's start, when none runs, no update from
+the window runs or is being started (milestone 2), and this server has made no check yet — the
+first tick is part of the start, so every server start checks — or its last one ended the value's
+wait ago or more by the wall clock — 15 minutes, an hour, 24 hours (`CHECK_EVERY_NS`, the owner's
+decision of 2026-11-24) —, or the clock stepped back behind it; after a check that failed — its
+fetch failed, a git call of its look failed or timed out, or the check itself threw (a git that
+could not be started) — the wait is `RETRY_AFTER_FAILURE_NS`, one hour (the owner's decision of
+2026-11-22), and never longer than the value's own wait: 15 minutes with `"15min"`
+(`retryAfterNs`). So `"hourly"` is: at every start, then every hour from the last check this
+server made, a Check now included. A change applies at the next tick: changed to a shorter wait, a
+check due by it is made at once; to a longer one, the next check waits for it from the last one.
+Why every hour by default: an update restarts the server, which checks at once and then waits; with
+a day's wait and several merges a day, the owner found each newer version first by Check now; a
+check is one quiet fetch of a small repository. With `"off"` no check
 starts by itself; a server that finds a stored outcome of its checkout looks once without the
 network at its first tick, so that a notice does not outlive an update made by hand. A server
 sends no stored outcome before its own first check or look has ended. The checker's own promises
@@ -4795,9 +4802,9 @@ screen's describe Advanced, which keeps F36's screen whole.
     from issue #184, `Copy on select` (`window.copyOnSelect`: a switch, on `true`, off `false`; hint
     `In a session’s terminal; Ctrl+Shift+C copies either way.`, since the label alone could be read
     as the group's whole window, whose list and header text it does not copy, 9.5).
-  - **Updates** (follow-up F38): `Check for updates every day` (`window.updateCheck`: a switch, on
-    `daily`, off `off`), then the group's extra block, the last check and `Check now` (the bullet
-    Updates below).
+  - **Updates** (follow-up F38): `Check for updates` (`window.updateCheck`: a choice, `Off`,
+    `Every 15 minutes`, `Every hour`, `Every day`, the server's order), then the group's extra
+    block, the last check and `Check now` (the bullet Updates below).
 
   Which keys are there, in which group, under which words, is one table beside the server's, pure
   text: `web/settings-short.js` (a new setting or group joins by one entry; a group's extra block
@@ -4876,8 +4883,9 @@ screen's describe Advanced, which keeps F36's screen whole.
   next list, the next link, the next ticket set, the next read of a status), `prRefreshMinutes` and
   `ticketRefreshMinutes` (the next automatic read), `restoreBatch`, `restoreMinFreeMb` and
   `restoreStartTimeoutSeconds` (the next restore; the timeout also the next mapping of terminals,
-  10.1), `window.links` (the next link), `window.updateCheck` (the next tick, 16.5: turned on, it
-  checks at once when this server's last check is a day old or there was none),
+  10.1), `window.links` (the next link), `window.updateCheck` (the next tick, 16.5: turned on, or
+  to a shorter wait, it checks at once when this server's last check is that old or there was
+  none),
   `window.copyOnSelect` (every page's next list, and with it the next selection, 9.5). After the
   window restarts: `window.keepAlive` — the
   keep-alive is made from it at the server's start (6.1), and one that runs keeps running until the
@@ -4936,9 +4944,10 @@ screen's describe Advanced, which keeps F36's screen whole.
   accent ground; the short screen's labels, hints, marks and words too); every text is text, a value
   only an input's value or text: one with markup stays text, a long one wraps, a right-to-left one
   keeps its order.
-- **Updates** (follow-up F38, 16.5). The short screen's fourth group, after The window: the switch
-  `Check for updates every day` (`window.updateCheck`, on `"daily"`, off `"off"`, saved as it is
-  picked like every short setting), then the group's extra block (`makeGroup`'s one place for it),
+- **Updates** (follow-up F38, 16.5). The short screen's fourth group, after The window: the choice
+  `Check for updates` (`window.updateCheck`: `Off`, `Every 15 minutes`, `Every hour`, `Every day`
+  for `"off"`, `"15min"`, `"hourly"`, `"daily"`, saved as it is picked like every short setting;
+  how long each waits is the server's, 16.5), then the group's extra block (`makeGroup`'s one place for it),
   shown from the start like the Appearance group: it says what the window's server last found when
   it looked for a newer skydeck: `Last check: <age> ago — <summary>`, the age that of the last
   check's end, whatever it found (`No check was made yet.`); when the last check failed, first
@@ -4947,7 +4956,7 @@ screen's describe Advanced, which keeps F36's screen whole.
   (`Nothing was fetched before.`) — that first line alone when the check's own outcome is that
   line (a git call failed, the check threw); a check that ends without a failure takes that line
   away; `Checking…` while a check runs. `Check now` runs a check at once (`act update-check`),
-  whether `window.updateCheck` is `"daily"` or `"off"`, and the block follows every `update`
+  whatever `window.updateCheck` says, `"off"` too, and the block follows every `update`
   message while the screen is shown. A checkout whose branch follows no branch of a remote never
   shows the title bar's `Update available` (12.1); this block is where it says why.
 
@@ -5182,7 +5191,7 @@ still parked.
 | **A program writes very fast** | The keeper keeps reading; the server parses about 10 MB/s and stops reading a keeper whose records its screen side has not applied (7.3), so the keeper closes that connection at its send cap and the server reconnects; pages that cannot keep up get snapshots (8.2.8). The program is never paused by skydeck. |
 | **The store is locked or broken** | As for every command (design 5.3): the tick fails, is logged and shown once, and is retried; terminals and their streams do not depend on the store. The server's own connection waits at most 250 ms for another process's write lock (the commands wait 5 s), so a lock held for long never freezes the server: the piece of work that met it is given up and tried again — the tick's store work at the next tick, an action answers `skydeck's database is busy; try again`, a `hello` is closed with 1013 and the page tries again, and a found keeper's decision (7.3) is put off to the next refresh while its deadline allows; a start that meets it fails at once (5.2), leaving nothing behind (ruled, plan task 23). |
 | **skydeck is updated** | 16.5. |
-| **The check for a newer skydeck fails** (follow-up F38: no network, a remote that needs a login, a remote gone, git missing) | No notice of its own: after a failed fetch an update an earlier fetch brought stays shown; after a git call that failed or a check that threw none is shown; either way the settings screen's block and `doctor` say that the last check failed, when, and why (12.13, 16.3). It never asks for a password or a passphrase and never waits at a prompt; it ends after 60 seconds at most, and a failed check is tried again an hour later. A check that was cut can leave a ref's `.lock`; 16.5 says what then. |
+| **The check for a newer skydeck fails** (follow-up F38: no network, a remote that needs a login, a remote gone, git missing) | No notice of its own: after a failed fetch an update an earlier fetch brought stays shown; after a git call that failed or a check that threw none is shown; either way the settings screen's block and `doctor` say that the last check failed, when, and why (12.13, 16.3). It never asks for a password or a passphrase and never waits at a prompt; it ends after 60 seconds at most, and a failed check is tried again an hour later (15 minutes later with `"15min"`). A check that was cut can leave a ref's `.lock`; 16.5 says what then. |
 | **An update from the window fails** (follow-up F38, `Update now`) | The updater records the merge's outcome before it brings the window back; the server that comes back shows it in the result bar (`the update could not be applied: …`, or a refusal's line); a server that never stopped shows the refusal at once. An updater that could not record shows `… did not record how it ended; its log says: <log>`. No server comes back: the page's bar names `<stateDir>/update.log` first and `skydeck window` second (6.3). The window comes back later than `skydeck window`'s waits with a dead `WSL_INTEROP`: no second window, the log's last line says to run `skydeck window` though the server runs (16.5's named limit). |
 | **The key is wrong** (after `--new-secret`, a launch address used too late or given up, a stale bookmark) | The page says that its key is not valid and to run `skydeck window` again (8.2.2). |
 | **A launch token is presented twice** | Another program may have the secret: the alarm (8.2.2) — the page, the waiting `skydeck window` and `doctor` all say to run `skydeck window --new-secret`. |
@@ -5252,7 +5261,8 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   mended and the window restarted (ruled by the lead: it stays changeable, with no time limit; the
   screen's line for it says that it runs on every title, and the guide's trouble table how to get
   back — the copy, or the key taken out of the file, then `skydeck window --restart`).
-  `window.updateCheck` turns the window's daily check for a newer skydeck on or off (16.5).
+  `window.updateCheck` says how often the window checks for a newer skydeck, or that it does not
+  (16.5).
   `window.copyOnSelect` decides only whether a selection the user ends with the mouse is copied
   (9.5): no value of it lets a page or a program write the clipboard without one.
   From follow-up F38 a proven connection can also make the server fetch skydeck's own checkout's
@@ -5471,7 +5481,7 @@ New keys, all optional:
 | `window.profileDir` | `null` | The Windows folder of the window's Edge profile (5.4). `null`: derived. An absolute Windows path (`<letter>:\…`). |
 | `window.keepAlive` | `"wsl"` | `"wsl"` or `"off"` (6.1). |
 | `window.links` | `"default"` | Ruled by the lead. Where the links the window opens go (9.6): `"default"`, the Windows default browser (`rundll32.exe url.dll,FileProtocolHandler <url>`), or `"edge"`, `window.edge` in the user's own Edge profile. Anything else is refused as every key of the file is: `<file>: "window.links" must be "default" or "edge"`. |
-| `window.updateCheck` | `"daily"` | Follow-up F38. `"daily"`: the window's server looks for a newer skydeck when it starts and once a day (16.5, "The window's check": a `git fetch` of skydeck's own checkout; nothing is applied without a click); `"off"`: only Check now in the settings screen looks (12.13). Read at each tick, so a change in the settings screen applies at once. Anything else is refused as every key of the file is: `<file>: "window.updateCheck" must be "daily" or "off"`. |
+| `window.updateCheck` | `"hourly"` | Follow-up F38. `"15min"`, `"hourly"`, `"daily"`: the window's server looks for a newer skydeck when it starts, then 15 minutes, an hour or a day after its last check, and an hour after one that failed (15 minutes with `"15min"`) (16.5, "The window's check": a `git fetch` of skydeck's own checkout; nothing is applied without a click); `"off"`: only Check now in the settings screen looks (12.13). A file without the key checks every hour; one that says `"daily"` or `"off"` keeps it (the owner's decision of 2026-11-24). Read at each tick, so a change in the settings screen applies at once. Anything else is refused as every key of the file is: `<file>: "window.updateCheck" must be "off", "15min", "hourly" or "daily"`. |
 | `window.copyOnSelect` | `true` | Issue #184 (the owner's decisions of 2026-11-23: on by default, a switch in Settings). `true`: a selection the user ends with the mouse in the shown terminal is copied to the clipboard at its release, as Ctrl+Shift+C copies it (9.5); `false`: only Ctrl+Shift+C copies. Every list carries the value the server uses, so a change in the settings screen applies at once, to the next selection of every page (12.13). `true` or `false` only; anything else is refused as every key of the file is: `<file>: "window.copyOnSelect" must be true or false`. |
 | `ticketUrl` | `null` | The details ruled by the lead. The address of a ticket, with `{key}` where its key goes (`"https://example.atlassian.net/browse/{key}"`): the group chip of the window's header opens it, and `skydeck show` prints it (12.5). `null`: no link. Accepted only with `{key}` exactly once, at most 2,048 characters, no white space, control character, `"` or backslash, and only when the URL parser, given two different keys in place of `{key}`, reads both as `http` or `https` without a user name or password (`skydeck show` would print it, and Edge's command line would carry it) and with the same host (a host the key went into would differ), and with no `%`, or `%` with one hex digit, right before `{key}` (a key would finish that escape): where the key stands among the address's parts is the parser's to decide, not the text's (`https:///{key}/x` and `https:{key}` are read with the key as the host, `https://{key}.example.net/` with it in the host, `https:///{key}@h/x` with it as the user name: all refused). Anything else is refused as every key of the file is: `<file>: "ticketUrl" must be null or an http or https address with {key} once, after its host`. |
 | `ticketStatus` | `[]` | Follow-up F19; the details ruled by the lead. The programs that read a ticket's status (12.5): a list of at most 8 rules, each exactly `{ "match": "<the start of an address>", "command": ["<program>", "<argument>", …] }`; the first rule whose `match` is the start of a ticket's address takes it, before GitHub's own reading of an issue's address. `match`: an `http` or `https` address, printable ASCII with no white space, at most 2,048 characters, with no user name or password, that starts with `<scheme>://<host>/` exactly as the URL parser writes them — scheme and host in lower case, a default port left out —, so that `https://tickets.example.com/` never takes `https://tickets.example.com.other.net/…` and a rule whose scheme or host could never match a stored address is refused instead of silently doing nothing (the rest of its path is not checked). `command`: 1 to 16 non-empty strings without control characters; `command[0]` is the program (a name on `PATH` or a path; a relative path is relative to the home directory), and in the other words every `{url}` becomes the address and every `{key}` the ticket's key (12.5; a rule whose command uses `{key}` is not run for an address that gives none); the program is run without a shell. No credential or token belongs in a rule: a program reads its secret from a file its owner keeps. Anything else is refused as every key of the file is, after `<file>: `: `"ticketStatus" must be a list of at most 8 rules`; `"ticketStatus[N]" must be an object with "match" and "command"`; `unknown key "ticketStatus[N].<key>"`; `"ticketStatus[N].match" must be the start of an http or https address, its scheme and host in lower case and followed by "/", at most 2,048 characters`; `"ticketStatus[N].command" must be a list of 1 to 16 non-empty strings without control characters`. Read at the server's start: after a change, `skydeck window --restart`. |
@@ -5653,12 +5663,14 @@ user's second click.
   branch). Its failure line is `git fetch
   from <remote> failed: <git's first line>` (or `no answer within 60 s`), clipped to 300
   characters.
-- **When** (10.1): with `window.updateCheck` `"daily"` (the default, 16.4), at every server start —
-  in the background, never delaying it — and then 24 hours after the last check this server made,
-  a Check now included (`CHECK_EVERY_NS`); after a check that failed (its fetch, a git call of its
-  look that failed or timed out — not a state of the checkout such as a detached HEAD —, or the
-  check itself, which threw) the wait is `RETRY_AFTER_FAILURE_NS`, one hour. Check now
-  (`act update-check`) checks whatever the switch says; with the switch `"off"` a server that finds
+- **When** (10.1): with `window.updateCheck` `"15min"`, `"hourly"` (the default, 16.4) or
+  `"daily"`, at every server start — in the background, never delaying it — and then 15 minutes,
+  an hour or 24 hours after the last check this server made, a Check now included
+  (`CHECK_EVERY_NS`); after a check that failed (its fetch, a git call of its look that failed or
+  timed out — not a state of the checkout such as a detached HEAD —, or the check itself, which
+  threw) the wait is `RETRY_AFTER_FAILURE_NS`, one hour, or 15 minutes with `"15min"`. The setting
+  is read at each tick: a change applies at once. Check now (`act update-check`) checks whatever
+  the setting says; with `"off"` a server that finds
   a stored outcome looks once without the network. One check runs at a time; a request while one
   runs joins it. The dialog's look (`act update-look`) runs without the network, so that what it
   says is true now (a change made, a branch switched, a `git pull` since the check).
@@ -5670,9 +5682,10 @@ user's second click.
   an earlier check's or an earlier server's outcome is taken up again (the stored entry gives only
   the time of the last fetch that worked) — and the dialog then says why. Either way the failure —
   its line and its time — is kept for the settings screen and `doctor` until a check that ends
-  without one, and the next check comes after the hour; a failed fetch is kept also when the look
-  after it ends `this checkout changed while git fetch ran`. A failure makes no notice of its own,
-  and a look that cannot tell shows none. The dialog's look follows the same rule: one whose git
+  without one, and the next check comes after the wait after a failure (an hour, 15 minutes with
+  `"15min"`); a failed fetch is kept also when the look after it ends `this checkout changed
+  while git fetch ran`. A failure makes no notice of its own, and a look that cannot tell shows
+  none. The dialog's look follows the same rule: one whose git
   call fails is a `cannot` with git's line and replaces what was known. The
   settings screen gives the time the last check ended, whatever it found (`checkedAtNs`), and the
   time of the last fetch that worked for what is known (`fetchedAtNs`).
@@ -5717,7 +5730,7 @@ command's, because the command is what runs:
   `to` only: when HEAD was moved back to an older ancestor between the dialog and the click (a
   `git reset` or a checkout by hand), the fast-forward to `to` also brings back commits that were
   installed before and that the dialog did not list. While an update runs or is being started,
-  Check now (`act update-check`) and the daily check start nothing and answer the state as it is.
+  Check now (`act update-check`) and the check by the clock start nothing and answer the state as it is.
 - **The start.** `kv window_update_run` says `applying` (10.2) and every page is told before
   anything is started; one line goes to `<stateDir>/update.log` (`update to <id> started from the
   window`; rotated at 1 MiB as the server's logs are, 4.2); then the process, with the **server's
@@ -5878,7 +5891,7 @@ test/helpers/update.ts), which checks that the path lies inside the sandbox firs
 remote is a bare repository beside it, or an `ssh://…invalid` address whose `ssh` is a sandbox stub
 that connects nowhere. The sandbox's `config.json` has `window.updateCheck` `"off"`
 (test/helpers/window-config.ts, beside `keepAlive` `"off"`), so that no test server checks unless
-its test turns the switch on.
+its test sets another value.
 
 **Two test platforms.** Logic is tested on a platform with a fake clock, a fake `/proc` and fake
 processes. Every test that starts a keeper, the stand-in or a server, or judges a real process
@@ -6300,7 +6313,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
 | W41 | The settings screen's Advanced on the owner's own `config.json`, copied aside first: the title bar's gear opens it, `Advanced (14 more settings)` opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36, F39 | 12.13 |
 | W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last row and under a filter; follow-up F42: a fourth session of another terminal moved above a numbered one, the numbers unchanged, `/clear` in it keeps its place; `skydeck window --restart` keeps the order; follow-up F43: `/exit` in a numbered terminal gives its number up (its row under Recent without one, Ctrl+Shift+1 reaches no session), the next new session takes it, also after `Mark done, keep it running`; issue #189: with nine numbered terminals, a tenth session without a number takes the number a numbered one gives up at its `/exit`, at that number's place, also after a restart. The restore order only where W16's drill runs anyway. | F37, F42, F43, #189 | 7.6, 12.1, 12.9 |
-| W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Update now` and `Close`; `doctor`'s `update:` line; the group's switch `Check for updates every day` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
+| W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Update now` and `Close`; `doctor`'s `update:` line; the group's choice `Check for updates` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
 | W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links, The window and (F38) Updates with eight plain labels (from issue #184 `Copy on select` in The window) and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
 | W45 | The tour of the window in the owner's Edge (follow-up F41): it starts by itself at the first opening after the update, over the real list; each step's region stands out and its words read well; Enter, → and ← walk it, a click on the page does nothing, Ctrl+Shift+L says `close the tour first (Esc)`; `Done` gives the keyboard back and a reload shows it no more; the key help's `Take the tour` and the switcher's `> tour` start it again and Esc ends it; an InPrivate window with `--print-url`'s address shows it by itself once, in a tab's words. | F41 | 12.9, 12.14 |
 | W46 | **Real claude**, copy on select (issue #184): a drag over text in the terminal, then Ctrl+V into Notepad, gives that text; a double click a word; `Copy on select` off in Settings, a new selection leaves the clipboard with the text copied before; on again, the next selection is copied, without a reload. | #184 | 9.5, 12.13 |
@@ -6309,6 +6322,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W49 | **Real claude**, issue #188 part 1: a throwaway session resumed from its card's `Other flags…` with another `--model` — the field filled with the flags it was started with, `f` from the list, the header showing the new flag once Claude Code has started, a plain `Resume here` keeping it (manual-checks.md, "Resuming with other flags"). | #188 | 12.6, 12.9, design 7.6 |
 | W50 | **Real claude**, follow-up F44: Parked on throwaway sessions — `w`, the toast and Undo; the number freed and taken by a new session, and the lowest free one back under Open; a prompt brings it back, a key typed and not sent does not; `skydeck park` and `skydeck unpark` in W show within seconds; a parked session that asks shows its mark, sends no notification and Ctrl+Shift+J passes it; `skydeck window --restart` keeps it parked without a number; after `w` the selection is on the next row and the list has not moved, three `w` in a row park three sessions and nothing is typed into the session the selection moved to; `w` on a row under Parked brings it back, still selected and in view; `/clear` in a parked session; `w` on a US and a Czech layout (manual-checks.md, "Parked"). | F44 | 7.6, 12.1, 12.4, 12.9, 12.15, design 7.1 |
 | W51 | **Real claude**, issue #166 with part 2 of #188: a throwaway session restarted from the header's `Restart` and with `r` — the keyboard on Cancel, `Restarting…`, the same conversation, the same number and place, not done, no notification —, then with `Other flags…` and another `--model`, the header showing it once Claude Code has started, a plain restart passing it on (manual-checks.md, "Restarting a session from the window"). | #166, #188 | 12.5, 12.10, design 7.6 |
+| W52 | How often the window checks for a newer skydeck by itself (follow-up F38's choice, the owner's decision of 2026-11-24): Settings' `Check for updates` shows the setup's value and its four words in order; `Every 15 minutes` saved, and a check by the clock within 16 minutes of the last one without a click; `Every day` makes none in twenty minutes; `Off` and `Check now`; the setup's value put back (manual-checks.md, "How often updates are checked"). | F38 | 10.1, 12.13, 16.5 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

@@ -13,11 +13,13 @@
  *   shows no notice: the outcome is a `cannot` with its line (a notice always comes from a look
  *   that ran to its end). The failure — its line and its time — is kept until a check that ends
  *   without one. A failure makes no notice of its own.
- * - When: at every tick (each second) with the switch on, when none runs and this server has made
- *   no check yet ("at start") or its last one ended CHECK_EVERY_NS ago or more by the wall clock (or
- *   the clock stepped back behind it); after a check that failed the wait is
- *   RETRY_AFTER_FAILURE_NS, an hour. With the switch off a server that finds a stored outcome looks
- *   once without the network, so that a stale notice does not survive an update made by hand.
+ * - When: at every tick (each second) with `window.updateCheck` not "off" (read at each tick), when
+ *   none runs and this server has made no check yet ("at start") or its last one ended the
+ *   setting's wait ago or more by the wall clock (CHECK_EVERY_NS: 15 minutes, an hour, a day), or
+ *   the clock stepped back behind it; after a check that failed the wait is RETRY_AFTER_FAILURE_NS,
+ *   an hour, never longer than the setting's own wait (retryAfterNs). With "off" a server that
+ *   finds a stored outcome looks once without the network, so that a stale notice does not survive
+ *   an update made by hand.
  * - The dialog's look runs without the network and replaces the outcome, keeping the times of the
  *   last fetch and the last failure; while a check runs it starts nothing.
  * - A server sends no stored outcome before its own first check or look has ended.
@@ -38,6 +40,7 @@
  */
 import { join } from 'node:path';
 
+import type { UpdateCheck } from '../platform/config.ts';
 import type { Ns } from '../platform/types.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { gitOn } from '../update/git.ts';
@@ -62,10 +65,25 @@ import { failureKind } from './auth.ts';
 import { serverLog } from './log.ts';
 import type { UpdatePayload } from './protocol.ts';
 
-/** "Daily": a check this long after the last one this server made (S2 10.1). */
-export const CHECK_EVERY_NS = 24n * 60n * 60n * 1_000_000_000n;
+const MINUTE_NS = 60n * 1_000_000_000n;
+
+/**
+ * The wait of each value of `window.updateCheck` but "off": a check this long after the last one
+ * this server made ended (S2 10.1, 16.5; the owner's decision of 2026-11-24).
+ */
+export const CHECK_EVERY_NS: Readonly<Record<Exclude<UpdateCheck, 'off'>, Ns>> = {
+  '15min': 15n * MINUTE_NS,
+  hourly: 60n * MINUTE_NS,
+  daily: 24n * 60n * MINUTE_NS,
+};
 /** The wait after a check that failed (no network, say): an hour (the owner's decision). */
-export const RETRY_AFTER_FAILURE_NS = 60n * 60n * 1_000_000_000n;
+export const RETRY_AFTER_FAILURE_NS = 60n * MINUTE_NS;
+
+/** The wait after a failed check with `every`: an hour, never longer than the value's own wait. */
+export function retryAfterNs(every: Exclude<UpdateCheck, 'off'>): Ns {
+  const own = CHECK_EVERY_NS[every];
+  return own < RETRY_AFTER_FAILURE_NS ? own : RETRY_AFTER_FAILURE_NS;
+}
 
 /** What a look without a checkout to look at says (a marked test sandbox without the seam). */
 export const NO_CHECKOUT_LINE = 'no update is looked for in a test sandbox';
@@ -122,7 +140,7 @@ export interface Updates {
   payload(): UpdatePayload;
   /** Called every second by the server's tick: starts a check when one is due; never throws. */
   tick(): void;
-  /** Check now: a check whatever the switch says (one that runs is joined); its state at the end. */
+  /** Check now: a check whatever the setting says (one that runs is joined); its state at the end. */
   check(): Promise<UpdatePayload>;
   /** The dialog's look, without the network; while a check runs, the state as it is. */
   look(): Promise<UpdatePayload>;
@@ -224,7 +242,7 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   let record: CheckRecord | null = null;
   /** When this server's last check ended (wall clock), and whether it failed. */
   let lastCheck: { atNs: Ns; failed: boolean } | null = null;
-  /** The first tick has happened (the switch-off look is made at most once). */
+  /** The first tick has happened (the look made with "off" is made at most once). */
   let started = false;
   let checking: Promise<UpdatePayload> | null = null;
   let looking: Promise<UpdatePayload> | null = null;
@@ -328,8 +346,8 @@ export function createUpdates(deps: UpdatesDeps): Updates {
    * this check's alone — a notice always comes from a look that ran to its end: one that threw,
    * or whose git call failed, is a `cannot` with its line. It failed when its fetch failed, when a
    * git call of its look failed (`cannot` with `failed`) or when it threw: the failure is kept
-   * and the next check comes after the hour. What was stored before gives only the time of the
-   * last fetch that worked.
+   * and the next check comes after the wait after a failure (retryAfterNs). What was stored
+   * before gives only the time of the last fetch that worked.
    */
   const endCheck = (nowNs: Ns, ended: Looked | { thrown: string }): void => {
     const before = known();
@@ -399,7 +417,7 @@ export function createUpdates(deps: UpdatesDeps): Updates {
         const kind = failureKind(error);
         log(`update check: failed (${kind})`);
         // A check that threw (a git that could not be started, say) is a failed check: it is
-        // said, and tried again after the hour, not at the next tick.
+        // said, and tried again after the wait after a failure, not at the next tick.
         try {
           endCheck(platform.clock.nowNs(), {
             thrown: `skydeck could not check for an update (${kind})`,
@@ -580,11 +598,11 @@ export function createUpdates(deps: UpdatesDeps): Updates {
     }
   };
 
-  /** Whether a check is due at `nowNs` (the switch is on). */
-  const due = (nowNs: Ns): boolean => {
+  /** Whether a check is due at `nowNs` with the setting `every` (read at this tick). */
+  const due = (nowNs: Ns, every: Exclude<UpdateCheck, 'off'>): boolean => {
     if (lastCheck === null) return true;
     if (nowNs < lastCheck.atNs) return true; // the clock stepped back behind it
-    const wait = lastCheck.failed ? RETRY_AFTER_FAILURE_NS : CHECK_EVERY_NS;
+    const wait = lastCheck.failed ? retryAfterNs(every) : CHECK_EVERY_NS[every];
     return nowNs - lastCheck.atNs >= wait;
   };
 
@@ -595,9 +613,10 @@ export function createUpdates(deps: UpdatesDeps): Updates {
         if (stopped || git === null) return;
         const first = !started;
         started = true;
-        if (deck.config.window.updateCheck === 'daily') {
+        const every = deck.config.window.updateCheck;
+        if (every !== 'off') {
           // check() itself starts nothing while an update runs or is being started.
-          if (checking === null && due(platform.clock.nowNs())) void check();
+          if (checking === null && due(platform.clock.nowNs(), every)) void check();
         } else if (first && known() !== null) {
           void look();
         }
