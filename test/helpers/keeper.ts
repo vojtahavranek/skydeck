@@ -371,6 +371,7 @@ export function keeperSandbox(t: TestContext): KeeperBox {
         STANDIN_RECORD: record,
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
+        FORCE_HYPERLINK: '1',
         PWD: overrides.cwd ?? s.home,
       }),
       startBy: String(now + 60_000_000_000n),
