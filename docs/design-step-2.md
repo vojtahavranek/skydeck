@@ -50,7 +50,10 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
 - **Principle 4 (no conversation content)** is extended: the screens of the terminals are
   conversation content, and so is what the user types. They exist only in memory — in the
   server's terminal models, in each keeper's parked snapshot and tail, in the page — and are never
-  written to a file, the store or a log by skydeck. Logs name terminals by id and record an error
+  written to a file, the store or a log by skydeck. A session's shell (issue #199, 7.10) is a
+  terminal in this: its screen and what is typed into it are in memory only, and nothing of a
+  shell — not its folder, its program's path or its commands — is stored or logged; logs name it
+  by its id. Logs name terminals by id and record an error
   caused by a peer's data by its kind only, never by its message (5.2), because an error message
   can quote the data (Node.js's `JSON.parse` error quotes its input).
   **Crash dumps** are the one way memory can reach a file: on WSL a crashing process's core dump is
@@ -144,6 +147,7 @@ Design 3's words keep their meaning. New:
 | server | The one Node.js process (`skydeck serve`) that serves the page and owns the screen side of every terminal. |
 | terminal | One pty with one program in it, started for the window. Identified by a **terminal id** (12 lowercase hex characters, random). A terminal is not a session: the session its program holds can change (`/clear`). |
 | keeper | The python3 process that owns one terminal's pty and program (7.1). |
+| shell (a session's) | Issue #199: the second kind of terminal (7.10). The account's login shell, opened under a session's terminal of the window, in its folder, and held by a keeper as that terminal is. It belongs to the session's terminal: no row, no slot, no session of its own, and it ends with that session's program. Where this document says "terminal" alone it means a session's terminal; 7.10 says what of it holds for a shell. |
 | screen side | The server's model of a terminal's screen: a headless xterm.js fed every byte the program writes (7.2). |
 | snapshot | The screen side serialised: viewport, scrollback, cursor and modes, as escape sequences that rebuild it. |
 | park | The server hands a snapshot to the keeper, which keeps the latest one. |
@@ -187,7 +191,7 @@ The places of design 9.1 stay. Step 2 adds:
 | `<runtimeDir>` | The server chooses it by the first rule that applies: `$SKYDECK_HOME/run` when `SKYDECK_HOME` counts (design 9.1: non-empty and absolute) — always, whatever `XDG_RUNTIME_DIR` says, so that a test or a trial installation never reaches the real server or the real keepers; else `$XDG_RUNTIME_DIR/skydeck-<store id>` when `XDG_RUNTIME_DIR` counts by the same rule, is a directory owned by the user and not readable by others, and systemd keeps it while the user has no login session (lingering: `/var/lib/systemd/linger/<user>` exists; without it, systemd removes the directory when the last terminal closes, and with it every keeper socket); else `<stateDir>/run-<store id>`. `<store id>` is the first 8 hex digits of the sha256 of the store's path, so two installations never share a runtime directory. The server records the directory it uses in the store (`kv` `window_runtime_dir`, 10.2) when it takes its lock, and leaves the record while any keeper lives. **A starting server follows the record first**: when it names a directory that exists and holds a keeper alive by its `.pid` line, the server uses that directory, whatever its own environment would give, so that it finds the keepers a server started with another environment left there; a record whose directory is missing or holds nothing alive is ignored, and the server chooses by the rule and replaces the record. **Commands follow the record**, not their own environment — a command run without `XDG_RUNTIME_DIR` (from cron, `wsl.exe --exec`, `sudo -u`) still finds the server and the keepers — and resolve the rule themselves only when there is no record. `uninstall --purge` looks in the recorded directory and in every directory the rule can give (16.2). The keep-alive script is given the directory as an argument (6.1). Created with mode 700. Holds `server.json`, `server.sock`, `server.pid`, `keeper-<build>.py`, `interop`, `keepalive.pid`, `keepalive.interop` and `terms/`. `XDG_RUNTIME_DIR` is emptied when WSL stops; the others are not, so the server treats anything there from another boot as stale (6.3, 7.8). A test asserts that with `SKYDECK_HOME` set nothing is created or opened outside it (17.3). |
 | `<runtimeDir>/server.json` | The running server: `pid`, `procStart`, `bootId`, `port`, `serverId` (random per start), `build` (16.5), `checkout` (its `appRoot`), `startedAt`, and where its environment came from (5.2). Mode 600. Written after the server listens, removed when it stops. |
 | `<runtimeDir>/server.sock` | The server's unix socket for the command line (8.3), mode 600. |
-| `<runtimeDir>/server.pid`, `keepalive.pid`, `terms/<terminal id>.pid` | One line each, `<pid> <process start> <boot id>`, for the server, the keep-alive script and each keeper: the keep-alive script reads them (it cannot read JSON), and every reader judges them by design 5.5's liveness rule (boot id, pid and process start), never by the pid alone. A reader that cannot tell — the boot id cannot be read, or reading `/proc` fails — counts the line as unknown, not dead: nothing is ever removed, ended or given up on an unknown line; only a dead one allows removing a socket or a `.pid` file. A keeper's line has two more fields, its keeper version and `started` (0 or 1), so that `doctor` and `uninstall` need not connect to it (16.2, 16.3). Written through a temporary name and a rename; removed by their owner when it ends, and by the server together with a keeper's socket when it finds that keeper dead. |
+| `<runtimeDir>/server.pid`, `keepalive.pid`, `terms/<terminal id>.pid` | One line each, `<pid> <process start> <boot id>`, for the server, the keep-alive script and each keeper: the keep-alive script reads them (it cannot read JSON), and every reader judges them by design 5.5's liveness rule (boot id, pid and process start), never by the pid alone. A reader that cannot tell — the boot id cannot be read, or reading `/proc` fails — counts the line as unknown, not dead: nothing is ever removed, ended or given up on an unknown line; only a dead one allows removing a socket or a `.pid` file. A keeper's line has two more fields, its keeper version and `started` (0 or 1), so that `doctor` and `uninstall` need not connect to it (16.2, 16.3); from keeper version 4 the line of a session's shell's keeper (7.10) has a sixth, the word `shell` (`<pid> <process start> <boot id> 4 1 shell`), and a session terminal's keeps five. A skydeck before shells reads three or five fields and nothing else, so to it a shell's keeper holds no line (7.7). The keep-alive script reads the first three fields of any form and ignores the rest, so a shell's keeper keeps WSL running too (6.1); its own comment still speaks of "a keeper's two extra fields", as the script is not edited for shells. Written through a temporary name and a rename; removed by their owner when it ends, and by the server together with a keeper's socket when it finds that keeper dead. |
 | `<runtimeDir>/keeper-<build>.py` | The keeper's code as the server read it at start (16.5): what new keepers run. Written by the server at start through a temporary name and a rename, mode 600. A running keeper has read its code when it started, so the server removes the files of other builds at start. |
 | `<runtimeDir>/keepalive.interop` | The keep-alive's `$WSL_INTEROP` (6.4). |
 | `<runtimeDir>/terms/<terminal id>.sock` | A keeper's unix socket, mode 600, in a directory of mode 700. |
@@ -216,6 +220,7 @@ Added to design 11:
 | `src/window/carry-over.ts` | Follow-up F40 (design 7.1, 12.6): the offer to carry fields over after `/clear` — the lookups it is computed with from the store (the `clear` link and the mark of the first start, the pull requests attached by hand, the resume lock), its `rev`, the two acts in one transaction each, the kv entries and their removal. | platform, store, sessions, `view/carry-over.ts`, `protocol.ts`'s types, and `auth.ts`'s `failureKind` |
 | `src/window/updates.ts` | Follow-up F38 (16.5): the server's check for a newer skydeck — when it runs, the state every page is told, the stored outcome; it decides everything the page shows of it. Milestone 2: Update now — its refusals, the start of `skydeck update --from-window` (through python3 for the core limit), the run entry, the result. | platform, sessions (the deck), update, text, `log.ts`'s `serverLog`, and `auth.ts`'s `failureKind` |
 | `src/update/` | Follow-up F38: the look for a newer skydeck, one copy for three callers — `skydeck update`, the window's server and `doctor` (the server may not import `src/cli/`): `git.ts` (how skydeck runs git on its own checkout, and the window's fetch that never asks; moved from `src/cli/update-git.ts`), `look.ts` (the look in the command's order and in the window's tolerant one, the notes and the other changes an update brings, and `--check`'s lines), `news.ts` (a note of what is new: its name, its parse, its limits, its code runs), `record.ts` (the stored outcome, `kv window_update_check`, and the run entry of an update from the window, `kv window_update_run`). | platform, text, store (types), and `protocol.ts`'s types |
+| `src/window/shells.ts` | Issue #199 (7.10): opening a session's shell — the refusals and their words, the program (`shellProgram`: the account's login shell or `/bin/sh`), the spec, the wait for its start. The end of a shell is the registry's (`terminals.ts`). | platform, `env.ts`, `frames.ts`, `hub.ts`'s types, `terminals.ts`, `end-session.ts`'s words |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12); from follow-up F37 the move of a session of Open by hand and the slots it gives out (`slot-moves.ts`, 12.9, 7.6); from follow-up F42 Open's order once a move made it the server's, the freeze and the places held after `/clear` (`open-sequence.ts`, 12.1); from follow-up F40 the parts of the offer to carry fields over after `/clear` (`carry-over.ts`, design 7.1: it imports no value). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
@@ -241,7 +246,9 @@ process (`Platform.processes`); an HTTP server on TCP or on a unix socket, conne
 socket and one JSON request over it (`Platform.net`); a one-shot timer (`Clock.after`); random
 bytes (`Platform.randomBytes`); from follow-up F38, a run that a timeout or an abort ends with
 SIGTERM first and SIGKILL only after a grace (`RunOptions.killGraceMs`, answered at the child's
-exit, not when its pipes close); this process's pid, uid and user name; a file's permission bits and
+exit, not when its pipes close); this process's pid, uid and user name; from issue #199 the
+account's login shell (`Platform.loginShell`: `os.userInfo().shell` from the account database, an
+absolute path, or null when it cannot be read; 7.10); a file's permission bits and
 owner (`FileInfo.mode`, `uid`); the target of a process's file descriptor and whether a TCP port
 has a listener (`Proc.fdTarget`, `Proc.tcpListening`, read from `/proc/net/tcp` and `tcp6`). A
 process's parent pid is read from `/proc/<pid>/stat` (`Proc.stat`) by a pure helper of
@@ -807,12 +814,21 @@ hibernation (WSL issue #8696, section 21): then nothing in WSL answers and 6.3's
 
 ## 7. Terminals
 
+A terminal of the window is one of two kinds. A **session's terminal** runs `claude` for a session
+(7.1–7.9). From issue #199 a **session's shell** runs the account's login shell under a session's
+terminal, in its folder (7.10): it is held by a keeper of its own, with the same frames, screen
+side, parking, reconnecting and rediscovery, but it is never a row, a slot or a session's
+terminal, and it ends with its session's program. Where this section says "terminal" alone it
+means a session's terminal; 7.10 says what holds for a shell.
+
 ### 7.1 The keeper
 
 `bin/skydeck-keeper` is one python3 file, standard library only (`pty`, `os`, `sys`, `select`,
 `socket`, `struct`, `json`, `fcntl`, `termios`, `signal`, `ctypes`, `resource`, `collections`,
 `time`; `sys` for the exception hook that keeps an error's message out of `keepers.log`, `ctypes`
-for `prctl`, `resource` for the program's core limit, `collections` for the tail), about 810 lines
+for `prctl`, `resource` for the program's core limit, `collections` for the tail), about 870 lines
+(version 4, issue #199, added the shell's meta, the spec's `file` and the pid line's sixth field;
+before it about 810)
 (about 700 without comments and blank lines; the first estimate counted the prototype's loop, and
 the rules below — claim, start deadline, pid line, queues and caps, linger — and the checks of every
 input it reads add the rest),
@@ -835,6 +851,19 @@ object, then closes stdin:
             "build": "<server build>" } }
 ```
 
+Keeper version 4 (issue #199, 7.10) knows a second form of the spec, a **session's shell's**: its
+`meta` is `{ "kind": "shell", "of": "<the session terminal's id>", "openedNs", "build", "dir" }`
+(no `sessionId`, `slot` or `label`), its `lock` is null, its `startBy` is the clock plus 55 s as a
+new session's, and it alone carries **`file`**, the absolute path of the program to run with
+`argv`: the keeper `exec`s `file` with `argv` as given, so that `argv[0]` can be `-<name>`, the way
+a login shell is told that it is one. A shell's spec without `file` (or with one that is no
+absolute path, or holds a NUL), a session's spec with `file`, and a shell's spec with a lock are
+each a bad spec. A session terminal's `meta` may carry **`shell`**, the id of a shell (12
+lowercase hex): written only into the meta of the terminal a restart opens while the terminal it
+replaces has a shell (11.2, 7.10). The hello echoes the fields of the meta's form. A shell's
+keeper writes its `.pid` line with the sixth field `shell` (4.2). Nothing else of the keeper
+changes: no frame, no timer, no signal.
+
 `openedNs` is the terminal's **opening stamp**: when the server opened it, the server's clock — but
 never a stamp that is not later than every opening stamp the server knows, those it gave and those
 of the terminals it found again (7.3, from their `hello`). The clock gives one value to several
@@ -845,7 +874,8 @@ opening stamp, and the stamps rise in the order the terminals were opened, also 
 of the server (issue #213); every order "by opening time" (7.6, 12.1) is the opening order. A kept
 terminal whose stamp is ahead of the new server's clock pulls the stamps of the terminals opened
 after it ahead too, by 1 ns each, until the clock passes it. A keeper whose hello comes late (7.3)
-is known from its hello on.
+is known from its hello on. A session's shell takes its stamp by the same rule (7.10), and a found
+shell's is known from its hello, as a terminal's.
 
 `startBy` is the **start deadline**, no later than the resume lock holds: for a resume, the time
 the lock was taken plus `LOCK_TTL_NS` minus `LOCK_START_TOLERANCE_NS` (55 s, design 7.6); for a
@@ -1091,6 +1121,12 @@ The server's environment (5.2), with:
 `TERM_PROGRAM=vscode` is never set: Claude Code would take the terminal for an editor's (section
 21). The program runs directly (`exec`), as in step 1; no shell is started around it.
 
+**A session's shell** (issue #199, 7.10) gets what a terminal's program gets, by the same cleaning
+(`shellEnvironment` and `programEnvironment` of `src/window/env.ts` share it), and nothing that is
+set for Claude Code alone: for any server environment, the only names in a shell's environment
+that the server's lacks are `TERM`, `COLORTERM`, `PWD` (the shell's folder) and `WSL_INTEROP`.
+`SHELL` and every other variable are the server's.
+
 ### 7.5 A terminal and its session
 
 A terminal is opened for a session (resume) or for a new session id (`new`), and the server keeps
@@ -1138,6 +1174,11 @@ both in memory: the **expected session**. Which session it shows is decided agai
   terminal moves to that session's ordinary row. A program that ends before its session reported a
   start leaves the row in place, no longer starting, with the ended terminal (7.8) until the
   terminal is closed.
+
+A holder that descends from a session's shell's keeper (7.10) belongs to no terminal of the
+window: the walk above starts at the programs of the listed terminals, and a shell is never one
+of them. So a `claude` started by hand inside a shell runs outside the window's terminals (7.9),
+and the shell never becomes a session's terminal.
 
 ### 7.6 Slots
 
@@ -1339,6 +1380,11 @@ slot, its moves change only `window_slots`, and it leaves `window_open_order` al
 while a session that was under Open then still runs, that old kept order wins over the moves made
 meanwhile, and the numbers need not ascend, until the next move or until a refresh sees Open empty.
 
+A session's shell (7.10) has no slot and is no candidate of #189's hand-out, of F44's withholding
+or of a move: each of those rules reads the listed terminals, and a shell is never listed. No
+shell is opened while a shell's keeper (or a `.pid` file of no form this build reads) may live
+that the server does not hold (7.10): it could be that terminal's own shell.
+
 ### 7.7 Keeper versions
 
 The keeper file states its version and the protocol version it speaks (`hello`, 8.1). A running
@@ -1350,6 +1396,34 @@ is served as before and its session cannot be ended from the window (12.10). The
 keeper protocol version that has shipped (they are small); it refuses to attach a keeper with a
 newer protocol than it knows and shows "this terminal was started by a newer skydeck; run skydeck
 window --restart" on it. Its program keeps running.
+
+Version 4 (issue #199) holds a session's shell (7.1, 7.10), within protocol 1: no frame is new or
+changed. "A keeper's meta never changes" still holds: the tie of a shell to the terminal a restart
+opens is written into that terminal's meta when it is spawned (`shell`), never into a running
+keeper's. An update and a switch back are tested both ways (17.2, 17.3):
+
+- **This build and the keepers of the build before** (versions 2 and 3): their spec, hello, `.pid`
+  line and frames are unchanged and still parse (`shell` is optional), and nothing is sent to them
+  that they do not know. A terminal a version 3 keeper holds is found again after the update,
+  takes input, shows output, and is endable and ends (the keeper file as released before this
+  change is kept as a test fixture).
+- **The build before and a version 4 keeper of a session's terminal** (a switch back while
+  sessions run): its parser reads the meta's seven fields by name and ignores `shell`, its only
+  version rules are the protocol (still 1) and `E` from version 3, so it lists the terminal,
+  attaches it and can end it (tested with that build's frames codec, kept as a fixture).
+- **The build before and a shell's keeper**: its `.pid` reader takes three or five fields and
+  nothing else, so a six-field line is no line to it: it never claims that keeper, lists nothing
+  for it and blocks nothing (#189's hand-out goes on), and its session terminals work as before;
+  its start-up probe of dead keepers connects once and removes nothing of a live one. The shell
+  keeps running unseen and that server never ends it. Named limits of a switch back: a session's
+  end leaves its shell running until the shell's program ends or WSL stops; that build's `doctor`
+  does not count it and its `uninstall --purge` does not refuse for it; a server left with only
+  shells in its runtime directory reads no keeper there and may take another directory by its
+  rule (4.2), and this build then follows that record and never finds them; a restart (`r`) by
+  that build writes no `shell`, so back on this build that session's shell names a terminal that
+  is gone and is ended although its session runs; and the keep-alive script of every build counts
+  a shell's keeper (4.2), so WSL is kept running for it also where nothing shows it. Back on this
+  build the shell is found again.
 
 ### 7.8 When the program ends
 
@@ -1427,6 +1501,14 @@ another boot under a runtime directory that survives one), are removed by the se
 starts, and when the user closes a lost terminal whose line is dead; they are skydeck's own
 transient files.
 
+**A session's shell** (7.10) ends the same way, by its own program's end (`exit` typed, the
+shell killed) or its keeper's loss, and the server keeps no ended shell: it acknowledges the exit
+(the keeper ends), forgets the shell, and removes a lost shell keeper's files when its line is
+dead. A shell also ends **with its session's program**: when that program's end is applied — End
+session and End session and park, `/exit`, a crash, a lost keeper, closing the terminal, a
+restart that is given up — the server hangs the shell up as 7.10's end rule says. That is the one
+process the window ends without being asked each time (design 2, principle 6).
+
 ### 7.9 Sessions running outside the window
 
 A session whose holder belongs to no terminal of the window runs in another terminal. The window
@@ -1488,6 +1570,158 @@ the user to kill one: Claude Code's supervisor restarts a background session who
 unexpectedly", so skydeck leaves ending it to agent view (or `claude stop`). The field is read while
 the process runs and nothing of it is stored.
 
+**A `claude` started by hand inside a session's shell** (issue #199, 7.10) is a session running
+outside the window's terminals: its holder descends from the shell's keeper, which is no listed
+terminal (7.5), so the window shows it as running in another terminal, never as the shell's
+session or its owner terminal's, and `show` marks no holder under a shell's keeper as in the
+window (11.4).
+
+### 7.10 A session's shell
+
+Issue #199. Now and then Claude Code asks the user to run something themselves: open a tunnel,
+log in somewhere, run a few commands. A **session's shell** is a shell under a session's terminal
+of the window, in the session's folder, so that the instruction can be read above while typing
+below. This section is the server's and the keeper's part; the page's (the act that opens a shell,
+the panel, the key) comes with the window's protocol and page (8.2, 12).
+
+**What it is.** A second kind of terminal: its own keeper process (7.1, version 4), its own
+terminal id, socket and `.pid` file in `terms/`, the same frames, screen side, parking,
+reconnecting and rediscovery. It lives in the same registry (`src/window/terminals.ts`) as the
+session terminals, but `list()` never returns it: `shells()` does, each shell with the session
+terminal it belongs to (`of`), its state (`starting`, `running`, `reconnecting`), its folder, its
+program and its size. Every reader of the server's terminals as session terminals goes through
+`list()` — the rows and Open's order, numbers 1 to 9 and the withheld ones, the mapping and the
+start timeout, attention, parked, End session, the "already open" refusal, restore, `doctor`'s
+count of the server's terminals — so a shell is in none of them by construction, and the type
+checker holds the rest: a shell's hello has another type (`ShellHello`) than a session
+terminal's, and the events of a hello, a start and an exit (7.3, 7.8) are never emitted for a
+shell. At most one shell per session's terminal. Nothing about a shell is stored (no table, no
+`kv` key); its screen and what is typed into it are in memory only (2).
+
+By id the registry serves a shell where a stream is meant and refuses it where a session terminal
+is meant:
+
+| Registry member | For a shell's id |
+|---|---|
+| `list`, `rediscover`'s answer | never in it |
+| `attach`, `input`, `resize`, `setTheme`, parking, reconnecting, `stopAll` | as for any terminal (`input` answers `ended` once the shell is being ended) |
+| `close` | `unknown` (so `close-terminal` answers that the terminal is no longer there) |
+| `end` | `unknown` (only the registry hangs a shell up) |
+| `holdSlot` | null |
+| `setSession` | ignored |
+| `start`, `refuse` | sent (`start` sends no `G` to a shell that is being ended) |
+| `nextOpenedNs` | a shell's opening stamp comes from it (7.1), and a found shell's is known from its hello |
+| the slots (`nextSlot`, `giveSlots`, `withholdSlots`, `setSlots`) | a shell has no slot and is skipped; `setSlots` naming one answers `changed` |
+| `onChange` listeners | called |
+
+**Opening** (`src/window/shells.ts`, `open(terminal, size)`). After the interop link is pointed
+again (6.4), everything up to the spawn runs without an await, so two opens at once meet at the
+registry's list. In order:
+
+1. the server is stopping: `the window's server is stopping`;
+2. the terminal is no listed session terminal: `this session has no terminal in the window: open
+   the session first`;
+3. the terminal is `restarting`: `skydeck is restarting this session`; its program is over
+   (`ended`, `lost`, `not-started`, or an exit that came): `this session has ended: resume it
+   first`; it is held by a newer keeper: `this terminal was started by a newer skydeck; run skydeck
+   window --restart`; it shows no session yet or has no program (starting, or started and not
+   reported): `this session has not started yet: open a shell once it runs`;
+4. it has a shell already: done, nothing started (a second press never opens a second one);
+5. its folder (the launch's working directory, the terminal's `dir`) is no directory: `the
+   session's folder is not there any more`;
+6. the spec (7.1): a new terminal id, the program — the account's login shell
+   (`Platform.loginShell`, read from the account database by `src/platform/` only) when an
+   executable file is there, else `/bin/sh`; `argv` `-<name>` (`-zsh`, `-bash`, `-sh`), the
+   leading `-` that `login` itself uses, rather than a `-l` that a shell might not know —, the
+   terminal's folder, the environment of 7.4, `lock` null, `startBy` the clock plus 55 s, the
+   opening stamp, and the meta `{ kind: "shell", of, openedNs, build, dir }`. The registry
+   refuses the spawn, before anything is started, while a keeper of `terms/` may live that it
+   does not hold and whose line is a shell's or cannot be told (below): `a terminal of this window
+   does not answer; a shell cannot be opened until it does` (it may be that terminal's own shell).
+   A session's keeper that never answers refuses nothing. Then `G`, and the wait for the program:
+   `the shell did not start` when it is gone before its `T`, `the shell did not start within 5
+   seconds` after 5 s (it may still start before its deadline, and then shows in the lists);
+7. after `T`, a wait of 400 ms: `T` comes before the `exec` (7.1), so a shell that cannot be run
+   (127) or that ends at once (an account whose shell is `nologin`, a profile that exits) is the
+   answer `the shell ended at once (status <n>)` (or `(signal <n>)`), not a panel that flashes.
+
+No request of a page carries a program, an argument, a folder or an environment for a shell: the
+page names the session's terminal, and the server chooses the rest (15.1, 15.5).
+
+**The owner.** A shell's owner is a session terminal's id, kept in memory, and it is always sure:
+unknown while it is not. A shell the server opened has the terminal it was opened under; a
+restart moves it (below). For a shell **found** after a server restart the owner is resolved
+once, and an owner once resolved is kept, whatever becomes of that terminal (the end rule then
+decides). Until then each settle (below) tries, in this order — a candidate's program "may run"
+when the terminal is not over, has no exit, and its latest hello does not say exited:
+
+1. a listed session terminal whose meta's `shell` names the shell and whose program may run (the
+   one opened last, if several);
+2. else the terminal of the shell's meta `of`, listed, its program may run;
+3. else the owner is in doubt while a keeper of `terms/` may live that the registry does not hold
+   (`keepersThatMayLive`, `src/window/runtime.ts`: every `.pid` file whose id the registry does not
+   hold and whose line is not dead by design 5.5 — a session's, a shell's, or one that cannot be
+   read or holds no line this build reads; held are all the registry's terminals, shells too, in
+   any state, so a shell's own keeper and another session's shell are never a doubt; a keeper
+   still being found, and one whose finding gave up after a connect error that was no refusal, are
+   not held). **Nothing is ended on that doubt** (4.2: nothing is ended on unknown): the shell stays
+   resolved to nothing, listed nowhere and running, the server logs once `terminal <id>: its
+   session's terminal is not found; the shell is left running` (once nothing is still being
+   found), and looks again once a second and at every change. Once no keeper may live unheld, a
+   listed candidate is the owner (it is over, so the end rule ends the shell), and with none the
+   shell has no terminal left and is ended.
+
+Two shells resolved to one terminal: the one opened last is the terminal's, the other is ended and
+logged. This build never makes two (the opening refuses while a shell's keeper may live unheld);
+the rule is a safeguard.
+
+**A restart of the session** (`r`, 12.10, 11.2) holds the terminal and hangs its program up; right
+after the resume's spawn takes the held number (`take`), in the same synchronous step, the held
+terminal's shell is moved to the new terminal (`moveShell`, which announces nothing: a settle
+before the spawn lists the new terminal would end the shell), and its id goes into the new
+terminal's meta as `shell`. So the tie lives in the keepers' metas, and a server restart after any
+number of session restarts (and after `/clear`, which changes the session, not the terminal)
+finds it. The same shell process, with its screen, goes on under the new terminal.
+
+**The end rule** (`settleShells`). It runs before the listeners of every change of the registry,
+after a keeper's finding ends and, while a shell's owner is unresolved, once a second; never once
+the server stops. For each shell with an owner that is not being ended: nothing while the owner is
+a listed session terminal whose program may run (not over, no exit), or one a restart holds; the
+shell is **ended** when the owner is listed and over and not held, or no longer listed (closed, or
+a spawn that failed). That covers each way a session's program ends: End session and End session
+and park (`E`, then its exit), `/exit`, a crash, a lost keeper (`lost` is over), closing the
+terminal (its program was over already), a restart that is given up or whose resume opens no
+terminal, and a server that starts and finds the session's keeper exited or its line dead.
+
+**Ending a shell.** It is marked ending and leaves `shells()` at once, so every page's panel closes
+with the next list. Then it is hung up, by one step that runs at the marking, at every hello of the
+shell and at its `T`: with a program and a connection, `E` (SIGHUP and SIGCONT, 7.1), once; with no
+program yet, `N`, once — when `G` was on the wire already the keeper starts the program all the
+same (it ignores an `N` once started), its `T` comes, and the step sends `E`; with no connection,
+at the next hello. The server logs `terminal <id>: its session's terminal is over; the shell is
+hung up`, and once more `terminal <id>: the shell has not ended` when no exit came 10 s after the
+`E`, and goes on waiting.
+
+**What ended means for what runs in it.** `E` is what the kernel sends a session's leader when its
+terminal goes: bash, zsh and dash end on it, bash and zsh pass it to their jobs, and the kernel
+hangs up the foreground job when the leader ends. A job started with `nohup`, `setsid` or
+`disown`, and a shell that ignores SIGHUP, go on, as after closing any terminal's window: a named
+limit. The server never escalates: the keeper has no other signal.
+
+**A shell's own exit** (`exit` typed, the shell killed, its keeper lost): its exit goes to the
+pages attached to it, the keeper is acknowledged, the shell is forgotten (a lost keeper's files
+with it when its line is dead), and the opening's wait is told. A found shell whose hello says its
+program was never started, and whose start nobody waits for any more, is refused (`N`) and
+forgotten at its exit; one whose hello says exited is forgotten after its exit.
+
+**Limits.** While a shell's keeper (or a `.pid` file of no readable form) may live and is not held
+— it never says hello, its finding gave up, its file cannot be read — no shell can be opened in the
+window, for any session, for as long as that lasts; a session's keeper in that state refuses
+nothing. Any keeper that may live unheld keeps a found shell whose owner is in doubt hidden and
+running for as long: nothing ends it, and each server start looks again. After WSL stops a shell is
+gone and is not restored. A switch back to a build before shells leaves them running and unseen
+(7.7).
+
 ## 8. Protocols
 
 ### 8.1 Server and keeper
@@ -1500,7 +1734,7 @@ keeper). Protocol version 1:
 | Type | Direction | Payload |
 |---|---|---|
 | `C` claim | server → keeper | Empty. The connection becomes the screen side (7.1, step 3). The first frame of every connection. |
-| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` and `procStart` (the program's, field 22 of its `/proc/<pid>/stat`; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers; 0 both for none and for the empty screen parked at record 0, 7.3 — see `S`), `tailFrom` (the number of the tail's first record: `snapSeq` + 1, or later when records were dropped, `seq` + 1 for an empty tail), `gap`, `meta` (the spec's), `exited` (null or as `X`). The answer to `C`. |
+| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` and `procStart` (the program's, field 22 of its `/proc/<pid>/stat`; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers; 0 both for none and for the empty screen parked at record 0, 7.3 — see `S`), `tailFrom` (the number of the tail's first record: `snapSeq` + 1, or later when records were dropped, `seq` + 1 for an empty tail), `gap`, `meta` (the spec's, in one of its two forms, 7.1: a session terminal's seven fields, with `shell` when its spec has one, or from keeper version 4 a session's shell's five, `kind` `shell`; the server tells them apart by `kind`, and a shell's hello has `lock` null), `exited` (null or as `X`). The answer to `C`. |
 | `G` start | server → keeper | Empty. Starts the program, only before `startBy` and only once (7.1, steps 1 and 2). |
 | `T` started | keeper → server | JSON `{ pid, procStart, atNs }`: the program was forked. Sent once, to the screen side, right after the fork and before the program's first output (when
 `exec` then fails, `X` with code 127 follows); a server that claims the keeper later finds the same in `hello`. It is what `open()` waits for (11.2) and what ties the terminal to the holder the program becomes (7.5). |
@@ -2615,6 +2849,11 @@ timeout's path: no command — a keeper may run, and a hand-run `claude` could s
 twice, or the terminal offers Resume itself — and the lock and the label stay; the terminal's exit
 gives them back when its program never started (7.8).
 
+Issue #199: a terminal opened for a restart (12.10, 7.6's hold) carries the held terminal's
+session's shell, if it has one that is not being ended: right after `take` gives it the held
+number, in the same synchronous step, the shell is moved to it (`moveShell`) and its id goes into
+the new terminal's meta as `shell` (7.1, 7.10).
+
 ### 11.3 In the window
 
 - **Resume.** Enter on a selected session that is not running, a double click, "Resume here" on
@@ -2667,7 +2906,9 @@ gives them back when its program never started (7.8).
   open in the window is refused as `running (pid <n>)` like any other running session; `show` adds
   `(in the skydeck window)` to a holder's line when the holder is a keeper's program or descends
   from it (7.5's walk: up to 8 parents below the program, so 9 below the keeper) and that keeper is
-  alive by its `.pid` line in the runtime directory the store records (4.2, design 5.5's rule). It
+  alive by its `.pid` line in the runtime directory the store records (4.2, design 5.5's rule) and
+  is no session's shell's keeper (its line's `shell`, 7.10: a `claude` started in a shell runs
+  outside the window's terminals, as the window shows it, 7.9). It
   needs no running server: it creates nothing and connects to nothing, and with no runtime
   directory, no keeper line or no boot id there is no mark. `show --json` is unchanged.
 - `--window` (new for `resume` and `new`; `--here`, `--tab` and `--window` exclude each other: two
@@ -5627,6 +5868,13 @@ scheme) without this in mind. So no input from a page becomes a program name or 
 skydeck's hand, but a link does reach the Windows shell: only an `http` or `https` address that
 check let through; a page's `new` flags become `claude` arguments only after design 7.7's refusals.
 
+From issue #199 a keeper runs one more thing: a session's shell (7.10), the account's login shell
+from the account database (`Platform.loginShell`), or `/bin/sh` when none is known or it is no
+executable file, with the `argv` the server builds (`-<name>`, a login shell) in the session
+terminal's folder and the environment of 7.4. The spec's `file` exists for it only (7.1): a
+session terminal's keeper still runs `argv[0]`. The server chooses the program, its arguments,
+its folder and its environment; what opens a shell names only the session's terminal.
+
 From follow-up F38 the server also runs `git` on its own checkout (16.5: the check for a newer
 skydeck, and the looks around it), as `git -C <checkout> …` with an argument list it builds itself,
 never a shell; the remote is the one the checkout's branch follows, and nothing a page sends
@@ -5654,7 +5902,9 @@ Before what it does in step 1:
   terminals in the window keep running` (for one: `1 terminal in the window keeps running`), where
   `<n>` counts the keepers whose `.pid` line is alive or cannot be judged (4.2), read before the
   stop: a server that does not answer cannot say how many it has. Keepers and their sessions are
-  never stopped (2).
+  never stopped (2). From issue #199 `<n>` counts every keeper, a session's shell's included
+  (7.10): it is a terminal in the window that keeps running too (`window --stop`, `--restart` and
+  `update` say the same words with the same count).
 - it names the Edge profile folder — the configured one, or the derived one (5.4) — when that
   folder exists (Edge creates it at the window's first start): `the window's Edge profile is in
   <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
@@ -5714,7 +5964,7 @@ are problems.
 | profile folder | it cannot be derived (5.4) and `window.profileDir` is not set. |
 | runtime directory | it is not mode 700 or not the user's, or a socket path would be 108 bytes or longer. The line names the directory the store records, or else which rule chose it (4.2), and says `info` when `XDG_RUNTIME_DIR` was passed over because the user does not linger (systemd would remove it when the last terminal closes). |
 | vendored files | a file of `vendor/MANIFEST.json` is missing or its hash differs (a broken checkout). |
-| keepers | never: `info` counts them from their `.pid` lines (4.2), alive by design 5.5's rule, with their keeper versions and whether each program was started; it never connects to a keeper (7.1). When a server runs, `GET /status` adds what it knows. A `.pid` line of a dead keeper is `info` (removed at the next server start); a `.pid` file that cannot be read is named on its own, as one whose keeper cannot be judged. |
+| keepers | never: `info` counts them from their `.pid` lines (4.2), alive by design 5.5's rule, with their keeper versions and whether each program was started; from issue #199 a session's shell's keeper is counted too, and its line says so after its version (`keeper <id>: running (pid 4242, keeper version 4, a session's shell, its program started)`, 7.10); the server's line (`<n> terminals`, from its list) does not count a shell; it never connects to a keeper (7.1). When a server runs, `GET /status` adds what it knows. A `.pid` line of a dead keeper is `info` (removed at the next server start); a `.pid` file that cannot be read is named on its own, as one whose keeper cannot be judged. |
 
 In a test sandbox (`SKYDECK_TEST_NO_WINDOWS=1`, 17) `doctor` and `uninstall` read nothing under
 `/mnt/`: the directory `SKYDECK_TEST_MNT_C` names stands for `/mnt/c`, and without it the C: drive
@@ -5765,6 +6015,10 @@ owner). Then:
   the restart, every screen is rebuilt (7.3), and pages reload themselves for the new assets
   (8.2.2).
 - **Keepers** keep running the code they started with (7.7). The server speaks their protocol.
+  From issue #199 that holds for a session's shell's keeper too: an update keeps every shell and
+  what runs in it, and the new server finds each again under its session's terminal (7.10). A
+  switch back to a build before shells does not see them, and keeps its session terminals working
+  (7.7, with its limits).
 - **Vendored xterm.js** changes for page and screen side together, at the server restart: the new
   screen side rebuilds each terminal from a snapshot written as escape sequences, which any version
   reads.
@@ -6268,6 +6522,15 @@ Driven over its socket by `node:test` with real python3 (CI has it):
 - killing the keeper ends the program (SIGHUP), and the stand-in reports `SessionEnd` `other`;
 - `T` comes once after `G`, before the first output, with the program's pid and process start;
   with a failing `exec`, `T` then `X` 127.
+- issue #199, a session's shell (`test/keeper/shell.test.ts`): a shell spec's hello (keeper 4, no
+  lock, exactly the shell meta's five fields) and its six-field `.pid` line; `file` run with the
+  spec's `argv` as given (`argv[0]` `-<name>`, the spec's folder and exactly its environment, with
+  the test's Node.js as the program); a `file` that is not there (`T`, then 127 and the line naming
+  it); `E` hanging the shell up; a session spec unchanged but for an optional `shell`; each bad
+  spec of 7.1's shell rules. And A13's switch back: the hello of a real version 4 session keeper,
+  its meta carrying `shell`, read by the frames codec of the build before
+  (`test/fixtures/frames-before-shell/frames.ts`, kept as it was), which serves it and can end it,
+  and a shell's hello, which it refuses.
 
 **The keep-alive script** (`bin/skydeck-keepalive`), with real `sh` and real processes: it stays
 while a `.pid` line names a live process; it ends when every line names a dead one, one of another
@@ -6385,7 +6648,27 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
   move after, a write that fails, a slow keeper at a start keeps its number; with Parked (F44): a
   parked session's terminal never waits, a number a parking frees goes to the first that waits
   (also in a block of a kept order, which keeps its place), an un-parked one takes the lowest free
-  number by F44's rule or waits, and the two writes keep each other's part.
+  number by F44's rule or waits, and the two writes keep each other's part;
+- issue #199, a session's shell, with real keepers: the session terminal runs the stand-in
+  `claude`, the shell **the stand-in shell** (`test/helpers/shell-standin.ts`): a `#!/bin/sh`
+  script in the sandbox that prompts `shell-standin> `, reads a line and `eval`s it; the kernel
+  runs it as `/bin/sh <script>`, not a login shell and not interactive, so no profile is read, and
+  both test platforms name it as `loginShell`, so no test starts a real shell of the user's. The
+  registry (`test/window/terminals-shell.test.ts`): a shell is in `shells()` and never in `list()`,
+  has no slot, no session and no event, is served by id, is forgotten at its `exit` and at its
+  keeper's loss, is found again after a restart, and no shell opens while a shell's keeper may
+  live unheld (stopped, a connect that always fails, a `.pid` file of no form). The owner
+  (`test/window/terminals-shell-owner.test.ts`): each way the session's program ends hangs the
+  shell up with a background job and a foreground child of it; the end between `G` and `T`; a
+  restart moves the shell; a found shell's owner by `meta.shell` and by `of`, an orphan beside
+  another session's shell, an owner whose hello says exited, an owner once resolved kept, and
+  nothing ended on a doubt; two shells of one terminal. Opening (`test/window/shells.test.ts`):
+  the program and the login form, each refusal with its words, the server's spec, one shell per
+  terminal, a folder that is gone, a shell that ends at once. The environment
+  (`test/window/env.test.ts`). The switch both ways: a version 3 keeper (the file as released
+  before shells, `test/fixtures/keeper-v3/`) found again by this build and endable
+  (`test/window/terminals-old-keeper.test.ts`); the `.pid` pattern of the build before does not read
+  a shell's keeper's line (`test/window/pidline.test.ts`).
 
 ### 17.4 The page
 

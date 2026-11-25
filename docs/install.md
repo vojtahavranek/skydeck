@@ -2309,7 +2309,7 @@ judged as before.
 | profile folder | It cannot be found and `window.profileDir` is not set. |
 | runtime directory | The directory of the server's and the keepers' sockets is not yours or not mode 700, or a socket path in it would be 108 bytes or longer. `info` when `XDG_RUNTIME_DIR` is passed over because you do not linger (`loginctl enable-linger <you>` makes it usable). |
 | vendored files | A file of `vendor/MANIFEST.json` is missing or changed: a broken checkout (`git status`). |
-| keepers | Never a problem: how many terminals run, and one line each. |
+| keepers | Never a problem: how many terminals run, and one line each. A shell opened under a session's terminal is held the same way and counted with them; its line says `a session's shell` after its keeper version. |
 
 ### Updating while the window runs
 
