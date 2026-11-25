@@ -11,6 +11,8 @@ import {
   needYouText,
   nextNeeding,
   notificationText,
+  UNREAD_TEXTS,
+  unreadAct,
   windowTitle,
 } from '../../web/attention-text.js';
 import { ageBetween } from '../../web/format.js';
@@ -283,5 +285,63 @@ describe('nextNeeding: Ctrl+Shift+J (B14)', () => {
     for (const odd of [undefined, -1, 2.5, Number.NaN, '9']) {
       assert.deepEqual(nextNeeding([A, B], A, odd as unknown as number), { id: B, say: null });
     }
+  });
+});
+
+describe('the mark unread (S2 12.4): its line, the act and the words of `u` and the header', () => {
+  test('the line: `marked unread · <age>` from the time it was marked; no age when not known', () => {
+    assert.equal(
+      attentionLine(attention({ reason: 'unread', sinceNs: ago(2n * MIN) }), now),
+      'marked unread · 2m',
+    );
+    assert.equal(
+      attentionLine(attention({ reason: 'unread', sinceNs: null }), now),
+      'marked unread',
+    );
+    assert.equal(
+      attentionLine(attention({ reason: 'unread', detail: 'not shown', sinceNs: null }), now),
+      'marked unread',
+      "a detail is an ask's only",
+    );
+  });
+
+  test('`read` and `Read` while the reason is one seeing clears (ended, finished, unread)', () => {
+    for (const reason of ['ended', 'finished', 'unread'] as const) {
+      assert.deepEqual(unreadAct({ attention: attention({ reason }) }), {
+        kind: 'read',
+        label: 'Read',
+        tip: 'mark it read (u)',
+      });
+    }
+  });
+
+  test('`unread` and `Unread` for a row with no mark, and for one that asks (the server refuses it)', () => {
+    const unread = {
+      kind: 'unread',
+      label: 'Unread',
+      tip: 'mark it unread: it needs you until you come back to it (u)',
+    };
+    assert.deepEqual(unreadAct({ attention: null }), unread);
+    assert.deepEqual(unreadAct({ attention: attention({ reason: 'asks' }) }), unread);
+    assert.deepEqual(unreadAct({} as { attention: null }), unread, 'a row of stage A');
+  });
+
+  test('an act the server took that no list shows yet decides: the next is its opposite, whatever the row says', () => {
+    const unread = attention({ reason: 'unread' });
+    assert.equal(unreadAct({ attention: null }, 'unread').kind, 'read');
+    assert.equal(unreadAct({ attention: null }, 'unread').label, 'Read');
+    assert.equal(unreadAct({ attention: unread }, 'read').kind, 'unread');
+    assert.equal(
+      unreadAct({ attention: attention({ reason: 'finished' }) }, 'read').label,
+      'Unread',
+    );
+    assert.equal(unreadAct({ attention: unread }, null).kind, 'read', 'none: by the row');
+  });
+
+  test("the toasts' words", () => {
+    assert.deepEqual(UNREAD_TEXTS, {
+      unread: 'Marked unread: it needs you until you come back to it.',
+      read: 'Marked read.',
+    });
   });
 });

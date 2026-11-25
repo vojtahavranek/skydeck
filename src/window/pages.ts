@@ -748,7 +748,7 @@ export function createPages(deps: PagesDeps): Pages {
           conn.focusedAt = ++focusOrder;
           if (conn.theme !== null) hub.setTheme(conn.theme);
         }
-        deps.seen?.focus(conn, message.focused, message.selected);
+        deps.seen?.focus(conn, message.focused, message.selected, message.byPage === true);
         return;
       case 'theme':
         // Follow-up F13: the page's colours changed while it is open. Kept for its next focus;

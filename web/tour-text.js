@@ -133,7 +133,14 @@ export function tourSteps(mode) {
           listKey('r'),
           ' restart',
         ],
-        [listKey('/'), ' filter · ', listKey('a'), ' show done sessions'],
+        [
+          listKey('/'),
+          ' filter · ',
+          listKey('a'),
+          ' show done sessions · ',
+          listKey('u'),
+          ' mark unread',
+        ],
       ],
     },
     {

@@ -23,6 +23,7 @@ import { SkydeckError } from '../platform/errors.ts';
 import type { HttpListener, Ns, Platform } from '../platform/types.ts';
 import { openDeck } from '../sessions/deck.ts';
 import type { Deck } from '../sessions/deck.ts';
+import type { ListRow } from '../sessions/list.ts';
 import { migratedLine } from '../store/store.ts';
 import type { LaunchSpec, Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
@@ -95,6 +96,7 @@ import { createTick } from './tick.ts';
 import { createUpdates } from './updates.ts';
 import type { Tick } from './tick.ts';
 import { buildListMessage, keptNow, openRows } from './view/build.ts';
+import { withoutUnread } from './view/attention.ts';
 import { restoreOffer } from './view/search/switcher.ts';
 import { windowTerminal } from './window-terminal.ts';
 import { loadXterm } from './xterm.ts';
@@ -207,11 +209,14 @@ export function keepAliveNotices(): (state: KeepAlivePayload) => {
 const NOTIFIER_VIEW = { filter: '', unfolded: ['earlier'], showDone: false, selected: null };
 
 /** Stage B's parts of the server (plan B 2.7): what `runServer` wires into the tick and the pages. */
-interface AttentionParts {
+export interface AttentionParts {
   seen: Seen;
   attention: Attention;
   /** The tick's `attention`: each call followed by the notifier's check. */
   tick: Pick<Attention, 'look' | 'refreshed'>;
+  /** S2 12.4: the user's `unread` or `read` (Attention.mark); the lists pushed and the notifier's
+   *  check made when it changed the facts. */
+  mark(row: ListRow, kind: 'unread' | 'read'): { ok: true } | { ok: false; error: string };
 }
 
 /**
@@ -221,7 +226,7 @@ interface AttentionParts {
  * check never stops the tick (contract 2.6: it throws what its deps throw): a failure is logged by
  * kind, once until a check works again.
  */
-function attentionParts(deps: {
+export function attentionParts(deps: {
   deck: Deck;
   hub: TerminalHub;
   tick: () => Tick | null;
@@ -251,7 +256,8 @@ function attentionParts(deps: {
       view: NOTIFIER_VIEW,
       selected: null,
       nowNs: deck.platform.clock.nowNs(),
-      attention: attention.facts(),
+      // S2 13: the user's mark unread plays no part in "starts to need you".
+      attention: withoutUnread(attention.facts()),
       openOrder: deps.openOrder(),
     });
     const rows = new Map(message.sections.flatMap((section) => section.rows).map((r) => [r.id, r]));
@@ -291,6 +297,18 @@ function attentionParts(deps: {
   return {
     seen,
     attention,
+    mark(row, kind) {
+      const outcome = attention.mark(row, kind);
+      if (!outcome.ok) return outcome;
+      if (outcome.changed) {
+        deps.pages().pushList();
+        // S2 13: a `read` makes the session stop needing you now, so that a later reason (a
+        // window end at the next refresh) starts to need you and notifies, not a reason that
+        // changed.
+        check();
+      }
+      return { ok: true };
+    },
     tick: {
       look() {
         const changed = attention.look();
@@ -772,6 +790,11 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       // F37 (S2 12.9): a session of Open moved by hand, for the page's last view.
       reorder: (page, sessionId, direction) => reorder.reorder(page.view, sessionId, direction),
       carryOver,
+      // S2 12.4: the mark unread, attention's (made below, before any action can come).
+      mark: (row, kind) => attending.mark(row, kind),
+      doneUnread: (sessionId) => {
+        attending.attention.clearUnread(sessionId);
+      },
     });
     // Plan C7, S2 8.2.6: what a terminal the server opens for a command or a restore starts at —
     // the area the page that had focus last reported, read when the terminal is opened.

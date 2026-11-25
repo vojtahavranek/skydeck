@@ -181,14 +181,23 @@ export interface AttentionRow {
   seenSeq: number | null;
   windowEndSeq: number | null;
   windowEndNs: Ns | null;
+  /** Migration 7: the latest time the user marked the session unread (S2 12.4), its order and its
+   *  time; null for none (also once a done session's mark was cleared). */
+  unreadSeq: number | null;
+  unreadNs: Ns | null;
 }
-/** One session's part of a write (B3): at least one of the three. */
+/** One session's part of a write (B3): at least one observation. */
 export interface AttentionWrite {
   sessionId: string;
   /** A turn end: turn_ended_seq = the next value, turn_ended_ns = this. */
   turnEndedNs?: Ns;
   /** A window end judged ended-unexpectedly (B10): window_end_seq = the next value, window_end_ns = this. */
   windowEndNs?: Ns;
+  /** The user marked the session unread (S2 12.4): unread_seq = the next value, unread_ns = this. */
+  unreadNs?: Ns;
+  /** A done session's mark goes (S2 12.4): unread_seq and unread_ns NULL; takes no value. Not
+   *  with `unreadNs`. */
+  unreadCleared?: true;
   /** seen_seq = the next value, after this write's other values for the session. */
   seen?: true;
 }

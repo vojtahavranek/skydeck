@@ -20,6 +20,12 @@
  * a read that fails for another reason than a busy store leaves no attention facts from the store
  * (ruled: one damaged row makes `attention()` throw for every session).
  *
+ * The mark unread (S2 12.4): `mark` sets it (the next value, the clock now) or reads the session
+ * (a seen), on the user's act; a seen of a session that will be unread is written only for a sight
+ * anew (Seen's `takeAll`: a selection that came back to it, or a typing), not even in the write of
+ * its turn end, so that such a turn shows finished; the look clears the stored mark of a done
+ * session. Every other session's seen is as before.
+ *
  * It never throws: its callers are the tick and Seen's listener (ruled: the listener must not
  * throw). Each failure is logged by its kind, once until that work works again; a log line names a
  * kind, never a session's text.
@@ -37,14 +43,14 @@ import { failureKind } from './auth.ts';
 import { isBusy } from './busy.ts';
 import type { TerminalHub } from './hub.ts';
 import type { Seen } from './seen.ts';
-import { liveStatuses } from './view/attention.ts';
+import { attentionOf, liveStatuses } from './view/attention.ts';
 import type { AttentionFacts, AttentionMarks, LiveStatus } from './view/attention.ts';
 
 export interface AttentionDeps {
   /** The server's guarded connection; files, proc, clock and places.claudeHome. */
   deck: Deck;
   hub: Pick<TerminalHub, 'list'>;
-  seen: Pick<Seen, 'take'>;
+  seen: Pick<Seen, 'takeAll' | 'unmark'>;
   /** The rows of the last reload (the tick's). */
   rows: () => readonly ListRow[];
   log: (line: string) => void;
@@ -72,6 +78,17 @@ export interface Attention {
    *  join them for the next look and the store is not touched. Cheap when there is nothing to clear
    *  (no read, no write). As look. */
   seenNow(): boolean;
+  /** S2 12.4, the user's act on a session (`unread` or `read`), refused for a done session and
+   *  for one that asks (`attentionOf` over the facts, with the error the page shows); `unread`
+   *  writes the mark (the next value, the clock now) and makes no sight of it anew (Seen.unmark);
+   *  `read` writes a seen when the session has a mark seeing clears, else nothing. With writes
+   *  kept, the write joins them for the next look. `changed`: the facts changed now. Never throws:
+   *  a write that failed but for a busy store is refused with its kind. */
+  mark(row: ListRow, kind: 'unread' | 'read'): MarkOutcome;
+  /** S2 12.4: the session was marked done by the `done` act: its stored mark unread goes now (both
+   *  columns NULL), not at the next look, so that an undone at once does not bring it back.
+   *  Nothing written when it holds none. With writes kept, it joins them. Never throws. */
+  clearUnread(sessionId: string): void;
   /** B12: true once the marks have been read, a refresh has worked since (refreshed() was called)
    *  and nothing is kept, so that the window ends of that refresh are in the first judgement also
    *  when a busy store kept them (ruled); once true, it stays true. */
@@ -80,6 +97,15 @@ export interface Attention {
    *  (a caller builds its lists at once, as the server's do). */
   facts(): AttentionFacts;
 }
+
+/** What `mark` did: `ok` with whether the facts changed now (false: nothing to write, or the write
+ *  waits for the next look behind kept writes), or refused with the page's words. */
+export type MarkOutcome = { ok: true; changed: boolean } | { ok: false; error: string };
+
+/** S2 12.4: the refusals of `mark`, in the page's words (its toast). */
+export const MARK_ASKS = 'it asks something: it needs you until it is answered';
+export const MARK_DONE = 'it is marked done: a done session needs nothing';
+const MARK_FAILED = 'skydeck could not write the mark; try again';
 
 /** A failure logged once by its kind, until the work it is of works again (S2 5.2: kinds only). */
 interface Reporter {
@@ -113,24 +139,30 @@ function hasEnd(write: AttentionWrite): boolean {
 }
 
 /**
- * B9: whether `sessionId` holds an unseen end once `writes` are stored after `stored`: each value a
- * write takes is later than every stored one and than those of the writes before it, and inside one
- * write the seen comes after the ends (B3).
+ * B9: what `sessionId` holds once `writes` are stored after `stored` — an unseen end, the mark
+ * unread: each value a write takes is later than every stored one and than those of the writes
+ * before it, and inside one write the seen comes after the ends and the mark (B3).
  */
-function unseenAfter(
+function marksAfter(
   stored: AttentionMarks | undefined,
   writes: readonly AttentionWrite[],
   sessionId: string,
-): boolean {
-  let open =
+): { end: boolean; unread: boolean } {
+  let end =
     stored !== undefined &&
     (unseen(stored.turnEndedSeq, stored.seenSeq) || unseen(stored.windowEndSeq, stored.seenSeq));
+  let unread = stored !== undefined && unseen(stored.unreadSeq, stored.seenSeq);
   for (const write of writes) {
     if (write.sessionId !== sessionId) continue;
-    if (hasEnd(write)) open = true;
-    if (write.seen === true) open = false;
+    if (hasEnd(write)) end = true;
+    if (write.unreadNs !== undefined) unread = true;
+    if (write.unreadCleared === true) unread = false;
+    if (write.seen === true) {
+      end = false;
+      unread = false;
+    }
   }
-  return open;
+  return { end, unread };
 }
 
 /**
@@ -211,6 +243,7 @@ export function createAttention(deps: AttentionDeps): Attention {
   const lookFailed = reporter(log, 'the look failed');
   const judgeFailed = reporter(log, 'the window ends could not be judged');
   const seenFailed = reporter(log, 'the seen could not be written');
+  const markFailed = reporter(log, 'the mark could not be made');
 
   /** The marks from the store, once (only the server writes them). True when there are any. */
   const readMarks = (): boolean => {
@@ -310,19 +343,44 @@ export function createAttention(deps: AttentionDeps): Attention {
    * end: B3), whatever the rows say (ruled on review 2: the end makes the row, so F6's reason does
    * not hold, and a turn that ends in front of the user is never finished); else one of its own,
    * for a session among the rows (F6), when the marks after the kept writes and `writes` will still
-   * hold an unseen end — a write only when there is something to clear.
+   * hold an unseen end or the mark unread — a write only when there is something to clear. S2
+   * 12.4's mark unread: a session that will be unread after them is seen only by a sight anew; any
+   * other sight of it writes nothing, not even with its end (that turn then shows finished).
    */
-  const addSeen = (writes: AttentionWrite[], taken: ReadonlySet<string>): void => {
+  const addSeen = (
+    writes: AttentionWrite[],
+    taken: { seen: ReadonlySet<string>; anew: ReadonlySet<string> },
+  ): void => {
     let rowIds: Set<string> | null = null;
-    for (const sessionId of taken) {
+    for (const sessionId of taken.seen) {
+      const after = marksAfter(marks.get(sessionId), [...kept, ...writes], sessionId);
+      if (after.unread && !taken.anew.has(sessionId)) continue;
       const own = writes.findLast((write) => write.sessionId === sessionId && hasEnd(write));
       if (own !== undefined) {
         own.seen = true;
         continue;
       }
-      if (!unseenAfter(marks.get(sessionId), [...kept, ...writes], sessionId)) continue;
+      if (!after.end && !after.unread) continue;
       rowIds ??= new Set(deps.rows().map((row) => row.id));
       if (rowIds.has(sessionId)) writes.push({ sessionId, seen: true });
+    }
+  };
+
+  /**
+   * S2 12.4: a done session needs nothing, so its stored mark unread goes (both columns NULL), once
+   * — an undone later does not bring it back. The `done` act clears it at once (`clearUnread`);
+   * this catches every other way of marking done (the command line's, an end, a carry over).
+   * Looked for only among the sessions whose marks hold the mark after the kept writes and
+   * `writes` (marksAfter, which reads a kept clear too), so that nothing is written while none
+   * does and a busy store keeps one clear per session, not one more at every look.
+   */
+  const addCleared = (writes: AttentionWrite[]): void => {
+    let rows: ReadonlyMap<string, ListRow> | null = null;
+    for (const [sessionId, stored] of marks) {
+      if (!unseen(stored.unreadSeq, stored.seenSeq)) continue;
+      if (!marksAfter(stored, [...kept, ...writes], sessionId).unread) continue;
+      rows ??= new Map(deps.rows().map((row) => [row.id, row]));
+      if (rows.get(sessionId)?.done === true) writes.push({ sessionId, unreadCleared: true });
     }
   };
 
@@ -332,35 +390,42 @@ export function createAttention(deps: AttentionDeps): Attention {
     deps.storeNewer(reason);
   };
 
-  /** One recordAttention of `queue`; the rows it returns replace their marks. True when written. */
-  const record = (queue: AttentionWrite[]): boolean => {
-    if (queue.length === 0) return false;
+  /** One recordAttention of `queue`; the rows it returns replace their marks. `written`, `kept`
+   *  (a busy store: the look tries it again), `failed` (dropped, or the store was migrated). */
+  const recorded = (queue: AttentionWrite[]): 'none' | 'written' | 'kept' | 'failed' => {
+    if (queue.length === 0) return 'none';
     let rows: AttentionRow[];
     try {
       rows = store.recordAttention(queue);
     } catch (error) {
       if (error instanceof StoreNewerError) {
         stop(error.message);
-      } else if (isBusy(error)) {
+        return 'failed';
+      }
+      if (isBusy(error)) {
         kept = queue;
         busy.failed(error);
-      } else {
-        refused.failed(error); // not kept (B2's limit, a damaged table)
+        return 'kept';
       }
-      return false;
+      refused.failed(error); // not kept (B2's limit, a damaged table)
+      return 'failed';
     }
     busy.worked();
     refused.worked();
     for (const row of rows) marks.set(row.sessionId, row);
-    return true;
+    return 'written';
   };
 
+  /** One recordAttention of `queue`. True when written. */
+  const record = (queue: AttentionWrite[]): boolean => recorded(queue) === 'written';
+
   /** Outside the look: behind the kept writes if there are any (the look tries them), else now. */
-  const write = (writes: AttentionWrite[]): boolean => {
-    if (kept.length === 0) return record(writes);
+  const writeAs = (writes: AttentionWrite[]): 'none' | 'written' | 'kept' | 'failed' => {
+    if (kept.length === 0) return recorded(writes);
     for (const one of writes) kept = enqueue(kept, one);
-    return false;
+    return writes.length === 0 ? 'none' : 'kept';
   };
+  const write = (writes: AttentionWrite[]): boolean => writeAs(writes) === 'written';
 
   return {
     look() {
@@ -378,7 +443,8 @@ export function createAttention(deps: AttentionDeps): Attention {
           changed = true;
         }
         const writes = turnEnds(ends, baselines);
-        addSeen(writes, deps.seen.take());
+        addSeen(writes, deps.seen.takeAll());
+        addCleared(writes);
         let queue = kept;
         for (const one of writes) queue = enqueue(queue, one);
         kept = [];
@@ -435,7 +501,7 @@ export function createAttention(deps: AttentionDeps): Attention {
         judged = true;
         judgeFailed.worked();
         if (writes.length === 0) return false;
-        addSeen(writes, deps.seen.take());
+        addSeen(writes, deps.seen.takeAll());
         return write(writes);
       } catch (error) {
         judgeFailed.failed(error);
@@ -447,13 +513,51 @@ export function createAttention(deps: AttentionDeps): Attention {
       if (stopped) return false;
       try {
         const writes: AttentionWrite[] = [];
-        addSeen(writes, deps.seen.take());
+        addSeen(writes, deps.seen.takeAll());
         const changed = write(writes);
         seenFailed.worked();
         return changed;
       } catch (error) {
         seenFailed.failed(error);
         return false;
+      }
+    },
+
+    mark(row, kind) {
+      if (stopped) return { ok: false, error: MARK_FAILED };
+      try {
+        readMarks();
+        if (row.done) return { ok: false, error: MARK_DONE };
+        const now = attentionOf(row, { marks, live });
+        if (now?.reason === 'asks') return { ok: false, error: MARK_ASKS };
+        const sessionId = row.id;
+        let writes: AttentionWrite[];
+        if (kind === 'unread') {
+          deps.seen.unmark(sessionId);
+          writes = [{ sessionId, unreadNs: clock.nowNs() }];
+        } else {
+          // Every other reason is one seeing clears (ended, finished, unread).
+          writes = now === null ? [] : [{ sessionId, seen: true }];
+        }
+        const outcome = writeAs(writes);
+        markFailed.worked();
+        if (outcome === 'failed') return { ok: false, error: MARK_FAILED };
+        return { ok: true, changed: outcome === 'written' };
+      } catch (error) {
+        markFailed.failed(error);
+        return { ok: false, error: MARK_FAILED };
+      }
+    },
+
+    clearUnread(sessionId) {
+      if (stopped) return;
+      try {
+        readMarks();
+        if (!marksAfter(marks.get(sessionId), kept, sessionId).unread) return;
+        writeAs([{ sessionId, unreadCleared: true }]);
+        markFailed.worked();
+      } catch (error) {
+        markFailed.failed(error);
       }
     },
 

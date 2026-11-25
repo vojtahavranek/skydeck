@@ -17,7 +17,13 @@ import { openStore } from '../../src/store/store.ts';
 import type { Store } from '../../src/store/store.ts';
 import { testPlatform } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
-import { SCHEMA1, dumpDatabase, schemaDatabase, withUptimeColumn } from '../helpers/schema1.ts';
+import {
+  SCHEMA1,
+  dumpDatabase,
+  schemaDatabase,
+  withUptimeColumn,
+  withoutUnread,
+} from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
 
 const TICKET = 'https://tickets.example.com/browse/ABC-12';
@@ -76,7 +82,9 @@ const NEWEST = String(SCHEMA_VERSION);
  * events' statement, which ends in the new column; every row of every table is as it was, but each
  * row of events gains `uptime_cs` NULL and kv schema_version is the newest.
  */
-function assertMigrated(before: DatabaseDump, after: DatabaseDump): void {
+function assertMigrated(before: DatabaseDump, newest: DatabaseDump): void {
+  // An open goes on with migration 7, whose two nullable columns of attention are left out here.
+  const after = withoutUnread(newest);
   assert.deepEqual(
     after.schema,
     before.schema.map((entry) =>

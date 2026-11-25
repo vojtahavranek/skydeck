@@ -200,9 +200,11 @@ export interface Store {
   /**
    * S2 10.2 in ONE transaction (the guarded connection refuses it whole: StoreNewerError): for each
    * write in order, each observation takes the next value (B2) in B3's order — turn end, window
-   * end, seen; a row is created when absent and never removed. Returns the rows it wrote, as
+   * end, unread (the mark of S2 12.4), seen; `unreadCleared` sets the unread mark's two columns
+   * NULL and takes no value; a row is created when absent and never removed. Returns the rows it wrote, as
    * stored: one per session the writes name, in its state after them, ordered by session id. An
-   * empty list writes nothing; a write with no observation is a RangeError and nothing is written.
+   * empty list writes nothing; a write with no observation, or with both `unreadNs` and
+   * `unreadCleared`, is a RangeError and nothing is written.
    * B2: each value is one more than the larger of kv attention_seq — 0 unless it is a canonical
    * decimal whole number below 2^53 — and every *_seq of attention; attention_seq is left at the
    * last value given. A value that would pass 2^53 - 1 is a RangeError, and nothing is written.
@@ -445,6 +447,8 @@ function mapAttention(row: Row): AttentionRow {
     seenSeq: optInt(row, 'seen_seq'),
     windowEndSeq: optInt(row, 'window_end_seq'),
     windowEndNs: optNs(row, 'window_end_ns'),
+    unreadSeq: optInt(row, 'unread_seq'),
+    unreadNs: optNs(row, 'unread_ns'),
   };
 }
 
@@ -1295,9 +1299,14 @@ class SqliteStore implements Store {
       if (
         write.turnEndedNs === undefined &&
         write.windowEndNs === undefined &&
+        write.unreadNs === undefined &&
+        write.unreadCleared !== true &&
         write.seen !== true
       ) {
         throw new RangeError(`an attention write for ${write.sessionId} has no observation`);
+      }
+      if (write.unreadNs !== undefined && write.unreadCleared === true) {
+        throw new RangeError(`an attention write for ${write.sessionId} both marks and clears`);
       }
     }
     if (writes.length === 0) {
@@ -1307,7 +1316,7 @@ class SqliteStore implements Store {
       // Inside the write lock, so that no other connection takes a value in between (B2).
       const stored = this.#get(
         `SELECT max(coalesce(max(turn_ended_seq), 0), coalesce(max(seen_seq), 0),
-                    coalesce(max(window_end_seq), 0)) AS top
+                    coalesce(max(window_end_seq), 0), coalesce(max(unread_seq), 0)) AS top
          FROM attention`,
       );
       let seq = Math.max(
@@ -1322,13 +1331,19 @@ class SqliteStore implements Store {
         return int(seq);
       };
       for (const write of writes) {
-        // B3's order: turn end, window end, seen.
-        const columns: [column: string, value: bigint][] = [];
+        // B3's order: turn end, window end, unread, seen.
+        const columns: [column: string, value: bigint | null][] = [];
         if (write.turnEndedNs !== undefined) {
           columns.push(['turn_ended_seq', next()], ['turn_ended_ns', write.turnEndedNs]);
         }
         if (write.windowEndNs !== undefined) {
           columns.push(['window_end_seq', next()], ['window_end_ns', write.windowEndNs]);
+        }
+        if (write.unreadNs !== undefined) {
+          columns.push(['unread_seq', next()], ['unread_ns', write.unreadNs]);
+        }
+        if (write.unreadCleared === true) {
+          columns.push(['unread_seq', null], ['unread_ns', null]);
         }
         if (write.seen === true) {
           columns.push(['seen_seq', next()]);

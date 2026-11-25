@@ -141,6 +141,10 @@ function harness(
     changed?: () => void;
     /** Called at each prs.fetch(), after it is recorded in `told`. */
     fetch?: () => void;
+    /** S2 12.4's `mark` dep; absent: the kinds `unread` and `read` have none. */
+    mark?: ActionDeps['mark'];
+    /** S2 12.4's `doneUnread` dep. */
+    doneUnread?: ActionDeps['doneUnread'];
   } = {},
 ): Harness {
   const events: Events = [];
@@ -178,6 +182,8 @@ function harness(
       },
       refresh: (sessionId) => told.push(`refresh ${sessionId}`),
     },
+    ...(options.mark === undefined ? {} : { mark: options.mark }),
+    ...(options.doneUnread === undefined ? {} : { doneUnread: options.doneUnread }),
   });
   return {
     d,
@@ -1505,6 +1511,78 @@ describe('done and undone (S2 12.10)', () => {
     assert.equal(d.deck.store.meta(S1)?.doneAtNs, null);
     assert.deepEqual(h.told, ['changed', 'changed']);
     assert.deepEqual(h.logs, []);
+  });
+});
+
+describe('unread and read (S2 12.4)', () => {
+  test("each goes to `mark` with the session's row as loadRows has it, and answers what it says; no changed() of step 1's", async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const calls: string[] = [];
+    const h = harness(d, {
+      mark: (row, kind) => {
+        calls.push(`${kind} ${row.id} ${row.state}`);
+        return kind === 'unread' ? { ok: true } : { ok: false, error: 'it asks something' };
+      },
+    });
+    assert.deepEqual(await h.act({ t: 'act', id: 60, kind: 'unread', sessionId: S1 }), ok(60));
+    assert.deepEqual(
+      await h.act({ t: 'act', id: 61, kind: 'read', sessionId: S1 }),
+      refused(61, 'it asks something'),
+    );
+    assert.deepEqual(calls, [`unread ${S1} not-running`, `read ${S1} not-running`]);
+    assert.deepEqual(h.told, []);
+  });
+
+  test('a session the store does not know, the session of a `new` terminal not started yet (its own words), and a server without the dep', async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const marked: string[] = [];
+    const h = harness(d, {
+      terminals: [
+        info('t-new', 'starting', { kind: 'new', expectedSessionId: NEW_ID, sessionId: null }),
+      ],
+      mark: (row) => {
+        marked.push(row.id);
+        return { ok: true };
+      },
+    });
+    for (const kind of ['unread', 'read'] as const) {
+      assert.deepEqual(
+        await h.act({ t: 'act', id: 62, kind, sessionId: S3 }),
+        refused(62, `no session matches '${S3}'`),
+      );
+      assert.deepEqual(
+        await h.act({ t: 'act', id: 63, kind, sessionId: NEW_ID }),
+        refused(63, 'this session has not started yet; mark it once it runs'),
+      );
+      assert.deepEqual(
+        await harness(d).act({ t: 'act', id: 64, kind, sessionId: S1 }),
+        refused(64, 'skydeck cannot do that action'),
+      );
+    }
+    assert.deepEqual(marked, []);
+  });
+});
+
+describe('done clears the mark unread (S2 12.4)', () => {
+  test('`done` calls doneUnread with the session after it marked it done; `undone`, a refused done and the other kinds do not', async (t) => {
+    const d = testDeck(t);
+    knownSession(d);
+    const cleared: string[] = [];
+    const h = harness(d, {
+      doneUnread: (sessionId) => {
+        cleared.push(
+          `${sessionId} done ${String(d.deck.store.meta(sessionId)?.doneAtNs !== null)}`,
+        );
+      },
+    });
+    assert.deepEqual(await h.act({ t: 'act', id: 70, kind: 'done', sessionId: S1 }), ok(70));
+    assert.deepEqual(cleared, [`${S1} done true`]);
+    assert.deepEqual(await h.act({ t: 'act', id: 71, kind: 'undone', sessionId: S1 }), ok(71));
+    await h.act({ t: 'act', id: 72, kind: 'park', sessionId: S1 });
+    await h.act({ t: 'act', id: 73, kind: 'done', sessionId: S3 });
+    assert.deepEqual(cleared, [`${S1} done true`]);
   });
 });
 

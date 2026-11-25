@@ -10,6 +10,7 @@ import {
   liveStatuses,
   NO_ATTENTION,
   startsToNeed,
+  withoutUnread,
 } from '../../../src/window/view/attention.ts';
 import type {
   AttentionFacts,
@@ -42,6 +43,8 @@ function marks(over: Partial<AttentionMarks> = {}): AttentionMarks {
     seenSeq: null,
     windowEndSeq: null,
     windowEndNs: null,
+    unreadSeq: null,
+    unreadNs: null,
     ...over,
   };
 }
@@ -320,6 +323,91 @@ test('attentionOf: asks before ended before finished when several hold', () => {
   });
 });
 
+// --- attentionOf: the mark unread (S2 12.4) ------------------------------------------------------
+
+/** A row marked done. */
+function doneRow(id: string, state: 'running' | 'not-running' = 'not-running'): ListRow {
+  return rowOf(ds({ id, state, hidden: true, doneAtNs: T0 - SEC }));
+}
+
+test('attentionOf: unread while unreadSeq is greater than seenSeq (or seenSeq is null), with the time it was marked', () => {
+  const unread = (seenSeq: number | null): AttentionFacts =>
+    facts({ marks: [[S1, marks({ unreadSeq: 4, unreadNs: T0 - 2n * SEC, seenSeq })]] });
+  const expected = { reason: 'unread', detail: null, sinceNs: String(T0 - 2n * SEC) };
+  assert.deepEqual(attentionOf(runningRow(S1), unread(null)), expected);
+  assert.deepEqual(attentionOf(runningRow(S1), unread(3)), expected);
+  assert.equal(attentionOf(runningRow(S1), unread(4)), null, 'an equal value is not later');
+  assert.equal(attentionOf(runningRow(S1), unread(5)), null, 'read again');
+});
+
+test('attentionOf: unread for a session that does not run, whatever its live status', () => {
+  const f = facts({
+    marks: [[S1, marks({ unreadSeq: 2, unreadNs: T0 })]],
+    live: [[S1, live('busy')]],
+  });
+  assert.equal(attentionOf(stoppedRow(S1), f)?.reason, 'unread');
+  assert.equal(attentionOf(runningRow(S1), f)?.reason, 'unread', 'busy: still unread');
+  assert.equal(
+    attentionOf(runningRow(S1), facts({ marks: [[S1, marks({ unreadSeq: 2 })]] }))?.sinceNs,
+    null,
+  );
+});
+
+test('attentionOf: a done session is never unread (a done session needs nothing); its other marks stay', () => {
+  const f = facts({ marks: [[S1, marks({ unreadSeq: 2, unreadNs: T0, windowEndSeq: 1 })]] });
+  assert.equal(attentionOf(doneRow(S1), facts({ marks: [[S1, marks({ unreadSeq: 2 })]] })), null);
+  assert.equal(attentionOf(doneRow(S1), f)?.reason, 'ended');
+});
+
+test('attentionOf: asks, ended and finished come before unread; the mark shows again once they end', () => {
+  const both = (over: Partial<AttentionMarks>, status: string): AttentionFacts =>
+    facts({
+      marks: [[S1, marks({ unreadSeq: 3, unreadNs: T0 - 5n * SEC, ...over })]],
+      live: [[S1, live(status, { sinceNs: T0 })]],
+    });
+  assert.equal(attentionOf(runningRow(S1), both({}, 'waiting'))?.reason, 'asks');
+  assert.equal(attentionOf(runningRow(S1), both({ windowEndSeq: 2 }, 'idle'))?.reason, 'ended');
+  // A turn that ends after the mark, unseen: finished (Behaviour 6).
+  assert.equal(
+    attentionOf(runningRow(S1), both({ turnEndedSeq: 4, turnEndedNs: T0 }, 'idle'))?.reason,
+    'finished',
+  );
+  // Its next turn starts: finished goes, the mark shows again.
+  assert.deepEqual(
+    attentionOf(runningRow(S1), both({ turnEndedSeq: 4, turnEndedNs: T0 }, 'busy')),
+    {
+      reason: 'unread',
+      detail: null,
+      sinceNs: String(T0 - 5n * SEC),
+    },
+  );
+  // A seen later than both clears both.
+  assert.equal(
+    attentionOf(runningRow(S1), both({ turnEndedSeq: 4, turnEndedNs: T0, seenSeq: 5 }, 'idle')),
+    null,
+  );
+});
+
+test('withoutUnread: the same facts but for the unread marks; the facts given are not changed', () => {
+  const f = facts({
+    marks: [
+      [S1, marks({ unreadSeq: 3, unreadNs: T0, turnEndedSeq: 2, turnEndedNs: T0 })],
+      [S2, marks({ windowEndSeq: 1 })],
+    ],
+    live: [[S1, live('idle', { sinceNs: T0 })]],
+  });
+  const without = withoutUnread(f);
+  assert.deepEqual(without.marks.get(S1), marks({ turnEndedSeq: 2, turnEndedNs: T0 }));
+  assert.equal(without.marks.get(S2), f.marks.get(S2));
+  assert.equal(without.live, f.live);
+  assert.equal(f.marks.get(S1)?.unreadSeq, 3);
+  assert.equal(attentionOf(runningRow(S1), without)?.reason, 'finished');
+  assert.equal(
+    attentionOf(stoppedRow(S3), withoutUnread(facts({ marks: [[S3, marks({ unreadSeq: 1 })]] }))),
+    null,
+  );
+});
+
 test('attentionOf: NO_ATTENTION gives no attention to any row', () => {
   assert.equal(attentionOf(runningRow(S1), NO_ATTENTION), null);
   assert.equal(attentionOf(stoppedRow(S1), NO_ATTENTION), null);
@@ -423,6 +511,29 @@ test('attentionOrder: B6 — asks by status time (unknown last), then ended, the
     return { id, attention };
   });
   assert.deepEqual(attentionOrder(entries, f), [S2, S1, S3, S5, S4, S7, S6]);
+});
+
+test('attentionOrder: those marked unread come after those that finished, the oldest mark first', () => {
+  const f = facts({
+    marks: [
+      [S1, marks({ unreadSeq: 30, unreadNs: T0 - 50n * SEC })],
+      [S2, marks({ unreadSeq: 10, unreadNs: T0 })],
+      [S3, marks({ turnEndedSeq: 40, turnEndedNs: T0 })],
+      [S4, marks({ windowEndSeq: 50 })],
+      [S5, marks({ unreadSeq: 20 })],
+    ],
+    live: [
+      [S3, live('idle', { sinceNs: T0 })],
+      [S6, live('waiting', { sinceNs: T0 })],
+    ],
+  });
+  const entries = [S1, S2, S3, S4, S5, S6].map((id) => {
+    const attention = attentionOf(runningRow(id), f);
+    assert.ok(attention, id);
+    return { id, attention };
+  });
+  // By the counter, never by the times (S1's time is the oldest).
+  assert.deepEqual(attentionOrder(entries, f), [S6, S4, S3, S2, S5, S1]);
 });
 
 test('attentionOrder: ties by session id, unknown times too', () => {

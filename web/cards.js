@@ -45,6 +45,7 @@ import {
   timesText,
   titleSourceText,
 } from './header-text.js';
+import { unreadAct } from './attention-text.js';
 import { elsewhereText, rowText } from './list-text.js';
 import { offersRestart, RESTART_TEXTS, RESTART_TIP } from './restart-text.js';
 import { groupCardText } from './search-text.js';
@@ -61,6 +62,10 @@ import { groupCardText } from './search-text.js';
  *   opens the dialog "Restart" for
  * @property {(sessionId: string) => void} park F44: park, or unpark a parked row (S2 12.15); the
  *   toast is app.js's
+ * @property {(sessionId: string) => void} unread S2 12.4: mark unread, or read a row with a mark
+ *   seeing clears; the act and the toast are app.js's
+ * @property {(sessionId: string) => 'unread' | 'read' | null} unreadAnswered S2 12.4: this page's
+ *   act on the session the server took that no list shows yet (`unreadAct`'s `answered`)
  * @property {(text: string) => void} say a line in the key bar
  * @property {(listener: ((favourites: string[]) => void) | null) => void} watchFavourites F15:
  *   the one listener of the favourites every list brings (S2 12.6) — the open new form's, null
@@ -421,8 +426,19 @@ export function createCards(root, deps) {
       }
     },
   );
+  // S2 12.4: mark it unread, or read while it has a mark seeing clears (`unreadAct`).
+  const unreadButton = headerButton(
+    'header-unread',
+    'Unread',
+    unreadAct({ attention: null }).tip,
+    () => {
+      if (headId !== '') {
+        deps.unread(headId);
+      }
+    },
+  );
   const actions = element('span', 'header-actions');
-  actions.append(noteButton, doneButton, parkButton);
+  actions.append(noteButton, doneButton, parkButton, unreadButton);
   /** @param {boolean} offered */
   const showRestart = (offered) => {
     if (offered && restartButton.parentElement !== actions) {
@@ -1139,6 +1155,9 @@ export function createCards(root, deps) {
         parkButton,
         row.parked === true ? 'back under Open (w)' : 'park it: it waits under Parked (w)',
       );
+      const unread = unreadAct(row, deps.unreadAnswered(row.id));
+      setText(unreadButton, unread.label);
+      setTip(unreadButton, unread.tip);
       setText(dir, row.dir ?? 'directory not known');
       // One line, cut with an ellipsis (a fixed height; ruled): the whole path in the tooltip.
       setTip(dir, row.dir ?? '');

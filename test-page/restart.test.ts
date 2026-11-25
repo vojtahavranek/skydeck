@@ -454,7 +454,7 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
   );
 
   await t.test(
-    'the header’s buttons give way, none is cut (ruled): Restart first, then Park / Unpark; every 2 px from 640 to 1,100 px, for a plain row, a parked one, a done one and a parked running one, no button is cut and nothing lies over another (but the state under Note on a done row below 650 px); `r` still there',
+    'the header’s buttons give way, none is cut (ruled): Restart first, then Unread / Read, then Park / Unpark; every 2 px from 640 to 1,100 px, for a plain row, a parked one, a done one and a parked running one, no button is cut and nothing lies over another (but the state under Note on a done row below 650 px); `r` still there',
     async (t) => {
       const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
       const d = await deck(
@@ -537,6 +537,7 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
         }
         // Each button comes back once there is room.
         assert.ok(seen.has('Park') || seen.has('Unpark'), `${kind}: Park or Unpark shown`);
+        assert.ok(seen.has('Unread'), `${kind}: Unread shown`);
         if (kind === 'a plain row' || kind === 'a parked running row') {
           assert.ok(seen.has('Restart'), `${kind}: Restart shown`);
         }

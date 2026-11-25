@@ -141,7 +141,17 @@ function world(
   const attention = createAttention({
     deck,
     hub: { list: () => terminals },
-    seen: take === undefined ? seen : { take },
+    // A `take` of the test's: every sight it gives is anew (no session of those tests is unread).
+    seen:
+      take === undefined
+        ? seen
+        : {
+            takeAll: () => {
+              const taken = take();
+              return { seen: taken, anew: new Set(taken) };
+            },
+            unmark: () => undefined,
+          },
     rows: () => rows,
     log: (line) => {
       logs.push(line);
@@ -165,6 +175,8 @@ function row(over: Partial<AttentionRow> & { sessionId: string }): AttentionRow 
     seenSeq: null,
     windowEndSeq: null,
     windowEndNs: null,
+    unreadSeq: null,
+    unreadNs: null,
     ...over,
   };
 }
@@ -1380,5 +1392,309 @@ describe("never throws (ruled: it is the tick and Seen's listener, and neither m
     assert.deepEqual(w.logs, [
       'attention: a write failed and is dropped (Error (ERR_SQLITE_ERROR))',
     ]);
+  });
+});
+
+describe('the mark unread (S2 12.4)', () => {
+  /** A page as the server makes it: `start` with no selection, then the selection it makes by
+   *  itself as it loads or reconnects (`byPage`). */
+  function arrive(w: World, page: object, sessionId: string | null): void {
+    w.seen.focus(page, true, null);
+    w.seen.focus(page, true, sessionId, true);
+  }
+
+  /** The world, with Seen's listener wired as the server wires it (seenNow at once). */
+  function wired(t: TestContext, rows?: ListRow[]): World {
+    const w = world(t, rows === undefined ? {} : { rows });
+    w.seen.onChange(() => {
+      w.attention.seenNow();
+    });
+    return w;
+  }
+
+  test('`unread` writes the next value and the clock now; the row says unread, also one that does not run', (t) => {
+    const w = wired(t, [running(S1), listRow({ id: S2 })]);
+    assert.deepEqual(w.attention.mark(running(S1), 'unread'), { ok: true, changed: true });
+    assert.deepEqual(w.attention.mark(listRow({ id: S2 }), 'unread'), { ok: true, changed: true });
+    assert.deepEqual(stored(w.d), [
+      row({ sessionId: S1, unreadSeq: 1, unreadNs: T0 }),
+      row({ sessionId: S2, unreadSeq: 2, unreadNs: T0 }),
+    ]);
+    assert.equal(reasonOf(w, S1), 'unread');
+    assert.equal(reasonOf(w, S2, 'not-running'), 'unread');
+  });
+
+  test('the page that marked it stays on it past 1.5 s, loses and regains focus: still unread, nothing written', (t) => {
+    const w = wired(t);
+    arrive(w, w.page, S2);
+    w.seen.focus(w.page, true, S1);
+    w.d.clock.advanceMs(1500);
+    w.attention.mark(running(S1), 'unread');
+    const before = w.writes.length;
+
+    w.d.clock.advanceMs(60_000);
+    w.seen.focus(w.page, false, S1);
+    w.seen.focus(w.page, true, S1);
+    w.d.clock.advanceMs(5_000);
+    w.attention.look();
+    w.attention.seenNow();
+
+    assert.equal(w.writes.length, before);
+    assert.equal(reasonOf(w, S1), 'unread');
+  });
+
+  test('a second page that has it selected holds nothing for it; a page whose first selection it is holds nothing either', (t) => {
+    const w = wired(t);
+    const other = {};
+    arrive(w, other, S2);
+    w.seen.focus(other, true, S1); // it came back to S1 before the mark
+    w.d.clock.advanceMs(1500);
+    w.attention.mark(running(S1), 'unread');
+    const loaded = {};
+    arrive(w, loaded, S1); // a page that loads, or reconnects, with it selected
+    w.d.clock.advanceMs(10_000);
+    w.attention.look();
+    assert.equal(reasonOf(w, S1), 'unread');
+  });
+
+  test('a selection that moves away and back reads it after 1.5 s, not at 1,499 ms', (t) => {
+    const w = wired(t);
+    arrive(w, w.page, S1);
+    w.attention.mark(running(S1), 'unread');
+    w.seen.focus(w.page, true, S2);
+    w.seen.focus(w.page, true, S1);
+    w.d.clock.advanceMs(1499);
+    assert.equal(reasonOf(w, S1), 'unread');
+    w.d.clock.advanceMs(1);
+    assert.equal(reasonOf(w, S1), null);
+    assert.deepEqual(stored(w.d), [row({ sessionId: S1, unreadSeq: 1, unreadNs: T0, seenSeq: 2 })]);
+  });
+
+  test('typing into it reads it at once; a focus report is no typing (pages.ts calls typed only for typing)', (t) => {
+    const w = wired(t);
+    arrive(w, w.page, S1);
+    w.attention.mark(running(S1), 'unread');
+    w.d.clock.advanceMs(5000);
+    w.seen.typed(w.page, S1);
+    assert.equal(reasonOf(w, S1), null);
+  });
+
+  test('a turn that ends while a page holds it but not anew: no seen with the end, so finished; coming back clears both', (t) => {
+    const w = wired(t);
+    liveFile(w.d, PID, S1, 'busy', T0);
+    w.attention.look();
+    arrive(w, w.page, S1);
+    w.d.clock.advanceMs(1500);
+    w.attention.mark(running(S1), 'unread');
+    liveFile(w.d, PID, S1, 'idle', T0 + 2n * SEC);
+    w.attention.look();
+    assert.deepEqual(w.writes.at(-1), [{ sessionId: S1, turnEndedNs: T0 + 2n * SEC }]);
+    assert.equal(reasonOf(w, S1), 'finished');
+
+    w.seen.focus(w.page, true, S2);
+    w.seen.focus(w.page, true, S1);
+    w.d.clock.advanceMs(1500);
+    assert.equal(reasonOf(w, S1), null);
+    assert.equal(stored(w.d)[0]?.seenSeq, 3, 'after the mark (1) and the turn end (2)');
+  });
+
+  test('a turn that ends while a page holds it anew after the mark is seen in its write, as always', (t) => {
+    const w = wired(t);
+    liveFile(w.d, PID, S1, 'busy', T0);
+    w.attention.look();
+    arrive(w, w.page, S1);
+    w.attention.mark(running(S1), 'unread');
+    w.seen.focus(w.page, true, S2);
+    w.seen.focus(w.page, true, S1);
+    w.d.clock.advanceMs(1500);
+    liveFile(w.d, PID, S1, 'idle', T0 + 2n * SEC);
+    w.attention.look();
+    assert.equal(reasonOf(w, S1), null);
+  });
+
+  test('another session held but not anew keeps 12.4: its turn end is seen in its write', (t) => {
+    const w = wired(t);
+    liveFile(w.d, PID, S2, 'busy', T0);
+    w.attention.look();
+    arrive(w, w.page, S2);
+    w.d.clock.advanceMs(1500);
+    w.attention.mark(running(S1), 'unread');
+    liveFile(w.d, PID, S2, 'idle', T0 + 2n * SEC);
+    w.attention.look();
+    assert.equal(reasonOf(w, S2), null);
+    assert.equal(reasonOf(w, S1), 'unread');
+  });
+
+  test('a new module (a server restart) and the pages coming back with it selected: still unread', (t) => {
+    const d = testDeck(t);
+    const first = world(t, { d });
+    first.attention.mark(running(S1), 'unread');
+    first.seen.stop();
+
+    const again = wired(t);
+    const restarted = world(t, { d });
+    restarted.seen.onChange(() => {
+      restarted.attention.seenNow();
+    });
+    restarted.attention.look(); // reads the marks
+    arrive(restarted, restarted.page, S1);
+    restarted.d.clock.advanceMs(5000);
+    restarted.attention.look();
+    assert.equal(reasonOf(restarted, S1), 'unread');
+    assert.equal(reasonOf(again, S1), null, 'another store knows nothing of it');
+  });
+
+  test('`read` writes a seen for a mark seeing clears (unread, finished, ended), nothing for none', (t) => {
+    const w = wired(t, [running(S1), running(S2), endedUnexpectedly(S3)]);
+    w.attention.mark(running(S1), 'unread');
+    assert.deepEqual(w.attention.mark(running(S1), 'read'), { ok: true, changed: true });
+    assert.equal(reasonOf(w, S1), null);
+    const before = w.writes.length;
+    assert.deepEqual(w.attention.mark(running(S2), 'read'), { ok: true, changed: false });
+    assert.equal(w.writes.length, before, 'nothing to clear: nothing written');
+
+    liveFile(w.d, PID, S2, 'busy', T0);
+    w.attention.look();
+    liveFile(w.d, PID, S2, 'idle', T0 + SEC);
+    w.attention.look();
+    assert.equal(reasonOf(w, S2), 'finished');
+    w.attention.mark(running(S2), 'read');
+    assert.equal(reasonOf(w, S2), null);
+  });
+
+  test('refused for a session that asks and for one marked done, in the words the page shows; nothing written', (t) => {
+    const w = wired(t);
+    liveFile(w.d, PID, S1, 'waiting', T0);
+    w.attention.look();
+    for (const kind of ['unread', 'read'] as const) {
+      assert.deepEqual(w.attention.mark(running(S1), kind), {
+        ok: false,
+        error: 'it asks something: it needs you until it is answered',
+      });
+      assert.deepEqual(w.attention.mark(listRow({ id: S2, done: true }), kind), {
+        ok: false,
+        error: 'it is marked done: a done session needs nothing',
+      });
+    }
+    assert.deepEqual(stored(w.d), []);
+  });
+
+  test('done: the look clears the stored mark of a done row once (an undone later does not bring it back); not of one that is not done', (t) => {
+    const rows = [running(S1), running(S2)];
+    const w = wired(t, rows);
+    w.attention.mark(running(S1), 'unread');
+    w.attention.mark(running(S2), 'unread');
+    rows[0] = listRow({ id: S1, state: 'running', done: true });
+    w.attention.look();
+    assert.deepEqual(stored(w.d), [
+      row({ sessionId: S1 }),
+      row({ sessionId: S2, unreadSeq: 2, unreadNs: T0 }),
+    ]);
+    const before = w.writes.length;
+    w.attention.look();
+    assert.equal(w.writes.length, before, 'once');
+    rows[0] = running(S1);
+    assert.equal(reasonOf(w, S1), null);
+    assert.equal(reasonOf(w, S2), 'unread');
+  });
+
+  test('a busy store keeps the mark for the next look, behind the writes kept before it', (t) => {
+    const d = testDeck(t);
+    const w = world(t, { d, deck: guardedDeck(t, d) });
+    w.attention.look();
+    const lock = lockStore(t, d);
+    assert.deepEqual(w.attention.mark(running(S1), 'unread'), { ok: true, changed: false });
+    assert.deepEqual(w.attention.mark(running(S2), 'unread'), { ok: true, changed: false });
+    lock.release();
+    w.attention.look();
+    assert.deepEqual(
+      stored(d).map((r) => [r.sessionId, r.unreadSeq]),
+      [
+        [S1, 1],
+        [S2, 2],
+      ],
+    );
+  });
+
+  test('`clearUnread` (the `done` act) clears the stored mark at once, so an undone at once does not bring it back; nothing written without a mark', (t) => {
+    const rows = [running(S1), running(S2)];
+    const w = wired(t, rows);
+    w.attention.mark(running(S1), 'unread');
+    const before = w.writes.length;
+    w.attention.clearUnread(S2);
+    assert.equal(w.writes.length, before, 'S2 holds no mark: nothing written');
+
+    w.attention.clearUnread(S1);
+    assert.deepEqual(stored(w.d), [row({ sessionId: S1 })]);
+    // Undone before any look: no mark comes back.
+    assert.equal(reasonOf(w, S1), null);
+    w.attention.look();
+    assert.equal(reasonOf(w, S1), null);
+  });
+
+  test('a write of the mark that fails (but for a busy store) is refused with its words and logged once by kind; nothing is kept', (t) => {
+    const d = testDeck(t);
+    const failing = deckWith(d.deck, {
+      store: {
+        recordAttention: () => {
+          throw sqliteError(11); // a damaged database, no busy store
+        },
+      },
+    });
+    const w = world(t, { d, deck: failing });
+    w.attention.look();
+    for (const kind of ['unread', 'unread'] as const) {
+      assert.deepEqual(w.attention.mark(running(S1), kind), {
+        ok: false,
+        error: 'skydeck could not write the mark; try again',
+      });
+    }
+    assert.deepEqual(w.logs, [
+      'attention: a write failed and is dropped (Error (ERR_SQLITE_ERROR))',
+    ]);
+    assert.deepEqual(stored(d), []);
+  });
+
+  test('after the store was migrated under the server, `mark` is refused and `clearUnread` writes nothing', (t) => {
+    const d = testDeck(t);
+    d.deck.store.recordAttention([{ sessionId: S1, unreadNs: T0 }]);
+    const w = world(t, { d, deck: guardedDeck(t, d) });
+    w.attention.look();
+    rawExec(d, `UPDATE kv SET value = '${SCHEMA_VERSION + 1}' WHERE key = 'schema_version'`);
+    assert.deepEqual(w.attention.mark(running(S2), 'unread'), {
+      ok: false,
+      error: 'skydeck could not write the mark; try again',
+    });
+    assert.deepEqual(w.storeNewer, ['skydeck was updated; run skydeck window']);
+    const calls = w.writes.length;
+    assert.deepEqual(w.attention.mark(running(S2), 'unread'), {
+      ok: false,
+      error: 'skydeck could not write the mark; try again',
+    });
+    w.attention.clearUnread(S1);
+    assert.equal(w.writes.length, calls, 'nothing tried after it');
+  });
+
+  test('a busy store keeps one clear of a done row, not one more at every look; `clearUnread` adds none to a kept one', (t) => {
+    const d = testDeck(t);
+    d.deck.store.recordAttention([{ sessionId: S1, unreadNs: T0 }]);
+    const rows = [running(S1)];
+    const w = world(t, { d, deck: guardedDeck(t, d), rows });
+    w.attention.look(); // reads the marks: S1 unread, not done
+    rows[0] = listRow({ id: S1, state: 'running', done: true });
+    const lock = lockStore(t, d);
+    w.attention.look();
+    w.attention.look();
+    w.attention.clearUnread(S1);
+    w.attention.look();
+    lock.release();
+    w.attention.look();
+    const clear = [{ sessionId: S1, unreadCleared: true }];
+    assert.deepEqual(
+      w.writes,
+      [clear, clear, clear, clear],
+      'the one kept clear, tried at each look',
+    );
+    assert.deepEqual(stored(d), [row({ sessionId: S1 })]);
   });
 });

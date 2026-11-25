@@ -3,6 +3,14 @@
  * one in a page that has focus, from 1.5 s after that began, or at once from a typing into its
  * terminal. The server's attention takes the sessions being seen at each write; this module
  * only keeps the holds, on the server's clock.
+ *
+ * The mark unread (S2 12.4) is read only by coming back to the session: each hold also keeps
+ * whether its page's selection came to the session anew — moved there from another session or
+ * from none — or the session was typed into. A selection the page reports as its own (`byPage`:
+ * the first row a page that loads selects by itself, the selection a page that reconnects reports
+ * again) is not anew, a change of focus alone keeps what it was, and `unmark` (the user marked the
+ * session unread) makes every hold of it not anew. Which session is unread is attention's; this
+ * module only says which sights are anew.
  */
 import type { Clock } from '../platform/types.ts';
 
@@ -49,21 +57,29 @@ export function isTyping(data: string, binary: boolean): boolean {
 export interface Seen {
   /** A page's focus and selection now (its `start`: selected null; its `focus`). A change of
    *  either starts the page's 1.5 s again (Clock.after: a timer, which no wall-clock step moves);
-   *  the same two again (a new area) change nothing. */
-  focus(page: object, focused: boolean, selected: string | null): void;
+   *  the same two again (a new area) change nothing. A changed selection is anew unless `byPage`
+   *  (the page's `focus.byPage`: it selected it by itself at its load or reconnect). */
+  focus(page: object, focused: boolean, selected: string | null, byPage?: boolean): void;
   /** Typing (isTyping; pages.ts calls it for no other input) into a terminal that shows
-   *  `sessionId`: seen at once — held, when it is the page's selection and the page has focus;
-   *  else once, in the next take(). */
+   *  `sessionId`: seen at once, and anew — held, when it is the page's selection and the page has
+   *  focus; else once, in the next take(). */
   typed(page: object, sessionId: string): void;
+  /** The user marked `sessionId` unread (S2 12.4): no hold of it is anew any more, and a typing
+   *  into it that take() has not given yet is dropped. A hold stays held (the other marks keep
+   *  their rules); it is anew again once its selection moves away and back, or at a typing. */
+  unmark(sessionId: string): void;
   /** The page ended: its hold goes, and later calls for it change nothing. */
   gone(page: object): void;
   /** The sessions being seen now: held by a focused page for 1.5 s or since a typing, and those
    *  typed into since the last call (given once). */
   take(): Set<string>;
-  /** A session began to be seen: a hold completed, or a typing when it was not yet seen (a key
-   *  into a session already being seen calls no listener: keys into one session call the
-   *  listeners at most once between two `take()`s, unless a `focus` or `gone` in between ended
-   *  the hold that made it seen). Listeners must not throw; a throw out of a completed hold is
+  /** As take() (it is the same call), with those of them that are seen anew: by a hold whose
+   *  selection came anew, or by a typing. */
+  takeAll(): { seen: Set<string>; anew: Set<string> };
+  /** A session began to be seen: a hold completed, or a typing when it was not yet seen anew (a
+   *  key into a session already being seen anew calls no listener: keys into one session call the
+   *  listeners at most once between two `take()`s, unless a `focus`, `unmark` or `gone` in between
+   *  ended the hold that made it seen anew). Listeners must not throw; a throw out of a completed hold is
    *  dropped so that the timer cannot end the server; `typed` throws only if a listener throws. */
   onChange(listener: () => void): () => void;
   /** Every timer stopped (the server's stop); nothing is seen or told after it. */
@@ -76,6 +92,9 @@ interface Hold {
   selected: string | null;
   /** The hold completed (1.5 s, or a typing): `selected` is being seen. */
   held: boolean;
+  /** `selected` came anew (the selection moved there, not by the page itself) or was typed into,
+   *  and no `unmark` of it came since. */
+  anew: boolean;
   /** Cancels the running 1.5 s; null when none runs. */
   cancel: (() => void) | null;
 }
@@ -96,13 +115,26 @@ export function createSeen(clock: Clock): Seen {
     }
   };
 
-  /** Whether take() would give `sessionId` now. */
-  const beingSeen = (sessionId: string): boolean => {
+  /** Whether takeAll() would give `sessionId` as seen anew now. */
+  const seenAnew = (sessionId: string): boolean => {
     if (typedOnce.has(sessionId)) return true;
     for (const hold of holds.values()) {
-      if (hold.held && hold.selected === sessionId) return true;
+      if (hold.held && hold.anew && hold.selected === sessionId) return true;
     }
     return false;
+  };
+
+  const takeAll = (): { seen: Set<string>; anew: Set<string> } => {
+    const seen = new Set(typedOnce);
+    const anew = new Set(typedOnce);
+    typedOnce.clear();
+    for (const hold of holds.values()) {
+      if (hold.held && hold.selected !== null) {
+        seen.add(hold.selected);
+        if (hold.anew) anew.add(hold.selected);
+      }
+    }
+    return { seen, anew };
   };
 
   const release = (hold: Hold): void => {
@@ -112,15 +144,21 @@ export function createSeen(clock: Clock): Seen {
   };
 
   return {
-    focus(page, focused, selected) {
+    focus(page, focused, selected, byPage = false) {
       if (stopped || ended.has(page)) return;
       let hold = holds.get(page);
       if (hold !== undefined && hold.focused === focused && hold.selected === selected) return;
       if (hold === undefined) {
-        hold = { focused, selected, held: false, cancel: null };
+        // The server makes a hold at the page's `start`, with no selection.
+        hold = { focused, selected, held: false, anew: false, cancel: null };
         holds.set(page, hold);
       } else {
         release(hold);
+        if (hold.selected !== selected) {
+          // The mark unread: a move to a session is a coming back, but for the page's own
+          // selection at its load or reconnect.
+          hold.anew = selected !== null && !byPage;
+        }
         hold.focused = focused;
         hold.selected = selected;
       }
@@ -140,19 +178,27 @@ export function createSeen(clock: Clock): Seen {
     },
     typed(page, sessionId) {
       if (stopped || ended.has(page)) return;
-      // C4 of review 2 (ruled): a key into a session already being seen begins nothing, so that
-      // the listeners do not run at every key press.
-      const began = !beingSeen(sessionId);
+      // C4 of review 2 (ruled): a key into a session already being seen anew begins nothing, so
+      // that the listeners do not run at every key press.
+      const began = !seenAnew(sessionId);
       const hold = holds.get(page);
       if (hold !== undefined && hold.focused && hold.selected === sessionId) {
         hold.cancel?.();
         hold.cancel = null;
         hold.held = true;
+        hold.anew = true;
       } else {
         typedOnce.add(sessionId);
       }
       if (began) {
         tell();
+      }
+    },
+    unmark(sessionId) {
+      if (stopped) return;
+      typedOnce.delete(sessionId);
+      for (const hold of holds.values()) {
+        if (hold.selected === sessionId) hold.anew = false;
       }
     },
     gone(page) {
@@ -163,16 +209,8 @@ export function createSeen(clock: Clock): Seen {
         holds.delete(page);
       }
     },
-    take() {
-      const seen = new Set(typedOnce);
-      typedOnce.clear();
-      for (const hold of holds.values()) {
-        if (hold.held && hold.selected !== null) {
-          seen.add(hold.selected);
-        }
-      }
-      return seen;
-    },
+    take: () => takeAll().seen,
+    takeAll,
     onChange(listener) {
       listeners.add(listener);
       return () => {

@@ -81,6 +81,10 @@ const SECTIONS = [
         'park: the session waits under Parked until you send it a prompt; one running in a terminal of this window asks first whether to end it; on a parked one, unpark (an Undo follows a park)',
       ],
       [
+        ['u'],
+        'unread: the session needs you again until you come back to it (select it again, or type into it); on one marked unread, finished or ended, mark it read',
+      ],
+      [
         ['r'],
         'restart a session running in a terminal of this window: it ends claude and resumes this session here, with the same flags or, with Other flags…, others (r, ←, ←, Enter)',
       ],

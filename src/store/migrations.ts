@@ -115,6 +115,11 @@ CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
   // nullable column, so a reader of schema 5 still reads correctly; an older skydeck refuses the
   // database at its open.
   "ALTER TABLE events ADD COLUMN uptime_cs INTEGER;  -- #207: /proc/uptime at the event in centiseconds, which orders one process's events; NULL for none",
+  // Migration 7 (the mark unread): the SQL of design-step-2.md 10.2, character for character. It
+  // only adds two nullable columns, so a reader of schema 6 still reads correctly; an older skydeck
+  // refuses the database at its open.
+  `ALTER TABLE attention ADD COLUMN unread_seq INTEGER;  -- order of the latest time the user marked the session unread (12.4); NULL for none
+ALTER TABLE attention ADD COLUMN unread_ns INTEGER;  -- its time, for display only; NULL for none`,
 ];
 
 export const SCHEMA_VERSION: number = MIGRATIONS.length;

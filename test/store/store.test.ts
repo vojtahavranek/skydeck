@@ -117,9 +117,9 @@ function sessionPr(store: Store, sessionId = S1, url = URL1): SessionPrRow | und
 }
 
 describe('migrations', () => {
-  test('there are six migrations and the schema version is their count', () => {
-    assert.equal(MIGRATIONS.length, 6);
-    assert.equal(SCHEMA_VERSION, 6);
+  test('there are seven migrations and the schema version is their count', () => {
+    assert.equal(MIGRATIONS.length, 7);
+    assert.equal(SCHEMA_VERSION, 7);
   });
 
   test('migration 1 is the SQL of design 9.2 character for character', () => {
@@ -178,6 +178,16 @@ describe('migrations', () => {
     assert.ok(match, 'design-step-2.md 10.2 has no "Migration 6" SQL block');
     assert.equal(MIGRATIONS[5], match[1]);
   });
+
+  test('migration 7 (the mark unread) is the SQL of design-step-2.md 10.2 character for character', () => {
+    const design = readFileSync(
+      join(import.meta.dirname, '..', '..', 'docs', 'design-step-2.md'),
+      'utf8',
+    );
+    const match = /^\*\*Migration 7\*\* [^\n]*:\n\n```sql\n([\s\S]*?)\n```$/m.exec(design);
+    assert.ok(match, 'design-step-2.md 10.2 has no "Migration 7" SQL block');
+    assert.equal(MIGRATIONS[6], match[1]);
+  });
 });
 
 describe('openStore', () => {
@@ -213,7 +223,7 @@ describe('openStore', () => {
       foreignKeys: 1,
     });
     assert.equal(mode(path), 0o600);
-    assert.equal(store.getKv('schema_version'), '6');
+    assert.equal(store.getKv('schema_version'), '7');
     const tables = rawRows(
       path,
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
@@ -284,7 +294,7 @@ describe('openStore', () => {
 
     const second = reopen();
 
-    assert.equal(second.getKv('schema_version'), '6');
+    assert.equal(second.getKv('schema_version'), '7');
     assert.equal(second.events().length, 1);
   });
 
@@ -1629,6 +1639,8 @@ describe('attention (S2 10.2; stage B, B2 and B3)', () => {
       seenSeq: null,
       windowEndSeq: null,
       windowEndNs: null,
+      unreadSeq: null,
+      unreadNs: null,
       ...over,
     };
   }
@@ -1712,6 +1724,89 @@ describe('attention (S2 10.2; stage B, B2 and B3)', () => {
     assert.equal(store.getKv('attention_seq'), '3');
   });
 
+  test('migration 7: an unread mark takes the next value and its time exactly; a later seen is later than it', (t) => {
+    const { store, path } = fresh(t);
+    const UNREAD = T0 + 3n * SEC + 11n;
+    store.recordAttention([{ sessionId: S1, seen: true }]);
+
+    assert.deepEqual(store.recordAttention([{ sessionId: S1, unreadNs: UNREAD }]), [
+      row({ sessionId: S1, seenSeq: 1, unreadSeq: 2, unreadNs: UNREAD }),
+    ]);
+    assert.equal(stored(path).rows[0]?.['unread_ns'], UNREAD);
+    assert.deepEqual(store.recordAttention([{ sessionId: S1, seen: true }]), [
+      row({ sessionId: S1, seenSeq: 3, unreadSeq: 2, unreadNs: UNREAD }),
+    ]);
+    assert.equal(store.getKv('attention_seq'), '3');
+  });
+
+  test("all four of one session in one write take the values in B3's order: turn end, window end, unread, seen", (t) => {
+    const { store } = fresh(t);
+    const UNREAD = T0 + 3n * SEC;
+    assert.deepEqual(
+      store.recordAttention([
+        { sessionId: S1, seen: true, unreadNs: UNREAD, windowEndNs: WINDOW_END, turnEndedNs: TURN },
+      ]),
+      [
+        row({
+          sessionId: S1,
+          turnEndedSeq: 1,
+          turnEndedNs: TURN,
+          windowEndSeq: 2,
+          windowEndNs: WINDOW_END,
+          unreadSeq: 3,
+          unreadNs: UNREAD,
+          seenSeq: 4,
+        }),
+      ],
+    );
+  });
+
+  test('a cleared unread mark sets its two columns NULL, keeps the others and takes no value', (t) => {
+    const { store } = fresh(t);
+    store.recordAttention([
+      { sessionId: S1, turnEndedNs: TURN },
+      { sessionId: S1, unreadNs: LATER_TURN },
+    ]);
+    assert.equal(store.getKv('attention_seq'), '2');
+
+    assert.deepEqual(store.recordAttention([{ sessionId: S1, unreadCleared: true }]), [
+      row({ sessionId: S1, turnEndedSeq: 1, turnEndedNs: TURN }),
+    ]);
+    assert.equal(store.getKv('attention_seq'), '2', 'no value taken');
+    assert.deepEqual(store.recordAttention([{ sessionId: S1, seen: true }]), [
+      row({ sessionId: S1, turnEndedSeq: 1, turnEndedNs: TURN, seenSeq: 3 }),
+    ]);
+  });
+
+  test('the next value is later than a stored unread_seq above the counter (B2)', (t) => {
+    const { store, path } = fresh(t);
+    store.recordAttention([{ sessionId: S1, unreadNs: TURN }]);
+    const db = new DatabaseSync(path);
+    try {
+      db.prepare('UPDATE attention SET unread_seq = 40').run();
+    } finally {
+      db.close();
+    }
+
+    assert.deepEqual(store.recordAttention([{ sessionId: S1, seen: true }]), [
+      row({ sessionId: S1, unreadSeq: 40, unreadNs: TURN, seenSeq: 41 }),
+    ]);
+  });
+
+  test('a write that both marks and clears the unread mark is a RangeError, and nothing is written', (t) => {
+    const { store } = fresh(t);
+    assert.throws(
+      () =>
+        store.recordAttention([
+          { sessionId: S2, seen: true },
+          { sessionId: S1, unreadNs: TURN, unreadCleared: true },
+        ]),
+      RangeError,
+    );
+    assert.deepEqual(store.attention(), []);
+    assert.equal(store.getKv('attention_seq'), null);
+  });
+
   test('values grow across writes and sessions, in the order the writes are given; the counter keeps the last', (t) => {
     const { store } = fresh(t);
     store.recordAttention([
@@ -1755,6 +1850,8 @@ describe('attention (S2 10.2; stage B, B2 and B3)', () => {
       seen_seq: 1n,
       window_end_seq: 2n,
       window_end_ns: WINDOW_END,
+      unread_seq: null,
+      unread_ns: null,
     });
   });
 

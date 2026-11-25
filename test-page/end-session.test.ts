@@ -646,10 +646,12 @@ test('F30: the dialog "Mark done" for a session the window can end', async (t) =
       await clickRow(page, S1);
       await toZone(page, 'list');
       let n = 0;
-      // No `w` in them: since F44 `w` is the list's key that parks (S2 12.15), and parks at once.
+      // No `w` in them: since F44 `w` is the list's key that parks (S2 12.15), and parks at once;
+      // nor a `u` before the `d`: since the mark unread `u` marks the session unread (S2 12.4), so
+      // `seed` where `used` was (after the `d` the dialog has the keyboard, so `touch` is fine).
       // (A word with an `r` before its `d`, `worked`, opens the dialog "Restart" first, which its
       // Enter cancels: issue #166, test-page/restart.test.ts.)
-      for (const typed of ['do not touch the tests', 'done\n', 'd ', 'used\n', 'fixed\n']) {
+      for (const typed of ['do not touch the tests', 'done\n', 'd ', 'seed\n', 'fixed\n']) {
         await page.waitForSelector('#toast[hidden]', { state: 'attached', timeout: 15_000 });
         await toZone(page, 'list');
         for (const character of typed) {

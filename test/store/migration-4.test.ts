@@ -23,6 +23,7 @@ import {
   isTicketStatusEntry,
   schema1Database,
   withoutParkedColumn,
+  withoutUnread,
   withoutUptime,
 } from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
@@ -83,7 +84,7 @@ function assertMigrated(before: DatabaseDump, newest: DatabaseDump): void {
   // F44: the open goes on with migration 5, which only adds the column parked_at_ns to
   // session_meta, NULL in every row; #207: and with migration 6, which only adds the nullable
   // column uptime_cs to events.
-  const after = withoutUptime(withoutParkedColumn(newest));
+  const after = withoutUnread(withoutUptime(withoutParkedColumn(newest)));
   assert.deepEqual(
     after.schema.filter((entry) => !isTicketStatusEntry(entry)),
     before.schema,

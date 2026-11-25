@@ -91,12 +91,17 @@ export interface ClosedBlock {
 export const MAX_CLOSED = 64;
 /** F15: the most favourite flags skydeck keeps (S2 12.6); `favourite-add`'s `at` is below it. */
 export const MAX_FAVOURITES = 12;
-/** Window focus, selection and the terminal area at the page's font (S2 8.2.3, 8.2.6). */
+/** Window focus, selection and the terminal area at the page's font (S2 8.2.3, 8.2.6). `byPage`
+ *  (S2 12.4, the mark unread): the selection is the page's own, not the user's — the first row a
+ *  page that loads selects by itself, or the selection a page that reconnects reports again; a
+ *  fact the page reports, from which the server judges that it is no coming back. Absent: the
+ *  user's. */
 export interface FocusMessage {
   t: 'focus';
   focused: boolean;
   selected: string | null;
   area: { cols: number; rows: number };
+  byPage?: true;
 }
 /** `term`: a terminal id, 12 lower-case hex characters (plan A21). The size is a proposal (S2 8.2.6). */
 export interface AttachMessage {
@@ -191,7 +196,13 @@ export interface ResizeMessage {
  *
  *  F44 (S2 12.15): `park` parks the session (`markParked`: nothing written when it is parked
  *  already, the time it was parked kept) and `unpark` ends its parking (`markUnparked`); each names
- *  only the session. Absolute, never a toggle: the page picks the act from its row's `parked`. */
+ *  only the session. Absolute, never a toggle: the page picks the act from its row's `parked`.
+ *
+ *  S2 12.4: `unread` marks the session unread (the next counter value, the server's clock) and
+ *  `read` marks it seen when it has a mark seeing clears (nothing written else); each names only
+ *  the session, and the page picks one from its row's `attention` (`read` while its reason is
+ *  ended, finished or unread). The server refuses both for a session that asks, one marked done
+ *  and the row of a session not started yet, in the words the page shows. */
 export type ActMessage =
   | {
       t: 'act';
@@ -222,7 +233,8 @@ export type ActMessage =
   | {
       t: 'act';
       id: number;
-      kind: 'done' | 'undone' | 'park' | 'unpark' | 'pr-refresh' | 'ticket-refresh';
+      kind:
+        'done' | 'undone' | 'park' | 'unpark' | 'unread' | 'read' | 'pr-refresh' | 'ticket-refresh';
       sessionId: string;
     }
   | { t: 'act'; id: number; kind: 'pr-add' | 'pr-rm'; sessionId: string; url: string }
@@ -686,12 +698,12 @@ export interface BannerPayload {
   /** A restore runs in the server, from any page or command: nothing more can be started. */
   running: boolean;
 }
-/** S2 12.4's three reasons, in their order. */
-export type AttentionReason = 'asks' | 'ended' | 'finished';
+/** S2 12.4's four reasons, in their order (`unread`: the user's mark). */
+export type AttentionReason = 'asks' | 'ended' | 'finished' | 'unread';
 /** S2 12.4: why a row needs you. `detail`: for `asks` the live file's waitingFor, sanitised,
  *  trimmed and cut to 120 UTF-16 units with `…` (plan B13; null without one, or when it is blank
  *  once sanitised); else null. `sinceNs`: asks — the file's statusUpdatedAt, else updatedAt;
- *  ended — window_end_ns; finished — turn_ended_ns; null when not known. Display only (S2 10.2):
+ *  ended — window_end_ns; finished — turn_ended_ns; unread — unread_ns; null when not known. Display only (S2 10.2):
  *  the order is decided by the counter. */
 export interface AttentionPayload {
   reason: AttentionReason;
@@ -1186,6 +1198,9 @@ const ACTS: Readonly<Record<string, Check>> = {
   // Follow-up F44: the session alone, as done and undone.
   park: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   unpark: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  // S2 12.4: the mark unread, set and cleared by the user; the session alone, as park.
+  unread: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  read: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   'pr-refresh': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   'pr-add': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
   'pr-rm': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
@@ -1276,7 +1291,10 @@ const MESSAGES: Readonly<Record<string, Check>> = {
     },
     ['chips', 'closed', 'switcher'],
   ),
-  focus: object({ t: ANY, focused: BOOLEAN, selected: nullable(SESSION), area: AREA }),
+  focus: object(
+    { t: ANY, focused: BOOLEAN, selected: nullable(SESSION), area: AREA, byPage: TRUE },
+    ['byPage'],
+  ),
   attach: object({ t: ANY, term: TERM, cols: SIZE, rows: SIZE }),
   detach: object({ t: ANY, term: TERM }),
   input: (value, where) => {

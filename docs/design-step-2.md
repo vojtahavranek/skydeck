@@ -152,7 +152,7 @@ Design 3's words keep their meaning. New:
 | Open's order | The order of the rows under Open (12.1): computed until the first move by hand, then the server's, kept per session (`window_open_order`, 10.2), so that a row keeps the place it was first drawn at (follow-up F42). |
 | secret, launch token | The long-lived key page and server prove to each other, and the one-use key that lets a new window obtain it (8.2.2, 15.2). |
 | size owner | The page whose size a terminal has (8.2.6). |
-| needs you | A session the user should look at (12.4): it asks something, a turn finished and was not seen, or its window terminal ended unexpectedly. |
+| needs you | A session the user should look at (12.4): it asks something, a turn finished and was not seen, its window terminal ended unexpectedly, or the user marked it unread. |
 | seen | The user has looked at a session in a window (12.4). |
 | runtime directory | `<runtimeDir>`, section 4.2. |
 | pty | A pseudo-terminal: the pair of devices a terminal program runs on. The program reads its keys from it and writes its screen to it; whoever holds the other end (the "master") is its terminal. |
@@ -1753,7 +1753,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 |---|---|---|
 | `ping` | `n` | `pong` with the same `n`, `bootId`, `serverId`. |
 | `view` | `filter`, `unfolded`, `showDone`, `selected` (null while the page's selection is a closed block's caption, 12.2: from follow-up F9 no session is selected then); from stage E, each optional (a page before stage E sends none): `chips` (12.8's Running, Open PR, Has note and, from follow-up F35, Done as `running`, `open-pr`, `note`, `done`, each once — a page before F35 sends no `done`: not set; Show done is `showDone`, no chip), `closed` (the blocks the user closed, 12.2: at most 64 entries, each exactly a `section` — `open`, `week` or `earlier`, from follow-up F44 also `parked` — and a `group`, a text, each section and group once; absent: no block closed. It replaced stage E's `opened` on 2026-11-16, follow-up F3: a view that still names `opened` is refused as any view with a field it does not know, and the server closes the page's connection, 1008 `message refused: view: unknown field`; the page and the server are one build, 8.2.2), `switcher` (the quick switcher's text while it is shown, else null; each change of it is a `view`) | The page's view state; the server answers with `list` at once and keeps sending `list` when it changes (12). |
-| `focus` | `focused`, `selected` (null then too), `area` (`cols`, `rows`: what the terminal area holds at the page's font) | Window focus, selection and terminal area, for seen (12.4), notifications (13), the size owner and the first size of a terminal the command line or a restore opens (8.2.6). Sent on every change and after `start`. |
+| `focus` | `focused`, `selected` (null then too), `area` (`cols`, `rows`: what the terminal area holds at the page's font), optional `byPage` (`true`) | Window focus, selection and terminal area, for seen (12.4), notifications (13), the size owner and the first size of a terminal the command line or a restore opens (8.2.6). Sent on every change and after `start`. `byPage` (the mark unread, 12.4): the selection is the page's own, not the user's — the first row it selects by itself at its first list, or the selection it reports again once (re)connected; absent, the user's. |
 | `attach` | `term`, `cols`, `rows` | Start a terminal stream (8.2.4). The page's size is a proposal (8.2.6). |
 | `detach` | `term` | Stop it. |
 | `input` | `term`, `data` | Typed text (UTF-8) for the terminal; `binary: true` when `data` is a byte string from xterm.js's binary channel (mouse reports). Makes this page the size owner. |
@@ -1770,6 +1770,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `note` | `sessionId`, `text`, `base` (the note the edit started from) | 12.5. |
 | `done`, `undone` | `sessionId` | 12.5, 12.10. |
 | `park`, `unpark` | `sessionId` | Follow-up F44, 12.15: `park` parks the session (design 7.1: the time it is parked, its done mark cleared, in one write; a session parked already is not written and keeps its first time, answered `ok` all the same), `unpark` ends its parking. Absolute, never a toggle: the page picks the act from its row's `parked`, as it picks `done` or `undone`. Refused as `done` is: a session the store does not know, a `new` terminal's session not started yet, a busy store. Every page's `list` follows a write; before it goes out, a terminal of the window running the session gives its number up (`park`) or takes the lowest free one (`unpark`), 7.6. |
+| `unread`, `read` | `sessionId` | 12.4, the mark unread: `unread` marks the session unread (the next counter value, the server's clock: 10.2) and makes no page's hold of it a coming back (Seen's `unmark`); `read` writes a seen when the session has a mark seeing clears (ended, finished, unread), and nothing else. Absolute, never a toggle: the page picks the act from its row's `attention` (`read` while its reason is ended, finished or unread; `unread` otherwise), as it picks `park` or `unpark`. Refused with the words the page shows in its toast: a session that asks (`it asks something: it needs you until it is answered`), one marked done (`it is marked done: a done session needs nothing`), a `new` terminal's session not started yet (`this session has not started yet; mark it once it runs`); a session the store does not know as `done` is. A busy store keeps the write for the next look (14) and answers `ok`. Every page's `list` follows the write. |
 | `pr-add`, `pr-rm` | `sessionId`, `url` | 12.5. |
 | `pr-refresh` | `sessionId` | An explicit refresh of that session's pull requests (design 7.3). |
 | `ticket` | `sessionId`, `text` (a link or a key as typed; empty removes the ticket) | 12.5 (follow-up F18): the server reads `text` by design 7.1's rule (`readTicket`) and stores the address, replacing the ticket before; a refusal's words are the result's error, nothing stored. `text` is held to the URL limit, so that a link of 2,048 characters is sent whole. Every page's `list` follows. |
@@ -2392,6 +2393,25 @@ migration (design 9.2, install.md "Going back"). A spool file with the new key, 
 skydeck still running, parses as before: the key is not one it knows, and those are ignored.
 `test/store/migration-6.test.ts` migrates a filled schema-5 database and compares every value.
 
+**Migration 7** (the mark unread, 12.4):
+
+```sql
+ALTER TABLE attention ADD COLUMN unread_seq INTEGER;  -- order of the latest time the user marked the session unread (12.4); NULL for none
+ALTER TABLE attention ADD COLUMN unread_ns INTEGER;  -- its time, for display only; NULL for none
+```
+
+It adds two nullable columns and nothing else, as migration 3 did one: every row keeps its values
+(both columns NULL in each) and a reader of schema 6 still reads `attention`. `unread_seq` takes the
+next value of the counter, as every `*_seq` (the next value counts it too), and `unread_ns` the
+server's clock, shown only (`marked unread · 2m`): a session is unread while its `unread_seq` is
+greater than its `seen_seq`, or no `seen_seq` is stored, by the counter as the other marks. In one
+write the unread comes after a turn end and a window end and before a seen (B3's order). The two
+columns are set NULL again only for a done session (12.4: a done session needs nothing), so that
+an undone later does not bring the mark back; the row stays. **An older skydeck refuses it**, as
+for migrations 3 to 6, and the way back is the copy kept before the migration (design 9.2,
+install.md "Going back"). `test/store/migration-7.test.ts` migrates a filled schema-6 database and
+compares every value.
+
 `kv` entries (no migration; `kv` is free text):
 
 | Key | Value |
@@ -2428,7 +2448,9 @@ A session with several holders (a duplicate) records the latest status time amon
 (stage B's plan, task 52): never earlier than the time the session shows, also when a look missed
 one holder's idle file and sees it end later.
 When the session is being seen at that moment (12.4), the same write sets `seen_seq` to a later
-value, so a turn that ends in front of the user is never "finished".
+value, so a turn that ends in front of the user is never "finished". A session marked unread
+(12.4) is being seen only by a coming back: a page that stays on it since the mark is not seeing
+it, so a turn that ends then shows `finished`.
 
 `busy` to `waiting` is not a turn end (a dialog opened inside the turn). A file that names another
 session than at the last look (`/clear`) starts over. A look that cannot read a file (it is being
@@ -3026,8 +3048,8 @@ command-line flag. Check W48.
   terminal`, `starting…`).
 - A row that needs you (12.4) has two lines whatever its state, an ended one that is not running
   too: the second is its reason, in place of the state line — `needs you · <detail> · 3m` (`needs
-  you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m` —,
-  its age from the time 12.4 names, left out while that time is not known; the first line then
+  you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m`,
+  `marked unread · 2m` —, its age from the time 12.4 names, left out while that time is not known; the first line then
   has no age (stage B, plan B13).
 - A session that is not running has one line: state icon, the ticket key (dim, monospaced) and the
   title, marks (`crashed`, `crashed mid-turn`, `expires 3d`, `expired`, `done`: design 6.3's marks
@@ -3282,7 +3304,7 @@ under both forced themes.
 
 ### 12.4 Attention: needs you and seen
 
-A session **needs you** for one of three reasons, in this order:
+A session **needs you** for one of four reasons, in this order:
 
 1. **asks**: a holder's live-session file has status `waiting` (a dialog is open: permission, a
    question); the detail is `waitingFor`. It ends when the status changes. (Design 6.2's state
@@ -3291,9 +3313,17 @@ A session **needs you** for one of three reasons, in this order:
    `ended-unexpectedly` at the next refresh: `window_end_seq` is set (10.2). It ends when seen.
 3. **finished**: `turn_ended_seq` is greater than `seen_seq`, and the session is running and idle.
    It ends when seen or when the next turn starts.
+4. **unread**: the user marked it so (`u` or the header's `Unread`, 12.5, 12.9): `unread_seq` is
+   greater than `seen_seq` (migration 7, 10.2), and the session is not done (a done session needs
+   nothing); running or not, so a row under Recent or Earlier can be marked too. It ends when the
+   user comes back to it (below: "The mark unread") or marks it read.
+
+A session with several reasons shows the first. A turn that ends unseen on an unread session shows
+`finished`, and coming back clears both; once the earlier reason ends without a look (an ask is
+answered, the next turn starts), the mark shows again.
 
 **A parked session is quiet** (follow-up F44, 12.15; the owner's decision of 2026-11-24). Its marks
-— asks, finished, ended — show in its row as on any row (the bar, the bold title, the reason's
+— asks, finished, ended, unread — show in its row as on any row (the bar, the bold title, the reason's
 line), but it does not **count** as needing you: it sends no desktop notification (13), the title
 bar's `need you` count and the window title's `(n)` leave it out (it is counted by its state
 instead, so the parts still add up), Ctrl+Shift+J skips it, a closed block's caption does not count
@@ -3328,10 +3358,11 @@ value is not later. The detail of an ask is the `waitingFor` sanitised (design 7
 cut to 120 UTF-16 units with `…`, never inside a surrogate pair (a `waitingFor` has no length limit,
 and the list is sent whole); one that is blank once sanitised (empty, or only white space) is no
 detail. The time a row shows is the file's `statusUpdatedAt` (else `updatedAt`) for an ask,
-`window_end_ns` for an end of the window, `turn_ended_ns` for a finished turn. Ctrl+Shift+J's order,
-in full: those that ask by that time, the longest-waiting first and an unknown time last; then those
-that ended by `window_end_seq`; then those that finished by `turn_ended_seq`, the oldest first; ties
-by session id.
+`window_end_ns` for an end of the window, `turn_ended_ns` for a finished turn, `unread_ns` for the
+mark unread. Ctrl+Shift+J's order, in full: those that ask by that time, the longest-waiting first
+and an unknown time last; then those that ended by `window_end_seq`; then those that finished by
+`turn_ended_seq`; then those marked unread by `unread_seq`; each the oldest first; ties by session
+id.
 
 **When a window end is recorded** (stage B's plan, B10). At each refresh that worked — after the
 exits it settled (7.8) — each terminal of the window in state `ended` or `lost` (a keeper that died:
@@ -3385,8 +3416,46 @@ leaves no row; one in the write of that session's own end goes with it all the s
 makes the row. The hold is `src/window/seen.ts` on the server's clock (`Clock.after`, which a step of the wall
 clock does not move).
 
+**The mark unread** (the owner's decision of 2026-11-25: "when you come back to it"). The user
+marks the selected session unread with `u` in the list or the header's `Unread` (12.5, 12.9), and
+marks it read with the same key or control (`Read` while the session has a mark seeing clears:
+ended, finished or unread; `act unread`, `act read`, 8.2.3). The mark is in the store (migration 7,
+10.2): it survives a server restart and shows in every window. A session that asks is not changed
+(it needs you until it is answered), a done one and a row of a session not started yet neither;
+each is said in a toast. The mark is read again only by:
+
+- a selection that moves to the session from another row or from none, by a key, a click, the
+  switcher or Ctrl+Shift+J, in a page that has focus, held 1.5 s (the hold above);
+- typing into its terminal (above), at once;
+- `u` or the header's `Read`.
+
+Not by staying on the session after marking it (the page that marked it, and every other page that
+has it selected at that moment, hold nothing for it until their selection moves away and back),
+nor by the window losing and regaining focus with it still selected, a page loaded or reconnected
+with it selected, a server restart, or a refresh of the list. This is the one difference from the
+hold above, and it applies only while the session is unread: the other marks keep their rules.
+
+How the server decides it (S2 4.3; `src/window/seen.ts`, `src/window/attention.ts`). Each page's
+hold also keeps whether its selection came to the session **anew**: moved there from another
+session or from none, but for a selection the page reports as its own (`focus.byPage`, 8.2.3: the
+first row a page that loads selects by itself at its first list, and the selection a page that
+reconnects reports again; a fact the page states, from which the server judges). A page that loads
+or reconnects with none selected and whose user then selects the session comes back to it. A
+change of focus alone keeps what it was; typing makes it anew; marking
+the session unread makes every hold of it not anew and drops a typing not yet taken. A selection
+the page moves by itself after a key (the next row after `w` or `d`, a selection that follows
+`/clear`) counts as a move. Attention writes no seen for a session that will be unread after its
+writes unless it is seen anew, not even in the write of its turn end (10.3); for every other session
+nothing changes. A server restart forgets the holds; the mark is in the store, and the pages come
+back with a `start` and their own selection (`byPage`): not anew. A done session needs nothing: the
+view model gives no `unread` to a done row, the `done` act sets the stored mark's columns NULL at
+once, and the look does so for every other way of marking done (the command line's `done`, at the
+look after the server's next reload of the rows; an end, a carry over), so that an undone later
+does not bring it back. The mark sends no notification (13).
+
 Ctrl+Shift+J selects the next session that needs you: those that ask, the longest-waiting first;
-then those that ended; then those that finished, oldest first. Pressed again it goes on; after the
+then those that ended; then those that finished, oldest first; then those marked unread, the
+oldest mark first. Pressed again it goes on; after the
 last it starts over.
 
 How the page goes (stage B, plan B14): Ctrl+Shift+J selects the id of the list's `needYou.order`
@@ -3404,7 +3473,9 @@ A row that needs you has a coloured left bar, a bold title and the reason on its
 
 The page's marks and words (stage B, plan B13): the bar and the reason's line are in the reason's
 colour — an ask in the waiting colour, a finished turn in green, an end of the window in the crash
-colour (the mockup's) —, the line is 12.2's, and the title bar's counts start with `3 need you`
+colour (the mockup's), the mark unread in a blue of its own whose line reads at least 4.5 : 1 on
+a plain row and on the selected one in every scheme and colour theme (the themes' accent does not:
+3.8 : 1 on the selected row in two of them) —, the line is 12.2's, and the title bar's counts start with `3 need you`
 (`1 needs you`), with a dot before it that the style sheet draws in the colour of an ask (a mark,
 not a character of the text); the window title is `(3) skydeck`, and `skydeck` while none needs
 you. A list without `needYou`, or a row without `attention` (a server of stage A), shows no count
@@ -3418,13 +3489,17 @@ it), the state pill, the project directory, "opened <time> · last active <age>"
 click copies the whole id), where the title comes from, from follow-up F16 the flags the session
 was started with (below), and buttons Note, from issue #166 Restart (12.10: only while the row is
 `endable` and not marked done), Done / Undone and, from follow-up F44, Park / Unpark (12.15:
-tooltips `park it: it waits under Parked (w)` and `back under Open (w)`). The buttons give way, none
-is cut (ruled for #166): Restart is not shown while the header is 382 px wide inside or less, and
-Park / Unpark while it is 290 px or less (measured in the suite's font: with Restart and Unpark a
-button is cut below 307 px and the state lies under Note below 338 px; with Unpark alone, below
-242 and 273 px; the rules leave slack for other fonts). With the list 400 px wide a window up to
-about 810 px wide shows no Restart and one up to about 718 px no Park / Unpark (at 640 px Park was
-cut before); `r`, `w` and `skydeck park` remain. A done row at the narrowest windows (below about
+tooltips `park it: it waits under Parked (w)` and `back under Open (w)`), and last `Unread` /
+`Read` (12.4: `Read` while the session has a mark seeing clears — ended, finished or unread —,
+else `Unread`; tooltips `mark it read (u)` and `mark it unread: it needs you until you come back to
+it (u)`; the act and the toast are those of `u`, 12.9). The buttons give way, none is cut (ruled
+for #166): Restart is not shown while the header is 450 px wide inside or less, Unread / Read while
+it is 382 px or less, and Park / Unpark while it is 290 px or less (measured in the suite's font:
+with Restart, Unpark and Unread a button is cut below 372 px and the state lies under Note below
+403 px; with Unpark and Unread, below 306 and 338 px; with Unpark alone, below 241 and 272 px; the
+rules leave slack for other fonts). With the list 400 px wide a window up to about 878 px wide
+shows no Restart, one up to about 810 px no Unread / Read and one up to about 718 px no Park /
+Unpark (at 640 px Park was cut before); `r`, `u`, `w` and `skydeck park` remain. A done row at the narrowest windows (below about
 650 px, with the list at 400 px) is the one case where the state may lie under Note (`Undone` is
 wider than `Done`); no button is cut there. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
@@ -4197,6 +4272,16 @@ a Czech layout and would take Claude Code's Ctrl+Shift+-. If the user turns on t
 protocol in a later xterm.js and binds a `ctrl+shift+<x>` in Claude Code, the window shadows that
 binding; the help says so.
 
+**Marking unread** (12.4). In the list zone `u` marks the selected session unread, or read while
+it has a mark seeing clears (ended, finished, unread), as the header's `Unread` / `Read` does
+(12.5): the page sends `unread` or `read` (8.2.3), picked from the row's `attention`, and the server
+decides the rest. The toast says what was done — `Marked unread: it needs you until you come back to
+it.`, `Marked read.` —, with no Undo (`u` again is its undo), or why nothing was: `it asks
+something: it needs you until it is answered`, `it is marked done: a done session needs nothing`,
+`this session has not started yet; mark it once it runs`. A held `u` acts once (its auto-repeats
+do nothing), one act per session at a time; the selection and the keyboard stay. On a hidden
+selection and a selected caption it says `no session selected`, as `d` does.
+
 **Moving a session of Open** (follow-up F37, 2026-11-21; follow-up F42, 2026-11-23: any row). In
 the list zone, with a session of Open selected, Shift+↑ or Shift+K moves it one place up and
 Shift+↓ or Shift+J one place down: Shift alone with the key that types k/K or j/J (so Shift+k under
@@ -4379,7 +4464,7 @@ session at all), never its card. The header's Done on such
 a session takes its toast from the row, since it is in no section: `Marked done. Stays under Open
 while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
 the lead on 2026-11-15). The list keys (`l`, F2,
-`g`, `n`, `t`, `p`, `d`, from follow-up F44 `w`) act only on a row the list shows: on a hidden selection, and on a selected
+`g`, `n`, `t`, `p`, `d`, from follow-up F44 `w`, from the mark unread `u`) act only on a row the list shows: on a hidden selection, and on a selected
 caption, they say `no session selected` and send nothing. `c` (follow-up F40) is the exception: it
 acts whenever the right side shows the carry-over bar, a hidden selection's too (after `/clear`
 the new session has a new title and often no row under a filter). A named limit: when Ctrl+Tab, a slot chord or a click on its
@@ -5087,7 +5172,7 @@ none: no made-up data.
   | the list | The list | every session, one row each, of this window and of any terminal; Open, Recent (the last 7 days) and Earlier; the number 1–9 is the slot |
   | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it, also with other flags (issue #188) |
   | the key bar | Where the keyboard is | `Focus: list` or `Focus: terminal`; Ctrl+Shift+L moves it; with `Focus: terminal` a letter goes to Claude Code |
-  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park and from issue #166 `r` restart (the version is not raised for them: the tour is not shown again); `/` filter, `a` show done |
+  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park and from issue #166 `r` restart (the version is not raised for them: the tour is not shown again); `/` filter, `a` show done, and from the mark unread `u` mark unread on that line (the line of the letters is full; the version is not raised) |
   | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+J the next session that needs you; Ctrl+Shift+N a new one |
   | the list | After a restart | a restart of the PC or of WSL ends the running sessions; run `skydeck window` again, and the top of the list offers the ones that were open (the banner, 12.7); `Restore` brings the ticked ones back, and after `Not now` `> restore` in `Switch…` offers it again |
   | the gear | Settings and every key (step 7) | the gear opens Settings; Ctrl+Shift+H shows every key; the tour again: `Take the tour` in the key help, or `> tour` in `Switch…` |
@@ -5257,10 +5342,13 @@ still parked.
 ## 13. Notifications
 
 - When a session starts to need you (12.4: a change from not needing you to needing you, for any
-  of the three reasons) and no window has focus, the server sends `notify` to **one** page: the
+  of the first three reasons; the user's mark unread plays no part) and no window has focus, the server sends `notify` to **one** page: the
   one that had focus last (several windows would otherwise each raise one).
 - How the server judges it (stage B's plan, B12): over the rows a page without a filter lists,
-  against its last judgement. A session whose reason changes does not start to need you; one that
+  against its last judgement. It judges without the marks unread (`withoutUnread` of
+  `src/window/view/attention.ts`): the user made the mark, so marking a session unread never
+  notifies, and a turn that ends unseen on an unread session starts to need you (`finished`) and
+  notifies as on any other. A session whose reason changes does not start to need you; one that
   stops needing you and needs you again later does. The first judgement records and notifies
   nothing, so that a restart does not notify everything that already needed you, and it is made
   only once the server has read the marks and a refresh has worked, with that refresh's window
@@ -6554,6 +6642,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W52 | How often the window checks for a newer skydeck by itself (follow-up F38's choice, the owner's decision of 2026-11-24): Settings' `Check for updates` shows the setup's value and its four words in order; `Every 15 minutes` saved, and a check by the clock within 16 minutes of the last one without a click; `Every day` makes none in twenty minutes; `Off` and `Check now`; the setup's value put back (manual-checks.md, "How often updates are checked"). | F38 | 10.1, 12.13, 16.5 |
 | W53 | The update dialog's notes of what is new in the owner's Edge, on the owner's own installation, at the first update after this change that brings a note (nothing is applied): the notes' titles heavier and their text under them, a code run in the terminal's font, the fold of the other changes opened and closed by a click, Enter and Space and folded again at the next open, the Tab round, the database note when there is one, the bottom lines; both schemes and the owner's colour theme read well; a window lower than the dialog scrolls its body with the heading and the buttons in view; `skydeck update --check` lists the titles under `what is new:`. | the notes of what is new | 12.1, 16.5 |
 | W54 | The version number on the owner's own installation, after the workflow Version made its first tags: the tags in the checkout (`git tag --list 'v*'`); `skydeck --version` and doctor's first line `0.9.<n>[+<k>] (<id>, <date>)`, the nearest version tag of HEAD; Settings' group Updates `skydeck 0.9.<n>` above its last check; with commits listed, `skydeck update --check`'s first line and the dialog's bottom line `<version> → <version> on origin/main` with the ids, a note brought making the next minor; and, when the owner wants the update, the running form and `updated to <version>`; the workflow's run in GitHub's Actions (manual-checks.md, "The version number"). | the version number | 12.1, 12.13, 16.5, 17.5 |
+| W55 | **Real claude**, the mark unread on throwaway sessions: `u` and the header's `Unread` / `Read`, the bar, the line `marked unread · <age>`, the count and `(n) skydeck`, no notification; the mark stays while the window stays on the session, loses and regains the focus and reloads, goes when the selection comes back to it after 1.5 s and at a typing; a turn that ends meanwhile shows `finished` and notifies; a session that asks and one marked done are refused in the toast; `skydeck window --restart` keeps it; `u` on a US and a Czech layout (manual-checks.md, "Marked unread"). | the mark unread | 10.2, 12.4, 12.5, 12.9, 13 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
