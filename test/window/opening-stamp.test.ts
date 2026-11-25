@@ -70,6 +70,23 @@ describe('the opening stamp (S2 7.1, #213)', () => {
     assert.equal(await openFor(w, r, platform, S3), first + 3n + 2n * NS_PER_SECOND);
   });
 
+  test('a spawn’s meta stamped ahead of the clock counts from the spawn on, before its hello', async (t) => {
+    const w = await windowDeck(t);
+    const heldNs = w.tp.platform.clock.nowNs();
+    const r = w.registry({ platform: withClock(w.tp.platform, () => heldNs) });
+    const spec = w.spec();
+    const aheadNs = heldNs + NS_PER_SECOND;
+    const spawning = r.registry.spawn({
+      ...spec,
+      meta: { ...spec.meta, openedNs: String(aheadNs) },
+    });
+    // In the same step as the spawn: no hello can have come yet.
+    const next = r.registry.nextOpenedNs();
+    await spawning;
+    assert.equal(next, aheadNs + 1n);
+    assert.equal(r.registry.nextOpenedNs(), aheadNs + 2n, 'and after its hello');
+  });
+
   for (const ahead of [0n, NS_PER_SECOND]) {
     test(`after a restart: a terminal kept with a stamp ${ahead === 0n ? 'at' : 'a second ahead of'} the clock’s value is found with it, and the next terminal opened is later`, async (t) => {
       const w = await windowDeck(t);
