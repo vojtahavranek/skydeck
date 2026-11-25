@@ -233,7 +233,8 @@ describe('skydeck update with a real window server (U5, U8)', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.equal(
       r.stdout,
-      `1 new commit on origin/main (${short(old)}..${short(made)}):\n  ${short(made)}  a new module\nupdated to ${short(made)}\n`,
+      // The copy's package.json set the pair in its one commit.
+      `1 new commit on origin/main (0.9.0 → 0.9.1, ${short(old)}..${short(made)}):\n  ${short(made)}  a new module\nupdated to 0.9.1\n`,
     );
     assert.equal(
       r.stderr,
@@ -265,7 +266,7 @@ describe('skydeck update with a real window server (U5, U8)', () => {
     const r = await runUpdate(h.platform, h.d.s);
 
     assert.equal(r.code, 0, r.stderr);
-    assert.match(r.stdout, new RegExp(`\\nupdated to ${short(made)}\\n$`));
+    assert.match(r.stdout, /\nupdated to 0\.9\.1\n$/);
     assert.equal(
       r.stderr,
       "skydeck: stopped skydeck's window server; 0 terminals in the window keep running\n" +

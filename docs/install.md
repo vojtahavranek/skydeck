@@ -2401,7 +2401,7 @@ branch follows, and restarts the window's server for the new code. In this order
    20 commits (then `… and <n> more`):
 
    ```
-   3 new commits on origin/main (1a2b3c4..5d6e7f8):
+   3 new commits on origin/main (0.9.16 → 0.9.19, 1a2b3c4..5d6e7f8):
      5d6e7f8  the newest commit's subject
      4c5d6e7  the one before
      3b4c5d6  the oldest new one
@@ -2409,13 +2409,14 @@ branch follows, and restarts the window's server for the new code. In this order
      Parked: set a session aside
    ```
 
-   The ids are the first 7 digits of each commit's id, for reading only; the update itself uses
-   the whole id. `what is new:` and the titles under it come only when the update brings notes of
+   `0.9.16 → 0.9.19` are the versions of the commit the checkout is at and of the newest one (as
+   `--version` counts them, the new one before anything is applied); the ids are the first 7
+   digits of each commit's id, for reading only; the update itself uses the whole id. `what is new:` and the titles under it come only when the update brings notes of
    what is new (the files of `docs/news/`, newest first); the window's dialog shows their text. When the new commits change `src/store/migrations.ts`, one more line says so:
    `this update changes the database's upgrade steps: it may upgrade the database, which an older
    checkout cannot open; a copy of the database as it was is kept first, and docs/install.md
    ("Going back") says how to return to 1a2b3c4`, with the commit the checkout is at (see "Going
-   back" below). With nothing new it says `skydeck is up to date (main at 1a2b3c4, as origin/main)` and does nothing
+   back" below). With nothing new it says `skydeck is up to date (main at 0.9.16, 1a2b3c4, as origin/main)` and does nothing
    else: no server is looked at, stopped or started.
 2. **`--check` ends here**, with `run skydeck update to apply it`. Its fetch has changed what a
    `git fetch` changes — the remote-tracking refs (`origin/main`), the tags it follows, and what
@@ -2431,7 +2432,7 @@ branch follows, and restarts the window's server for the new code. In this order
    (`skydeck: waiting up to 7 s for the open window to come back; …`), which reloads itself and
    connects again (`skydeck window: a window is already open`). When no window was open it starts
    nothing and says `skydeck: the window's server was stopped for the update; skydeck window starts
-   it again`. Last, `updated to 5d6e7f8`.
+   it again`. Last, `updated to 0.9.19`, the version it brought.
 
 The look and the fetch can be ended with Ctrl+C: nothing is changed. **Once the stop of the
 window's server has begun — or the fast-forward, when there is no server of this checkout to stop —
@@ -2540,9 +2541,9 @@ More ends, each with exit 1:
     git refused and wrote nothing that matters; only the look after it could not tell (a file came
     into the checkout meanwhile, or the look took too long). `git status`, move away (or commit)
     what git names — it is yours —, `skydeck window`, then `skydeck update` again. No reset.
-- `updated to <id>, but skydeck window ended with exit <n>; run skydeck window`: the update is in,
+- `updated to <version>, but skydeck window ended with exit <n>; run skydeck window`: the update is in,
   but the new `skydeck window` failed (its own lines above say why); run `skydeck window`.
-- `updated to <id>, but skydeck window could not be started or was ended by a signal; run skydeck
+- `updated to <version>, but skydeck window could not be started or was ended by a signal; run skydeck
   window`: the update is in, but the new `skydeck window` did not run to its end; run
   `skydeck window`.
 
@@ -2735,7 +2736,7 @@ terminal of your own:
    interactive list (`skydeck` with no command) in any other terminal too: from here on no skydeck
    may have the database open.
 2. Put the checkout back at the commit the update left. `skydeck update` named it: the first id of
-   its first line (`3 new commits on origin/main (1a2b3c4..5d6e7f8):`, so `1a2b3c4`), and the line
+   its first line (`3 new commits on origin/main (0.9.16 → 0.9.19, 1a2b3c4..5d6e7f8):`, so `1a2b3c4`), and the line
    about the database's upgrade steps (`… says how to return to 1a2b3c4`); `git pull` shows it as
    `Updating 1a2b3c4..5d6e7f8`.
 

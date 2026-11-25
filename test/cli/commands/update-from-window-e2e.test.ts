@@ -318,9 +318,10 @@ describe('Update now end to end: a real server, the real launcher, a real fast-f
     assert.equal(procStartOf(before.pid), null, 'the old server has ended');
     // The updater's last line comes once its `skydeck window` has seen the page come back.
     const logPath = join(h.d.deck.places.stateDir, 'update.log');
+    // The copy's package.json set the pair in its one commit: the update brings 0.9.1.
     await until(
-      () => readFileSync(logPath, 'utf8').endsWith(`\nupdated to ${short(made)}\n`),
-      `update.log ends with updated to ${short(made)}`,
+      () => readFileSync(logPath, 'utf8').endsWith('\nupdated to 0.9.1\n'),
+      'update.log ends with updated to 0.9.1',
       2 * WAIT_MS,
     );
     assert.match(

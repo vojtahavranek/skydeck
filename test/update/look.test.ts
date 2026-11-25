@@ -19,6 +19,7 @@ import {
   scriptedGit,
   scriptedRepo,
   subCommand,
+  VERSION_CALLS,
 } from '../helpers/update.ts';
 import type { ScriptedRepo } from '../helpers/update.ts';
 
@@ -198,7 +199,60 @@ describe("lookForUpdate, the window's order (tolerant)", () => {
       'log',
       'ls-tree',
       'ls-tree',
+      ...VERSION_CALLS,
     ]);
+  });
+
+  test("the versions of both commits, from each one's own history; the header of the report names them beside the ids", async (t) => {
+    const bump = 'b'.repeat(40);
+    const l = looker(t, {
+      versions: {
+        [OLD]: { bump, pair: '0.9', after: 16 },
+        [NEW]: { bump, pair: '0.9', after: 17 },
+      },
+    });
+
+    const { update } = known(await l.look('none', true));
+
+    assert.equal(update.oldVersion, '0.9.16');
+    assert.equal(update.newVersion, '0.9.17');
+    assert.equal(
+      report(update)[0],
+      '1 new commit on origin/main (0.9.16 → 0.9.17, 0123456..fedcba9):',
+    );
+  });
+
+  test('a version that cannot be read, or whose calls fail or time out, costs the look nothing: the rest as it was', async (t) => {
+    const bump = 'b'.repeat(40);
+    const versions = {
+      [OLD]: { bump, pair: '0.9', after: 16 },
+      [NEW]: { bump, pair: '0.9', after: 17 },
+    };
+    const counted = known(await looker(t, { versions }).look('none', true)).update;
+    const expected = { ...counted, oldVersion: '0.9', newVersion: '0.9' };
+    for (const answer of [
+      { code: 128, stderr: 'fatal: no\n' },
+      { code: null, timedOut: true },
+    ]) {
+      const failing = looker(t, {
+        versions,
+        answers: {
+          [`rev-list --first-parent --count ${bump}..${OLD}`]: answer,
+          [`rev-list --first-parent --count ${bump}..${NEW}`]: answer,
+        },
+      });
+      const looked = await failing.look('none', true);
+      assert.deepEqual(known(looked).update, expected, 'the pair alone; nothing else changed');
+      assert.equal(looked.kind === 'known' && looked.blocked, null);
+    }
+    const unread = looker(t, {
+      answers: { 'rev-parse --is-shallow-repository': { code: null, timedOut: true } },
+    });
+    const update = known(await unread.look('none', true)).update;
+    assert.equal(update.oldVersion, null);
+    assert.equal(update.newVersion, null);
+    assert.equal(update.count, 1);
+    assert.equal(report(update)[0], '1 new commit on origin/main (0123456..fedcba9):', 'as before');
   });
 
   test('a quiet fetch that fails or times out: known, with its line, the facts those of the ref as it was', async (t) => {

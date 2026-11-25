@@ -28,6 +28,9 @@ import {
   scriptedGit,
   scriptedRepo,
   subCommand,
+  VERSION_CALLS,
+  VERSION_CALLS_ONE,
+  versionArgs,
 } from '../../helpers/update.ts';
 import type { ScriptedRepo } from '../../helpers/update.ts';
 
@@ -88,6 +91,7 @@ const LOOK = [
   'log',
   'ls-tree',
   'ls-tree',
+  ...VERSION_CALLS,
 ];
 
 /** A fetch that succeeded, and the look again at the branch, HEAD and the status after it (C3). */
@@ -463,6 +467,7 @@ describe('skydeck update: how git is run (U3)', () => {
         ],
         ['ls-tree', '--full-tree', '-z', OLD, '--', 'src/store/migrations.ts'],
         ['ls-tree', '--full-tree', '-z', NEW, '--', 'src/store/migrations.ts'],
+        ...versionArgs(OLD, NEW),
         ['rev-parse', '--git-path', 'index.lock'],
         ['ls-files', '-z', '--others', '--exclude-standard'],
         ['merge', '--ff-only', '--no-squash', NEW],
@@ -533,9 +538,11 @@ describe('skydeck update: what it reports (U4)', () => {
       ...BEFORE_FETCH,
       ...FETCHED,
       'rev-parse',
+      ...VERSION_CALLS_ONE,
       ...BEFORE_FETCH,
       ...FETCHED,
       'rev-parse',
+      ...VERSION_CALLS_ONE,
     ]);
     assert.ok(!existsSync(u.tp.places.dbPath), 'the database was not opened');
     assert.deepEqual(

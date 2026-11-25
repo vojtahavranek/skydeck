@@ -19,6 +19,7 @@ import {
 import type { Git, QuietFetchOptions } from './git.ts';
 import { NEWS_DIR, NOTE_BYTES, NOTE_FILE, NOTES_SHOWN, parseNote } from './news.ts';
 import type { Note } from './news.ts';
+import { versionGitOf, versionName, versionOf } from './version.ts';
 
 /** The file whose change says that the new code may upgrade the database (U4). */
 export const MIGRATIONS = 'src/store/migrations.ts';
@@ -42,6 +43,13 @@ export interface Update {
   upstream: string;
   oldId: string;
   newId: string;
+  /**
+   * The versions of the two commits (src/update/version.ts: `0.9.16`, or the pair alone when git
+   * cannot count), each read from git's objects of its own commit; null when not even its pair can
+   * be read. The same for both when nothing would come.
+   */
+  oldVersion: string | null;
+  newVersion: string | null;
   /** How many commits the upstream has that HEAD does not. */
   count: number;
   /** How many commits HEAD has that the upstream does not (0 for the command: it refuses then). */
@@ -166,7 +174,9 @@ interface Seen {
 export async function lookForUpdate(git: Git, files: Files, options: LookOptions): Promise<Looked> {
   const seen: Seen = { head: null, fetchFailed: null };
   try {
-    return await look(git, files, options, seen);
+    const looked = await look(git, files, options, seen);
+    if (looked.kind === 'known') await addVersions(git, looked.update);
+    return looked;
   } catch (error) {
     if (error instanceof SkydeckError) {
       return {
@@ -279,6 +289,8 @@ async function look(
     upstream,
     oldId,
     newId,
+    oldVersion: null,
+    newVersion: null,
     count: 0,
     ahead: 0,
     commits: [],
@@ -320,6 +332,22 @@ async function look(
   update.otherCount = Math.max(0, update.count - news.adders.size);
   update.upgradesDatabase = (await migrationsOf(git, oldId)) !== (await migrationsOf(git, newId));
   return known();
+}
+
+/**
+ * The versions of a look that is `known`, both side by side within GIT_MS, offline. It never costs
+ * the look: whatever stops it gives the pair alone or null, and the rest stays as it is (only the
+ * AbortError of the window's stop is thrown on, as from any other call of the look).
+ */
+async function addVersions(git: Git, update: Update): Promise<void> {
+  const versionGit = versionGitOf(git);
+  const same = update.newId === update.oldId;
+  const [oldVersion, newVersion] = await Promise.all([
+    versionOf(versionGit, update.oldId, GIT_MS),
+    same ? Promise.resolve(null) : versionOf(versionGit, update.newId, GIT_MS),
+  ]);
+  update.oldVersion = oldVersion;
+  update.newVersion = same ? oldVersion : newVersion;
 }
 
 /** The newest `max` commits of `old..new`, newest first: full id and subject. */
@@ -505,10 +533,30 @@ export function subjectLine(subject: string): string {
   return text.length > SUBJECT_MAX ? `${clip(text, SUBJECT_MAX - 1)}…` : text;
 }
 
+/**
+ * The versions an update goes between, `0.9.16 → 0.9.19` (a version not known: the commit's short
+ * id); null when neither is known.
+ */
+export function versionsLine(update: Update): string | null {
+  if (update.oldVersion === null && update.newVersion === null) return null;
+  return `${versionName(update.oldVersion, update.oldId)} → ${versionName(update.newVersion, update.newId)}`;
+}
+
+/** `skydeck is up to date (<branch> at <version>, <id>, as <upstream>)`; without a version known, the id alone. */
+export function upToDateLine(update: Update): string {
+  const at =
+    update.oldVersion === null
+      ? short(update.oldId)
+      : `${update.oldVersion}, ${short(update.oldId)}`;
+  return `skydeck is up to date (${sanitize(update.branch)} at ${at}, as ${sanitize(update.upstream)})`;
+}
+
 /** U4's lines for an update that brings commits (`skydeck update --check`'s and `skydeck update`'s). */
 export function report(update: Update): string[] {
+  const versions = versionsLine(update);
+  const ids = `${short(update.oldId)}..${short(update.newId)}`;
   const lines = [
-    `${counted(update.count, 'new commit', 'new commits')} on ${sanitize(update.upstream)} (${short(update.oldId)}..${short(update.newId)}):`,
+    `${counted(update.count, 'new commit', 'new commits')} on ${sanitize(update.upstream)} (${versions === null ? ids : `${versions}, ${ids}`}):`,
     ...update.commits.map((c) => `  ${short(c.id)}  ${subjectLine(c.subject)}`),
   ];
   if (update.count > update.commits.length) {

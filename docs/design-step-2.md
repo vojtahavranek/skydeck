@@ -5683,11 +5683,18 @@ database before it migrates it, design 9.2; install.md, "Going back", gives the 
    exception: `fetch --quiet -- <remote>` in the user's own terminal with no timeout, as `git pull`
    would be (a passphrase prompt works; Ctrl+C ends it, nothing changed). `--check` fetches too:
    that changes the checkout's remote-tracking refs and nothing else.
-2. **It reports** on standard output: `skydeck is up to date (<branch> at <id>, as <upstream>)`
-   (exit 0, and nothing else happens: no server is looked at), or `<n> new commits on <upstream>
-   (<old>..<new>):` and one line per commit, newest first, at most 20 (`… and <m> more`). Ids are
-   the first 7 hexadecimal digits of the commit's id, for reading only; the fast-forward uses the
-   whole id. When `src/store/migrations.ts` differs between HEAD and the new commit (or is gone),
+2. **It reports** on standard output: `skydeck is up to date (<branch> at <version>, <id>, as
+   <upstream>)` (exit 0, and nothing else happens: no server is looked at), or `<n> new commits on
+   <upstream> (<old version> → <new version>, <old>..<new>):` and one line per commit, newest
+   first, at most 20 (`… and <m> more`). Ids are the first 7 hexadecimal digits of the commit's
+   id, for reading only; the fast-forward uses the whole id. A version is the commit's own (design
+   8, the version line: `0.9.16`, or the pair alone, `0.9`, when git cannot count), read from git's
+   objects of that commit — the fetched commit's from its own `package.json` and its own history,
+   before anything is applied, so a bump the update brings shows (`0.9.16 → 0.10.0`) —, offline
+   (nothing is fetched; in a partial clone nothing is read), the two side by side within the 10
+   seconds of one git call; a version that cannot be read at all is the commit's short id there,
+   and with neither known the parenthesis holds the ids alone, as the up-to-date line does. Reading
+   them never costs the look: whatever stops it leaves every other line as it is. When `src/store/migrations.ts` differs between HEAD and the new commit (or is gone),
    one more line says that the update may upgrade the database, that a copy of it as it was is kept
    first (design 9.2), and that install.md ("Going back") says how to return to HEAD's commit,
    which it names (`SCHEMA_VERSION` is computed, so
@@ -5718,8 +5725,9 @@ database before it migrates it, design 9.2; install.md, "Going back", gives the 
    tries again for ever (6.3), reloads itself for the new build (8.2.2) and counts as the open
    window; no second window is opened. When the stopped server had no page nothing is started
    (`skydeck window starts it again`); windows are left as they were, and one that does not come
-   back within the 7 seconds is replaced as `skydeck window` replaces it. (d) `updated to <id>`,
-   exit 0; exit 1 when the child ended otherwise.
+   back within the 7 seconds is replaced as `skydeck window` replaces it. (d) `updated to
+   <version>` (the new commit's, as the report named it; its short id when not known), exit 0;
+   exit 1 when the child ended otherwise.
 
    A fast-forward that git refused (it ended with a code), or that could not be started, is looked
    at: HEAD, the tracked files' status and the untracked files against the list read before. As it

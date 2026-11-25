@@ -57,6 +57,36 @@ export function availablePayload(over: Partial<AvailablePayload> = {}): Availabl
   };
 }
 
+/**
+ * The sub-commands of the versions a look that is known reads (src/update/version.ts), for two
+ * commits the scripted git names no package.json of (the default): side by side, each commit's
+ * partial-clone settings and whether the history is shallow, then each one's changes of
+ * package.json (none: no more). VERSION_CALLS_ONE: the same for one commit (nothing would come).
+ */
+export const VERSION_CALLS = ['config', 'rev-parse', 'config', 'rev-parse', 'rev-list', 'rev-list'];
+export const VERSION_CALLS_ONE = ['config', 'rev-parse', 'rev-list'];
+
+/** The arguments of VERSION_CALLS' calls (after `-C <root>`), in their order, for `old` and `new`. */
+export function versionArgs(old: string, ...more: string[]): string[][] {
+  const config = [
+    'config',
+    '-z',
+    '--get-regexp',
+    '^(extensions\\.partialclone|remote\\..*\\.promisor)$',
+  ];
+  const shallow = ['rev-parse', '--is-shallow-repository'];
+  const changes = (id: string): string[] => [
+    'rev-list',
+    '--first-parent',
+    '--max-count=100',
+    id,
+    '--',
+    'package.json',
+  ];
+  const ids = [old, ...more];
+  return [...ids.flatMap(() => [config, shallow]), ...ids.map(changes)];
+}
+
 /** The id of the i-th new commit (1 = the oldest); its short id is its first seven characters. */
 export function commitId(i: number): string {
   return `${i.toString(16).padStart(7, '0')}${'e'.repeat(33)}`;
@@ -119,6 +149,12 @@ export interface ScriptedRepo {
   noteAdders: string[];
   /** `ls-tree` of src/store/migrations.ts per commit id: its output (default the same blob). */
   migrations: Record<string, string>;
+  /**
+   * The version of a commit (src/update/version.ts), per commit id: the commit that set its pair
+   * (`bump`, the one change of package.json the first-parent history shows), that pair, and how
+   * many commits came after it. A commit not named has no package.json: its version is null.
+   */
+  versions: Record<string, { bump: string; pair: string; after: number }>;
   /** What `merge --ff-only` answers. */
   merge: Partial<RunResult>;
   /** What HEAD and `status` say after a merge that failed. */
@@ -163,6 +199,7 @@ export function scriptedRepo(root: string, over: Partial<ScriptedRepo> = {}): Sc
     blobs: {},
     noteAdders: [],
     migrations: {},
+    versions: {},
     merge: {},
     afterFailedMerge: { head: OLD, status: '' },
     headAfterMerge: null,
@@ -293,6 +330,34 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
         return repo.partialClone === null
           ? runResult({ code: 1 })
           : runResult({ stdout: repo.partialClone });
+      // The version's calls (src/update/version.ts): no partial clone (`config -z` above), a
+      // history that is not shallow, and each commit's one change of package.json.
+      case 'rev-parse --is-shallow-repository':
+        return line('false');
+      case 'rev-list --first-parent': {
+        if (rest[1] === '--count') {
+          const [bump, commit] = (rest[2] ?? '').split('..');
+          const version = repo.versions[commit ?? ''];
+          if (version !== undefined && version.bump === bump) return line(String(version.after));
+          break;
+        }
+        const version = repo.versions[rest[2] ?? ''];
+        return runResult({ stdout: version === undefined ? '' : `${version.bump}\n` });
+      }
+      case 'cat-file --batch':
+        return runResult({
+          stdout: (call.options?.input ?? '')
+            .split('\n')
+            .filter((entry) => entry !== '')
+            .map((entry) => {
+              const bump = entry.split(':')[0] ?? '';
+              const version = Object.values(repo.versions).find((v) => v.bump === bump);
+              if (version === undefined) return `${entry} missing\n`;
+              const file = JSON.stringify({ version: `${version.pair}.0` });
+              return `${'6'.repeat(40)} blob ${Buffer.byteLength(file)}\n${file}\n`;
+            })
+            .join(''),
+        });
       case 'cat-file --batch-check':
         return runResult({
           stdout: (call.options?.input ?? '')

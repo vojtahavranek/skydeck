@@ -136,6 +136,45 @@ describe('skydeck update with the real git: applying (U5, U8)', () => {
     );
   });
 
+  test('the versions: the header and the up-to-date line name them beside the ids, the result line names the new one — also across a bump the update brings', async (t) => {
+    const pkg = (version: string): string => `${JSON.stringify({ name: 'x', version })}\n`;
+    const r = real(t, { content: { 'README.md': 'one\n', 'package.json': pkg('0.9.0') } });
+    r.c.commit(r.c.root, 'one', { 'a.txt': 'a\n' });
+    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main');
+    r.c.git(r.c.other, 'pull', '--quiet');
+    const old = r.c.id();
+
+    const up = await r.update();
+    assert.equal(up.code, 0, up.stderr);
+    assert.equal(
+      up.stdout,
+      `skydeck is up to date (main at 0.9.1, ${short(old)}, as origin/main)\n`,
+    );
+
+    r.c.push('two', { 'b.txt': 'b\n' });
+    const bump = r.c.push('the next pair', { 'package.json': pkg('0.10.0') });
+    const made = r.c.push('after the bump', { 'c.txt': 'c\n' });
+    const checked = await r.update(['--check']);
+    assert.equal(checked.code, 0, checked.stderr);
+    assert.equal(
+      checked.stdout,
+      `3 new commits on origin/main (0.9.1 → 0.10.1, ${short(old)}..${short(made)}):\n` +
+        `  ${short(made)}  after the bump\n  ${short(bump)}  the next pair\n` +
+        `  ${short(r.c.id(`${bump}~1`, r.c.other))}  two\n` +
+        'run skydeck update to apply it\n',
+    );
+    assert.equal(
+      r.c.id(),
+      old,
+      'the version of the new commit was read before anything was applied',
+    );
+
+    const u = await r.update();
+    assert.equal(u.code, 0, u.stderr);
+    assert.match(u.stdout, /\nupdated to 0\.10\.1\n$/);
+    assert.equal(r.c.id(), made);
+  });
+
   test('the upstream on a remote not named origin', async (t) => {
     const r = real(t, { remoteName: 'upstream', branch: 'trunk' });
     const old = r.c.id();
@@ -425,10 +464,11 @@ describe('the real launcher across an update of itself (U6, U8)', () => {
     assert.equal(u.stderr, '');
     assert.equal(
       u.stdout,
-      `1 new commit on origin/main (${short(old)}..${short(made)}):\n  ${short(made)}  a new launcher and poisoned modules\n` +
+      // The copy's package.json set the pair in its one commit: 0.9.0, then 0.9.1.
+      `1 new commit on origin/main (0.9.0 → 0.9.1, ${short(old)}..${short(made)}):\n  ${short(made)}  a new launcher and poisoned modules\n` +
         // src/store/migrations.ts is one of the modules replaced
         `this update changes the database's upgrade steps: it may upgrade the database, which an older checkout cannot open; a copy of the database as it was is kept first, and docs/install.md ("Going back") says how to return to ${short(old)}\n` +
-        `updated to ${short(made)}\n`,
+        'updated to 0.9.1\n',
     );
     assert.equal(u.status, 0);
     assert.equal(r.c.id(), made);

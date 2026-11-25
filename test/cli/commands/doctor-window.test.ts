@@ -493,7 +493,7 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
 
   const root = (m: WindowMachine): string => join(m.s.root, 'checkout');
 
-  test("no record: never checked; no fetch and no git call beyond the version line's two", async (t) => {
+  test("no record: never checked; no fetch and no git call beyond the version line's", async (t) => {
     const m = machine(t);
 
     const { r, gitCalls } = await doctorAt(m);
@@ -503,8 +503,11 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
       'info',
       /^info {5}update: never checked \(the window's server checks when it starts\)$/,
     );
-    assert.equal(gitCalls.length, 2, JSON.stringify(gitCalls));
+    // log and status, and the version's chain up to the fake git's empty list of package.json's
+    // changes (src/cli/version.ts): each one of the line's, with no optional lock.
+    assert.equal(gitCalls.length, 5, JSON.stringify(gitCalls));
     assert.ok(gitCalls.every((args) => !args.includes('fetch')));
+    assert.ok(gitCalls.every((args) => args.includes('--no-optional-locks')));
   });
 
   test('a record of the shape before (version 1, before the notes of what is new): never checked, as for none', async (t) => {
@@ -1155,7 +1158,8 @@ describe('doctor: what it starts', () => {
       commands.filter((command) => !command.startsWith('git ')),
       ['claude --version', 'gh --version', 'python3 --version'],
     );
-    assert.equal(commands.filter((command) => command.startsWith('git ')).length, 2);
+    // The version line's: log and status beside the version's first round of two, which ends it.
+    assert.equal(commands.filter((command) => command.startsWith('git ')).length, 4);
   });
 });
 

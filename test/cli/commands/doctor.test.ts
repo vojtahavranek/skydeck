@@ -110,12 +110,16 @@ describe('doctor on a complete installation', () => {
     const commands = r.runner.calls.map((call) => [call.command, ...call.args].join(' '));
     assert.deepEqual(
       commands.filter((command) => !command.startsWith('git ')),
-      // Follow-up F20 adds Claude Code's --version (and the version line's two git calls, of
+      // Follow-up F20 adds Claude Code's --version (and the version line's git calls, of
       // test/cli/version.test.ts); S2 16.3 adds python3 --version (ruled by the plan owner, task
       // 24); nothing else.
       ['claude --version', 'gh --version', 'gh auth status', 'python3 --version'],
     );
-    assert.equal(commands.filter((command) => command.startsWith('git ')).length, 2);
+    // The version line's: log and status, and the version's chain, which ends at the first
+    // round of the fake git that names no package.json (src/update/version.ts).
+    const git = commands.filter((command) => command.startsWith('git '));
+    assert.equal(git.length, 5, JSON.stringify(git));
+    assert.ok(git.every((command) => command.includes(' --no-optional-locks ')));
   });
 
   test('it reads nothing in: a spool file stays where it is, and is counted', async (t) => {
