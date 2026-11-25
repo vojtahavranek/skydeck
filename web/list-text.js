@@ -78,7 +78,7 @@ function clean(text) {
  * @property {string} age a one-line row's age (its last activity); '' on a row of two lines
  * @property {string | null} stateLine the second line of a running or starting row, and of a row
  *   that needs you (the reason's line, B13); else null
- * @property {'asks' | 'ended' | 'finished' | 'other' | null} attention why the row needs you
+ * @property {'asks' | 'ended' | 'finished' | 'unread' | 'other' | null} attention why the row needs you
  *   (S2 12.4: its mark; `other` for a reason the page does not know), null when it needs nothing
  */
 
@@ -445,11 +445,13 @@ function stateLineOf(row, nowNs, terminal) {
  * The mark of a row that needs you (S2 12.4): its reason, each drawn in its own way
  * (web/list.css), or `other` for a reason the page does not know.
  * @param {RowPayload} row
- * @returns {'asks' | 'ended' | 'finished' | 'other'}
+ * @returns {'asks' | 'ended' | 'finished' | 'unread' | 'other'}
  */
 function attentionMark(row) {
   const reason = row.attention?.reason;
-  return reason === 'asks' || reason === 'ended' || reason === 'finished' ? reason : 'other';
+  return reason === 'asks' || reason === 'ended' || reason === 'finished' || reason === 'unread'
+    ? reason
+    : 'other';
 }
 
 /**

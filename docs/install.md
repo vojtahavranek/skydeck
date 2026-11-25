@@ -1013,6 +1013,7 @@ header:
 | the pull requests | `p` | `Pull requests` (`+ PR` while none is attached) |
 | done, undone | `d` | `Done` (`Undone` for a session marked done) |
 | park, unpark | `w` | `Park` (`Unpark` for a parked session) |
+| unread, read ("Which sessions need you") | `u` | `Unread` (`Read` for a session marked unread, finished or ended) |
 | restart (below) | `r` | `Restart` |
 
 With no session selected, a key says `no session selected`.
@@ -1021,10 +1022,11 @@ With no session selected, a key says `no session selected`.
 is one line, cut with an ellipsis when it is long:
 
 1. the title, the group chip with its ✎ (or `+ group`), the state, `Note`, `Restart` (only for a
-   session running in a terminal of the window that is not marked done; see below), `Done` and
-   `Park`. In a narrow right side the buttons give way rather than being cut: with the list 400 px
-   wide, a window up to about 810 px wide shows no `Restart`, and one up to about 718 px no `Park`
-   or `Unpark`; `r`, `w` and `skydeck park` still work;
+   session running in a terminal of the window that is not marked done; see below), `Done`,
+   `Park` and `Unread` (or `Read`). In a narrow right side the buttons give way rather than being
+   cut: with the list 400 px wide, a window up to about 878 px wide shows no `Restart`, one up to
+   about 810 px no `Unread` or `Read`, and one up to about 718 px no `Park` or `Unpark`; `r`, `u`,
+   `w` and `skydeck park` still work;
 2. the directory (whole in its tooltip), `opened today at 14:02 · last active 3m` (`opened` while
    the window shows the session's terminal), where the title comes from (`title: your label`,
    `title: Claude Code's name`, `title: Claude Code's summary` or `title: start time and
@@ -1124,7 +1126,7 @@ After `w` in the list the selection goes to the row after it in the section it l
 before it, else none (the list does not move; Ctrl+Tab goes back to the parked session); the
 keyboard stays in the list, so `w` again parks the next one. `Park` in the header keeps the session
 selected and the list follows it under Parked. A parked session is quiet: its marks (asks,
-finished, ended) still show in its row, but it sends no desktop notification, the title bar's `need
+finished, ended, marked unread) still show in its row, but it sends no desktop notification, the title bar's `need
 you` count leaves it out and Ctrl+Shift+J skips it. Running in the window, it gives its number up
 at once: its row and terminal show none, Ctrl+Shift+1…9 never go to it, and a terminal of the
 window that waits for a number takes it at once (else the next session you start or resume does);
@@ -1573,7 +1575,7 @@ filter and the quick switcher find a session by its status' text too. `skydeck s
 
 #### Which sessions need you (stage B)
 
-A session **needs you** for one of three reasons. Its row then has a coloured bar at its left, a
+A session **needs you** for one of four reasons. Its row then has a coloured bar at its left, a
 bold title and the reason on its second line, in the reason's colour, with how long ago it began;
 an ended row that is not running has the two lines too:
 
@@ -1582,8 +1584,24 @@ an ended row that is not running has the two lines too:
 | `needs you · <detail> · 3m` (`needs you · 3m` without a detail), in the waiting colour | Claude Code asks: a permission prompt or a question is open in the session. The detail is what Claude Code says it waits for, cut at 120 characters with `…`. | when the prompt or the question is closed, wherever you answer it |
 | `finished · not seen · 2m`, in green | its turn ended while you were not looking at it, and it is idle | when you have seen it (below), when its next turn starts, or when it stops running |
 | `ended unexpectedly · not seen · 2m`, in the crash colour | the program of its terminal in the window ended, but not the normal way (as `/exit` ends it): `claude` crashed or was killed, or the terminal's keeper died | when you have seen it |
+| `marked unread · 2m`, in the accent colour (the colour of the selection) | you marked it unread (`u` or `Unread`, below), running or not | when you come back to it (below), or with `u` or `Read` |
 
-The age is left out while skydeck does not know when the reason began.
+The age is left out while skydeck does not know when the reason began. A session with several
+reasons shows the first of them in this order.
+
+**Marked unread.** You looked at a session but want to come back to it later: press `u` in the
+list (`Focus: list`) or `Unread` in the header. The toast says `Marked unread: it needs you until
+you come back to it.`, and the session needs you as for any other reason, in every window and
+after a restart of the window, until you **come back to it**: select it again from another row (a
+click, the keys, the quick switcher or Ctrl+Shift+J) and stay 1.5 seconds in a window that has the
+focus, or type into its terminal. Staying on it after marking it, the window losing and getting
+back the focus, reloading the window or opening a second one with it selected do not read it. `u`
+again, or `Read` in the header, takes the mark away (`Marked read.`); on a session that finished
+or ended unexpectedly, `u` marks it read as if you had looked at it. A session that asks keeps
+asking (the toast says `it asks something: it needs you until it is answered`), and a session
+marked done cannot be marked (done takes the mark away). A turn that ends on a session marked
+unread shows `finished`; coming back clears both. Marking a session unread sends no desktop
+notification. A parked session can be marked too: its row shows the mark, and it stays quiet.
 
 **Seen.** You have seen a session once it has been the selected one for 1.5 seconds in a skydeck
 window that has the focus (in front: the one you work in), or at once when you type into its
@@ -1609,7 +1627,7 @@ and `skydeck` while none needs you.
 
 **Ctrl+Shift+J** selects the next session that needs you: first those that ask, the one that has
 waited longest first; then those that ended unexpectedly; then those that finished, the oldest
-first. Pressed again it goes on, and after the last it starts over. As with Ctrl+Shift+1…9, the
+first; then those marked unread, the one marked first first. Pressed again it goes on, and after the last it starts over. As with Ctrl+Shift+1…9, the
 session's terminal takes the keyboard, or the list when it has none. The key bar says `no session
 needs you` when none does, and `no other session needs you` when only the selected one does (it
 stays selected). It goes only through the rows the list shows: when the filter or the folded Earlier

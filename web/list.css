@@ -388,6 +388,9 @@
 .list-row[data-attention='ended']::before {
   background: var(--need-ended);
 }
+.list-row[data-attention='unread']::before {
+  background: var(--need-unread);
+}
 .list-row[data-attention] .row-title {
   color: var(--text);
   font-weight: 700;
@@ -400,6 +403,9 @@
 }
 .list-row[data-attention='ended'] .row-state {
   color: var(--need-ended);
+}
+.list-row[data-attention='unread'] .row-state {
+  color: var(--need-unread);
 }
 /* The count of those that need you, first in the title bar: its dot is drawn here, not a
    character of its text (B13), in the rows' attention colour. */

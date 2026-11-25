@@ -880,6 +880,21 @@ describe('rowText: a row that needs you (S2 12.2, 12.4; plan B13)', () => {
     );
   });
 
+  test('S2 12.4: a row marked unread has two lines, running or not: `marked unread · <age>`, its own mark', () => {
+    const unread = { reason: 'unread' as const, detail: null, sinceNs: ago(2n * MIN) };
+    const stopped = rowText(row({ attention: unread }), now, null);
+    assert.equal(stopped.stateLine, 'marked unread · 2m');
+    assert.equal(stopped.attention, 'unread');
+    assert.equal(stopped.age, '', 'no age on its first line');
+    const running = rowText(
+      row({ state: 'running', terminal: 'aaaaaaaaaaaa', attention: { ...unread, sinceNs: null } }),
+      now,
+      terminal(),
+    );
+    assert.equal(running.stateLine, 'marked unread');
+    assert.equal(running.attention, 'unread');
+  });
+
   test("the reason's line counts on with the time given (the list repaints its ages)", () => {
     const needs = row({
       state: 'running',

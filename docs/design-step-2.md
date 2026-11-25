@@ -3480,13 +3480,17 @@ it), the state pill, the project directory, "opened <time> · last active <age>"
 click copies the whole id), where the title comes from, from follow-up F16 the flags the session
 was started with (below), and buttons Note, from issue #166 Restart (12.10: only while the row is
 `endable` and not marked done), Done / Undone and, from follow-up F44, Park / Unpark (12.15:
-tooltips `park it: it waits under Parked (w)` and `back under Open (w)`). The buttons give way, none
-is cut (ruled for #166): Restart is not shown while the header is 382 px wide inside or less, and
-Park / Unpark while it is 290 px or less (measured in the suite's font: with Restart and Unpark a
-button is cut below 307 px and the state lies under Note below 338 px; with Unpark alone, below
-242 and 273 px; the rules leave slack for other fonts). With the list 400 px wide a window up to
-about 810 px wide shows no Restart and one up to about 718 px no Park / Unpark (at 640 px Park was
-cut before); `r`, `w` and `skydeck park` remain. A done row at the narrowest windows (below about
+tooltips `park it: it waits under Parked (w)` and `back under Open (w)`), and last `Unread` /
+`Read` (12.4: `Read` while the session has a mark seeing clears — ended, finished or unread —,
+else `Unread`; tooltips `mark it read (u)` and `mark it unread: it needs you until you come back to
+it (u)`; the act and the toast are those of `u`, 12.9). The buttons give way, none is cut (ruled
+for #166): Restart is not shown while the header is 450 px wide inside or less, Unread / Read while
+it is 382 px or less, and Park / Unpark while it is 290 px or less (measured in the suite's font:
+with Restart, Unpark and Unread a button is cut below 372 px and the state lies under Note below
+403 px; with Unpark and Unread, below 306 and 338 px; with Unpark alone, below 241 and 272 px; the
+rules leave slack for other fonts). With the list 400 px wide a window up to about 878 px wide
+shows no Restart, one up to about 810 px no Unread / Read and one up to about 718 px no Park /
+Unpark (at 640 px Park was cut before); `r`, `u`, `w` and `skydeck park` remain. A done row at the narrowest windows (below about
 650 px, with the list at 400 px) is the one case where the state may lie under Note (`Undone` is
 wider than `Done`); no button is cut there. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
@@ -4259,6 +4263,16 @@ a Czech layout and would take Claude Code's Ctrl+Shift+-. If the user turns on t
 protocol in a later xterm.js and binds a `ctrl+shift+<x>` in Claude Code, the window shadows that
 binding; the help says so.
 
+**Marking unread** (12.4). In the list zone `u` marks the selected session unread, or read while
+it has a mark seeing clears (ended, finished, unread), as the header's `Unread` / `Read` does
+(12.5): the page sends `unread` or `read` (8.2.3), picked from the row's `attention`, and the server
+decides the rest. The toast says what was done — `Marked unread: it needs you until you come back to
+it.`, `Marked read.` —, with no Undo (`u` again is its undo), or why nothing was: `it asks
+something: it needs you until it is answered`, `it is marked done: a done session needs nothing`,
+`this session has not started yet; mark it once it runs`. A held `u` acts once (its auto-repeats
+do nothing), one act per session at a time; the selection and the keyboard stay. On a hidden
+selection and a selected caption it says `no session selected`, as `d` does.
+
 **Moving a session of Open** (follow-up F37, 2026-11-21; follow-up F42, 2026-11-23: any row). In
 the list zone, with a session of Open selected, Shift+↑ or Shift+K moves it one place up and
 Shift+↓ or Shift+J one place down: Shift alone with the key that types k/K or j/J (so Shift+k under
@@ -4441,7 +4455,7 @@ session at all), never its card. The header's Done on such
 a session takes its toast from the row, since it is in no section: `Marked done. Stays under Open
 while it runs; …` while it runs or starts, else `Marked done: hidden from the list. …` (ruled by
 the lead on 2026-11-15). The list keys (`l`, F2,
-`g`, `n`, `t`, `p`, `d`, from follow-up F44 `w`) act only on a row the list shows: on a hidden selection, and on a selected
+`g`, `n`, `t`, `p`, `d`, from follow-up F44 `w`, from the mark unread `u`) act only on a row the list shows: on a hidden selection, and on a selected
 caption, they say `no session selected` and send nothing. `c` (follow-up F40) is the exception: it
 acts whenever the right side shows the carry-over bar, a hidden selection's too (after `/clear`
 the new session has a new title and often no row under a filter). A named limit: when Ctrl+Tab, a slot chord or a click on its
@@ -5147,7 +5161,7 @@ none: no made-up data.
   | the list | The list | every session, one row each, of this window and of any terminal; Open, Recent (the last 7 days) and Earlier; the number 1–9 is the slot |
   | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it, also with other flags (issue #188) |
   | the key bar | Where the keyboard is | `Focus: list` or `Focus: terminal`; Ctrl+Shift+L moves it; with `Focus: terminal` a letter goes to Claude Code |
-  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park and from issue #166 `r` restart (the version is not raised for them: the tour is not shown again); `/` filter, `a` show done |
+  | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park and from issue #166 `r` restart (the version is not raised for them: the tour is not shown again); `/` filter, `a` show done, and from the mark unread `u` mark unread on that line (the line of the letters is full; the version is not raised) |
   | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+J the next session that needs you; Ctrl+Shift+N a new one |
   | the list | After a restart | a restart of the PC or of WSL ends the running sessions; run `skydeck window` again, and the top of the list offers the ones that were open (the banner, 12.7); `Restore` brings the ticked ones back, and after `Not now` `> restore` in `Switch…` offers it again |
   | the gear | Settings and every key (step 7) | the gear opens Settings; Ctrl+Shift+H shows every key; the tour again: `Take the tour` in the key help, or `> tour` in `Switch…` |
@@ -6566,6 +6580,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W51 | **Real claude**, issue #166 with part 2 of #188: a throwaway session restarted from the header's `Restart` and with `r` — the keyboard on Cancel, `Restarting…`, the same conversation, the same number and place, not done, no notification —, then with `Other flags…` and another `--model`, the header showing it once Claude Code has started, a plain restart passing it on (manual-checks.md, "Restarting a session from the window"). | #166, #188 | 12.5, 12.10, design 7.6 |
 | W52 | How often the window checks for a newer skydeck by itself (follow-up F38's choice, the owner's decision of 2026-11-24): Settings' `Check for updates` shows the setup's value and its four words in order; `Every 15 minutes` saved, and a check by the clock within 16 minutes of the last one without a click; `Every day` makes none in twenty minutes; `Off` and `Check now`; the setup's value put back (manual-checks.md, "How often updates are checked"). | F38 | 10.1, 12.13, 16.5 |
 | W53 | The update dialog's notes of what is new in the owner's Edge, on the owner's own installation, at the first update after this change that brings a note (nothing is applied): the notes' titles heavier and their text under them, a code run in the terminal's font, the fold of the other changes opened and closed by a click, Enter and Space and folded again at the next open, the Tab round, the database note when there is one, the bottom lines; both schemes and the owner's colour theme read well; a window lower than the dialog scrolls its body with the heading and the buttons in view; `skydeck update --check` lists the titles under `what is new:`. | the notes of what is new | 12.1, 16.5 |
+| W54 | **Real claude**, the mark unread on throwaway sessions: `u` and the header's `Unread` / `Read`, the bar, the line `marked unread · <age>`, the count and `(n) skydeck`, no notification; the mark stays while the window stays on the session, loses and regains the focus and reloads, goes when the selection comes back to it after 1.5 s and at a typing; a turn that ends meanwhile shows `finished` and notifies; a session that asks and one marked done are refused in the toast; `skydeck window --restart` keeps it; `u` on a US and a Czech layout (manual-checks.md, "Marked unread"). | the mark unread | 10.2, 12.4, 12.5, 12.9, 13 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

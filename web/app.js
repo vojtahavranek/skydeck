@@ -66,7 +66,7 @@
 /** @import { EditWhat, ListAction, WindowChord, Zone } from './keys.js' */
 /** @import { Change } from './connection.js' */
 /** @import { Pane } from './pane.js' */
-import { nextNeeding, windowTitle } from './attention-text.js';
+import { nextNeeding, UNREAD_TEXTS, unreadAct, windowTitle } from './attention-text.js';
 import { decodeKey, loadKey, takeToken } from './auth.js';
 import { createBanner } from './banner.js';
 import { createCarryOver } from './carry-over.js';
@@ -359,6 +359,7 @@ const cards = createCards(dom.cards, {
   done: (sessionId) => markDone(sessionId, false),
   restart: (sessionId) => askRestart(sessionId, false),
   park: (sessionId) => markParked(sessionId, false),
+  unread: (sessionId) => markUnread(sessionId),
   say: (text) => say(text),
   watchFavourites: (listener) => {
     favouritesListener = listener;
@@ -1716,6 +1717,33 @@ function sendPark(sessionId, fromList, runningText) {
   });
 }
 
+/**
+ * S2 12.4: `u` and the header's `Unread` / `Read` mark the session unread, or read while its row
+ * has a mark seeing clears (`unreadAct`); one act per session at a time, as `d` and `w`. The
+ * server decides the rest and refuses an ask, a done session and one not started yet in the
+ * toast's words; a mark it took says so in the toast (`u` again is its undo). The selection stays.
+ * @param {string} sessionId
+ */
+function markUnread(sessionId) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null) {
+    say('no session selected');
+    return;
+  }
+  if (state.marking.has(sessionId)) {
+    return;
+  }
+  const { kind } = unreadAct(row);
+  state.marking.add(sessionId);
+  void act({ kind, sessionId }).then((result) => {
+    state.marking.delete(sessionId);
+    toast.show(
+      result.ok ? UNREAD_TEXTS[kind] : (result.error ?? 'skydeck could not do that'),
+      null,
+    );
+  });
+}
+
 /** A `park` (or an end that parks) of this page's `w` was answered: F44's rule (`leavePark`). */
 function answeredPark(/** @type {string} */ sessionId) {
   if (state.leaving?.sessionId === sessionId) {
@@ -2869,6 +2897,19 @@ function doListKey(action, event) {
         say('no session selected');
       } else {
         markParked(row.id, true);
+      }
+      return true;
+    }
+    case 'unread': {
+      // S2 12.4: mark the selected session unread, or read; at the first keydown only, as `d`.
+      if (event.repeat) {
+        return true;
+      }
+      const row = selectedRow();
+      if (row === undefined) {
+        say('no session selected');
+      } else {
+        markUnread(row.id);
       }
       return true;
     }

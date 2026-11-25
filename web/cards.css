@@ -16,11 +16,18 @@
   container: card-header / inline-size;
 }
 /* Issue #166: the buttons give way when the first line is short of room, none is cut (ruled).
-   Restart first: with it (and Unpark) a button is cut below 307 px of the header's width inside,
-   and the state lies under Note below 338 px; the rule, with slack for other fonts, is 382 px.
-   `r` in the list remains. */
-@container card-header (max-width: 382px) {
+   Restart first: with it, Unpark and (S2 12.4) Unread a button is cut below 372 px of the header's
+   width inside, and the state lies under Note below 403 px; the rule, with slack for other fonts,
+   is 450 px. `r` in the list remains. */
+@container card-header (max-width: 450px) {
   .header-restart {
+    display: none;
+  }
+}
+/* Then Unread / Read (S2 12.4): with Unpark and Unread a button is cut below 306 px, and the state
+   lies under Note below 338 px; the rule, with slack, is 382 px. `u` remains. */
+@container card-header (max-width: 382px) {
+  .header-unread {
     display: none;
   }
 }

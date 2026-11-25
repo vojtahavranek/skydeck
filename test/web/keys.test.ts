@@ -294,6 +294,8 @@ describe('listKey (S2 12.9)', () => {
     ['d', ev('d', 'KeyD'), { kind: 'done' }],
     // Follow-up F44: park, or unpark a parked one.
     ['w', ev('w', 'KeyW'), { kind: 'park' }],
+    // S2 12.4: the mark unread, or read.
+    ['u', ev('u', 'KeyU'), { kind: 'unread' }],
   ];
   for (const [name, e, action] of table) {
     test(name, () => {
@@ -316,6 +318,16 @@ describe('listKey (S2 12.9)', () => {
     assert.equal(listKey(ev('W', 'KeyW')), null, 'Caps Lock alone');
     for (const mod of ['ctrl', 'alt', 'meta'] as const) {
       assert.equal(listKey(ev('w', 'KeyW', mod)), null, `${mod}+w`);
+    }
+  });
+
+  test('S2 12.4: `u` marks unread on a US and on a Czech (QWERTZ) layout, matched by the character; `U` is no key, nor `u` with Ctrl, Alt or Meta', () => {
+    assert.deepEqual(listKey(ev('u', 'KeyU')), { kind: 'unread' });
+    assert.deepEqual(listKey(ev('u', 'KeyF')), { kind: 'unread' }, 'Dvorak types u on the F key');
+    assert.equal(listKey(ev('U', 'KeyU', 'shift')), null);
+    assert.equal(listKey(ev('U', 'KeyU')), null, 'Caps Lock alone');
+    for (const mod of ['ctrl', 'alt', 'meta'] as const) {
+      assert.equal(listKey(ev('u', 'KeyU', mod)), null, `${mod}+u`);
     }
   });
 

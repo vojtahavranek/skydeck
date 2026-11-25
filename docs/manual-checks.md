@@ -34,7 +34,7 @@ flags"; W50 checks parking a session (follow-up F44), at "Parked"; W51 checks re
 from the window (issue #166), at "Restarting a session from the window"; W52 checks how often the
 window checks for a newer skydeck by itself (follow-up F38's choice), at "How often updates are
 checked"; W53 checks the notes of what is new in the update dialog, at "What is new in
-the update dialog".
+the update dialog"; W54 checks marking a session unread, at "Marked unread".
 
 Setup:
 
@@ -3608,5 +3608,66 @@ out: no note yet" and stop here).
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge
 version and your colour themes; how the notes read to you.
+
+Not tried before this check was written: all of it, in Edge.
+
+## Marked unread
+
+The check of the mark unread (design-step-2.md 10.2, 12.4, 12.5, 12.9, 13;
+[install.md](install.md), "Using the window", its paragraph "Marked unread"): W54, in your window,
+with real Claude Code, on throwaway sessions in the throwaway folder. The tests mark sessions of the
+stand-in program in headless Chromium against a test server; only here do the keys meet Edge and
+your layouts, the window's focus is Windows', and Windows shows (or does not show) a desktop
+notification.
+
+## W54. Throwaway sessions marked unread and read again (real claude)
+
+Setup: skydeck updated to a commit that has the mark unread (`skydeck update`, W32), then the
+window open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Throughout:
+type a word only where the step says the keyboard is (the key bar names the zone, `Focus: list` or
+`Focus: terminal`; Ctrl+Shift+L switches it). In the list a letter is a key: `u` marks unread or
+read, `d` marks done.
+
+1. **Two throwaway sessions.** Twice: Ctrl+Shift+N, the throwaway folder's full path in the
+   directory field (`/home/<you>/skydeck-try`), a label `unread-1`, then `unread-2`, Enter. In each,
+   once Claude Code's prompt shows, type `Reply with the single word ok.` and Enter, and wait for
+   the answer.
+2. **`u` and the toast.** Click `unread-1`, wait 2 seconds, Ctrl+Shift+L until `Focus: list`, then
+   `u`. Expected: its row gets a bar at its left in the colour of the selection, a bold title and
+   the line `marked unread · 0s` (later `1m`); the toast says `Marked unread: it needs you until you
+   come back to it.` with no Undo; the title bar starts with `1 needs you`, the taskbar's title is
+   `(1) skydeck`; the header's button after `Park` says `Read`. No desktop notification.
+3. **Staying on it.** Wait 10 seconds with `unread-1` selected and the window in front. Click
+   another Windows program, wait 5 seconds, click the window again and wait 5 seconds. Press F5
+   (`Focus: list`) to reload the window, and wait 5 seconds. Expected: after each, `unread-1` still
+   shows `marked unread`.
+4. **Coming back.** Click `unread-2`, then `unread-1` again, and count: the mark is still there at
+   one second and gone at about 1.5 seconds; the count and the `(1)` go too.
+5. **Typing.** With `unread-1` selected and `Focus: list`, `u` (`Marked unread: …`). Then Enter
+   (`Focus: terminal`) and type one letter without Enter. Expected: the mark goes at once. Delete
+   the letter (Backspace).
+6. **`u` again, and the header.** Ctrl+Shift+L (`Focus: list`), `u`, then `u` again. Expected:
+   `Marked unread: …`, then `Marked read.`, and the mark is gone; the header's button says
+   `Unread`. Click it: marked unread; click it again (`Read`): read.
+7. **A turn that ends while it is unread.** Enter (`Focus: terminal`), type `Count slowly from 1
+   to 30, one number per line.` and Enter; at once Ctrl+Shift+L and `u`, then click another
+   Windows program and wait until the turn has ended (about half a minute). Expected: a desktop
+   notification for `unread-1`; back in the window, without selecting another row first, its row
+   shows `finished · not seen`. Click `unread-2`, then `unread-1`, and wait 2 seconds: the mark is
+   gone, and no `marked unread` shows afterwards.
+8. **A session that asks, and one marked done.** In `unread-2` type `Use the Bash tool to run the
+   command date.` and Enter, and wait until Claude Code asks for the permission. Ctrl+Shift+L, `u`.
+   Expected: `it asks something: it needs you until it is answered`, nothing changed. Refuse the
+   permission in its terminal (Esc). Then mark `unread-2` done (`d`, `Mark done, keep it running`),
+   `a` to show done sessions, select it, `u`. Expected: `it is marked done: a done session needs
+   nothing`. `d` again to undo the done mark, and `a`.
+9. **A restart.** Mark `unread-1` unread, then in W: `skydeck window --restart`. Expected: once the
+   window is back, with `unread-1` still selected, its mark is there after 5 seconds; click
+   another row and back: read.
+10. **Two layouts.** On a US and on a Czech layout, `u` in the list marks and reads; `U` (Shift)
+    does nothing.
+
+Write down: for each step whether it went as expected, and the words where they differ; your Edge
+version and layouts. At the end end the two throwaway sessions (`/exit` in each) and mark them done.
 
 Not tried before this check was written: all of it, in Edge.

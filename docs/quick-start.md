@@ -205,6 +205,12 @@ gets a coloured bar and a line that says why, and the title bar and the taskbar 
 in the title bar (it shows until you have answered Edge's question) lets Edge show a desktop
 notification when a session starts to need you while no skydeck window has the focus.
 
+Looked at a session but want to come back to it later? Press `u` in the list (`Focus: list`), or
+**Unread** in the header: it needs you again (`marked unread`) until you select it again from
+another row for 1.5 seconds or type into it. Staying on it, or reloading the window, keeps the
+mark. `u` again (or **Read**) takes it away; on a session that finished or ended unexpectedly, `u`
+marks it read.
+
 ## After a restart of the PC or of WSL
 
 A restart ends every session that was running. Afterwards, open a WSL terminal and run
@@ -238,8 +244,8 @@ there).
 
 - **session**: one Claude Code conversation, with its id and its transcript.
 - **state**: what a session's program does now: working, waiting, running, or not running.
-- **needs you**: the session asks you something, finished a turn you have not seen, or its
-  terminal in the window ended unexpectedly.
+- **needs you**: the session asks you something, finished a turn you have not seen, its terminal
+  in the window ended unexpectedly, or you marked it unread.
 - **label**: your name for a session, shown as its title.
 - **group**: a ticket key or a topic, by default the ticket key at the start of the title.
 - **note**: free text on one session, kept on this machine.

@@ -47,6 +47,8 @@ function wordsOf(reason) {
       return { row: 'finished · not seen', body: 'finished' };
     case 'ended':
       return { row: 'ended unexpectedly · not seen', body: 'ended unexpectedly' };
+    case 'unread':
+      return { row: 'marked unread', body: 'marked unread' };
     default: {
       const named = clean(reason);
       return { row: named, body: named };
@@ -66,9 +68,35 @@ export function needsYou(row) {
   return typeof row.needsYou === 'boolean' ? row.needsYou : (row.attention ?? null) !== null;
 }
 
+/** S2 12.4: the toasts of `u` and the header's control once the server took the act. */
+export const UNREAD_TEXTS = {
+  unread: 'Marked unread: it needs you until you come back to it.',
+  read: 'Marked read.',
+};
+
+/**
+ * S2 12.4: the act `u` and the header's control send for a row — `read` while its `attention` is
+ * one seeing clears (ended, finished, unread), else `unread` — and the header control's words,
+ * `Read` or `Unread`, with its tooltip. The server decides the rest: an ask, a done session and a
+ * session not started yet are refused there, in the words of the toast.
+ * @param {Pick<RowPayload, 'attention'>} row
+ * @returns {{ kind: 'unread' | 'read', label: string, tip: string }}
+ */
+export function unreadAct(row) {
+  const reason = row.attention?.reason;
+  return reason === 'ended' || reason === 'finished' || reason === 'unread'
+    ? { kind: 'read', label: 'Read', tip: 'mark it read (u)' }
+    : {
+        kind: 'unread',
+        label: 'Unread',
+        tip: 'mark it unread: it needs you until you come back to it (u)',
+      };
+}
+
 /**
  * B13: the second line of a row that needs you — `needs you · <detail> · 3m` (`needs you · 3m`
- * without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m` — its age
+ * without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m`, `marked
+ * unread · 2m` (S2 12.4) — its age
  * format.js's from `sinceNs` (none when that is not known); null when `attention` is null (or
  * absent, as in a list of stage A).
  * @param {AttentionPayload | null} attention
