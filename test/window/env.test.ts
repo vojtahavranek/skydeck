@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { CLAUDE_CHILD_VARIABLES } from '../../src/claude/terminal.ts';
-import { programEnvironment, serverEnvironment } from '../../src/window/env.ts';
+import { programEnvironment, serverEnvironment, shellEnvironment } from '../../src/window/env.ts';
 
 const CWD = '/home/me/projects/app';
 const LINK = '/run/user/1000/skydeck-0a1b2c3d/interop';
@@ -369,4 +369,65 @@ test("programEnvironment over serverEnvironment gives a program none of the laun
     PWD: CWD,
     WSL_INTEROP: LINK,
   });
+});
+
+// ---------------------------------------------------------------------------------------------
+// shellEnvironment (issue #199, S2 7.4, 7.10)
+
+/** A server environment with every variable this file uses. */
+function everyVariable(): Record<string, string> {
+  const env: Record<string, string> = {
+    HOME: '/h',
+    PATH: '/usr/bin',
+    SHELL: '/bin/zsh',
+    LANG: 'C.UTF-8',
+    GIT_ASKPASS: '/a',
+    VSCODE_GIT_ASKPASS_MAIN: '/m',
+    NODE_COMPILE_CACHE: '/c',
+    CLAUDECODE: '1',
+    CLAUDE_CONFIG_DIR: '/cc',
+    TERM: 'screen',
+    COLORTERM: '24bit',
+    PWD: '/elsewhere',
+    WSL_INTEROP: '/run/WSL/1_interop',
+  };
+  for (const name of [...TERMINAL_NAMES, ...TERMINAL_FAMILIES, ...SKYDECK_NAMES]) env[name] = 'x';
+  for (const name of CLAUDE_CHILD_VARIABLES) env[name] = 'x';
+  return env;
+}
+
+test("shellEnvironment: TERM, COLORTERM, PWD the folder, WSL_INTEROP the link; none of Claude Code's children's, the terminal's or the launcher's", () => {
+  const shell = shellEnvironment(everyVariable(), { cwd: CWD, interop: LINK });
+
+  assert.equal(shell['TERM'], 'xterm-256color');
+  assert.equal(shell['COLORTERM'], 'truecolor');
+  assert.equal(shell['PWD'], CWD);
+  assert.equal(shell['WSL_INTEROP'], LINK);
+  for (const name of [
+    ...CLAUDE_CHILD_VARIABLES,
+    ...TERMINAL_NAMES,
+    ...TERMINAL_FAMILIES,
+    ...SKYDECK_NAMES,
+  ]) {
+    assert.equal(name in shell, false, name);
+  }
+  assert.equal('GIT_ASKPASS' in shell, false, "the editor's askpass");
+  assert.equal(shell['SHELL'], '/bin/zsh', "SHELL is the server's");
+});
+
+test("shellEnvironment: a name the server's environment lacks is only one of TERM, COLORTERM, PWD, WSL_INTEROP; the server's values pass", () => {
+  const added = new Set(['TERM', 'COLORTERM', 'PWD', 'WSL_INTEROP']);
+  for (const server of [everyVariable(), { HOME: '/h' }, {}, { PATH: '/p', CLAUDECODE: '1' }]) {
+    for (const interop of [LINK, null]) {
+      const shell = shellEnvironment(server, { cwd: CWD, interop });
+      for (const name of Object.keys(shell)) {
+        assert.ok(Object.hasOwn(server, name) || added.has(name), `${name} came from nowhere`);
+        if (!added.has(name)) assert.equal(shell[name], server[name as keyof typeof server], name);
+      }
+    }
+  }
+  assert.equal(
+    shellEnvironment({ LANG: 'C', HOME: '/h' }, { cwd: CWD, interop: null })['LANG'],
+    'C',
+  );
 });

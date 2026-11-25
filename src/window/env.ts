@@ -128,6 +128,26 @@ export function programEnvironment(
   serverEnv: Readonly<Record<string, string>>,
   options: { cwd: string; interop: string | null },
 ): Record<string, string> {
+  return cleanedEnvironment(serverEnv, options);
+}
+
+/**
+ * Issue #199 (S2 7.4, 7.10): a session's shell's environment: what a terminal's program gets
+ * (`programEnvironment`'s cleaning, `TERM`, `COLORTERM`, `PWD`, `WSL_INTEROP`), and nothing that is
+ * set for Claude Code alone. `SHELL` and every other variable are the server's.
+ */
+export function shellEnvironment(
+  serverEnv: Readonly<Record<string, string>>,
+  options: { cwd: string; interop: string | null },
+): Record<string, string> {
+  return cleanedEnvironment(serverEnv, options);
+}
+
+/** The part both kinds of terminal share: the cleaning and the four variables every one gets. */
+function cleanedEnvironment(
+  serverEnv: Readonly<Record<string, string>>,
+  options: { cwd: string; interop: string | null },
+): Record<string, string> {
   const env: Record<string, string> = { ...serverEnv };
   dropLauncherVariables(env);
   delete env[CORE_SOFT];
