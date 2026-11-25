@@ -640,6 +640,7 @@ async function main(): Promise<void> {
       COLORTERM: process.env['COLORTERM'] ?? null,
       PWD: process.env['PWD'] ?? null,
       WSL_INTEROP: process.env['WSL_INTEROP'] ?? null,
+      FORCE_HYPERLINK: process.env['FORCE_HYPERLINK'] ?? null,
     },
     coreSoft: coreSoft(),
     ...size(),

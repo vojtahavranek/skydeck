@@ -59,6 +59,15 @@ export const SHORT = [
         words: { default: 'The default browser', edge: 'Edge' },
       },
       {
+        // S2 7.4: how Claude Code prints a web address; the hint, because a session already
+        // running keeps the way it was started with.
+        key: 'window.webAddresses',
+        label: 'Web addresses in replies',
+        hint: 'In sessions started after a change.',
+        control: 'choice',
+        words: { links: 'As links', text: 'As plain text' },
+      },
+      {
         key: 'ticketUrl',
         label: 'Ticket address',
         hint: 'With {key} where the ticket key goes. Empty: no link.',

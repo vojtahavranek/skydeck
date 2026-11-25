@@ -311,6 +311,7 @@ describe('keeper: the process', { concurrency: true }, () => {
       COLORTERM: 'truecolor',
       PWD: dir,
       WSL_INTEROP: '/run/WSL/7_interop',
+      FORCE_HYPERLINK: '1',
     });
     assert.deepEqual(start.argv.slice(-2), ['--model', 'opus']);
     assert.equal(start.cols, 80);

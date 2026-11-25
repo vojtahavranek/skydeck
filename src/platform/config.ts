@@ -28,6 +28,10 @@ export interface WindowConfig {
   /** Issue #184 (S2 9.5): a selection the user ends with the mouse in the window's terminal is
    *  written to the clipboard at once, as Ctrl+Shift+C writes it. */
   copyOnSelect: boolean;
+  /** S2 7.4: how Claude Code prints a web address in the window's terminals — `links`: the program
+   *  is started with FORCE_HYPERLINK=1 (unless the server's environment has one), so it draws OSC 8
+   *  links; `text`: FORCE_HYPERLINK is left as the server's environment has it. */
+  webAddresses: 'links' | 'text';
 }
 
 /**
@@ -84,6 +88,7 @@ export const DEFAULT_CONFIG: Config = {
     links: 'default',
     updateCheck: 'hourly',
     copyOnSelect: true,
+    webAddresses: 'links',
   },
 };
 
@@ -229,7 +234,8 @@ function readStatusRules(value: unknown, fail: (problem: string) => never): Tick
  * readStatusRules refuses and `ticketRefreshMinutes` not a whole number from 1 to 1440 (F19); in `window` (S2 16.4): an
  * unknown key, `port` outside 1–65535, `edge` not absolute, `profileDir` neither null nor an absolute Windows path,
  * `keepAlive` neither "wsl" nor "off", `links` neither "default" nor "edge", `updateCheck` not
- * "off", "15min", "hourly" or "daily" (F38), `copyOnSelect` neither true nor false (issue #184).
+ * "off", "15min", "hourly" or "daily" (F38), `copyOnSelect` neither true nor false (issue #184),
+ * `webAddresses` neither "links" nor "text" (S2 7.4).
  *
  * `claudeHome`, `ticketUrl` and `wezterm.domain` may also be `null`, which is their default; an
  * empty `wezterm.domain` is an error like an empty `claudeCommand`.
@@ -384,6 +390,12 @@ export function parseConfig(text: string, source: string): Config {
                 fail('"window.copyOnSelect" must be true or false');
               }
               config.window.copyOnSelect = item;
+              break;
+            case 'webAddresses':
+              if (item !== 'links' && item !== 'text') {
+                fail('"window.webAddresses" must be "links" or "text"');
+              }
+              config.window.webAddresses = item;
               break;
             default:
               fail(`unknown key "window.${name}"`);

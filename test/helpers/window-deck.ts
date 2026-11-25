@@ -105,6 +105,7 @@ export async function windowDeck(
         serverEnv: server.env,
         coreSoft: server.coreSoft,
         interop: () => null,
+        hyperlinks: () => opened.config.window.webAddresses === 'links',
         build: 'test-build',
         ...more.over,
       },

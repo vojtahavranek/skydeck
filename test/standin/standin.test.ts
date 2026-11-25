@@ -447,6 +447,7 @@ describe('stand-in: start', () => {
       COLORTERM: 'truecolor',
       PWD: s.home,
       WSL_INTEROP: '/run/WSL/9_interop',
+      FORCE_HYPERLINK: null,
     });
     const names = [...start.envNames];
     assert.deepEqual(names, [...names].sort());

@@ -1,6 +1,6 @@
 // The settings screen in the page (follow-up F36, issue #164; S2 12.13): opened by the title bar's
 // gear (F39) and by the switcher's `> settings`. F39's short screen: four groups (the fourth,
-// Updates, F38's), eight controls (issue #184's Copy on select) under plain labels, each saved as it is picked, a refusal beside it, `after a restart`; then the
+// Updates, F38's), nine controls (issue #184's Copy on select; Web addresses in replies) under plain labels, each saved as it is picked, a refusal beside it, `after a restart`; then the
 // closed Advanced, which holds F36's screen of every other setting: the file's path on top, each
 // setting in the server's order under its group, a changeable one in a control that fits it with
 // Save and Default, a shown-only one as text with what it names; a save, a refusal beside the
@@ -254,6 +254,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
         'window.links',
         'window.updateCheck',
         'window.copyOnSelect',
+        'window.webAddresses',
       ]) {
         assert.ok(!drawn.keys.includes(key), `${key} is on the short screen, not in Advanced`);
       }
@@ -893,7 +894,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
     },
   );
   await t.test(
-    'the short screen (F39): four groups, eight controls (F38: Updates; #184: Copy on select) under plain labels, each showing the file’s value; a hint only under four; `after a restart` beside Keep WSL running; no Save, no Default, no line about the default, the file or when a change applies',
+    'the short screen (F39): four groups, nine controls (F38: Updates; #184: Copy on select; Web addresses in replies) under plain labels, each showing the file’s value; a hint only under five; `after a restart` beside Keep WSL running; no Save, no Default, no line about the default, the file or when a change applies',
     async (t) => {
       const l = await launched(t, chromium, {
         config: {
@@ -965,6 +966,15 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
               control: ['The default browser', 'Edge'],
               value: 'edge',
               hint: [],
+              mark: [],
+            },
+            {
+              // "links" by default (not in the sandbox's file).
+              label: 'Web addresses in replies',
+              labelled: true,
+              control: ['As links', 'As plain text'],
+              value: 'links',
+              hint: ['In sessions started after a change.'],
               mark: [],
             },
             {

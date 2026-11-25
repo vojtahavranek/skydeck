@@ -579,8 +579,9 @@ the header, the ticket chip) opens in your Windows default browser: skydeck hand
 instead (install.md, "The `window` keys"). With `"default"` each link is one start of
 `rundll32.exe url.dll,FileProtocolHandler`, which a managed PC's security monitoring may record;
 with `"edge"` skydeck starts Edge itself and does not use that program. Part 1 needs no
-change of your configuration; part 2 is for trying `"edge"`, and only if you want to. Every step
-types only into the throwaway session, never into one of your real work.
+change of your configuration; part 2 is for trying `"edge"`, and part 3 for addresses as plain
+text, each only if you want to. Every step types only into the throwaway session, never into one
+of your real work.
 
 **First, what your configuration says.** The paths below are the default ones: with
 `XDG_CONFIG_HOME` set, the file is under that folder (install.md, "Places"); with `SKYDECK_HOME`
@@ -707,8 +708,17 @@ skydeck window --restart
    Then `skydeck window --restart`, and Ctrl+click the address once more. Expected: it opens in your
    default browser again, as in part 1.
 
+**Part 3, addresses as plain text (only if you want to try it;** design-step-2.md 7.4). In part 1
+the address was drawn in blue. Open Settings (the gear) and, in Links, set `Web addresses in
+replies` to `As plain text` (`Saved.`); close it with Esc. Expected: the throwaway session's
+terminal is unchanged. End that session (`/exit`), resume it in the window, and send part 1's first
+prompt again. Expected: the address is in the colour of the text around it, and Ctrl+click still
+opens it. Set `Web addresses in replies` back to `As links` (`Saved.`). Your `config.json` then
+holds `"webAddresses": "links"`, the default, which can stay (or take that one key out by hand).
+
 Write down where the link opened in part 1 (which browser, logged in or not), the address the
-browser showed for the second link, and, if you did part 2, where it opened in part 2.
+browser showed for the second link, if you did part 2, where it opened in part 2, and, if you did
+part 3, the colour of the address there.
 
 ## W13. What an Edge policy does to the window
 
@@ -3042,9 +3052,10 @@ with the terminal of a session shown (any running one; no prompt is typed into i
 3. **Open it from the terminal.** Press Ctrl+Shift+L until the key bar says `Focus: terminal`.
    Press the mouse button on the gear and hold it: the key bar still says `Focus: terminal`. Let go.
    Expected: a dialog over the page, `Settings`, then `Appearance` (`Mode`, `Colour theme` and
-   under it `Light and dark each keep their own.`), `Links` (`Open links in`, `Ticket address` and
-   its hint about `{key}`), `The window` (`Keep WSL running`, a switch with `after a restart`
-   beside it; `Typed commands start sessions in` and its hint; from issue #184 `Copy on select`,
+   under it `Light and dark each keep their own.`), `Links` (`Open links in`, `Web addresses in
+   replies`, a choice of `As links` and `As plain text` with the hint `In sessions started after a
+   change.`, `Ticket address` and its hint about `{key}`), `The window` (`Keep WSL running`, a
+   switch with `after a restart` beside it; `Typed commands start sessions in` and its hint; from issue #184 `Copy on select`,
    a switch, and its hint `In a session’s terminal; Ctrl+Shift+C copies either way.`),
    `Updates` (follow-up F38: the choice `Check for updates`, the line of the last check
    and `Check now`; W43 tries them), and at the end `Advanced (14 more settings)` and `Close`. No `Save`, no `Default`, no file name. The keyboard

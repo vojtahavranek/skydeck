@@ -554,6 +554,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
           serverEnv: environment.env,
           coreSoft: environment.coreSoft,
           interop: () => interop.current(),
+          hyperlinks: () => deck.config.window.webAddresses === 'links',
           build,
           // F44 (S2 7.6): a terminal opened for a parked session gives its number up in the step
           // that spawns it.

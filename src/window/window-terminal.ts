@@ -24,6 +24,9 @@ export interface WindowTerminalDeps {
   serverEnv: Readonly<Record<string, string>>;
   coreSoft: string | null;
   interop(): string | null;
+  /** S2 7.4: whether a program is started with FORCE_HYPERLINK=1 (`window.webAddresses` is
+   *  "links"), asked at each start, so that a change in the settings applies to the next one. */
+  hyperlinks(): boolean;
   build: string;
   /** F44 (S2 11.2, 7.6): called right after `registry.spawn` was called, in the same synchronous
    *  step (the registry lists the terminal, with its slot, before its first await): the server's
@@ -153,7 +156,11 @@ export function windowTerminal(
         rows: size.rows,
         cwd: spec.cwd,
         argv: [...spec.argv],
-        env: programEnvironment(deps.serverEnv, { cwd: spec.cwd, interop: deps.interop() }),
+        env: programEnvironment(deps.serverEnv, {
+          cwd: spec.cwd,
+          interop: deps.interop(),
+          hyperlinks: deps.hyperlinks(),
+        }),
         startBy: String(spec.startByNs),
         lock: spec.lock,
         coreSoft: deps.coreSoft,

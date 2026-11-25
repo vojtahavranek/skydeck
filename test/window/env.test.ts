@@ -31,14 +31,17 @@ test('serverEnvironment keeps a variable whatever its name, __proto__ included',
     ['__proto__', 'x'],
     ['A', 'b'],
   ]);
-  assert.deepEqual(Object.entries(programEnvironment(env, { cwd: CWD, interop: null })), [
-    ['__proto__', 'x'],
-    ['A', 'b'],
-    ['TERM', 'xterm-256color'],
-    ['COLORTERM', 'truecolor'],
-    ['FORCE_HYPERLINK', '1'],
-    ['PWD', CWD],
-  ]);
+  assert.deepEqual(
+    Object.entries(programEnvironment(env, { cwd: CWD, interop: null, hyperlinks: true })),
+    [
+      ['__proto__', 'x'],
+      ['A', 'b'],
+      ['TERM', 'xterm-256color'],
+      ['COLORTERM', 'truecolor'],
+      ['FORCE_HYPERLINK', '1'],
+      ['PWD', CWD],
+    ],
+  );
 });
 
 test('serverEnvironment removes SKYDECK_HANDOFF', () => {
@@ -194,8 +197,9 @@ const SKYDECK_NAMES = [
 function program(
   serverEnv: Record<string, string>,
   interop: string | null = null,
+  hyperlinks = true,
 ): Record<string, string> {
-  return programEnvironment(serverEnv, { cwd: CWD, interop });
+  return programEnvironment(serverEnv, { cwd: CWD, interop, hyperlinks });
 }
 
 test('programEnvironment removes every terminal and multiplexer variable of S2 7.4', () => {
@@ -320,11 +324,22 @@ test('programEnvironment sets TERM, COLORTERM, FORCE_HYPERLINK and PWD when the 
   });
 });
 
-test('programEnvironment sets FORCE_HYPERLINK=1 and keeps a value the server had', () => {
+test('programEnvironment with hyperlinks (window.webAddresses "links") sets FORCE_HYPERLINK=1 and keeps a value the server had', () => {
   assert.equal(program({}).FORCE_HYPERLINK, '1');
   assert.equal(program({ FORCE_HYPERLINK: '0' }).FORCE_HYPERLINK, '0');
   assert.equal(program({ FORCE_HYPERLINK: '1' }).FORCE_HYPERLINK, '1');
   assert.equal(program({ FORCE_HYPERLINK: '' }).FORCE_HYPERLINK, '');
+});
+
+test('programEnvironment without hyperlinks (window.webAddresses "text") leaves FORCE_HYPERLINK as the server had it', () => {
+  assert.deepEqual(program({}, null, false), {
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    PWD: CWD,
+  });
+  assert.equal(program({ FORCE_HYPERLINK: '0' }, null, false).FORCE_HYPERLINK, '0');
+  assert.equal(program({ FORCE_HYPERLINK: '1' }, null, false).FORCE_HYPERLINK, '1');
+  assert.equal(program({ FORCE_HYPERLINK: '' }, null, false).FORCE_HYPERLINK, '');
 });
 
 test('programEnvironment points WSL_INTEROP at the link when one is given', () => {

@@ -36,6 +36,7 @@ export type StandinRecord = RecordBase &
           COLORTERM: string | null;
           PWD: string | null;
           WSL_INTEROP: string | null;
+          FORCE_HYPERLINK: string | null;
         };
         /** The soft "Max core file size" of /proc/self/limits as written there ("0", "unlimited"). */
         coreSoft: string | null;

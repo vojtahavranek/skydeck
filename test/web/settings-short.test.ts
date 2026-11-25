@@ -1,6 +1,7 @@
 // Follow-up F39's short settings screen (web/settings-short.js), held against the server's table
-// (src/window/settings.ts): its four groups and eight controls in order (the fourth group,
-// Updates, is F38's; issue #184's Copy on select in The window), under plain labels; every
+// (src/window/settings.ts): its four groups and nine controls in order (the fourth group,
+// Updates, is F38's; issue #184's Copy on select in The window; Web addresses in replies in
+// Links), under plain labels; every
 // key it names is a changeable one of the server's table, a choice's words name exactly the values
 // the server takes and a switch's two sides the two it takes (of a key that is true or false, the
 // texts of the two), so the page decides no rule (S2 4.3);
@@ -15,12 +16,12 @@ import { advancedText } from '../../web/settings-text.js';
 
 const isKey = (key: string): key is SettingKey => Object.hasOwn(SETTINGS, key);
 
-test('four groups, eight controls, in this order, under plain labels', () => {
+test('four groups, nine controls, in this order, under plain labels', () => {
   assert.deepEqual(
     SHORT.map((group) => [group.title, group.entries.map((entry) => entry.label)]),
     [
       ['Appearance', ['Mode', 'Colour theme']],
-      ['Links', ['Open links in', 'Ticket address']],
+      ['Links', ['Open links in', 'Web addresses in replies', 'Ticket address']],
       ['The window', ['Keep WSL running', 'Typed commands start sessions in', 'Copy on select']],
       ['Updates', ['Check for updates']],
     ],
@@ -33,6 +34,7 @@ test('four groups, eight controls, in this order, under plain labels', () => {
       'mode',
       'palette',
       'window.links',
+      'window.webAddresses',
       'ticketUrl',
       'window.keepAlive',
       'terminal',
@@ -63,7 +65,14 @@ test('no label is a key name, and a hint is one short line', () => {
       (entry) => entry.label,
     ),
     // Copy on select: its group is the window's, whose list and header text it does not copy.
-    ['Colour theme', 'Ticket address', 'Typed commands start sessions in', 'Copy on select'],
+    // Web addresses in replies: a session already running keeps how it was started.
+    [
+      'Colour theme',
+      'Web addresses in replies',
+      'Ticket address',
+      'Typed commands start sessions in',
+      'Copy on select',
+    ],
   );
 });
 
@@ -107,6 +116,7 @@ test('every key is a changeable one of the server’s table, named once, its con
     keys.map((entry) => [entry.key, entry.control]),
     [
       ['window.links', 'choice'],
+      ['window.webAddresses', 'choice'],
       ['ticketUrl', 'text'],
       ['window.keepAlive', 'switch'],
       ['terminal', 'choice'],
@@ -133,6 +143,12 @@ test('every key is a changeable one of the server’s table, named once, its con
   assert.ok(copyOnSelect?.control === 'switch');
   assert.deepEqual([copyOnSelect.on, copyOnSelect.off], ['true', 'false'], 'on copies');
   assert.equal(SETTINGS['window.copyOnSelect'].control, 'switch');
+  const webAddresses = keys.find((entry) => entry.key === 'window.webAddresses');
+  assert.ok(webAddresses?.control === 'choice');
+  assert.deepEqual(Object.entries(webAddresses.words), [
+    ['links', 'As links'],
+    ['text', 'As plain text'],
+  ]);
 });
 
 test('Advanced holds every other key of the server’s table: 14 today, counted on its button', () => {

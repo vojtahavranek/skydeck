@@ -25,7 +25,7 @@ import { windowTerminal } from '../../src/window/window-terminal.ts';
 import { sleep, startProgram, until, within } from '../helpers/keeper.ts';
 import { info } from '../helpers/registry.ts';
 import type { TestRegistry } from '../helpers/registry.ts';
-import { S1, S2 } from '../helpers/platform.ts';
+import { S1, S2, S3 } from '../helpers/platform.ts';
 import { readRecords, waitForRecord } from '../helpers/standin.ts';
 import type { StandinRecord } from '../helpers/standin.ts';
 import { windowDeck } from '../helpers/window-deck.ts';
@@ -173,7 +173,7 @@ describe('window terminal: sessions start through step 1’s launch', () => {
     assert.equal(hello.lock, null);
   });
 
-  test('the program’s environment: S2 7.4’s names removed, PWD, TERM, COLORTERM, WSL_INTEROP the link; the core limit', async (t) => {
+  test('the program’s environment: S2 7.4’s names removed, PWD, TERM, COLORTERM, FORCE_HYPERLINK, WSL_INTEROP the link; the core limit', async (t) => {
     if (coreLimits('self').hard === '0') {
       t.skip('the hard core limit is 0 here: no soft limit can be given to the program');
       return;
@@ -230,6 +230,7 @@ describe('window terminal: sessions start through step 1’s launch', () => {
       COLORTERM: 'truecolor',
       PWD: dir,
       WSL_INTEROP: link,
+      FORCE_HYPERLINK: '1',
     });
     assert.equal(deps.coreSoft, '1');
     assert.equal(start.coreSoft, '1');
@@ -252,6 +253,28 @@ describe('window terminal: sessions start through step 1’s launch', () => {
     const start = await waitForRecord(record, isStart, 15_000);
     assert.equal(start.env.WSL_INTEROP, '/run/WSL/99_interop');
     assert.equal(start.coreSoft, coreLimits('self').soft);
+  });
+
+  test('FORCE_HYPERLINK follows window.webAddresses as it is when the program starts; one the server has wins', async (t) => {
+    const w = await windowDeck(t);
+    const r = w.registry();
+    const S4 = '3e8c6f4b-1a5d-4c9e-8f6a-5b4c3d2e1f0a';
+    const started = async (
+      sessionId: string,
+      env: Record<string, string | undefined>,
+    ): Promise<string | null> => {
+      w.resumable(sessionId);
+      const { deps, record } = w.deps(r, { env });
+      const prepared = prepareResumeById(w.deck, sessionId);
+      assert.equal((await launchPrepared(w.deck, prepared, windowTerminal(deps, SIZE))).code, 0);
+      return (await waitForRecord(record, isStart, 15_000)).env.FORCE_HYPERLINK;
+    };
+    assert.equal(await started(S1, {}), '1', '"links", the default');
+    assert.equal(await started(S2, { FORCE_HYPERLINK: '0' }), '0', 'the user’s own value');
+    // A change in the settings puts the new value into deck.config: the next start reads it.
+    w.deck.config.window.webAddresses = 'text';
+    assert.equal(await started(S3, {}), null, '"text": left as the server has it');
+    assert.equal(await started(S4, { FORCE_HYPERLINK: '1' }), '1');
   });
 });
 

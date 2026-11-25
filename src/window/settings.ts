@@ -283,6 +283,19 @@ export const SETTINGS: Readonly<Record<SettingKey, SettingRow>> = {
     nullable: false,
     applies: 'now',
   },
+  // S2 7.4: the window terminal reads deck.config.window.webAddresses at each program it starts;
+  // a program already running keeps the environment it was started with.
+  'window.webAddresses': {
+    group: 'The window',
+    meaning:
+      'How Claude Code shows web addresses in the window’s terminals: "links" (in blue, as links) or "text" (as plain text), in sessions started after a change. Your own FORCE_HYPERLINK wins.',
+    kind: 'change',
+    names: null,
+    control: 'choice',
+    choices: ['links', 'text'],
+    nullable: false,
+    applies: 'now',
+  },
 };
 
 /** Beside config.json: the copy kept before a server's first change. */

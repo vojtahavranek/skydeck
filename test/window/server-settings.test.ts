@@ -14,7 +14,9 @@ import { describe, test } from 'node:test';
 import type { Detached, Platform } from '../../src/platform/types.ts';
 import type { ListMessage, SettingsPayload } from '../../src/window/protocol.ts';
 import { sleep, until } from '../helpers/keeper.ts';
-import { S1 } from '../helpers/platform.ts';
+import { S1, S2 } from '../helpers/platform.ts';
+import { waitForRecord } from '../helpers/standin.ts';
+import type { StandinRecord } from '../helpers/standin.ts';
 import { connectTestPage, rowsOf, serverSandbox, WAIT_MS } from '../helpers/window.ts';
 import type { ServerSandbox, TestPage, TestServer } from '../helpers/window.ts';
 import { earlierId, postRestore, restoreSandbox } from '../helpers/window-restore.ts';
@@ -270,6 +272,30 @@ describe('AT ONCE: the running server uses the new value from its next use (G4)'
     for (const page of [a, b, c]) {
       await page.list((list) => list.copyOnSelect === true, 'back to true', 5000);
     }
+  });
+
+  test('window.webAddresses (S2 7.4): the next session started gets FORCE_HYPERLINK=1 only while the value is "links"', async (t) => {
+    const d = serverSandbox(t);
+    const { a } = await twoPages(t, d);
+    d.resumable(S2);
+    const startOf = async (sessionId: string): Promise<string | null> => {
+      const result = await a.act({ kind: 'resume', sessionId, cols: 80, rows: 24 });
+      assert.equal(result.ok, true, JSON.stringify(result));
+      const start = await waitForRecord(
+        d.record,
+        (record): record is Extract<StandinRecord, { ev: 'start' }> =>
+          record.ev === 'start' && record.argv.includes(sessionId),
+        WAIT_MS,
+      );
+      return start.env.FORCE_HYPERLINK;
+    };
+    const text = await a.act({ kind: 'setting-set', key: 'window.webAddresses', value: 'text' });
+    assert.equal(text.ok, true, JSON.stringify(text));
+    assert.equal((configOf(d)['window'] as Record<string, unknown>)['webAddresses'], 'text');
+    assert.equal(await startOf(S1), null, '"text": left as the server has it (not set)');
+    const links = await a.act({ kind: 'setting-default', key: 'window.webAddresses' });
+    assert.equal(links.ok, true, JSON.stringify(links));
+    assert.equal(await startOf(S2), '1', '"links" again, without a restart');
   });
 
   test('window.links: the next link goes where the new value says', async (t) => {

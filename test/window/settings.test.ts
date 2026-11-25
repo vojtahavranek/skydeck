@@ -48,6 +48,7 @@ const CHANGEABLE = [
   'window.keepAlive',
   'window.updateCheck',
   'window.copyOnSelect',
+  'window.webAddresses',
 ];
 const SHOWN_ONLY = [
   'claudeCommand',
@@ -69,6 +70,7 @@ const AT_ONCE = [
   'window.links',
   'window.updateCheck',
   'window.copyOnSelect',
+  'window.webAddresses',
 ];
 
 /** Every key of a Config as config.json names it: `<key>`, or `<object>.<key>` one level down. */
@@ -239,6 +241,8 @@ describe('the table (G1): one row for every key of Config', () => {
     assert.deepEqual(SETTINGS['window.keepAlive'].choices, ['wsl', 'off']);
     assert.deepEqual(SETTINGS['window.updateCheck'].choices, ['off', '15min', 'hourly', 'daily']);
     assert.equal(SETTINGS['window.updateCheck'].group, 'The window');
+    assert.deepEqual(SETTINGS['window.webAddresses'].choices, ['links', 'text']);
+    assert.equal(SETTINGS['window.webAddresses'].group, 'The window');
     assert.deepEqual(
       Object.keys(SETTINGS).filter((key) => SETTINGS[key as SettingKey].control === 'switch'),
       ['window.copyOnSelect'],
@@ -354,6 +358,8 @@ describe('what a page may send (G2): every refusal changes nothing', () => {
       ['window.copyOnSelect', 1, '"window.copyOnSelect" must be true or false'],
       ['window.copyOnSelect', null, '"window.copyOnSelect" must be true or false'],
       ['window.copyOnSelect', 0, '"window.copyOnSelect" must be true or false'],
+      ['window.webAddresses', 'plain', '"window.webAddresses" must be "links" or "text"'],
+      ['window.webAddresses', false, '"window.webAddresses" must be "links" or "text"'],
       ['prRefreshMinutes', true, '"prRefreshMinutes" must be a positive integer'],
       ['groupPattern', false, '"groupPattern" must be a string'],
       [
@@ -798,6 +804,7 @@ describe('the screen (payload) and what the running server uses (G4)', () => {
       'window.links': 'edge',
       'window.updateCheck': 'off',
       'window.copyOnSelect': false,
+      'window.webAddresses': 'text',
     };
     assert.deepEqual(Object.keys(values), AT_ONCE);
     for (const [key, value] of Object.entries(values)) {
@@ -826,6 +833,21 @@ describe('the screen (payload) and what the running server uses (G4)', () => {
     assert.equal(w.settings.set('window.copyOnSelect', true).ok, true);
     assert.deepEqual(w.json(), { prRefreshMinutes: 7, window: { copyOnSelect: true } });
     assert.equal(w.d.deck.config.window.copyOnSelect, true);
+  });
+
+  test('window.webAddresses: "links" by default; "text" is written to the file and is what the next program started gets', (t) => {
+    const w = world(t, { prRefreshMinutes: 7 });
+    const shown = setting(w.settings.payload(), 'window.webAddresses');
+    assert.deepEqual(
+      [shown.value, shown.inFile, shown.control, shown.choices],
+      ['links', false, 'choice', ['links', 'text']],
+    );
+    assert.equal(w.settings.set('window.webAddresses', 'text').ok, true);
+    assert.deepEqual(w.json(), { prRefreshMinutes: 7, window: { webAddresses: 'text' } });
+    assert.equal(w.d.deck.config.window.webAddresses, 'text');
+    assert.equal(setting(w.settings.payload(), 'window.webAddresses').pending, false);
+    assert.equal(w.settings.reset('window.webAddresses').ok, true);
+    assert.equal(w.d.deck.config.window.webAddresses, 'links');
   });
 
   test('window.updateCheck: the four values, "hourly" by default; each is saved to the file and applies at once', (t) => {

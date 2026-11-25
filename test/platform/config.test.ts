@@ -47,6 +47,7 @@ describe('loadConfig', () => {
       links: 'default',
       updateCheck: 'hourly',
       copyOnSelect: true,
+      webAddresses: 'links',
     });
   });
 
@@ -67,6 +68,7 @@ describe('loadConfig', () => {
         links: 'edge',
         updateCheck: 'off',
         copyOnSelect: false,
+        webAddresses: 'text',
       },
     });
 
@@ -78,6 +80,7 @@ describe('loadConfig', () => {
       links: 'edge',
       updateCheck: 'off',
       copyOnSelect: false,
+      webAddresses: 'text',
     });
     assert.equal(parseConfig('{"window":{"port":65535}}', 'x').window.port, 65535);
     assert.equal(parseConfig('{"window":{"profileDir":"c:\\\\"}}', 'x').window.profileDir, 'c:\\');
@@ -122,6 +125,33 @@ describe('loadConfig', () => {
           assert.equal(
             error.message,
             '/c/config.json: "window.updateCheck" must be "off", "15min", "hourly" or "daily"',
+            value,
+          );
+          return true;
+        },
+      );
+    }
+  });
+
+  test('window.webAddresses is "links" unless set, and takes "links" or "text" (S2 7.4, 16.4)', () => {
+    assert.equal(parseConfig('{}', 'x').window.webAddresses, 'links');
+    assert.equal(parseConfig('{"window":{"links":"edge"}}', 'x').window.webAddresses, 'links');
+    assert.equal(
+      parseConfig('{"window":{"webAddresses":"links"}}', 'x').window.webAddresses,
+      'links',
+    );
+    assert.equal(
+      parseConfig('{"window":{"webAddresses":"text"}}', 'x').window.webAddresses,
+      'text',
+    );
+    for (const value of ['"Links"', '"plain"', '""', 'true', 'false', 'null', '1', '["text"]']) {
+      assert.throws(
+        () => parseConfig(`{"window":{"webAddresses":${value}}}`, '/c/config.json'),
+        (error: unknown) => {
+          assert.ok(error instanceof ConfigError, String(error));
+          assert.equal(
+            error.message,
+            '/c/config.json: "window.webAddresses" must be "links" or "text"',
             value,
           );
           return true;
@@ -293,6 +323,7 @@ describe('parseConfig', () => {
         links: 'default',
         updateCheck: 'hourly',
         copyOnSelect: true,
+        webAddresses: 'links',
       },
     });
   });
