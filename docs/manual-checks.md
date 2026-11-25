@@ -3633,7 +3633,7 @@ read, `d` marks done.
    once Claude Code's prompt shows, type `Reply with the single word ok.` and Enter, and wait for
    the answer.
 2. **`u` and the toast.** Click `unread-1`, wait 2 seconds, Ctrl+Shift+L until `Focus: list`, then
-   `u`. Expected: its row gets a bar at its left in the colour of the selection, a bold title and
+   `u`. Expected: its row gets a blue bar at its left, a bold title and
    the line `marked unread · 0s` (later `1m`); the toast says `Marked unread: it needs you until you
    come back to it.` with no Undo; the title bar starts with `1 needs you`, the taskbar's title is
    `(1) skydeck`; the header's button after `Park` says `Read`. No desktop notification.

@@ -1584,7 +1584,7 @@ an ended row that is not running has the two lines too:
 | `needs you · <detail> · 3m` (`needs you · 3m` without a detail), in the waiting colour | Claude Code asks: a permission prompt or a question is open in the session. The detail is what Claude Code says it waits for, cut at 120 characters with `…`. | when the prompt or the question is closed, wherever you answer it |
 | `finished · not seen · 2m`, in green | its turn ended while you were not looking at it, and it is idle | when you have seen it (below), when its next turn starts, or when it stops running |
 | `ended unexpectedly · not seen · 2m`, in the crash colour | the program of its terminal in the window ended, but not the normal way (as `/exit` ends it): `claude` crashed or was killed, or the terminal's keeper died | when you have seen it |
-| `marked unread · 2m`, in the accent colour (the colour of the selection) | you marked it unread (`u` or `Unread`, below), running or not | when you come back to it (below), or with `u` or `Read` |
+| `marked unread · 2m`, in blue | you marked it unread (`u` or `Unread`, below), running or not | when you come back to it (below), or with `u` or `Read` |
 
 The age is left out while skydeck does not know when the reason began. A session with several
 reasons shows the first of them in this order.
