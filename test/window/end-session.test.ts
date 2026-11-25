@@ -358,6 +358,40 @@ describe('act end-session: done, then the hang-up', () => {
     assert.equal(row?.session.lastHolding?.endDetail, 'exit');
   });
 
+  test("#207: after a step back of the wall clock the done mark and the end are stamped not below the session's start, and the end carries the uptime", async (t) => {
+    const d = running(t);
+    d.proc.setUptimeCs(777n);
+    // An in-session /resume of S1, stamped by its hook 5 s ahead of the clock now.
+    const ahead = T0 + 5_000_000_000n;
+    d.deck.store.insertEvent({
+      spoolName: 'ahead.ev',
+      timeNs: ahead,
+      uptimeCs: 700n,
+      kind: 'start',
+      detail: 'resume',
+      rawDetail: 'resume',
+      sessionId: S1,
+      bootId: BOOT_A,
+      pid: PID,
+      procStart: START,
+      cwd: null,
+      argv: null,
+      name: null,
+      payload: null,
+    });
+    const h = harness(d);
+    const answer = h.act(endSession());
+    await Promise.resolve();
+    assert.equal(d.deck.store.meta(S1)?.doneAtNs, ahead, 'not below the start');
+    h.hub.exitNow();
+    assert.equal((await answer).ok, true);
+    const end = d.deck.store.events().find((event) => event.rawDetail === ENDED_IN_WINDOW);
+    assert.deepEqual([end?.timeNs, end?.uptimeCs], [ahead + 1n, 777n]);
+    d.proc.setProcess(PID, null);
+    const row = loadRows(d.deck).find((one) => one.id === S1);
+    assert.deepEqual([row?.done, row?.session.hidden, row?.marks], [true, true, []]);
+  });
+
   test('a program that ends only after the wait: `ended` false at 10 s, still marked done and running; its later end recorded and closed as one within the wait', async (t) => {
     const d = running(t);
     const h = harness(d);

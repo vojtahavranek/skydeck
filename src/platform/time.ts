@@ -1,4 +1,4 @@
-import type { Ns } from './types.ts';
+import type { Ns, UptimeCs } from './types.ts';
 
 export const NS_PER_MS = 1_000_000n;
 export const NS_PER_SECOND = 1_000_000_000n;
@@ -35,4 +35,17 @@ export function nsFromIso(iso: string): Ns | null {
   }
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? null : nsFromMs(ms);
+}
+
+/** The first field of /proc/uptime as the hook writes it: seconds and two decimals (#207). */
+const UPTIME = /^([0-9]{1,15})\.([0-9]{2})$/;
+
+/**
+ * Seconds with exactly two decimals (`119174.07`, the first field of /proc/uptime) as
+ * centiseconds; null for anything else (empty, another form, more digits): never an error, so that
+ * a value the hook could not read leaves the event's other facts as they are (design 5.2).
+ */
+export function uptimeCsFromText(text: string): UptimeCs | null {
+  const match = UPTIME.exec(text);
+  return match === null ? null : BigInt(match[1]!) * 100n + BigInt(match[2]!);
 }

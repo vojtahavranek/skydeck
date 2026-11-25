@@ -742,6 +742,23 @@ describe('real proc', () => {
     assert.equal(kernel, release());
     assert.match(kernel ?? '', /^\S+$/);
   });
+
+  test('uptimeCs is the first field of /proc/uptime in centiseconds, and it moves on (#207)', async () => {
+    const read = (): bigint => {
+      const [seconds, hundredths] = (
+        readFileSync('/proc/uptime', 'utf8').split(' ')[0] ?? ''
+      ).split('.');
+      return BigInt(seconds ?? '') * 100n + BigInt(hundredths ?? '');
+    };
+    const { proc } = realPlatform();
+    const before = read();
+    const first = proc.uptimeCs();
+    const after = read();
+    assert.ok(first !== null && before <= first && first <= after, `${before} ${first} ${after}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const later = proc.uptimeCs();
+    assert.ok(later !== null && later > first, `${first} then ${later}`);
+  });
 });
 
 describe('real runner', () => {

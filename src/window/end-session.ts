@@ -20,7 +20,8 @@
  *
  * Once the program has ended the server records, for each holder of the session the request found
  * in the terminal, an `end` event of detail `exit` and raw detail ENDED_IN_WINDOW (no spool file;
- * no schema change), so that the session reads as an ordinary ended one (design 6.1: never
+ * stamped not below the holder's process's stamps, with the machine's uptime: #207, design 5.3
+ * "Order"), so that the session reads as an ordinary ended one (design 6.1: never
  * `ended-unexpectedly`, so no `was-working` and no restore offer) whatever end Claude Code's own
  * hook sends after its hang-up, before or after this one; then it closes the terminal (what
  * `close-terminal` does for an ended terminal: its slot is free, and its row, done, is hidden).
@@ -169,12 +170,18 @@ export function createEndings(deps: EndingDeps): Endings {
   /** The end of each holder, as an `end` event of the window's own (tried again on a busy store). */
   function record(termId: string, entry: Ending, tries = 1): void {
     try {
-      const atNs = clock.nowNs();
+      const clockNs = clock.nowNs();
+      const uptimeCs = deck.platform.proc.uptimeCs();
       deck.store.transaction(() => {
         for (const holder of entry.holders) {
+          const { bootId, pid, procStart } = holder.process;
+          // Never below a stamp stored for the process, and with the machine's uptime, which orders
+          // the process's events (#207): the wall clock may have stepped back since its start.
+          const latestNs = deck.store.latestStampOfProcess(bootId, pid, procStart);
           deck.store.insertEvent({
             spoolName: null,
-            timeNs: atNs,
+            timeNs: latestNs !== null && latestNs >= clockNs ? latestNs + 1n : clockNs,
+            ...(uptimeCs === null ? {} : { uptimeCs }),
             kind: 'end',
             detail: 'exit',
             rawDetail: ENDED_IN_WINDOW,

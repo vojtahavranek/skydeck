@@ -25,7 +25,7 @@ import type { PageInfo, SlotHold, TerminalHub, TerminalInfo } from '../../src/wi
 import type { ActMessage, ResultMessage } from '../../src/window/protocol.ts';
 import { testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
-import { S1, S2, SEC, T0, statLine } from '../helpers/platform.ts';
+import { BOOT_A, S1, S2, SEC, T0, statLine } from '../helpers/platform.ts';
 import { userRecord, writeTranscript } from '../helpers/session-files.ts';
 import { hookInput, spoolName, spoolText } from '../helpers/spool.ts';
 
@@ -524,6 +524,37 @@ describe('act restart: ended, then resumed as a plain resume', () => {
     assert.equal(d.deck.store.meta(S1)?.doneAtNs ?? null, null, 'not marked done');
     assert.equal(windowEnds(d), 1, 'the end recorded as one the user asked for');
     assert.notEqual(d.deck.store.getKv(lockKey(S1)), null, 'the resume took the lock');
+  });
+
+  test("#207: the restart's end is stamped not below the process's stamps, with the machine's uptime, as the window's end", async (t) => {
+    const d = running(t);
+    d.proc.setUptimeCs(888n);
+    // An in-session /resume of S1, stamped by its hook 5 s ahead of the clock now (the wall clock
+    // stepped back since).
+    const ahead = T0 + 5n * SEC;
+    d.deck.store.insertEvent({
+      spoolName: 'ahead.ev',
+      timeNs: ahead,
+      uptimeCs: 800n,
+      kind: 'start',
+      detail: 'resume',
+      rawDetail: 'resume',
+      sessionId: S1,
+      bootId: BOOT_A,
+      pid: PID,
+      procStart: START,
+      cwd: null,
+      argv: null,
+      name: null,
+      payload: null,
+    });
+    const h = harness(d);
+    const answer = h.act(restart());
+    await Promise.resolve();
+    h.hub.exitNow();
+    assert.equal((await answer).ok, true);
+    const end = d.deck.store.events().find((event) => event.rawDetail === ENDED_IN_WINDOW);
+    assert.deepEqual([end?.timeNs, end?.uptimeCs], [ahead + 1n, 888n]);
   });
 
   test('with flags: those flags in place of the recorded ones, as act resume passes them', async (t) => {

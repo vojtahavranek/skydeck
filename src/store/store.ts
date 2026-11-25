@@ -28,6 +28,7 @@ import type {
   LinkRow,
   MetaPatch,
   NewEvent,
+  ProcessPlace,
   PrChecks,
   PrFetchResult,
   PrOrigin,
@@ -90,20 +91,39 @@ export interface Store {
   /** All events ordered by (time_ns, id). */
   events(): EventRow[];
   /**
-   * The latest event (by time_ns, id) of the process (bootId, pid, procStart) with
-   * time_ns <= beforeNs. procStart null matches proc_start IS NULL.
+   * The latest event of the process (bootId, pid, procStart) in the process's order (design 5.3
+   * "Order", #207): with `place`, the latest that comes before an event at `place` stored after the
+   * process's events (the order is then that of the process's events together with that one, so
+   * an event at `place` without an uptime puts the process on (time_ns, id)); with null, the latest
+   * of all. procStart null matches proc_start IS NULL.
    */
   latestEventOfProcess(
     bootId: string,
     pid: number,
     procStart: number | null,
-    beforeNs: Ns,
+    place: ProcessPlace | null,
   ): EventRow | null;
   /**
-   * Follow-up F33: the first event (by time_ns, id) of the process (bootId, pid, procStart), null
-   * when it has none. procStart null matches proc_start IS NULL.
+   * The first event of the process in the same order (F33), null when it has none; `before`: the
+   * first that comes before an event at that place (as for latestEventOfProcess);
+   * `startWithLaunch`: the first `start` with a stored launch command (5.3).
    */
-  firstEventOfProcess(bootId: string, pid: number, procStart: number | null): EventRow | null;
+  firstEventOfProcess(
+    bootId: string,
+    pid: number,
+    procStart: number | null,
+    options?: { before?: ProcessPlace; startWithLaunch?: boolean },
+  ): EventRow | null;
+  /**
+   * The latest time_ns of the process's events, null when it has none: a stamp skydeck makes for
+   * that process is never below it (#207: the wall clock can be behind a stamp stored earlier).
+   */
+  latestStampOfProcess(bootId: string, pid: number, procStart: number | null): Ns | null;
+  /**
+   * Whether the process's stored events are ordered by their uptime (design 5.3 "Order"): every one
+   * has one (true for a process with none yet).
+   */
+  processOrderedByUptime(bootId: string, pid: number, procStart: number | null): boolean;
   /** Whether any event of that process has a non-null argv. */
   processHasLaunch(bootId: string, pid: number, procStart: number | null): boolean;
   /**
@@ -117,6 +137,14 @@ export interface Store {
   hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean;
   /** The highest id among the events that name the session (whatever their time or kind); null when there is none. */
   latestEventIdOfSession(sessionId: string): number | null;
+  /**
+   * The latest of what makes a done session active again (design 7.1, derive's activityAfter): the
+   * time of its latest `start` event with one of `details`, and the last input of any of its
+   * transcripts; null when it has neither. A done mark is stamped not below it (#207). Derive
+   * compares the one transcript it chooses for the session; this takes the highest of all of its
+   * rows (a session has one in practice), which is never below that one's: the safe side.
+   */
+  latestActivityNs(sessionId: string, details: readonly string[]): Ns | null;
   /** All links ordered by time_ns. */
   links(): LinkRow[];
   /** Follow-up F33: the links to the session, ordered by time_ns, then event id. */
@@ -291,8 +319,30 @@ function optIntParam(value: number | null): bigint | null {
   return value === null ? null : int(value);
 }
 
+/**
+ * Design 5.3 "Order" in SQL (#207): the one definition every query of one process's events goes
+ * through (PROCESS_RULE, PROCESS_ROWS, BEFORE_PLACE and the ORDER BY of #inProcessOrder).
+ * `processOrder` (src/sessions/process-order.ts) is the same rule in TypeScript, and a test holds
+ * the two to the same answers. ?1 to ?3: the process; ?4: 1 when an event not stored
+ * yet takes part (a `ProcessPlace`), else 0; ?5 and ?6: its uptime (NULL for none) and its time.
+ * `rule.byUptime` is true when every event of the process, that one included, has an uptime: then
+ * the order is (uptime_cs, time_ns, id), else (time_ns, id). Read on the index events_by_process.
+ * No WITH: a read must start with SELECT (prepareRead).
+ */
+const PROCESS_RULE = `(SELECT NOT EXISTS (SELECT 1 FROM events
+                                         WHERE boot_id = ?1 AND pid = ?2 AND proc_start IS ?3
+                                           AND uptime_cs IS NULL)
+                            AND (?4 = 0 OR ?5 IS NOT NULL) AS byUptime) AS rule`;
+/** The process's rows, as `p`. */
+const PROCESS_ROWS = 'p.boot_id = ?1 AND p.pid = ?2 AND p.proc_start IS ?3';
+/** The rows before the place (all of them without one); an equal place is stored after them. */
+const BEFORE_PLACE = `(?4 = 0 OR CASE WHEN rule.byUptime
+                                     THEN (p.uptime_cs, p.time_ns) <= (?5, ?6)
+                                     ELSE p.time_ns <= ?6 END)`;
+
 function mapEvent(row: Row): EventRow {
   const argv = optStr(row, 'argv');
+  const uptime = optNs(row, 'uptime_cs');
   return {
     id: reqInt(row, 'id'),
     spoolName: optStr(row, 'spool_name'),
@@ -308,6 +358,7 @@ function mapEvent(row: Row): EventRow {
     argv: argv === null ? null : (JSON.parse(argv) as string[]),
     name: optStr(row, 'name'),
     payload: optStr(row, 'payload'),
+    ...(uptime === null ? {} : { uptimeCs: uptime }),
   };
 }
 
@@ -893,8 +944,8 @@ class SqliteStore implements Store {
   insertEvent(event: NewEvent): number | null {
     const [row] = this.#runReturning(
       `INSERT INTO events (spool_name, time_ns, kind, detail, raw_detail, session_id, boot_id,
-                           pid, proc_start, cwd, argv, name, payload)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                           pid, proc_start, cwd, argv, name, payload, uptime_cs)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (spool_name) DO NOTHING
        RETURNING id`,
       event.spoolName,
@@ -910,6 +961,7 @@ class SqliteStore implements Store {
       event.argv === null ? null : JSON.stringify(event.argv),
       event.name,
       event.payload,
+      event.uptimeCs ?? null,
     );
     return row === undefined ? null : reqInt(row, 'id');
   }
@@ -933,28 +985,65 @@ class SqliteStore implements Store {
     bootId: string,
     pid: number,
     procStart: number | null,
-    beforeNs: Ns,
+    place: ProcessPlace | null,
   ): EventRow | null {
-    const row = this.#get(
-      `SELECT * FROM events
-       WHERE boot_id = ? AND pid = ? AND proc_start IS ? AND time_ns <= ?
-       ORDER BY time_ns DESC, id DESC LIMIT 1`,
-      bootId,
-      int(pid),
-      optIntParam(procStart),
-      beforeNs,
-    );
-    return row === undefined ? null : mapEvent(row);
+    return this.#inProcessOrder(bootId, pid, procStart, place, 'DESC', '');
   }
 
-  firstEventOfProcess(bootId: string, pid: number, procStart: number | null): EventRow | null {
+  firstEventOfProcess(
+    bootId: string,
+    pid: number,
+    procStart: number | null,
+    options: { before?: ProcessPlace; startWithLaunch?: boolean } = {},
+  ): EventRow | null {
+    const only =
+      options.startWithLaunch === true ? "AND p.kind = 'start' AND p.argv IS NOT NULL" : '';
+    return this.#inProcessOrder(bootId, pid, procStart, options.before ?? null, 'ASC', only);
+  }
+
+  latestStampOfProcess(bootId: string, pid: number, procStart: number | null): Ns | null {
     const row = this.#get(
-      `SELECT * FROM events
-       WHERE boot_id = ? AND pid = ? AND proc_start IS ?
-       ORDER BY time_ns, id LIMIT 1`,
+      `SELECT MAX(time_ns) AS latest FROM events WHERE boot_id = ? AND pid = ? AND proc_start IS ?`,
       bootId,
       int(pid),
       optIntParam(procStart),
+    );
+    return row === undefined ? null : optNs(row, 'latest');
+  }
+
+  processOrderedByUptime(bootId: string, pid: number, procStart: number | null): boolean {
+    const row = this.#get(
+      `SELECT rule.byUptime AS byUptime FROM ${PROCESS_RULE}`,
+      bootId,
+      int(pid),
+      optIntParam(procStart),
+      0n,
+      null,
+    );
+    return row !== undefined && optNs(row, 'byUptime') === 1n;
+  }
+
+  /** The first or the last event of a process in its order (PROCESS_RULE), among those before `place`. */
+  #inProcessOrder(
+    bootId: string,
+    pid: number,
+    procStart: number | null,
+    place: ProcessPlace | null,
+    direction: 'ASC' | 'DESC',
+    only: string,
+  ): EventRow | null {
+    const row = this.#get(
+      `SELECT p.* FROM events AS p, ${PROCESS_RULE}
+       WHERE ${PROCESS_ROWS} AND ${BEFORE_PLACE} ${only}
+       ORDER BY CASE WHEN rule.byUptime THEN p.uptime_cs END ${direction},
+                p.time_ns ${direction}, p.id ${direction}
+       LIMIT 1`,
+      bootId,
+      int(pid),
+      optIntParam(procStart),
+      place === null ? 0n : 1n,
+      place?.uptimeCs ?? null,
+      place?.timeNs ?? 0n,
     );
     return row === undefined ? null : mapEvent(row);
   }
@@ -969,6 +1058,20 @@ class SqliteStore implements Store {
         optIntParam(procStart),
       ) !== undefined
     );
+  }
+
+  latestActivityNs(sessionId: string, details: readonly string[]): Ns | null {
+    const row = this.#get(
+      `SELECT MAX(latest) AS latest FROM (
+         SELECT MAX(time_ns) AS latest FROM events
+          WHERE session_id = ? AND kind = 'start' AND detail IN (SELECT value FROM json_each(?))
+         UNION ALL
+         SELECT MAX(last_user_ns) FROM transcripts WHERE session_id = ?)`,
+      sessionId,
+      JSON.stringify(details),
+      sessionId,
+    );
+    return row === undefined ? null : optNs(row, 'latest');
   }
 
   hasProcessStartSince(sessionId: string, sinceNs: Ns, afterEventId: number | null): boolean {

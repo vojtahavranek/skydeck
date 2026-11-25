@@ -2375,6 +2375,23 @@ checkout still running stops at its next write (10.1's guard), and nothing remov
 way back is the copy kept before the migration (install.md, "Going back").
 `test/store/migration-5.test.ts` migrates a filled schema-4 database and compares every value.
 
+**Migration 6** (issue #207, the order of one process's events, design 5.2 and 5.3):
+
+```sql
+ALTER TABLE events ADD COLUMN uptime_cs INTEGER;  -- #207: /proc/uptime at the event in centiseconds, which orders one process's events; NULL for none
+```
+
+It adds one nullable column and nothing else, as migration 3 did: every row keeps its values (the
+column is NULL in each; nothing is filled in afterwards) and a reader of schema 5 still reads
+`events`. The column holds the machine's uptime when the event was stamped: the hook's `uptime`
+key (design 5.2), and for the server's own events (the window's end, 12.10; reconcile's
+`observed`, design 5.4) its own read of /proc/uptime. It is never shown: it only orders the events
+of one process (design 5.3 "Order"), whose stamps a wall clock that stepped back can invert. **An
+older skydeck refuses it**, as for migrations 3 to 5, and the way back is the copy kept before the
+migration (design 9.2, install.md "Going back"). A spool file with the new key, read by an older
+skydeck still running, parses as before: the key is not one it knows, and those are ignored.
+`test/store/migration-6.test.ts` migrates a filled schema-5 database and compares every value.
+
 `kv` entries (no migration; `kv` is free text):
 
 | Key | Value |
@@ -4592,7 +4609,11 @@ gone after `d` (a row of Open: nothing else is selected).
 
 A session ended so is an ordinary ended one: once its program has exited the server stores an `end`
 of detail `exit` for each of its holders that belonged to the terminal (no spool file, raw detail
-`skydeck-window`; no change of the schema), and design 6.3 reads that holding as a deliberate exit
+`skydeck-window`; no change of the schema), stamped with its clock but never below a time already
+stored for that holder's process, and with the machine's uptime (#207, design 5.3 "Order": after a
+step back of the wall clock it would otherwise lie before the session's own start); the done mark
+is never below the session's latest start either (design 7.1). Design 6.3 reads that holding as a
+deliberate exit
 whatever end Claude Code's own hook sends after its hang-up (reason `other`, design 14), before or
 after it — also when the program ends only after the 10 seconds (the server follows the terminal
 until then). So it is never `ended-unexpectedly` or `was-working`, never needs you as an ended
