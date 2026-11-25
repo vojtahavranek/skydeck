@@ -475,12 +475,12 @@ Three questions about how Claude Code talks to the terminal skydeck gives it.
 - **Does Claude Code use synchronized output?** The window's server logs nothing of what a program
   writes, so this is recorded in W with `script`, under the environment the window gives its
   programs (design-step-2.md 7.4, `src/window/env.ts`): the variables that name a terminal taken
-  out, `TERM=xterm-256color` and `COLORTERM=truecolor` set. In W:
+  out, `TERM=xterm-256color`, `COLORTERM=truecolor` and `FORCE_HYPERLINK=1` set. In W:
 
   ```sh
   cd ~/skydeck-try
   (for v in $(env | cut -d= -f1 | grep -E '^(TERM_PROGRAM|TERM_PROGRAM_VERSION|WT_SESSION|WT_PROFILE_ID|TMUX|TMUX_PANE|STY|VTE_VERSION|KITTY_WINDOW_ID|ITERM_SESSION_ID|CLAUDE_CODE_SSE_PORT|ENABLE_IDE_INTEGRATION|GPG_TTY|SSH_TTY|WEZTERM_.*|KONSOLE_.*|VSCODE_.*)$'); do unset "$v"; done
-   TERM=xterm-256color COLORTERM=truecolor exec script -q -c claude claude-output.txt)
+   TERM=xterm-256color COLORTERM=truecolor FORCE_HYPERLINK=1 exec script -q -c claude claude-output.txt)
   ```
 
   Send one prompt, `/exit`, then `grep -c $'\e\\[?2026h' claude-output.txt`: a number above 0 means

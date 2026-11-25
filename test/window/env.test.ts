@@ -310,7 +310,7 @@ test('programEnvironment sets TERM, COLORTERM and PWD, over what the server had'
   assert.equal(result.PWD, CWD);
 });
 
-test('programEnvironment sets TERM, COLORTERM and PWD when the server had none', () => {
+test('programEnvironment sets TERM, COLORTERM, FORCE_HYPERLINK and PWD when the server had none', () => {
   const result = program({});
   assert.deepEqual(result, {
     TERM: 'xterm-256color',
@@ -324,6 +324,7 @@ test('programEnvironment sets FORCE_HYPERLINK=1 and keeps a value the server had
   assert.equal(program({}).FORCE_HYPERLINK, '1');
   assert.equal(program({ FORCE_HYPERLINK: '0' }).FORCE_HYPERLINK, '0');
   assert.equal(program({ FORCE_HYPERLINK: '1' }).FORCE_HYPERLINK, '1');
+  assert.equal(program({ FORCE_HYPERLINK: '' }).FORCE_HYPERLINK, '');
 });
 
 test('programEnvironment points WSL_INTEROP at the link when one is given', () => {

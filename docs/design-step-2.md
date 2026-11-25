@@ -1073,8 +1073,11 @@ The server's environment (5.2), with:
   `FORCE_HYPERLINK=1` unless the server's environment has one (the user's choice, `0` too, wins),
   and `WSL_INTEROP=<runtimeDir>/interop` while that link points at a live socket (6.4; otherwise
   `WSL_INTEROP` is left as it is). The window's terminal follows OSC 8 links (9.6), but Claude Code
-  cannot tell from the environment and prints a URL as plain text, uncoloured and not clickable,
-  in a terminal it does not know; `FORCE_HYPERLINK` is the switch it reads for that.
+  cannot tell from the environment: in a terminal it does not know it prints a URL as plain text,
+  in the colour of the text around it, and a Markdown link as `text (url)`. `FORCE_HYPERLINK` is
+  the switch it reads: with it, a URL is drawn in blue as an OSC 8 link, and a Markdown link shows
+  its text alone, its target in the link. A snapshot drops OSC 8 links (7.2), so after a reattach
+  such a link's target is gone; a bare URL stays clickable as plain text (9.6).
 
 `TERM_PROGRAM=vscode` is never set: Claude Code would take the terminal for an editor's (section
 21). The program runs directly (`exec`), as in step 1; no shell is started around it.
