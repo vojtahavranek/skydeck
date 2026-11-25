@@ -10,6 +10,7 @@ import { prepareResumeById } from '../../src/sessions/resume-by-id.ts';
 import { windowTerminal } from '../../src/window/window-terminal.ts';
 import { until } from '../helpers/keeper.ts';
 import { info } from '../helpers/registry.ts';
+import type { TestRegistry } from '../helpers/registry.ts';
 import { S1, S2 } from '../helpers/platform.ts';
 import { windowDeck } from '../helpers/window-deck.ts';
 
@@ -54,5 +55,60 @@ describe('window terminal: a restart’s hold', () => {
     assert.equal(info(r.registry, first.id).slot, null);
     hold.release();
     assert.equal(r.registry.nextSlot(), 3);
+  });
+
+  test("a restart's terminal carries its keeper meta's shell exactly when the held terminal had a shell (issue #199)", async (t) => {
+    const w = await windowDeck(t);
+    w.resumable(S1);
+    w.resumable(S2);
+    const r = w.registry();
+    const opened = new Map<string, string>();
+    for (const id of [S1, S2]) {
+      const { deps } = w.deps(r);
+      const outcome = await launchPrepared(
+        w.deck,
+        prepareResumeById(w.deck, id),
+        windowTerminal(deps, SIZE),
+      );
+      assert.equal(outcome.code, 0, JSON.stringify(outcome));
+      const term = r.registry.list().find((one) => one.expectedSessionId === id);
+      assert.ok(term !== undefined);
+      opened.set(id, term.id);
+      await w.prompt(r, term.id, id);
+    }
+    const withShell = opened.get(S1) ?? '';
+    const shell = w.shellSpec(r, withShell);
+    await r.registry.spawnShell(shell);
+    r.registry.start(shell.id);
+    await until(() => r.registry.shells()[0]?.state === 'running', 'the shell runs');
+
+    /** Restarts the session's terminal with a hold; the keeper meta's shell of the next one. */
+    const restart = async (registry: TestRegistry, id: string): Promise<string | undefined> => {
+      const termId = opened.get(id) ?? '';
+      const hold = registry.registry.holdSlot(termId);
+      assert.ok(hold !== null);
+      assert.equal(registry.registry.end(termId), 'ok');
+      await until(() => info(registry.registry, termId).state === 'ended', 'ended', 10_000);
+      const { deps } = w.deps(registry);
+      const outcome = await launchPrepared(
+        w.deck,
+        prepareResumeById(w.deck, id),
+        windowTerminal(deps, SIZE, hold),
+      );
+      assert.equal(outcome.code, 0, JSON.stringify(outcome));
+      hold.release();
+      const next = registry.events.hello.find(
+        (one) => one.hello.meta.sessionId === id && one.term.id !== termId,
+      );
+      assert.ok(next !== undefined, 'the next terminal said hello');
+      return next.hello.meta.shell;
+    };
+
+    assert.equal(await restart(r, S1), shell.id, 'the held terminal had a shell');
+    assert.equal(await restart(r, S2), undefined, 'it had none');
+    assert.deepEqual(
+      r.registry.shells().map((one) => one.id),
+      [shell.id],
+    );
   });
 });

@@ -94,7 +94,10 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   program the same way and then resumes the same session: its keeper sends that program SIGHUP
   and then SIGCONT, what the kernel sends when a terminal's window is closed, and nothing else —
   never SIGTERM or SIGKILL, and never to a session in another terminal. Every other session ends when the user ends it inside
-  `claude`. Nothing moves from one session to another but on the user's word in the window: from
+  `claude`. One process the window ends without being asked each time: a session's shell (issue
+  #199, 7.10). The user opened it under a session's terminal in the window, and it is ended when
+  that session's program ends, whoever ended it (End session, `/exit`, a crash): an ended session
+  holds nothing running. Its keeper sends the shell the same SIGHUP and SIGCONT, and nothing else. Nothing moves from one session to another but on the user's word in the window: from
   follow-up F40 the bar of 12.6 copies the fields the user ticks from the session `/clear` started
   out of to the new one, each time it is answered, and the old session keeps all of them (design
   7.1).

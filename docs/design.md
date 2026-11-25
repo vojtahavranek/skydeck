@@ -57,7 +57,10 @@ section first.
    12.5) — `End session and mark done`, from follow-up F44 `End session and park` (the mark
    still stops nothing: ending is the user's separate answer in the dialog "Park",
    design-step-2.md 12.15), or from issue #166 `Restart`, which then resumes the same session
-   (design-step-2.md 12.10). This is about the user's data (sessions, labels, groups, notes), not skydeck's own
+   (design-step-2.md 12.10). One process the window ends without being asked each time: a
+   session's shell (issue #199, design-step-2.md 7.10). The user opened it under a session's
+   terminal in the window, and it is ended when that session's program ends, whoever ended it: an
+   ended session holds nothing running. This is about the user's data (sessions, labels, groups, notes), not skydeck's own
    transient files (5.3). The one exception is the label and group skydeck itself has just stored
    for a `new` session that never started (7.7).
 7. **Never resume one session twice.** Two processes on one session interleave one transcript.

@@ -80,6 +80,14 @@ export interface SlotHold {
    */
   take(newId: string): number | null;
   /**
+   * Issue #199 (S2 7.10): right after `take(newId)`, in the same synchronous step: the held
+   * terminal's shell (one that is not being ended) belongs to `newId` from now on, and its id is the
+   * answer, for the new terminal's meta (`shell`). Null when the hold was not taken for `newId`, or
+   * the terminal has no such shell. It announces no change: the spawn that follows does. Optional:
+   * a hold of a hub without shells has none.
+   */
+  moveShell?(newId: string): string | null;
+  /**
    * Ends the hold: the terminal is no longer `restarting`; a number nobody took is freed now when
    * its program is over (as F43 frees it at the exit), and the change is announced. Once only.
    */
