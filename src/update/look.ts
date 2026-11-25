@@ -44,9 +44,9 @@ export interface Update {
   oldId: string;
   newId: string;
   /**
-   * The versions of the two commits (src/update/version.ts: `0.9.16`, or the pair alone when git
-   * cannot count), each read from git's objects of its own commit; null when not even its pair can
-   * be read. The same for both when nothing would come.
+   * The versions of the two commits (src/update/version.ts: `0.9.16`, or `0.9.16+3` past the
+   * nearest version tag), each read from the tags and the history git has; null: no version. The
+   * same for both when nothing would come.
    */
   oldVersion: string | null;
   newVersion: string | null;
@@ -335,8 +335,8 @@ async function look(
 }
 
 /**
- * The versions of a look that is `known`, both side by side within GIT_MS, offline. It never costs
- * the look: whatever stops it gives the pair alone or null, and the rest stays as it is (only the
+ * The versions of a look that is `known`, both side by side, each call within GIT_MS, offline. It
+ * never costs the look: whatever stops it gives no version, and the rest stays as it is (only the
  * AbortError of the window's stop is thrown on, as from any other call of the look).
  */
 async function addVersions(git: Git, update: Update): Promise<void> {

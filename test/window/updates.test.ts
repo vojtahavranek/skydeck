@@ -41,7 +41,7 @@ import type { TestDeck } from '../helpers/deck.ts';
 import { fakeProcesses, T0 } from '../helpers/platform.ts';
 import type { FakeProcesses, FakeRunner } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
-import { RUNNING_PAIR } from '../../src/update/version.ts';
+import { TAGS_ARGS } from '../../src/update/version-tags.ts';
 import {
   availableOutcome,
   availablePayload,
@@ -170,10 +170,7 @@ function world(t: TestContext, options: WorldOptions = {}): World {
         const args = gitArgs(call, seam);
         const versions =
           call.options?.env?.['GIT_NO_LAZY_FETCH'] === '1' &&
-          (args[0] === 'config' ||
-            args.includes('--is-shallow-repository') ||
-            args.includes('--first-parent') ||
-            (args[0] === 'cat-file' && args[1] === '--batch'));
+          (args.join(' ') === TAGS_ARGS.join(' ') || args.includes('--first-parent'));
         return !versions;
       }),
     stored: () => readCheck(d.deck.store, root),
@@ -1844,13 +1841,12 @@ describe('Update now: the guards of review 2', () => {
 });
 
 describe('the versions (S2 16.5)', () => {
-  const BUMP = 'b'.repeat(40);
   const VERSIONS = {
-    [OLD]: { bump: BUMP, pair: '0.9', after: 16 },
-    [NEW]: { bump: BUMP, pair: '0.9', after: 19 },
+    [OLD]: { tag: 'v0.9.16', distance: 0 },
+    [NEW]: { tag: 'v0.9.19', distance: 0 },
   };
 
-  test("the server's checkout's version, counted once at the first tick whatever the setting says, without a fetch", async (t) => {
+  test("the server's checkout's version, read once at the first tick whatever the setting says, without a fetch", async (t) => {
     for (const updateCheck of ['off', 'daily'] as const) {
       const w = world(t, { updateCheck, repo: { versions: VERSIONS } });
       assert.equal(w.updates.payload().version, null, 'not before the first tick');
@@ -1866,21 +1862,25 @@ describe('the versions (S2 16.5)', () => {
     }
   });
 
-  test("a version git cannot count is the running code's pair; a marked sandbox without the seam runs no git and says the pair", async (t) => {
-    const pair = RUNNING_PAIR;
+  test('no version tag reachable, or a call that fails: no version (Settings shows none); a marked sandbox without the seam runs no git', async (t) => {
+    const none = world(t, { updateCheck: 'off' });
+    none.updates.tick();
+    await flush();
+    assert.equal(none.updates.payload().version, null);
+
     const failing = world(t, {
       updateCheck: 'off',
-      repo: { answers: { 'rev-parse --is-shallow-repository': { code: 128 } } },
+      repo: { versions: VERSIONS, answers: { [TAGS_ARGS.join(' ')]: { code: 128 } } },
     });
     failing.updates.tick();
     await flush();
-    assert.equal(failing.updates.payload().version, pair);
+    assert.equal(failing.updates.payload().version, null);
 
-    const none = world(t, { updateCheck: 'off', seam: false });
-    none.updates.tick();
+    const sandboxed = world(t, { updateCheck: 'off', seam: false });
+    sandboxed.updates.tick();
     await flush();
-    assert.equal(none.updates.payload().version, pair);
-    assert.equal(none.runner.calls.length, 0);
+    assert.equal(sandboxed.updates.payload().version, null);
+    assert.equal(sandboxed.runner.calls.length, 0);
   });
 
   test("a check: the dialog gets the versions, the record keeps them, the up-to-date line names HEAD's", async (t) => {

@@ -148,8 +148,10 @@ function readerBefore(value: unknown): boolean {
 }
 
 describe('the check entry in kv', () => {
-  test('a round trip: what is written is read back, by its root', (t) => {
+  test('a round trip: what is written is read back, by its root (a version past its tag too)', (t) => {
     const d = testDeck(t);
+    writeCheck(d.deck.store, available({ headVersion: '0.9.16+3' }));
+    assert.equal(readCheckEntry(d.deck.store)?.headVersion, '0.9.16+3');
     const record = available({
       failure: { atNs: '1794474000000000001', line: 'git fetch failed' },
     });
@@ -183,6 +185,10 @@ describe('the check entry in kv', () => {
       { ...good, headVersion: '0.9.16.1' },
       { ...good, headVersion: 'v0.9' },
       { ...good, headVersion: '0.09.1' },
+      { ...good, headVersion: '0.9' },
+      { ...good, headVersion: '0.9.16+0' },
+      { ...good, headVersion: '0.9.16+' },
+      { ...good, headVersion: '0.9.16-3' },
       { ...good, head: null }, // a version without its commit
       { ...good, outcome: { ...good.outcome, fromVersion: '1' } },
       { ...good, outcome: { ...good.outcome, toVersion: 0.9 } },
@@ -461,7 +467,7 @@ describe('checkPayload', () => {
       const payload = checkPayload(available({ outcome: outcome({ fromVersion, toVersion }) }));
       return payload.state === 'available' ? payload.versions : 'not available';
     };
-    assert.equal(versions('0.9', '0.10.0'), '0.9 → 0.10.0');
+    assert.equal(versions('0.9.16+2', '0.10.0'), '0.9.16+2 → 0.10.0');
     assert.equal(versions('0.9.16', null), '0.9.16 → fedcba9');
     assert.equal(versions(null, '0.9.17'), '0123456 → 0.9.17');
     assert.equal(versions(null, null), null);
@@ -469,7 +475,10 @@ describe('checkPayload', () => {
 
   test("nameOf: the version of `to` the record's available outcome names, else its short id", () => {
     assert.equal(nameOf(available(), NEW), '0.9.18');
-    assert.equal(nameOf(available({ outcome: outcome({ toVersion: '0.9' }) }), NEW), '0.9');
+    assert.equal(
+      nameOf(available({ outcome: outcome({ toVersion: '0.9.18+2' }) }), NEW),
+      '0.9.18+2',
+    );
     assert.equal(nameOf(available({ outcome: outcome({ toVersion: null }) }), NEW), 'fedcba9');
     assert.equal(nameOf(available(), OLD), '0123456', 'another commit than the one it lists');
     assert.equal(nameOf(available({ outcome: { kind: 'current', line: 'x' } }), NEW), 'fedcba9');

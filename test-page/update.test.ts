@@ -67,8 +67,9 @@ async function world(
   const l = await launched(t, chromium, {
     window: { updateCheck: 'off' },
     server: (d) => {
-      // Its package.json sets the pair in the first commit: HEAD is 0.9.0, each commit one more.
-      const c = gitCheckout(d.s, { content: { 'README.md': 'one\n', 'package.json': PACKAGE } });
+      // Its first commit carries the version tag v0.9.0: HEAD is 0.9.0, each commit past it +1.
+      const c = gitCheckout(d.s);
+      c.git(c.root, 'tag', 'v0.9.0');
       prepare(c);
       made = c;
       return {
@@ -99,9 +100,6 @@ function noticeShown(page: Page): Promise<boolean> {
 async function noticeIs(page: Page, shown: boolean, what: string): Promise<void> {
   await until(async () => (await noticeShown(page)) === shown, what);
 }
-
-/** The world's checkout's package.json. */
-const PACKAGE = '{ "name": "skydeck", "version": "0.9.0" }\n';
 
 /** Every line of the settings screen's group Updates. */
 function allBlockLines(page: Page): Promise<string[]> {
@@ -216,10 +214,11 @@ async function closeDialog(page: Page): Promise<void> {
   );
 }
 
-/** The version of `rev` in the world's checkout: 0.9 and how many commits after the first. */
+/** The version of `rev` in the world's checkout: 0.9.0, and `+n` n commits past the first. */
 function versionAt(w: World, rev: string): string {
   const first = w.c.git(w.c.root, 'rev-list', '--max-parents=0', 'HEAD').trim();
-  return `0.9.${w.c.git(w.c.root, 'rev-list', '--first-parent', '--count', `${first}..${rev}`).trim()}`;
+  const n = w.c.git(w.c.root, 'rev-list', '--first-parent', '--count', `${first}..${rev}`).trim();
+  return n === '0' ? '0.9.0' : `0.9.0+${n}`;
 }
 
 /**
@@ -683,7 +682,7 @@ test('the update notice (F38, S2 16.5)', async (t) => {
       assert.equal(merged.length, 1);
       assert.match(
         merged[0] ?? '',
-        /^skydeck is up to date \(main at 0\.9\.[0-9]+, [0-9a-f]{7}, as origin\/main\)$/,
+        /^skydeck is up to date \(main at 0\.9\.0\+[0-9]+, [0-9a-f]{7}, as origin\/main\)$/,
       );
       await closeDialog(w.l.page);
       await noticeIs(w.l.page, false, 'the control goes on the first page');

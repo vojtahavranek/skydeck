@@ -25,9 +25,9 @@
  * - A server sends no stored outcome before its own first check or look has ended.
  * - The versions (src/update/version.ts): each look names HEAD's and the upstream's, kept in the
  *   record (version 3) and sent as the dialog's `versions`; at its first tick, whatever the
- *   setting says, the server counts its checkout's once without the network (`version`, for the
- *   settings screen; the running code's pair when git cannot say, and in a marked sandbox without
- *   the seam). The running form and the result name `to` by the version the look Update now made
+ *   setting says, the server reads its checkout's once without the network (`version`, for the
+ *   settings screen; null without one, and in a marked sandbox without the seam, where no git
+ *   runs). The running form and the result name `to` by the version the look Update now made
  *   gives it (`nameOf`), else by its short id.
  * - Update now (milestone 2, S2 16.5 "Update now"): `apply(to)` is refused while the server
  *   stops, an update runs, a check runs or a restore runs, and unless a look made now says
@@ -67,7 +67,7 @@ import {
 } from '../update/record.ts';
 import type { CheckOutcome, CheckRecord, RunRecord } from '../update/record.ts';
 import { clipLine } from '../update/git.ts';
-import { RUNNING_PAIR, versionGitOf, versionOf } from '../update/version.ts';
+import { versionGitOf, versionOf } from '../update/version.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
 import { serverLog } from './log.ts';
@@ -267,8 +267,8 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   /** An update started from this server: since when, to which commit and its name; null: none runs. */
   let applying: { to: string; sinceNs: string; name: string } | null = null;
   /**
-   * The version of the checkout (src/update/version.ts), counted once at the first tick, the
-   * running code's pair when it cannot be read; null until then (S2 16.5, the settings screen).
+   * The version of the checkout (src/update/version.ts), read once at the first tick; null until
+   * then, and when it has none (S2 16.5, the settings screen).
    */
   let version: string | null = null;
   let versionAsked = false;
@@ -638,16 +638,12 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   };
 
   /**
-   * The checkout's version, once (S2 16.5, the settings screen): without the network, within
-   * GIT_MS; in a marked sandbox without the seam (no git) the running code's pair.
+   * The checkout's version, once (S2 16.5, the settings screen): without the network, each call
+   * within GIT_MS; in a marked sandbox without the seam no git runs and there is none.
    */
   const countVersion = (): void => {
-    if (git === null) {
-      version = RUNNING_PAIR;
-      tell();
-      return;
-    }
-    void versionOf(versionGitOf(git), 'HEAD', GIT_MS, RUNNING_PAIR)
+    if (git === null) return;
+    void versionOf(versionGitOf(git), 'HEAD', GIT_MS)
       .then((counted) => {
         if (stopped) return;
         version = counted;

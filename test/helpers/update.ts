@@ -2,9 +2,13 @@
  * The tests of `skydeck update` (F8): a scripted git for the fake runner, and the one way every
  * test runs the command — on a root inside its sandbox, never on this repository (hazard 1).
  */
+import { createHash } from 'node:crypto';
+
 import { main } from '../../src/cli/main.ts';
 import type { Platform, RunResult } from '../../src/platform/types.ts';
 import type { CheckOutcome } from '../../src/update/record.ts';
+import { CHAIN_READ } from '../../src/update/version.ts';
+import { TAGS_ARGS } from '../../src/update/version-tags.ts';
 import type { UpdateCheckPayload } from '../../src/window/protocol.ts';
 import type { Captured } from './capture.ts';
 import { insideSandbox } from './git-checkout.ts';
@@ -65,32 +69,23 @@ export function availablePayload(over: Partial<AvailablePayload> = {}): Availabl
 
 /**
  * The sub-commands of the versions a look that is known reads (src/update/version.ts), for two
- * commits the scripted git names no package.json of (the default): side by side, each commit's
- * partial-clone settings and whether the history is shallow, then each one's changes of
- * package.json (none: no more). VERSION_CALLS_ONE: the same for one commit (nothing would come).
+ * commits: side by side, each commit's tags and first-parent history. VERSION_CALLS_ONE: the same
+ * for one commit (nothing would come).
  */
-export const VERSION_CALLS = ['config', 'rev-parse', 'config', 'rev-parse', 'rev-list', 'rev-list'];
-export const VERSION_CALLS_ONE = ['config', 'rev-parse', 'rev-list'];
+export const VERSION_CALLS = ['for-each-ref', 'rev-list', 'for-each-ref', 'rev-list'];
+export const VERSION_CALLS_ONE = ['for-each-ref', 'rev-list'];
 
 /** The arguments of VERSION_CALLS' calls (after `-C <root>`), in their order, for `old` and `new`. */
 export function versionArgs(old: string, ...more: string[]): string[][] {
-  const config = [
-    'config',
-    '-z',
-    '--get-regexp',
-    '^(extensions\\.partialclone|remote\\..*\\.promisor)$',
-  ];
-  const shallow = ['rev-parse', '--is-shallow-repository'];
-  const changes = (id: string): string[] => [
-    'rev-list',
-    '--first-parent',
-    '--max-count=100',
-    id,
-    '--',
-    'package.json',
-  ];
-  const ids = [old, ...more];
-  return [...ids.flatMap(() => [config, shallow]), ...ids.map(changes)];
+  return [old, ...more].flatMap((id) => [
+    [...TAGS_ARGS],
+    ['rev-list', '--first-parent', `--max-count=${CHAIN_READ}`, id],
+  ]);
+}
+
+/** The id of the commit a version tag of the scripted git names, when not the commit itself. */
+function taggedCommit(tag: string): string {
+  return createHash('sha1').update(tag).digest('hex');
 }
 
 /** The id of the i-th new commit (1 = the oldest); its short id is its first seven characters. */
@@ -156,11 +151,11 @@ export interface ScriptedRepo {
   /** `ls-tree` of src/store/migrations.ts per commit id: its output (default the same blob). */
   migrations: Record<string, string>;
   /**
-   * The version of a commit (src/update/version.ts), per commit id: the commit that set its pair
-   * (`bump`, the one change of package.json the first-parent history shows), that pair, and how
-   * many commits came after it. A commit not named has no package.json: its version is null.
+   * The version of a commit (src/update/version.ts), per commit id: the nearest version tag on its
+   * first-parent history, and how many commits come before the tag's (0: the commit carries it).
+   * A commit not named reaches no version tag: its version is null.
    */
-  versions: Record<string, { bump: string; pair: string; after: number }>;
+  versions: Record<string, { tag: string; distance: number }>;
   /** What `merge --ff-only` answers. */
   merge: Partial<RunResult>;
   /** What HEAD and `status` say after a merge that failed. */
@@ -336,41 +331,35 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
         return repo.partialClone === null
           ? runResult({ code: 1 })
           : runResult({ stdout: repo.partialClone });
-      // The version's calls (src/update/version.ts): no partial clone (`config -z` above), a
-      // history that is not shallow, and each commit's one change of package.json.
-      case 'rev-parse --is-shallow-repository':
-        return line('false');
+      // The version's calls (src/update/version.ts): the tags, and a commit's first-parent
+      // history up to the commit its tag names.
+      case `for-each-ref ${TAGS_ARGS[1] ?? ''}`:
+        return runResult({
+          stdout: Object.entries(repo.versions)
+            .map(
+              ([id, { tag, distance }]) =>
+                `refs/tags/${tag}\0commit\0${distance === 0 ? id : taggedCommit(tag)}\0\0\0\n`,
+            )
+            .join(''),
+        });
       case 'rev-list --first-parent': {
         // `HEAD` is the checkout's HEAD as rev-parse answers it.
-        const commitOf = (rev: string): string =>
+        const rev = rest[2] ?? '';
+        const commit =
           rev !== 'HEAD'
             ? rev
             : merged === null
               ? repo.head
               : (repo.headAfterMerge ?? repo.fetched);
-        if (rest[1] === '--count') {
-          const [bump, commit] = (rest[2] ?? '').split('..');
-          const version = repo.versions[commitOf(commit ?? '')];
-          if (version !== undefined && version.bump === bump) return line(String(version.after));
-          break;
-        }
-        const version = repo.versions[commitOf(rest[2] ?? '')];
-        return runResult({ stdout: version === undefined ? '' : `${version.bump}\n` });
+        const version = repo.versions[commit];
+        if (version === undefined) return line(commit);
+        const between = Array.from({ length: Math.max(0, version.distance - 1) }, (_, k) =>
+          createHash('sha1').update(`${commit} ${k}`).digest('hex'),
+        );
+        const chain =
+          version.distance === 0 ? [commit] : [commit, ...between, taggedCommit(version.tag)];
+        return runResult({ stdout: `${chain.join('\n')}\n` });
       }
-      case 'cat-file --batch':
-        return runResult({
-          stdout: (call.options?.input ?? '')
-            .split('\n')
-            .filter((entry) => entry !== '')
-            .map((entry) => {
-              const bump = entry.split(':')[0] ?? '';
-              const version = Object.values(repo.versions).find((v) => v.bump === bump);
-              if (version === undefined) return `${entry} missing\n`;
-              const file = JSON.stringify({ version: `${version.pair}.0` });
-              return `${'6'.repeat(40)} blob ${Buffer.byteLength(file)}\n${file}\n`;
-            })
-            .join(''),
-        });
       case 'cat-file --batch-check':
         return runResult({
           stdout: (call.options?.input ?? '')

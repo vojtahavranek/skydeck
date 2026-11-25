@@ -18,7 +18,6 @@ import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import pkg from '../../package.json' with { type: 'json' };
 import { sandbox } from '../helpers/sandbox.ts';
 import type { Sandbox } from '../helpers/sandbox.ts';
 
@@ -1003,7 +1002,7 @@ describe('bin/skydeck with the real node', () => {
     assert.equal(r.status, 0);
     // No git on the sandbox's PATH: this checkout's own history is never asked (the commit is
     // test/cli/version.test.ts's, on throwaway checkouts).
-    assert.equal(r.stdout, `${pkg.version.split('.').slice(0, 2).join('.')} (commit unknown)\n`);
+    assert.equal(r.stdout, 'unversioned (commit unknown)\n');
     assert.equal(r.stderr, '');
   });
 

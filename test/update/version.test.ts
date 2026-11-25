@@ -1,58 +1,52 @@
-// The version of a commit (src/update/version.ts): `<major>.<minor>.<patch>`, the pair from
-// package.json, the third number counted by git on the first-parent history after the commit that
-// last changed the pair — on the real git with throwaway repositories in the sandbox, and the pair
-// alone whenever git cannot count (a shallow clone, a partial clone, a failure, the budget, the
-// search's limit, a package.json that is not one), with nothing fetched.
+// The version of a commit (src/update/version.ts, R-D and D1'' of the plan): the nearest version tag
+// on the commit's first-parent history and the distance — on the real git with throwaway
+// repositories in the sandbox: at a tag, past it, none, several on one commit, names that are not
+// version tags, a tag on a merged branch, a shallow clone, a partial clone (nothing fetched) — and
+// no version whenever a call fails or does not answer, on a scripted git. R-F, the tags an
+// installation gets by the fetches skydeck already makes, is test/update/version-fetch.test.ts.
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
-import type { Platform } from '../../src/platform/types.ts';
+import type { Platform, RunResult } from '../../src/platform/types.ts';
 import { gitOn } from '../../src/update/git.ts';
-import {
-  pairOf,
-  PAIR_CHANGES_READ,
-  versionGitOf,
-  versionName,
-  versionOf,
-} from '../../src/update/version.ts';
+import { CHAIN_READ, versionGitOf, versionName, versionOf } from '../../src/update/version.ts';
 import type { VersionGit } from '../../src/update/version.ts';
+import {
+  compareVersions,
+  parseVersionTag,
+  TAGS_ARGS,
+  versionTagsOf,
+} from '../../src/update/version-tags.ts';
 import { gitCheckout, gitTestEnv, insideSandbox } from '../helpers/git-checkout.ts';
 import type { GitCheckout } from '../helpers/git-checkout.ts';
 import { realTestPlatform, runResult } from '../helpers/platform.ts';
 import type { RealTestPlatform } from '../helpers/platform.ts';
 
-const BUDGET = 10_000;
+const MS = 10_000;
 const IDENTITY = ['-c', 'user.name=skydeck test', '-c', 'user.email=test@skydeck.invalid'];
-
-/** package.json with `version` and one more line, as the repository's own has. */
-function pkg(version: string, extra = 'a'): string {
-  return `${JSON.stringify({ name: 'skydeck', version, extra }, null, 2)}\n`;
-}
 
 interface Repo {
   tp: RealTestPlatform;
   c: GitCheckout;
   /** The version of `rev` (HEAD by default) in `dir` (the checkout by default). */
   version(rev?: string, dir?: string): Promise<string | null>;
-  /** `n` commits that do not touch package.json; the last one's id. */
+  /** `n` plain commits; the last one's id. */
   commits(n: number, tag: string): string;
+  tag(name: string, rev?: string): void;
 }
 
-function repo(
-  t: TestContext,
-  first: Record<string, string> = { 'package.json': pkg('0.9.0') },
-): Repo {
+function repo(t: TestContext): Repo {
   const tp = realTestPlatform(t, { env: (s) => gitTestEnv(s) });
-  const c = gitCheckout(tp.sandbox, { content: first });
+  const c = gitCheckout(tp.sandbox);
   const platform: Platform = { ...tp.platform, appRoot: c.root };
   return {
     tp,
     c,
     version: (rev = 'HEAD', dir = c.root) =>
-      versionOf(versionGitOf(gitOn(platform, insideSandbox(tp.sandbox, dir))), rev, BUDGET),
+      versionOf(versionGitOf(gitOn(platform, insideSandbox(tp.sandbox, dir))), rev, MS),
     commits(n, tag) {
       let id = '';
       for (let i = 1; i <= n; i += 1) {
@@ -60,245 +54,259 @@ function repo(
       }
       return id;
     },
+    tag: (name, rev = 'HEAD') => {
+      c.git(c.root, 'tag', name, rev);
+    },
   };
 }
 
-describe('the version of a commit, on the real git (D1)', () => {
-  test('the commit that sets the pair is .0; n commits later .n', async (t) => {
+describe("the version of a commit, on the real git (D1'')", () => {
+  test('no version tag reachable: no version', async (t) => {
     const r = repo(t);
-    assert.equal(await r.version(), '0.9.0');
-    r.commits(1, 'one');
-    assert.equal(await r.version(), '0.9.1');
-    r.commits(15, 'more');
-    assert.equal(await r.version(), '0.9.16');
+    r.commits(2, 'a');
+    assert.equal(await r.version(), null);
   });
 
-  test('a second bump starts again at .0, also when it is a change of the third number too', async (t) => {
+  test('at a tag: its version; n commits past it: +n; a later tag: its own', async (t) => {
     const r = repo(t);
+    r.tag('v0.9.0');
+    assert.equal(await r.version(), '0.9.0');
     r.commits(3, 'a');
-    const before = r.c.id();
-    r.c.commit(r.c.root, 'bump', { 'package.json': pkg('0.10.0') });
+    assert.equal(await r.version(), '0.9.0+3');
+    r.tag('v0.9.1');
+    assert.equal(await r.version(), '0.9.1');
+    r.commits(1, 'b');
+    assert.equal(await r.version(), '0.9.1+1');
+    assert.equal(await r.version('HEAD~2'), '0.9.0+2', 'an older commit keeps its own');
+  });
+
+  test('several version tags on one commit: the highest; names that are not version tags: none', async (t) => {
+    const r = repo(t);
+    r.tag('v0.9.3');
+    r.tag('v0.10.0');
+    r.tag('v0.9.12');
     assert.equal(await r.version(), '0.10.0');
-    r.commits(2, 'b');
-    assert.equal(await r.version(), '0.10.2');
-    assert.equal(await r.version(before), '0.9.3', 'an older commit keeps its own version');
-    r.c.commit(r.c.root, 'one', { 'package.json': pkg('1.0.0') });
+    r.commits(1, 'a');
+    for (const name of ['v1.2', 'v01.2.3', 'version-1', 'v1.2.3-rc1', '1.2.3', 'v2.0.0.1']) {
+      r.tag(name);
+    }
+    assert.equal(await r.version(), '0.10.0+1');
+  });
+
+  test('an annotated version tag counts; one that names no commit does not', async (t) => {
+    const r = repo(t);
+    r.c.git(r.c.root, ...IDENTITY, 'tag', '-a', '-m', 'by hand', 'v1.0.0');
+    assert.equal(await r.version(), '1.0.0');
+    const tree = r.c.git(r.c.root, 'rev-parse', 'HEAD^{tree}').trim();
+    r.tag('v2.0.0', tree);
     assert.equal(await r.version(), '1.0.0');
   });
 
-  test('a change of the third number alone, or of another line of package.json, is no bump', async (t) => {
+  test('only the first-parent history: a tag on a merged branch is not reached; the merge is one commit', async (t) => {
     const r = repo(t);
-    r.commits(2, 'a');
-    r.c.commit(r.c.root, 'the third number', { 'package.json': pkg('0.9.7') });
-    assert.equal(await r.version(), '0.9.3');
-    r.c.commit(r.c.root, 'another line', { 'package.json': pkg('0.9.7', 'b') });
-    assert.equal(await r.version(), '0.9.4');
-    r.commits(1, 'c');
-    assert.equal(await r.version(), '0.9.5');
-  });
-
-  test('a pair that goes back to an earlier one is a bump too: the last change of the pair counts', async (t) => {
-    const r = repo(t);
-    r.c.commit(r.c.root, 'up', { 'package.json': pkg('0.10.0') });
-    r.c.commit(r.c.root, 'back', { 'package.json': pkg('0.9.0') });
-    r.commits(1, 'a');
-    assert.equal(await r.version(), '0.9.1');
-  });
-
-  test('a merge commit counts as one: the commits of the merged branch do not count (first parent)', async (t) => {
-    const r = repo(t);
-    r.commits(2, 'main');
+    r.tag('v0.9.2');
     r.c.git(r.c.root, 'checkout', '--quiet', '-b', 'side');
-    r.commits(5, 'side');
+    r.commits(3, 'side');
+    r.tag('v5.0.0');
     r.c.git(r.c.root, 'checkout', '--quiet', 'main');
-    r.c.git(r.c.root, ...IDENTITY, 'merge', '--quiet', '--no-ff', '-m', 'merge side', 'side');
-    assert.equal(await r.version(), '0.9.3');
-    // A bump made on the merged branch counts from the merge, which brings it to the first parent.
-    r.c.git(r.c.root, 'checkout', '--quiet', '-b', 'bumped');
-    r.c.commit(r.c.root, 'bump on a branch', { 'package.json': pkg('0.11.0') });
-    r.commits(4, 'bumped');
-    r.c.git(r.c.root, 'checkout', '--quiet', 'main');
-    r.c.git(r.c.root, ...IDENTITY, 'merge', '--quiet', '--no-ff', '-m', 'merge bump', 'bumped');
-    assert.equal(await r.version(), '0.11.0');
-    r.commits(1, 'after');
-    assert.equal(await r.version(), '0.11.1');
+    r.c.git(r.c.root, ...IDENTITY, 'merge', '--quiet', '--no-ff', '-m', 'merge', 'side');
+    assert.equal(await r.version(), '0.9.2+1');
   });
 
-  test('package.json added later than the first commit: the commit that adds it is .0', async (t) => {
-    const r = repo(t, { 'README.md': 'one\n' });
-    assert.equal(await r.version(), null, 'no package.json: no pair, no fallback');
-    r.c.commit(r.c.root, 'add it', { 'package.json': pkg('0.9.0') });
-    r.commits(2, 'a');
-    assert.equal(await r.version(), '0.9.2');
-  });
-
-  test('the version is read from the commit, never the work tree', async (t) => {
+  test('a shallow clone that does not reach the tag: no version; one that does: the version', async (t) => {
     const r = repo(t);
-    r.commits(1, 'a');
-    writeFileSync(join(r.c.root, 'package.json'), pkg('3.4.0'));
-    assert.equal(await r.version(), '0.9.1');
-  });
-});
-
-describe('when git cannot count: the pair alone (D4)', () => {
-  test('a shallow clone whose history does not reach the bump: the pair alone; one that does: counted', async (t) => {
-    const r = repo(t);
+    r.tag('v0.9.0');
     r.commits(5, 'a');
+    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main', 'v0.9.0');
     const shallow = insideSandbox(r.tp.sandbox, join(r.tp.sandbox.root, 'shallow'));
     mkdirSync(shallow);
-    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main');
     r.c.git(shallow, 'clone', '--quiet', '--depth', '2', `file://${r.c.remote}`, '.');
-    assert.equal(await r.version('HEAD', shallow), '0.9');
-
-    r.c.commit(r.c.root, 'bump', { 'package.json': pkg('0.10.0') });
-    r.commits(2, 'b');
-    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main');
-    const deeper = insideSandbox(r.tp.sandbox, join(r.tp.sandbox.root, 'deeper'));
-    mkdirSync(deeper);
-    r.c.git(deeper, 'clone', '--quiet', '--depth', '4', `file://${r.c.remote}`, '.');
-    assert.equal(await r.version('HEAD', deeper), '0.10.2', 'the bump is inside the history');
+    assert.equal(await r.version('HEAD', shallow), null);
+    const deep = insideSandbox(r.tp.sandbox, join(r.tp.sandbox.root, 'deep'));
+    mkdirSync(deep);
+    r.c.git(deep, 'clone', '--quiet', '--depth', '6', `file://${r.c.remote}`, '.');
+    assert.equal(await r.version('HEAD', deep), '0.9.0+5');
   });
 
-  test('a partial clone without blobs: the pair alone (no fallback: null), and nothing is fetched', async (t) => {
+  test('a partial clone without blobs or trees: the version, and nothing is fetched', async (t) => {
     const r = repo(t);
-    r.commits(3, 'a');
-    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main');
+    r.tag('v0.9.0');
+    r.commits(2, 'a');
+    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main', 'v0.9.0');
     r.c.git(r.c.remote, 'config', 'uploadpack.allowFilter', 'true');
-    const partial = insideSandbox(r.tp.sandbox, join(r.tp.sandbox.root, 'partial'));
-    mkdirSync(partial);
-    r.c.git(
-      partial,
-      'clone',
-      '--quiet',
-      '--no-checkout',
-      '--filter=blob:none',
-      `file://${r.c.remote}`,
-      '.',
-    );
-    const missing = (): string =>
-      r.c.git(partial, 'rev-list', '--objects', '--missing=print', '--all');
-    const before = missing();
-    assert.match(before, /^\?[0-9a-f]+$/m, 'blobs are missing');
-
-    const platform: Platform = { ...r.tp.platform, appRoot: partial };
-    const git = versionGitOf(gitOn(platform, partial));
-    assert.equal(await versionOf(git, 'HEAD', BUDGET), null);
-    assert.equal(await versionOf(git, 'HEAD', BUDGET, '0.9'), '0.9');
-    assert.equal(missing(), before, 'no object was fetched');
-  });
-
-  test('a package.json in the history that is not JSON: the pair alone, never a guess', async (t) => {
-    const r = repo(t);
-    r.c.commit(r.c.root, 'broken', { 'package.json': '{ "version": "0.9.0",\n' });
-    r.c.commit(r.c.root, 'mended', { 'package.json': pkg('0.9.0') });
-    r.commits(1, 'a');
-    assert.equal(await r.version(), '0.9');
-    r.c.commit(r.c.root, 'no version', { 'package.json': '{}\n' });
-    assert.equal(await r.version(), null, "the commit's own has no pair");
-  });
-
-  test('more changes of package.json than the search reads, without a bump: the pair alone', async (t) => {
-    const r = repo(t);
-    for (let i = 1; i <= PAIR_CHANGES_READ; i += 1) {
-      r.c.commit(r.c.root, `deps ${i}`, { 'package.json': pkg('0.9.0', `x${i}`) });
+    for (const filter of ['blob:none', 'tree:0']) {
+      const partial = insideSandbox(
+        r.tp.sandbox,
+        join(r.tp.sandbox.root, filter.replace(':', '-')),
+      );
+      mkdirSync(partial);
+      r.c.git(
+        partial,
+        'clone',
+        '--quiet',
+        '--no-checkout',
+        `--filter=${filter}`,
+        `file://${r.c.remote}`,
+        '.',
+      );
+      const missing = (): string =>
+        r.c.git(partial, 'rev-list', '--objects', '--missing=print', '--all');
+      const before = missing();
+      assert.match(before, /^\?[0-9a-f]+$/m, `${filter}: objects are missing`);
+      assert.equal(await r.version('HEAD', partial), '0.9.0+2', filter);
+      assert.equal(missing(), before, `${filter}: no object was fetched`);
     }
-    assert.equal(await r.version(), '0.9');
-    r.c.commit(r.c.root, 'bump', { 'package.json': pkg('0.10.0') });
-    assert.equal(await r.version(), '0.10.0', 'a bump within the limit is found');
   });
 
-  test('not a checkout, or a commit that is not there: the fallback, or null', async (t) => {
+  test('not a checkout, or a commit that is not there: no version', async (t) => {
     const r = repo(t);
+    r.tag('v0.9.0');
     const plain = insideSandbox(r.tp.sandbox, join(r.tp.sandbox.root, 'plain'));
     mkdirSync(plain);
     const platform: Platform = { ...r.tp.platform, appRoot: plain };
-    assert.equal(
-      await versionOf(versionGitOf(gitOn(platform, plain)), 'HEAD', BUDGET, '0.9'),
-      '0.9',
-    );
+    assert.equal(await versionOf(versionGitOf(gitOn(platform, plain)), 'HEAD', MS), null);
     assert.equal(await r.version('f'.repeat(40)), null);
   });
 });
 
-describe('the budget and the failures, on a scripted git', () => {
-  /** A VersionGit whose every call answers `answer`; the calls' arguments and timeouts. */
-  function scripted(
-    answer: (args: readonly string[]) => ReturnType<VersionGit['run']>,
-    clock = { ns: 0n },
-  ): {
+describe('the calls, their failures and their limits, on a scripted git', () => {
+  const HEAD = 'a'.repeat(40);
+  const TAGGED = 'b'.repeat(40);
+  const record = (name: string, id: string): string => `refs/tags/${name}\0commit\0${id}\0\0\0\n`;
+
+  /** A VersionGit that answers `answer`; the calls with their options. */
+  function scripted(answer: (args: readonly string[]) => Promise<RunResult>): {
     git: VersionGit;
-    calls: { args: readonly string[]; timeoutMs: number }[];
+    calls: { args: readonly string[]; timeoutMs: number; maxBytes: number }[];
   } {
-    const calls: { args: readonly string[]; timeoutMs: number }[] = [];
+    const calls: { args: readonly string[]; timeoutMs: number; maxBytes: number }[] = [];
     return {
       calls,
       git: {
         run(args, options) {
-          calls.push({ args, timeoutMs: options.timeoutMs });
+          calls.push({ args, ...options });
           return answer(args);
         },
-        monotonicNs: () => clock.ns,
       },
     };
   }
 
-  test('a call that fails, times out or throws: the pair alone, nothing thrown', async () => {
-    for (const fail of [
+  const good = (args: readonly string[]): Promise<RunResult> =>
+    Promise.resolve(
+      runResult({
+        stdout: args[0] === 'for-each-ref' ? record('v0.9.16', TAGGED) : `${HEAD}\n${TAGGED}\n`,
+      }),
+    );
+
+  test('two calls, side by side, each with the whole bound: the tags and the first-parent history', async () => {
+    const answers: (() => void)[] = [];
+    const { git, calls } = scripted(
+      (args) =>
+        new Promise((resolve) => {
+          answers.push(() => {
+            void good(args).then(resolve);
+          });
+        }),
+    );
+    const version = versionOf(git, 'HEAD', 2_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(calls.length, 2, 'both before any answer');
+    for (const answer of answers) answer();
+    assert.equal(await version, '0.9.16+1');
+    assert.deepEqual(
+      calls.map((c) => [c.args, c.timeoutMs]),
+      [
+        [TAGS_ARGS, 2_000],
+        [['rev-list', '--first-parent', `--max-count=${CHAIN_READ}`, 'HEAD'], 2_000],
+      ],
+    );
+  });
+
+  test('a call that fails, times out, is not found, throws or is cut at its cap: no version, nothing thrown', async () => {
+    for (const bad of [
       runResult({ code: 128 }),
       runResult({ code: null, timedOut: true }),
       runResult({ code: null, notFound: true }),
     ]) {
-      const { git } = scripted(() => Promise.resolve(fail));
-      assert.equal(await versionOf(git, 'HEAD', BUDGET, '0.9'), '0.9');
+      for (const which of ['for-each-ref', 'rev-list']) {
+        const { git } = scripted((args) => (args[0] === which ? Promise.resolve(bad) : good(args)));
+        assert.equal(await versionOf(git, 'HEAD', MS), null, which);
+      }
     }
-    const { git } = scripted(() => Promise.reject(new Error('EAGAIN')));
-    assert.equal(await versionOf(git, 'HEAD', BUDGET, '0.9'), '0.9');
+    const thrown = scripted(() => Promise.reject(new Error('EAGAIN')));
+    assert.equal(await versionOf(thrown.git, 'HEAD', MS), null);
+    const capped = scripted((args) =>
+      args[0] === 'for-each-ref'
+        ? Promise.resolve(runResult({ stdout: 'x'.repeat(1024 * 1024) }))
+        : good(args),
+    );
+    assert.equal(await versionOf(capped.git, 'HEAD', MS), null, 'a list of tags past its cap');
+    const odd = scripted((args) =>
+      args[0] === 'rev-list' ? Promise.resolve(runResult({ stdout: 'not an id\n' })) : good(args),
+    );
+    assert.equal(await versionOf(odd.git, 'HEAD', MS), null, 'an answer that is not a history');
   });
 
   test("an AbortError (the caller's stop) is thrown on", async () => {
     const abort = Object.assign(new Error('stopped'), { name: 'AbortError' });
     const { git } = scripted(() => Promise.reject(abort));
-    await assert.rejects(versionOf(git, 'HEAD', BUDGET), { name: 'AbortError' });
+    await assert.rejects(versionOf(git, 'HEAD', MS), { name: 'AbortError' });
   });
 
-  test('every call gets what is left of the budget; none starts once it is spent', async () => {
-    const clock = { ns: 0n };
-    const ID = 'a'.repeat(40);
-    const { git, calls } = scripted(async (args) => {
-      await Promise.resolve(); // every call takes 0.7 s, once all of its round have started
-      clock.ns += 700_000_000n;
-      if (args[0] === 'config') return runResult({ code: 1 });
-      if (args[0] === 'rev-parse') return runResult({ stdout: 'false\n' });
-      if (args.includes('--max-count=100')) return runResult({ stdout: `${ID}\n` });
-      const file = pkg('0.9.0');
-      return runResult({ stdout: `${ID} blob ${Buffer.byteLength(file)}\n${file}\n` });
-    }, clock);
-
-    assert.equal(await versionOf(git, 'HEAD', 2_000, '0.1'), '0.1');
-    assert.deepEqual(
-      calls.map((c) => [c.args[0], c.timeoutMs]),
-      [
-        ['config', 2_000],
-        ['rev-parse', 2_000],
-        ['rev-list', 600], // 1.4 s spent by the first round (the fake clock adds both)
-      ],
-      'the third round had no time left: the pair of no file was read, the fallback stays',
+  test('more than CHAIN_READ commits past the nearest tag: no version', async () => {
+    const chain = Array.from({ length: CHAIN_READ }, (_, i) => i.toString(16).padStart(40, '0'));
+    const { git } = scripted((args) =>
+      Promise.resolve(
+        runResult({
+          stdout: args[0] === 'for-each-ref' ? record('v0.9.0', TAGGED) : `${chain.join('\n')}\n`,
+        }),
+      ),
     );
+    assert.equal(await versionOf(git, 'HEAD', MS), null);
   });
 });
 
 describe('the helpers', () => {
-  test('pairOf: three numbers without leading zeros, the first two', () => {
-    assert.equal(pairOf('0.9.0'), '0.9');
-    assert.equal(pairOf('12.034.0'), null);
-    assert.equal(pairOf('1.0'), null);
-    assert.equal(pairOf('1.0.0-beta'), null);
-    assert.equal(pairOf(1), null);
+  test('parseVersionTag: v and three numbers without leading zeros; compareVersions orders them', () => {
+    assert.deepEqual(parseVersionTag('v0.9.16'), { major: 0, minor: 9, patch: 16 });
+    for (const name of [
+      'v1.2',
+      'v01.2.3',
+      'version-1',
+      'v1.2.3-rc1',
+      '1.2.3',
+      'V1.2.3',
+      'v1.2.3 ',
+    ]) {
+      assert.equal(parseVersionTag(name), null, name);
+    }
+    assert.equal(parseVersionTag(`v${'9'.repeat(20)}.0.0`), null, 'not a safe number');
+    const v = (name: string) => parseVersionTag(name) ?? assert.fail(name);
+    assert.ok(compareVersions(v('v0.10.0'), v('v0.9.99')) > 0);
+    assert.ok(compareVersions(v('v1.0.0'), v('v0.99.99')) > 0);
+    assert.equal(compareVersions(v('v0.9.1'), v('v0.9.1')), 0);
+  });
+
+  test('versionTagsOf: by commit the highest; a peeled annotated tag; a tag of a tree is none', () => {
+    const a = 'a'.repeat(40);
+    const b = 'b'.repeat(40);
+    const out =
+      `refs/tags/v0.9.1\0commit\0${a}\0\0\0\n` +
+      `refs/tags/v0.9.10\0commit\0${a}\0\0\0\n` +
+      `refs/tags/v1.0.0\0tag\0${'c'.repeat(40)}\0commit\0${b}\0\n` +
+      `refs/tags/v2.0.0\0tree\0${'d'.repeat(40)}\0\0\0\n` +
+      `refs/tags/nightly\0commit\0${b}\0\0\0\n`;
+    const { byCommit, names } = versionTagsOf(out);
+    assert.deepEqual(byCommit.get(a), { major: 0, minor: 9, patch: 10 });
+    assert.deepEqual(byCommit.get(b), { major: 1, minor: 0, patch: 0 });
+    assert.equal(byCommit.size, 2);
+    assert.deepEqual([...names].sort(), ['v0.9.1', 'v0.9.10', 'v1.0.0', 'v2.0.0']);
   });
 
   test('versionName: the version, else the short id', () => {
-    assert.equal(versionName('0.9.16', 'c75af0e'.padEnd(40, '0')), '0.9.16');
-    assert.equal(versionName('0.9', 'c75af0e'.padEnd(40, '0')), '0.9');
-    assert.equal(versionName(null, 'c75af0e'.padEnd(40, '0')), 'c75af0e');
+    const id = 'c75af0e'.padEnd(40, '0');
+    assert.equal(versionName('0.9.16', id), '0.9.16');
+    assert.equal(versionName('0.9.16+2', id), '0.9.16+2');
+    assert.equal(versionName(null, id), 'c75af0e');
   });
 });

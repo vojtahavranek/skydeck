@@ -506,9 +506,9 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
       'info',
       /^info {5}update: never checked \(the window's server checks when it starts\)$/,
     );
-    // log and status, and the version's chain up to the fake git's empty list of package.json's
-    // changes (src/cli/version.ts): each one of the line's, with no optional lock.
-    assert.equal(gitCalls.length, 5, JSON.stringify(gitCalls));
+    // log, status, the tags and the first-parent history (src/cli/version.ts): each one of the
+    // line's, with no optional lock.
+    assert.equal(gitCalls.length, 4, JSON.stringify(gitCalls));
     assert.ok(gitCalls.every((args) => !args.includes('fetch')));
     assert.ok(gitCalls.every((args) => args.includes('--no-optional-locks')));
   });
@@ -1186,7 +1186,7 @@ describe('doctor: what it starts', () => {
       commands.filter((command) => !command.startsWith('git ')),
       ['claude --version', 'gh --version', 'python3 --version'],
     );
-    // The version line's: log and status beside the version's first round of two, which ends it.
+    // The version line's four, side by side: log, status, the tags and the first-parent history.
     assert.equal(commands.filter((command) => command.startsWith('git ')).length, 4);
   });
 });

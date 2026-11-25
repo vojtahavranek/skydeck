@@ -6,7 +6,7 @@
 // `skydeck update`'s fetch is the exception: it is the owner's own command in their own terminal
 // (runInteractive), with no timeout. The window's fetch is the other: it never asks (fetchQuietly).
 import { SkydeckError } from '../platform/errors.ts';
-import type { Env, Ns, Platform, RunResult } from '../platform/types.ts';
+import type { Env, Platform, RunResult } from '../platform/types.ts';
 import { clip } from '../text/clip.ts';
 import { sanitize } from '../text/sanitize.ts';
 
@@ -132,8 +132,6 @@ export interface Git {
    * SkydeckError when git is not found.
    */
   run(args: readonly string[], timeoutMs?: number, options?: OutputOptions): Promise<RunResult>;
-  /** The platform's clock that cannot step (Clock.monotonicNs): a budget of several calls. */
-  monotonicNs(): Ns;
   /**
    * From now on every call runs in a session of its own (RunOptions.newSession): the terminal's
    * Ctrl+C and hang-up reach none of them. `skydeck update` calls it right before the merge, so that
@@ -189,7 +187,6 @@ export function gitOn(platform: Platform, root: string, gitOptions: GitOptions =
   return {
     root,
     run: (args, timeoutMs, options) => run(args, timeoutMs, options),
-    monotonicNs: () => platform.clock.monotonicNs(),
     ownSessions() {
       ownSessions = true;
     },

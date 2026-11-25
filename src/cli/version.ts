@@ -2,28 +2,28 @@
 // `skydeck doctor`: `<version> (<short commit>, <commit date>[, modified])`, or `<version> (commit
 // unknown)`. The commit is the one of the checkout the running code is in (`platform.appRoot`),
 // wherever the command runs from, so that a tester can say what they run; the version is that
-// commit's (src/update/version.ts: `0.9.16`, the pair alone when git cannot count), and the pair
-// of the running code's package.json when not even HEAD's can be read.
+// commit's (src/update/version.ts: `0.9.16`, `0.9.16+3` past the tag), and `unversioned` when it has
+// none (no version tag reachable, or git cannot say).
 //
 // It runs often (by people and by scripts), so it never fails, never writes and never waits long:
-// six git calls, `log -1` and `status` side by side with the version's chain (its four rounds, the
-// first of two calls), as argument lists through the platform's runner (never a shell), all within
-// VERSION_GIT_MS from the line's start, in the command's environment without the variables that
-// would point git at another repository (src/update/git.ts), with git's search for the repository
-// stopped at the app root, with no optional lock (`status` would otherwise refresh the index and
-// write it into the checkout) and fetching nothing (GIT_NO_LAZY_FETCH).
+// four git calls side by side — `log -1`, `status`, and the version's two (the tags, the
+// first-parent history) —, as argument lists through the platform's runner (never a shell), each
+// stopped after VERSION_GIT_MS, in the command's environment without the variables that would
+// point git at another repository (src/update/git.ts), with git's search for the repository stopped
+// at the app root, with no optional lock (`status` would otherwise refresh the index and write it
+// into the checkout) and fetching nothing (GIT_NO_LAZY_FETCH).
 import { dirname } from 'node:path';
 
 import type { Platform, RunResult } from '../platform/types.ts';
 import { gitEnv } from '../update/git.ts';
-import { RUNNING_PAIR, versionOf } from '../update/version.ts';
+import { versionOf } from '../update/version.ts';
 import type { VersionGit } from '../update/version.ts';
 
-/**
- * How long each git call may take before it is stopped and the commit counts as unknown; the
- * version's chain of calls shares it (each of its calls gets what is left).
- */
+/** How long each git call may take before it is stopped and what it would tell counts as unknown. */
 export const VERSION_GIT_MS = 2_000;
+
+/** The line's first word for a commit without a version. */
+export const UNVERSIONED = 'unversioned';
 
 /** Of each call's output only this much is kept: one commit line, or whether anything changed. */
 const KEPT_BYTES = 4096;
@@ -44,7 +44,7 @@ export async function checkoutFacts(platform: Platform): Promise<CheckoutFacts> 
     headVersion(platform).catch((): null => null),
   ]);
   return {
-    line: `${version ?? RUNNING_PAIR} (${commit?.text ?? 'commit unknown'})`,
+    line: `${version ?? UNVERSIONED} (${commit?.text ?? 'commit unknown'})`,
     id: commit?.id ?? null,
   };
 }
@@ -68,21 +68,19 @@ function lineEnv(platform: Platform): Record<string, string> {
   };
 }
 
-/** HEAD's version (src/update/version.ts) within VERSION_GIT_MS, the running code's pair as its fallback. */
+/** HEAD's version (src/update/version.ts), each call within VERSION_GIT_MS; null: none. */
 async function headVersion(platform: Platform): Promise<string | null> {
   const root = platform.appRoot;
   const env = lineEnv(platform);
   const git: VersionGit = {
-    run: (args, { timeoutMs, maxBytes, input }) =>
+    run: (args, { timeoutMs, maxBytes }) =>
       platform.runner.run('git', ['-C', root, '--no-optional-locks', ...args], {
         env,
         timeoutMs,
         maxOutputBytes: maxBytes,
-        ...(input === undefined ? {} : { input }),
       }),
-    monotonicNs: () => platform.clock.monotonicNs(),
   };
-  return versionOf(git, 'HEAD', VERSION_GIT_MS, RUNNING_PAIR);
+  return versionOf(git, 'HEAD', VERSION_GIT_MS);
 }
 
 /** `<short commit>, <date>[, modified]` and the full id, or null when git cannot say. */

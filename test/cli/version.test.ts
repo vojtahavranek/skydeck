@@ -11,7 +11,7 @@ import type { TestContext } from 'node:test';
 
 import { main } from '../../src/cli/main.ts';
 import { VERSION_GIT_MS, versionLine } from '../../src/cli/version.ts';
-import pkg from '../../package.json' with { type: 'json' };
+import { TAGS_ARGS } from '../../src/update/version-tags.ts';
 import type { Platform, RunResult, Runner } from '../../src/platform/types.ts';
 import { testContext, testContextOn } from '../helpers/context.ts';
 import { gitCheckout, gitTestEnv, insideSandbox } from '../helpers/git-checkout.ts';
@@ -21,9 +21,9 @@ import type { RealTestPlatform } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
 import type { Sandbox } from '../helpers/sandbox.ts';
 
-/** The pair of the running code's package.json: what the line says when HEAD's cannot be read. */
-const PAIR = pkg.version.split('.').slice(0, 2).join('.');
-const UNKNOWN = `${PAIR} (commit unknown)\n`;
+/** The line's word for a commit without a version (no version tag, or git cannot say). */
+const NONE = 'unversioned';
+const UNKNOWN = `${NONE} (commit unknown)\n`;
 
 /** A real machine whose git sees no configuration of this one, and a throwaway checkout in it. */
 function machine(t: TestContext): {
@@ -38,9 +38,9 @@ function machine(t: TestContext): {
 
 /**
  * What the checkout's line should say: the version (by default the running code's pair: the
- * throwaway checkouts have no package.json), its short commit and the date of that commit.
+ * throwaway checkouts have no version tag: `unversioned`), its short commit and the date of that commit.
  */
-function expected(checkout: GitCheckout, extra = '', version = PAIR): string {
+function expected(checkout: GitCheckout, extra = '', version = NONE): string {
   const date = checkout.git(checkout.root, 'log', '-1', '--format=%cI').slice(0, 10);
   return `${version} (${checkout.id().slice(0, 7)}, ${date}${extra})\n`;
 }
@@ -74,32 +74,34 @@ describe('the version line: what the checkout is at', () => {
   for (const flag of ['--version', '-V']) {
     test(`${flag}: the version, the short commit and the date of that commit`, async (t) => {
       const { tp, checkout, platform } = machine(t);
-      checkout.commit(checkout.root, 'set the pair', {
-        'package.json': '{ "version": "0.9.0" }\n',
-      });
-      checkout.commit(checkout.root, 'one more', { 'one.txt': '1\n' });
-      checkout.commit(checkout.root, 'and another', { 'two.txt': '2\n' });
+      checkout.git(checkout.root, 'tag', 'v0.9.16');
 
       const out = await version(platform, tp.sandbox, flag);
 
-      assert.equal(out, expected(checkout, '', '0.9.2'));
+      assert.equal(out, expected(checkout, '', '0.9.16'));
       assert.match(out, /^\d+\.\d+\.\d+ \([0-9a-f]{7}, \d{4}-\d{2}-\d{2}\)\n$/);
     });
   }
 
-  test("HEAD's version, not the work tree's: a bump not committed yet is a modified checkout", async (t) => {
+  test('commits past the nearest version tag: +n; a commit of its own modified: `, modified` beside it', async (t) => {
     const { tp, checkout, platform } = machine(t);
-    checkout.commit(checkout.root, 'set the pair', { 'package.json': '{ "version": "0.9.0" }\n' });
+    checkout.git(checkout.root, 'tag', 'v0.9.16');
     checkout.commit(checkout.root, 'one more', { 'one.txt': '1\n' });
-    writeFileSync(join(checkout.root, 'package.json'), '{ "version": "0.10.0" }\n');
+    checkout.commit(checkout.root, 'and another', { 'two.txt': '2\n' });
+    assert.equal(await version(platform, tp.sandbox), expected(checkout, '', '0.9.16+2'));
 
-    assert.equal(await version(platform, tp.sandbox), expected(checkout, ', modified', '0.9.1'));
+    writeFileSync(join(checkout.root, 'one.txt'), 'changed\n');
+    assert.equal(await version(platform, tp.sandbox), expected(checkout, ', modified', '0.9.16+2'));
   });
 
-  test('a checkout without package.json in its history: the pair of the running code', async (t) => {
+  test('a checkout without a version tag: unversioned, the commit as before', async (t) => {
     const { tp, checkout, platform } = machine(t);
+    checkout.git(checkout.root, 'tag', 'v1.2', 'HEAD'); // not a version tag
 
-    assert.equal(await version(platform, tp.sandbox), expected(checkout, '', PAIR));
+    const out = await version(platform, tp.sandbox);
+
+    assert.equal(out, expected(checkout, '', NONE));
+    assert.match(out, /^unversioned \([0-9a-f]{7}, \d{4}-\d{2}-\d{2}\)\n$/);
   });
 
   test('a tracked file changed or removed: ", modified"; an untracked file alone does not count', async (t) => {
@@ -293,24 +295,18 @@ describe('the version line: which repository git looks at', () => {
     assert.notDeepEqual(snapshot(), before);
   });
 
-  /** The answers of a git whose HEAD is 16 commits after the bump (the fake runner's). */
+  /** The answers of a git whose HEAD carries the tag v0.9.16 (the fake runner's). */
   function answers(call: { args: readonly string[] }): Partial<RunResult> {
     const { args } = call;
     const id = 'f1fce49' + '0'.repeat(33);
-    const bump = 'b'.repeat(40);
     if (args.includes('log')) return { stdout: `${id} 2026-11-19\n` };
-    if (args.includes('config')) return { code: 1 };
-    if (args.includes('--is-shallow-repository')) return { stdout: 'false\n' };
-    if (args.includes('--count')) return { stdout: '16\n' };
-    if (args.includes('rev-list')) return { stdout: `${bump}\n` };
-    if (args.includes('cat-file')) {
-      const file = '{ "version": "0.9.0" }';
-      return { stdout: `${bump} blob ${file.length}\n${file}\n` };
-    }
+    if (args.includes('for-each-ref'))
+      return { stdout: `refs/tags/v0.9.16\0commit\0${id}\0\0\0\n` };
+    if (args.includes('rev-list')) return { stdout: `${id}\n` };
     return {};
   }
 
-  test('what it starts: six git calls on the app root, each within the limit, with no shell, no lock and no fetch', async (t) => {
+  test('what it starts: four git calls on the app root, each within the limit, with no shell, no lock and no fetch', async (t) => {
     const d = testPlatform(t, {
       env: { GIT_DIR: '/elsewhere/.git', GIT_WORK_TREE: '/elsewhere', GIT_INDEX_FILE: '/x' },
     });
@@ -332,21 +328,13 @@ describe('the version line: which repository git looks at', () => {
       [
         git('log', '-1', '--no-show-signature', '--format=%H %cs', 'HEAD', '--'),
         git('-c', 'core.fsmonitor=false', 'status', '--porcelain', '-z', '--untracked-files=no'),
-        git('config', '-z', '--get-regexp', '^(extensions\\.partialclone|remote\\..*\\.promisor)$'),
-        git('rev-parse', '--is-shallow-repository'),
-        git('rev-list', '--first-parent', '--max-count=100', 'HEAD', '--', 'package.json'),
-        git('cat-file', '--batch'),
-        git('rev-list', '--first-parent', '--count', `${'b'.repeat(40)}..HEAD`),
+        git(...TAGS_ARGS),
+        git('rev-list', '--first-parent', '--max-count=10000', 'HEAD'),
       ],
     );
-    for (const { args, options } of runner.calls) {
-      // The fake clock does not move: every call of the version's chain gets the whole limit.
+    for (const { options } of runner.calls) {
       assert.equal(options?.timeoutMs, VERSION_GIT_MS);
-      assert.equal(
-        options?.input,
-        args.includes('cat-file') ? `${'b'.repeat(40)}:package.json\n` : undefined,
-        'stdin is /dev/null but for the files asked of cat-file',
-      );
+      assert.equal(options?.input, undefined, 'stdin is /dev/null');
       assert.equal(options?.env?.['GIT_DIR'], undefined);
       assert.equal(options?.env?.['GIT_WORK_TREE'], undefined);
       assert.equal(options?.env?.['GIT_INDEX_FILE'], undefined);
@@ -358,7 +346,7 @@ describe('the version line: which repository git looks at', () => {
     }
   });
 
-  test("the line's calls and the version's first round run side by side: four started before any answer", async (t) => {
+  test('the four calls run side by side: all started before any answer', async (t) => {
     const d = testPlatform(t);
     const appRoot = join(d.sandbox.root, 'checkout');
     const held: (() => void)[] = [];
@@ -376,7 +364,7 @@ describe('the version line: which repository git looks at', () => {
     const line = versionLine({ ...d.platform, appRoot, runner });
     await new Promise((resolve) => setImmediate(resolve));
 
-    assert.equal(runner.calls.length, 4, 'log, status and the first round before any answer');
+    assert.equal(runner.calls.length, 4, "log, status and the version's two before any answer");
     release = true;
     for (const answer of held) answer();
     assert.equal(await line, '0.9.16 (f1fce49, 2026-11-19)');
@@ -396,7 +384,7 @@ describe('the version line: which repository git looks at', () => {
 
     const line = await versionLine({ ...d.platform, appRoot, runner });
 
-    assert.equal(line, `${PAIR} (f1fce49, 2026-11-19, modified)`);
+    assert.equal(line, `${NONE} (f1fce49, 2026-11-19, modified)`);
   });
 });
 
@@ -431,8 +419,8 @@ describe('the version line: bin/skydeck of a checkout', () => {
     assert.equal(clean.status, 0, clean.stderr);
     assert.equal(clean.stderr, '');
     assert.notEqual(elsewhere.id(), checkout.id());
-    // The copy's one commit holds package.json: it sets the pair.
-    assert.equal(clean.stdout, expected(checkout, '', '0.9.0'));
+    // The copy has no version tag.
+    assert.equal(clean.stdout, expected(checkout));
 
     const manifest = join(checkout.root, 'vendor', 'MANIFEST.json');
     writeFileSync(manifest, `${readFileSync(manifest, 'utf8')}\n`);
@@ -440,6 +428,6 @@ describe('the version line: bin/skydeck of a checkout', () => {
 
     assert.equal(modified.status, 0, modified.stderr);
     assert.equal(modified.stderr, '');
-    assert.equal(modified.stdout, expected(checkout, ', modified', '0.9.0'));
+    assert.equal(modified.stdout, expected(checkout, ', modified'));
   });
 });

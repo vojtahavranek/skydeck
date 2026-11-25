@@ -115,10 +115,9 @@ describe('doctor on a complete installation', () => {
       // 24); nothing else.
       ['claude --version', 'gh --version', 'gh auth status', 'python3 --version'],
     );
-    // The version line's: log and status, and the version's chain, which ends at the first
-    // round of the fake git that names no package.json (src/update/version.ts).
+    // The version line's four: log and status, the tags and the first-parent history.
     const git = commands.filter((command) => command.startsWith('git '));
-    assert.equal(git.length, 5, JSON.stringify(git));
+    assert.equal(git.length, 4, JSON.stringify(git));
     assert.ok(git.every((command) => command.includes(' --no-optional-locks ')));
   });
 

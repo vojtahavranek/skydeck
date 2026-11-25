@@ -1,17 +1,40 @@
-// The version written in package.json (src/update/version.ts): its first two numbers are the
-// version's pair, set by hand in a pull request; its third number means nothing (git counts the
-// third number of the version) and is always 0.
+// The version written in package.json is not skydeck's (design.md 8, the version line): a version
+// is a git tag made by the workflow Version. package.json says 0.0.0, as the lock file does, and
+// nothing shown reads it.
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import pkg from '../package.json' with { type: 'json' };
 import lock from '../package-lock.json' with { type: 'json' };
-import { PACKAGE_VERSION, pairOf } from '../src/update/version.ts';
 
-test("package.json's version: a well-formed pair and a third number of 0, as the lock file says", () => {
-  assert.match(pkg.version, PACKAGE_VERSION);
-  assert.notEqual(pairOf(pkg.version), null);
-  assert.equal(pkg.version.split('.')[2], '0', 'the third number is counted by git, never written');
-  assert.equal(lock.version, pkg.version);
-  assert.equal(lock.packages[''].version, pkg.version);
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
+
+test("package.json's version is 0.0.0, as the lock file says", () => {
+  assert.equal(pkg.version, '0.0.0');
+  assert.equal(lock.version, '0.0.0');
+  assert.equal(lock.packages[''].version, '0.0.0');
+});
+
+// The one reader left: the window's welcome message carries it as a field (protocol.ts's
+// WelcomeMessage.version), which no page reads or shows.
+test("no module of the product or the page reads package.json's version but the welcome's unused field", () => {
+  const files = ['src', 'web', 'bin'].flatMap((dir) =>
+    readdirSync(join(ROOT, dir), { recursive: true })
+      .map(String)
+      .filter((path) => /\.(ts|js|mjs)$/.test(path))
+      .map((path) => join(dir, path)),
+  );
+  const readers = files.filter((path) => {
+    const text = readFileSync(join(ROOT, path), 'utf8');
+    return /package\.json['"] with/.test(text) && /\bpkg\.version\b|\.version\b/.test(text);
+  });
+  assert.deepEqual(readers, ['src/window/server.ts']);
+  const page = readdirSync(join(ROOT, 'web'), { recursive: true })
+    .map(String)
+    .filter((path) => path.endsWith('.js'))
+    .map((path) => readFileSync(join(ROOT, 'web', path), 'utf8'));
+  assert.ok(!page.some((text) => /welcome\??\.version|\.version\b.*welcome/.test(text)));
 });

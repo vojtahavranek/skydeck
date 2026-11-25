@@ -300,6 +300,7 @@ describe('Update now end to end: a real server, the real launcher, a real fast-f
     const oldCoreSoft = coreSoftOf(before.pid);
     const oldStatus = await controlClient(h.d.platform.net, h.d.files.serverSock).status();
 
+    h.c.git(h.c.root, 'tag', 'v0.9.0'); // the copy's one commit carries a version tag
     const made = h.c.push('a change of the page', { 'web/added.txt': 'new\n' });
     const checked = await win.act({ kind: 'update-check' });
     assert.ok(checked.update?.check?.state === 'available', JSON.stringify(checked));
@@ -309,8 +310,9 @@ describe('Update now end to end: a real server, the real launcher, a real fast-f
 
     const back = await comingBack(t, h, before.pid);
     const told = await back.update((u) => u.result !== null, 'the result after the update');
-    // The version the dialog's look named (the copy's package.json set the pair in its one commit).
-    assert.deepEqual(told.result, { ok: true, text: 'updated to 0.9.1' });
+    // The version the dialog's look named: one past the copy's tag (the new commit's own tag has
+    // not been made).
+    assert.deepEqual(told.result, { ok: true, text: 'updated to 0.9.0+1' });
     const after = h.server();
     assert.ok(after !== null);
     assert.notEqual(after.pid, before.pid);
@@ -319,10 +321,9 @@ describe('Update now end to end: a real server, the real launcher, a real fast-f
     assert.equal(procStartOf(before.pid), null, 'the old server has ended');
     // The updater's last line comes once its `skydeck window` has seen the page come back.
     const logPath = join(h.d.deck.places.stateDir, 'update.log');
-    // The copy's package.json set the pair in its one commit: the update brings 0.9.1.
     await until(
-      () => readFileSync(logPath, 'utf8').endsWith('\nupdated to 0.9.1\n'),
-      'update.log ends with updated to 0.9.1',
+      () => readFileSync(logPath, 'utf8').endsWith('\nupdated to 0.9.0+1\n'),
+      'update.log ends with updated to 0.9.0+1',
       2 * WAIT_MS,
     );
     assert.match(
