@@ -128,6 +128,62 @@ test('parsePidLine gives null for garbled lines', () => {
   }
 });
 
+// ---------------------------------------------------------------------------------------------
+// The third form: the keeper of a session's shell (S2 7.10) ends its line with `shell`.
+
+const SHELL_KEEPER: PidLine = {
+  pid: 4242,
+  procStart: 51234567,
+  bootId: BOOT_A,
+  keeper: { version: '4', started: false, shell: true },
+};
+
+test("formatPidLine writes a shell's keeper's line with the sixth field", () => {
+  assert.equal(formatPidLine(SHELL_KEEPER), `4242 51234567 ${BOOT_A} 4 0 shell\n`);
+  assert.equal(
+    formatPidLine({ ...SHELL_KEEPER, keeper: { version: '4', started: true, shell: true } }),
+    `4242 51234567 ${BOOT_A} 4 1 shell\n`,
+  );
+});
+
+test('the three forms round-trip; a keeper line without `shell` reads without it', () => {
+  for (const line of [SERVER, KEEPER, SHELL_KEEPER]) {
+    assert.deepEqual(parsePidLine(formatPidLine(line)), line);
+  }
+  assert.deepEqual(parsePidLine(`4242 51234567 ${BOOT_A} 4 1 shell`), {
+    ...SHELL_KEEPER,
+    keeper: { version: '4', started: true, shell: true },
+  });
+  assert.equal('shell' in (parsePidLine(`4242 51234567 ${BOOT_A} 4 1\n`)?.keeper ?? {}), false);
+});
+
+test('parsePidLine refuses what is no third form', () => {
+  for (const text of [
+    `4242 51234567 ${BOOT_A} 4 1 shell x\n`, // a seventh field
+    `4242 51234567 ${BOOT_A} 4 1 sh\n`, // another word
+    `4242 51234567 ${BOOT_A} 4 1 Shell\n`,
+    `4242 51234567 ${BOOT_A} shell\n`, // after three fields
+    `4242 51234567 ${BOOT_A} 4 1  shell\n`, // two spaces
+    `4242 51234567 ${BOOT_A} 4 1 shell \n`, // a trailing space
+  ]) {
+    assert.equal(parsePidLine(text), null, JSON.stringify(text));
+  }
+});
+
+/**
+ * A13 (S2 7.7): the pattern every skydeck before shells read a `.pid` line with (pidline.ts as it
+ * was, frozen here and never edited). A shell's keeper's line is no line to it, so an older
+ * server never claims that keeper; a version 4 keeper of a session still writes a line it reads.
+ */
+const LINE_BEFORE = /^([0-9]+) ([0-9]+) (\S+)(?: (\S+) ([01]))?\n?$/;
+
+test("A13: the pattern of the build before does not read a shell's keeper's line, and reads a version 4 session keeper's", () => {
+  assert.equal(LINE_BEFORE.test(`4242 51234567 ${BOOT_A} 4 1 shell\n`), false);
+  assert.equal(LINE_BEFORE.test(`4242 51234567 ${BOOT_A} 4 0 shell\n`), false);
+  assert.equal(LINE_BEFORE.test(`4242 51234567 ${BOOT_A} 4 1\n`), true);
+  assert.equal(LINE_BEFORE.test(formatPidLine(SHELL_KEEPER)), false);
+});
+
 test('formatPidLine writes an invented boot id as it is, and it reads back', () => {
   const line: PidLine = { pid: 7, procStart: 1, bootId: 'test-boot' };
   assert.equal(formatPidLine(line), '7 1 test-boot\n');

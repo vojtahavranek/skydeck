@@ -843,7 +843,7 @@ async function checkKeepers(view: WindowView, report: Report): Promise<void> {
       const program =
         keeper === undefined
           ? ''
-          : `, keeper version ${keeper.version}, its program ${keeper.started ? 'started' : 'not started yet'}`;
+          : `, keeper version ${keeper.version}${keeper.shell === true ? ", a session's shell" : ''}, its program ${keeper.started ? 'started' : 'not started yet'}`;
       const terminal = shown.get(id);
       const known =
         terminal === undefined

@@ -1104,6 +1104,34 @@ describe('doctor: keepers', () => {
     noLine(r, /^problem {2}keeper/);
   });
 
+  test("a session's shell's keeper (its line's sixth field) is named as one, and counted", async (t) => {
+    const m = machine(t);
+    const files = m.makeRuntime();
+    writeKeeperLine(files, ID_A, (await liveProcess(t, m)).line, true);
+    const path = writeKeeperLine(files, ID_B, (await liveProcess(t, m)).line);
+    const line = readFileSync(path, 'utf8').replace(/ 2 1\n$/, ' 4 1 shell\n');
+    assert.match(line, / 4 1 shell\n$/);
+    writeFileSync(path, line);
+
+    const r = await doctor(m);
+
+    lineOf(r, 'info', /^info {5}keepers: 2 running$/);
+    lineOf(
+      r,
+      'info',
+      new RegExp(
+        `^info {5}keeper ${ID_B}: running \\(pid \\d+, keeper version 4, a session's shell, its program started\\)$`,
+      ),
+    );
+    lineOf(
+      r,
+      'info',
+      new RegExp(
+        `^info {5}keeper ${ID_A}: running \\(pid \\d+, keeper version 2, its program started\\)$`,
+      ),
+    );
+  });
+
   test('a .pid file that cannot be read is reported on its own, not as not running', async (t) => {
     if (process.getuid?.() === 0) return t.skip('root reads anything');
     const m = machine(t);

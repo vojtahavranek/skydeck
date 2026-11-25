@@ -1471,6 +1471,18 @@ describe('killKeepersIn (A34)', () => {
     });
   });
 
+  test("keepersToKill: a session's shell's keeper (its line's sixth field) is one it kills", () => {
+    const proc = fakeProc({
+      bootId: BOOT_A,
+      processes: { 10: { stat: statLine(10, 100), cmdline: [] } },
+    });
+
+    assert.deepEqual(keepersToKill([`10 100 ${BOOT_A} 4 1 shell\n`], proc, BOOT_A, [4000]), {
+      kill: [10],
+      unknown: [],
+    });
+  });
+
   test('a line whose process cannot be read is not signalled; the others are, then it throws', async (t) => {
     const s = sandbox(t);
     const first = await sleeper(t, s);
