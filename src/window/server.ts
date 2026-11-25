@@ -23,6 +23,7 @@ import { SkydeckError } from '../platform/errors.ts';
 import type { HttpListener, Ns, Platform } from '../platform/types.ts';
 import { openDeck } from '../sessions/deck.ts';
 import type { Deck } from '../sessions/deck.ts';
+import type { ListRow } from '../sessions/list.ts';
 import { migratedLine } from '../store/store.ts';
 import type { LaunchSpec, Terminal } from '../terminals/types.ts';
 import { sanitize } from '../text/sanitize.ts';
@@ -213,6 +214,9 @@ interface AttentionParts {
   attention: Attention;
   /** The tick's `attention`: each call followed by the notifier's check. */
   tick: Pick<Attention, 'look' | 'refreshed'>;
+  /** S2 12.4: the user's `unread` or `read` (Attention.mark); the lists pushed and the notifier's
+   *  check made when it changed the facts. */
+  mark(row: ListRow, kind: 'unread' | 'read'): { ok: true } | { ok: false; error: string };
 }
 
 /**
@@ -293,6 +297,15 @@ function attentionParts(deps: {
   return {
     seen,
     attention,
+    mark(row, kind) {
+      const outcome = attention.mark(row, kind);
+      if (!outcome.ok) return outcome;
+      if (outcome.changed) {
+        deps.pages().pushList();
+        check();
+      }
+      return { ok: true };
+    },
     tick: {
       look() {
         const changed = attention.look();
@@ -774,6 +787,8 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       // F37 (S2 12.9): a session of Open moved by hand, for the page's last view.
       reorder: (page, sessionId, direction) => reorder.reorder(page.view, sessionId, direction),
       carryOver,
+      // S2 12.4: the mark unread, attention's (made below, before any action can come).
+      mark: (row, kind) => attending.mark(row, kind),
     });
     // Plan C7, S2 8.2.6: what a terminal the server opens for a command or a restore starts at —
     // the area the page that had focus last reported, read when the terminal is opened.

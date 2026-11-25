@@ -154,6 +154,9 @@ const VALID: Record<string, PageMessage> = {
   // Follow-up F44.
   'act park': { t: 'act', id: 9, kind: 'park', sessionId: S1 },
   'act unpark': { t: 'act', id: 9, kind: 'unpark', sessionId: S1 },
+  // S2 12.4: the mark unread.
+  'act unread': { t: 'act', id: 9, kind: 'unread', sessionId: S1 },
+  'act read': { t: 'act', id: 9, kind: 'read', sessionId: S1 },
   'act pr-refresh': { t: 'act', id: 10, kind: 'pr-refresh', sessionId: S1 },
   'act pr-add': {
     t: 'act',
@@ -198,6 +201,9 @@ const STAGE_D_ACTS = [
   // Follow-up F44's, which name only the session as done and undone do.
   'act park',
   'act unpark',
+  // S2 12.4's, which name only the session as park and unpark do.
+  'act unread',
+  'act read',
 ] as const;
 
 /** A value of another JSON type than `value`. */
@@ -273,6 +279,11 @@ describe('parsePageMessage: what is refused', () => {
     refused(page({ ...VALID['act unpark'], at: 0 }));
     refused(page({ t: 'act', id: 1, kind: 'Park', sessionId: S1 }));
     refused(page({ t: 'act', id: 1, kind: 'park' }));
+    // S2 12.4: unread and read name the session alone.
+    refused(page({ ...VALID['act unread'], text: 'x' }));
+    refused(page({ ...VALID['act read'], mark: 'done' }));
+    refused(page({ t: 'act', id: 1, kind: 'unread' }));
+    refused(page({ t: 'act', id: 1, kind: 'Read', sessionId: S1 }));
     refused(page({ ...VALID['act pr-refresh'], url: 'https://github.com/a/b/pull/7' }));
     refused(page({ ...VALID['act label'], base: '' }));
     refused(page({ ...VALID['act group'], url: 'https://github.com/a/b/pull/7' }));
@@ -427,7 +438,7 @@ describe('parsePageMessage: what is refused', () => {
 
   test("every act's id is a whole number from 0 (stage A's, stage D's and F18's kinds alike)", () => {
     const acts = Object.entries(VALID).filter(([, message]) => message.t === 'act');
-    assert.equal(acts.length, 20); // #188's two act resume with flags, F44's park and unpark
+    assert.equal(acts.length, 22); // #188's two act resume with flags, F44's park and unpark, S2 12.4's unread and read
     for (const [name, message] of acts) {
       for (const id of [-1, 1.5, 2 ** 53]) {
         refused(page({ ...message, id }));

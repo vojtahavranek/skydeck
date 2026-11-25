@@ -412,7 +412,8 @@ test('onChange: once per completed hold and once per typing that begins a seen; 
     calls.push('b');
   });
   const p = page();
-  seen.focus(p, true, S1);
+  seen.focus(p, true, S3);
+  seen.focus(p, true, S1); // a selection moved to it: anew (the mark unread)
   clock.advanceMs(1499);
   assert.equal(calls.length, 0);
   clock.advanceMs(1);
@@ -496,4 +497,120 @@ test('a page told gone stays gone: a later focus or typing for it holds nothing'
   clock.advanceMs(5000);
   assert.deepEqual(seen.take(), new Set());
   assert.equal(changes, 0);
+});
+
+// --- the mark unread (S2 12.4): which sights are anew ----------------------------------------------
+
+/** A page as the server makes it: `start` (no selection), then the page's first `focus`. */
+function started(seen: ReturnType<typeof createSeen>, selected: string | null): object {
+  const p = page();
+  seen.focus(p, true, null);
+  seen.focus(p, true, selected);
+  return p;
+}
+
+test("takeAll: a page's first selection, held, is seen but not anew (a page that loads or reconnects with it selected)", (t) => {
+  const { clock } = testPlatform(t);
+  const seen = createSeen(clock);
+  started(seen, S1);
+  clock.advanceMs(SEEN_AFTER_MS);
+  assert.deepEqual(seen.takeAll(), { seen: new Set([S1]), anew: new Set() });
+});
+
+test('takeAll: a selection moved from another session, held 1.5 s, is anew; not at 1,499 ms', (t) => {
+  const { clock } = testPlatform(t);
+  const seen = createSeen(clock);
+  const p = started(seen, S2);
+  seen.focus(p, true, S1);
+  clock.advanceMs(SEEN_AFTER_MS - 1);
+  assert.deepEqual(seen.takeAll(), { seen: new Set(), anew: new Set() });
+  clock.advanceMs(1);
+  assert.deepEqual(seen.takeAll(), { seen: new Set([S1]), anew: new Set([S1]) });
+  assert.deepEqual(seen.take(), new Set([S1]), 'take() is the same call');
+});
+
+test('takeAll: a move from none is anew once the page has had a selection, not before', (t) => {
+  const { clock } = testPlatform(t);
+  const seen = createSeen(clock);
+  const fresh = started(seen, null);
+  seen.focus(fresh, true, S1); // the first row the page selects by itself
+  const back = started(seen, S2);
+  seen.focus(back, true, null); // a caption, or the last row parked
+  seen.focus(back, true, S3);
+  clock.advanceMs(SEEN_AFTER_MS);
+  assert.deepEqual(seen.takeAll(), { seen: new Set([S1, S3]), anew: new Set([S3]) });
+});
+
+test('takeAll: focus lost and regained with the selection kept keeps what it was, anew or not', (t) => {
+  const { clock } = testPlatform(t);
+  const seen = createSeen(clock);
+  const first = started(seen, S1);
+  const moved = started(seen, S3);
+  seen.focus(moved, true, S2);
+  for (const p of [first, moved]) {
+    seen.focus(p, false, p === first ? S1 : S2);
+    seen.focus(p, true, p === first ? S1 : S2);
+  }
+  clock.advanceMs(SEEN_AFTER_MS);
+  assert.deepEqual(seen.takeAll(), { seen: new Set([S1, S2]), anew: new Set([S2]) });
+});
+
+test('unmark: every hold of the session stops being anew, held or not, until its selection moves away and back', (t) => {
+  const { clock } = testPlatform(t);
+  const seen = createSeen(clock);
+  const a = started(seen, S2);
+  seen.focus(a, true, S1);
+  const b = started(seen, S3);
+  seen.focus(b, true, S1);
+  clock.advanceMs(SEEN_AFTER_MS);
+  assert.deepEqual(seen.takeAll().anew, new Set([S1]));
+
+  seen.unmark(S1);
+
+  clock.advanceMs(60_000);
+  assert.deepEqual(seen.takeAll(), { seen: new Set([S1]), anew: new Set() });
+  seen.focus(a, false, S1);
+  seen.focus(a, true, S1);
+  clock.advanceMs(SEEN_AFTER_MS);
+  assert.deepEqual(seen.takeAll().anew, new Set(), 'focus regained: still not anew');
+  seen.focus(a, true, S2);
+  seen.focus(a, true, S1);
+  clock.advanceMs(SEEN_AFTER_MS);
+  assert.deepEqual(seen.takeAll().anew, new Set([S1]), 'moved away and back');
+});
+
+test('unmark: a typing not yet taken is dropped; a typing after it is anew at once and tells the listeners', (t) => {
+  const { clock } = testPlatform(t);
+  const seen = createSeen(clock);
+  let changes = 0;
+  seen.onChange(() => {
+    changes += 1;
+  });
+  const p = started(seen, S1);
+  clock.advanceMs(SEEN_AFTER_MS);
+  assert.equal(changes, 1, 'the hold completed');
+  seen.typed(page(), S2);
+  seen.unmark(S2);
+  assert.deepEqual(seen.takeAll(), { seen: new Set([S1]), anew: new Set() });
+
+  seen.typed(p, S1);
+
+  assert.equal(changes, 3, 'a typing into a session seen but not anew begins a seen anew');
+  assert.deepEqual(seen.takeAll(), { seen: new Set([S1]), anew: new Set([S1]) });
+  seen.typed(p, S1);
+  assert.equal(changes, 3, 'the next key begins nothing');
+  seen.unmark(S1);
+  assert.deepEqual(seen.takeAll().anew, new Set());
+  seen.typed(p, S1);
+  assert.equal(changes, 4);
+  assert.deepEqual(seen.takeAll().anew, new Set([S1]));
+});
+
+test('unmark: after stop() or for a session no page holds it changes nothing', (t) => {
+  const { clock } = testPlatform(t);
+  const seen = createSeen(clock);
+  seen.unmark(S1);
+  seen.stop();
+  seen.unmark(S1);
+  assert.deepEqual(seen.takeAll(), { seen: new Set(), anew: new Set() });
 });

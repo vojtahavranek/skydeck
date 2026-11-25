@@ -11,7 +11,8 @@
  * since F37 move a session of Open one place up or down (`reorder`, reorder.ts; since F42 any row of
  * Open); since F40 answer the offer to carry fields over after `/clear` (`carry-over`,
  * `dismiss-carry-over`, carry-over.ts: the offer computed again, one transaction); since F44 park
- * and un-park a session (`park`, `unpark`: step 1's markParked and markUnparked); since issue #166
+ * and un-park a session (`park`, `unpark`: step 1's markParked and markUnparked); since the mark
+ * unread mark a session unread or read (`unread`, `read`: attention.ts's `mark`); since issue #166
  * restart a session's program in its terminal, with #188's flags (`restart`, restart.ts: every
  * refusal before the end, then the end as `end-session` makes it without the done mark, then a
  * plain resume). Every field of an action is the page's — any page that passed the handshake — so each
@@ -109,6 +110,9 @@ export interface ActionDeps {
     sessionId: string,
     direction: 'up' | 'down',
   ): { ok: true } | { ok: false; error: string };
+  /** S2 12.4: `act unread` and `act read` on the session's row (attention.ts's `mark`, the lists
+   *  pushed when it changed the facts). Absent: the kinds answer "skydeck cannot do that action". */
+  mark?(row: ListRow, kind: 'unread' | 'read'): { ok: true } | { ok: false; error: string };
 }
 
 /** A result without its `t` and `id`, which `act` adds. */
@@ -126,6 +130,8 @@ type EditAction = Extract<
       | 'undone'
       | 'park'
       | 'unpark'
+      | 'unread'
+      | 'read'
       | 'pr-refresh'
       | 'pr-add'
       | 'pr-rm'
@@ -149,6 +155,8 @@ const LINK_FAILED = {
 const NOT_AN_ACTION = 'skydeck cannot do that action';
 /** Plan D 2.5: the row of a `new` terminal whose session the store does not know yet (A28). */
 const NOT_STARTED = 'this session has not started yet; edit it once it runs';
+/** S2 12.4: `unread` or `read` on such a row. */
+const NOT_STARTED_MARK = 'this session has not started yet; mark it once it runs';
 /** S2 12.5: a note's save whose `base` is no longer the stored note. */
 const NOTE_CHANGED =
   'the note was changed elsewhere while you edited it; your text is still in the box';
@@ -313,13 +321,13 @@ export function createActions(deps: ActionDeps): ActionHandler {
    * as for `act resume`. Its row is the answer (F44: `park` reads whether it is parked now and
    * its transcript).
    */
-  function requireKnown(sessionId: string): ListRow {
+  function requireKnown(sessionId: string, notStarted = NOT_STARTED): ListRow {
     const known = loadRows(deck).find((row) => row.id === sessionId);
     if (known !== undefined) return known;
     const waits = hub
       .list()
       .some((terminal) => terminal.kind === 'new' && terminal.expectedSessionId === sessionId);
-    if (waits) throw new SkydeckError(NOT_STARTED);
+    if (waits) throw new SkydeckError(notStarted);
     throw new RefError(`no session matches '${sanitize(sessionId)}'`, []);
   }
 
@@ -379,7 +387,8 @@ export function createActions(deps: ActionDeps): ActionHandler {
    * (its refusals are `skydeck ticket set`'s), then setTicket — empty text removes it; `note`
    * saveNote; `done`, `undone` markDone, markUndone; F44: `park` markParked over the session's row
    * (nothing written, and no `changed()`, when it is parked already: the first time is kept),
-   * `unpark` markUnparked; `pr-add`
+   * `unpark` markUnparked; S2 12.4: `unread`, `read` deps.mark over the session's row (a row of a
+   * session not started yet refused in its own words); `pr-add`
    * attachManualPr (origin manual, an earlier detach cleared), then the fetch in the background
    * (D8), answered `attached <url>` without waiting for it; `pr-rm` detachSessionPr; `pr-refresh`
    * the explicit refresh in the background, `ok` at once. F19: a ticket set that a provider reads
@@ -389,7 +398,8 @@ export function createActions(deps: ActionDeps): ActionHandler {
    */
   function edit(action: EditAction): Answer {
     const { sessionId } = action;
-    const known = requireKnown(sessionId);
+    const mark = action.kind === 'unread' || action.kind === 'read';
+    const known = requireKnown(sessionId, mark ? NOT_STARTED_MARK : NOT_STARTED);
     switch (action.kind) {
       case 'label': {
         const text = orNone(action.text);
@@ -432,6 +442,12 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'unpark':
         markUnparked(deck, sessionId);
         return wrote(action.kind);
+      case 'unread':
+      case 'read':
+        // S2 12.4: attention's, which pushes the lists itself (no store write of step 1's).
+        return deps.mark === undefined
+          ? refusal(NOT_AN_ACTION)
+          : answered(deps.mark(known, action.kind));
       case 'pr-add': {
         const key = attachManualPr(deck, sessionId, action.url);
         tell(action.kind);
@@ -500,6 +516,8 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'undone':
       case 'park':
       case 'unpark':
+      case 'unread':
+      case 'read':
       case 'pr-refresh':
       case 'pr-add':
       case 'pr-rm':

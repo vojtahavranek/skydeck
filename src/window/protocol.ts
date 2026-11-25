@@ -191,7 +191,13 @@ export interface ResizeMessage {
  *
  *  F44 (S2 12.15): `park` parks the session (`markParked`: nothing written when it is parked
  *  already, the time it was parked kept) and `unpark` ends its parking (`markUnparked`); each names
- *  only the session. Absolute, never a toggle: the page picks the act from its row's `parked`. */
+ *  only the session. Absolute, never a toggle: the page picks the act from its row's `parked`.
+ *
+ *  S2 12.4: `unread` marks the session unread (the next counter value, the server's clock) and
+ *  `read` marks it seen when it has a mark seeing clears (nothing written else); each names only
+ *  the session, and the page picks one from its row's `attention` (`read` while its reason is
+ *  ended, finished or unread). The server refuses both for a session that asks, one marked done
+ *  and the row of a session not started yet, in the words the page shows. */
 export type ActMessage =
   | {
       t: 'act';
@@ -222,7 +228,8 @@ export type ActMessage =
   | {
       t: 'act';
       id: number;
-      kind: 'done' | 'undone' | 'park' | 'unpark' | 'pr-refresh' | 'ticket-refresh';
+      kind:
+        'done' | 'undone' | 'park' | 'unpark' | 'unread' | 'read' | 'pr-refresh' | 'ticket-refresh';
       sessionId: string;
     }
   | { t: 'act'; id: number; kind: 'pr-add' | 'pr-rm'; sessionId: string; url: string }
@@ -1181,6 +1188,9 @@ const ACTS: Readonly<Record<string, Check>> = {
   // Follow-up F44: the session alone, as done and undone.
   park: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   unpark: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  // S2 12.4: the mark unread, set and cleared by the user; the session alone, as park.
+  unread: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  read: object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   'pr-refresh': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
   'pr-add': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),
   'pr-rm': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION, url: PATH }),

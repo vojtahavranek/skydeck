@@ -1770,6 +1770,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `note` | `sessionId`, `text`, `base` (the note the edit started from) | 12.5. |
 | `done`, `undone` | `sessionId` | 12.5, 12.10. |
 | `park`, `unpark` | `sessionId` | Follow-up F44, 12.15: `park` parks the session (design 7.1: the time it is parked, its done mark cleared, in one write; a session parked already is not written and keeps its first time, answered `ok` all the same), `unpark` ends its parking. Absolute, never a toggle: the page picks the act from its row's `parked`, as it picks `done` or `undone`. Refused as `done` is: a session the store does not know, a `new` terminal's session not started yet, a busy store. Every page's `list` follows a write; before it goes out, a terminal of the window running the session gives its number up (`park`) or takes the lowest free one (`unpark`), 7.6. |
+| `unread`, `read` | `sessionId` | 12.4, the mark unread: `unread` marks the session unread (the next counter value, the server's clock: 10.2) and makes no page's hold of it a coming back (Seen's `unmark`); `read` writes a seen when the session has a mark seeing clears (ended, finished, unread), and nothing else. Absolute, never a toggle: the page picks the act from its row's `attention` (`read` while its reason is ended, finished or unread; `unread` otherwise), as it picks `park` or `unpark`. Refused with the words the page shows in its toast: a session that asks (`it asks something: it needs you until it is answered`), one marked done (`it is marked done: a done session needs nothing`), a `new` terminal's session not started yet (`this session has not started yet; mark it once it runs`); a session the store does not know as `done` is. A busy store keeps the write for the next look (14) and answers `ok`. Every page's `list` follows the write. |
 | `pr-add`, `pr-rm` | `sessionId`, `url` | 12.5. |
 | `pr-refresh` | `sessionId` | An explicit refresh of that session's pull requests (design 7.3). |
 | `ticket` | `sessionId`, `text` (a link or a key as typed; empty removes the ticket) | 12.5 (follow-up F18): the server reads `text` by design 7.1's rule (`readTicket`) and stores the address, replacing the ticket before; a refusal's words are the result's error, nothing stored. `text` is held to the URL limit, so that a link of 2,048 characters is sent whole. Every page's `list` follows. |
@@ -2447,7 +2448,9 @@ A session with several holders (a duplicate) records the latest status time amon
 (stage B's plan, task 52): never earlier than the time the session shows, also when a look missed
 one holder's idle file and sees it end later.
 When the session is being seen at that moment (12.4), the same write sets `seen_seq` to a later
-value, so a turn that ends in front of the user is never "finished".
+value, so a turn that ends in front of the user is never "finished". A session marked unread
+(12.4) is being seen only by a coming back: a page that stays on it since the mark is not seeing
+it, so a turn that ends then shows `finished`.
 
 `busy` to `waiting` is not a turn end (a dialog opened inside the turn). A file that names another
 session than at the last look (`/clear`) starts over. A look that cannot read a file (it is being
@@ -3408,6 +3411,40 @@ written on its own only for a session among the list's rows, so that a selection
 leaves no row; one in the write of that session's own end goes with it all the same, since the end
 makes the row. The hold is `src/window/seen.ts` on the server's clock (`Clock.after`, which a step of the wall
 clock does not move).
+
+**The mark unread** (the owner's decision of 2026-11-25: "when you come back to it"). The user
+marks the selected session unread with `u` in the list or the header's `Unread` (12.5, 12.9), and
+marks it read with the same key or control (`Read` while the session has a mark seeing clears:
+ended, finished or unread; `act unread`, `act read`, 8.2.3). The mark is in the store (migration 7,
+10.2): it survives a server restart and shows in every window. A session that asks is not changed
+(it needs you until it is answered), a done one and a row of a session not started yet neither;
+each is said in a toast. The mark is read again only by:
+
+- a selection that moves to the session from another row or from none, by a key, a click, the
+  switcher or Ctrl+Shift+J, in a page that has focus, held 1.5 s (the hold above);
+- typing into its terminal (above), at once;
+- `u` or the header's `Read`.
+
+Not by staying on the session after marking it (the page that marked it, and every other page that
+has it selected at that moment, hold nothing for it until their selection moves away and back),
+nor by the window losing and regaining focus with it still selected, a page loaded or reconnected
+with it selected, a server restart, or a refresh of the list. This is the one difference from the
+hold above, and it applies only while the session is unread: the other marks keep their rules.
+
+How the server decides it (S2 4.3; `src/window/seen.ts`, `src/window/attention.ts`). Each page's
+hold also keeps whether its selection came to the session **anew**: moved there from another
+session, or from none after the page had reported a selection before; a page's first selection
+after its `start` (a page that loads selects its first row by itself, one that reconnects reports
+what it had) is not anew. A change of focus alone keeps what it was; typing makes it anew; marking
+the session unread makes every hold of it not anew and drops a typing not yet taken. A selection
+the page moves by itself after a key (the next row after `w` or `d`, a selection that follows
+`/clear`) counts as a move. Attention writes no seen for a session that will be unread after its
+writes unless it is seen anew, not even in the write of its turn end (10.3); for every other session
+nothing changes. A server restart forgets the holds; the mark is in the store, and the pages come
+back with a `start` and their first selection: not anew. A done session needs nothing: the view
+model gives no `unread` to a done row, and the next look sets the stored mark's columns NULL, so
+that an undone later does not bring it back (the command line's `done` too, at the look after the
+server's next reload of the rows). The mark sends no notification (13).
 
 Ctrl+Shift+J selects the next session that needs you: those that ask, the longest-waiting first;
 then those that ended; then those that finished, oldest first; then those marked unread, the
