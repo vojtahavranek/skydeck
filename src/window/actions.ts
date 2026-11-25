@@ -4,7 +4,8 @@
  * group and note, done and undone, its pull requests; from stage C restore the banner's sessions
  * and dismiss its offer (S2 12.7); since F15 add and remove the new form's favourite flags (S2
  * 12.6); since F18 set or remove the session's ticket (S2 12.5); since F30 end a session's program and
- * mark it done, on the user's word in the page's dialog (`end-session`, end-session.ts); since F36
+ * mark it done, on the user's word in the page's dialog (`end-session`, end-session.ts; with
+ * `mark` `park`, end it and park it, the dialog "Park" of S2 12.15); since F36
  * read the settings screen and change one setting of config.json (`settings`, `setting-set`,
  * `setting-default`, settings.ts: no path, no program, no key outside its table's changeable ones);
  * since F37 move a session of Open one place up or down (`reorder`, reorder.ts; since F42 any row of
@@ -520,7 +521,7 @@ export function createActions(deps: ActionDeps): ActionHandler {
       case 'favourite-remove':
         return removeFavourite(deck.store, action.text) ? wrote(action.kind) : DONE;
       case 'end-session': {
-        const outcome = await endings.end(action.term, action.sessionId);
+        const outcome = await endings.end(action.term, action.sessionId, action.mark ?? 'done');
         return outcome.ok ? { ...DONE, ended: outcome.ended } : refusal(outcome.error);
       }
       case 'restart': {
