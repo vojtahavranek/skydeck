@@ -98,10 +98,10 @@ async function twoOpenedWhileHeld(t: TestContext): Promise<{ page: TestPage; lis
 
 describe('the opening order under a clock that holds (#213)', () => {
   test('Open lists the terminals without a number in the order they were opened', async (t) => {
-    const { page } = await twoOpenedWhileHeld(t);
-    await openWhere(
-      page,
-      reads([...ONE_TO_NINE.map((n) => `${n}:${n}`), '10:-', '11:-']),
+    const { list } = await twoOpenedWhileHeld(t);
+    assert.deepEqual(
+      openOf(list),
+      [...ONE_TO_NINE.map((n) => `${n}:${n}`), '10:-', '11:-'],
       'the first opened first',
     );
   });
