@@ -38,12 +38,20 @@ function clipped(text: string, max: number): string {
   return text.length > max ? `${clip(text, max - 1)}…` : text;
 }
 
+/**
+ * Whether `text` shows nothing: empty, or only spaces and characters that are drawn as nothing
+ * (format characters such as a zero-width space, separators).
+ */
+function blank(text: string): boolean {
+  return text.replace(/[\s\p{Cf}\p{Z}]/gu, '') === '';
+}
+
 /** The parts of a file, before any limit: null when it is not a note at all. */
 function parts(text: string): { title: string; paragraphs: string[] } | null {
   // A NUL, or a byte that is not UTF-8 (decoded as U+FFFD): a binary file.
-  if (text.includes('\0') || text.includes('�')) return null;
+  if (text.includes('\0') || text.includes('\ufffd')) return null;
   const lines = text
-    .replace(/^﻿/, '')
+    .replace(/^\ufeff/, '')
     .split('\n')
     .map((line) => line.replace(/\r$/, ''));
   const head = /^# (.*)$/.exec(lines[0] ?? '');
@@ -52,7 +60,9 @@ function parts(text: string): { title: string; paragraphs: string[] } | null {
   const paragraphs: string[] = [];
   let open: string[] = [];
   const end = (): void => {
-    if (open.length > 0) paragraphs.push(sanitize(open.join(' ')));
+    // A paragraph that sanitising leaves showing nothing is dropped.
+    const paragraph = sanitize(open.join(' ')).trim();
+    if (!blank(paragraph)) paragraphs.push(paragraph);
     open = [];
   };
   for (const line of lines.slice(2)) {
@@ -61,7 +71,7 @@ function parts(text: string): { title: string; paragraphs: string[] } | null {
     else open.push(words);
   }
   end();
-  if (title === '' || paragraphs.length === 0) return null;
+  if (blank(title) || paragraphs.length === 0) return null;
   return { title, paragraphs };
 }
 
@@ -108,16 +118,11 @@ export function parseNote(text: string): Note | null {
 export function noteProblem(bytes: Uint8Array): string | null {
   if (bytes.length > NOTE_BYTES) return `it is larger than ${NOTE_BYTES} bytes`;
   const text = new TextDecoder('utf-8').decode(bytes);
-  if (text.includes('\0') || text.includes('�')) return 'it is not UTF-8 text';
-  const lines = text.replace(/^﻿/, '').split('\n');
+  if (text.includes('\0') || text.includes('\ufffd')) return 'it is not UTF-8 text';
+  const lines = text.replace(/^\ufeff/, '').split('\n');
   if (!/^# /.test(lines[0] ?? '')) return 'its first line is not `# <title>`';
   if ((lines[1] ?? '').trim() !== '') return 'its title line is not followed by a blank line';
-  if (
-    sanitize(lines[0] ?? '')
-      .slice(2)
-      .trim() === ''
-  )
-    return 'its title is empty';
+  if (blank(sanitize(lines[0] ?? '').slice(2))) return 'its title is empty';
   const found = parts(text);
   if (found === null) return 'its text is empty';
   for (const line of lines) {

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
-import type { Platform } from '../../src/platform/types.ts';
+import type { Platform, RunOptions } from '../../src/platform/types.ts';
 import {
   FETCH_GRACE_MS,
   FETCH_MS,
@@ -147,6 +147,37 @@ describe('the quiet fetch on the fake runner', () => {
     const long = (await git.fetchQuietly('origin')) ?? '';
     assert.equal(long.length, 300);
     assert.ok(long.endsWith('…'));
+  });
+});
+
+describe('Git.output: what a call may add to its run', () => {
+  test("maxBytes, input and offline reach the runner; offline adds GIT_NO_LAZY_FETCH=1 to git's environment only for that call", async (t) => {
+    const tp = testPlatform(t);
+    const root = join(tp.sandbox.root, 'checkout');
+    const calls: RunOptions[] = [];
+    const platform: Platform = {
+      ...tp.platform,
+      runner: {
+        ...tp.runner,
+        run: (_command, _args, options = {}) => {
+          calls.push(options);
+          return Promise.resolve(runResult({ stdout: 'x' }));
+        },
+      },
+    };
+    const git = gitOn(platform, root);
+
+    await git.output(['cat-file', 'blob', 'b'], { maxBytes: 8192, offline: true });
+    await git.output(['cat-file', '--batch-check'], { input: 'a:b\n' });
+    await git.output(['status']);
+
+    assert.equal(calls[0]?.maxOutputBytes, 8192);
+    assert.equal(calls[0]?.env?.['GIT_NO_LAZY_FETCH'], '1');
+    assert.equal(calls[0]?.input, undefined);
+    assert.equal(calls[1]?.input, 'a:b\n');
+    assert.equal(calls[1]?.env?.['GIT_NO_LAZY_FETCH'], undefined);
+    assert.equal(calls[2]?.maxOutputBytes, undefined);
+    assert.equal(calls[2]?.env?.['GIT_NO_LAZY_FETCH'], undefined);
   });
 });
 

@@ -37,6 +37,22 @@ import {
  * @property {() => void} closed called once whenever the dialog closes
  */
 
+/** How far ↑ and ↓ scroll the dialog's body, in pixels. */
+const LINE_PX = 40;
+
+/**
+ * The keys that scroll the dialog's body: how far, from the body's page height and its whole height.
+ * @type {Record<string, (page: number, whole: number) => number>}
+ */
+const SCROLL_KEYS = {
+  ArrowUp: () => -LINE_PX,
+  ArrowDown: () => LINE_PX,
+  PageUp: (page) => -page,
+  PageDown: (page) => page,
+  Home: (_, whole) => -whole,
+  End: (_, whole) => whole,
+};
+
 /**
  * @param {string} tag
  * @param {string} className
@@ -147,10 +163,10 @@ export function createUpdateDialog(root, deps) {
 
   /** The fold line and its list, as `model` and the user's choice say. */
   const drawFold = () => {
-    const shown = model.fold;
+    const folding = model.fold;
     const had = document.activeElement === fold;
-    fold.hidden = shown === null;
-    if (shown === null) {
+    fold.hidden = folding === null;
+    if (folding === null) {
       others.hidden = true;
       others.replaceChildren();
       if (had) {
@@ -158,13 +174,13 @@ export function createUpdateDialog(root, deps) {
       }
       return;
     }
-    const open = foldOpen ?? shown.openAtStart;
+    const open = foldOpen ?? folding.openAtStart;
     const mark = element('span', 'update-fold-mark', open ? '▾' : '▸');
     mark.setAttribute('aria-hidden', 'true');
-    fold.replaceChildren(mark, document.createTextNode(` ${shown.label}`));
+    fold.replaceChildren(mark, document.createTextNode(` ${folding.label}`));
     fold.setAttribute('aria-expanded', String(open));
     others.hidden = !open;
-    others.replaceChildren(...shown.items.map((item) => element('li', 'update-other', item)));
+    others.replaceChildren(...folding.items.map((item) => element('li', 'update-other', item)));
   };
 
   /** @param {DialogModel} next */
@@ -320,7 +336,9 @@ export function createUpdateDialog(root, deps) {
     runningShown: () => shown && runningForm,
     /**
      * A keydown while shown, from app.js's capture phase: true when the dialog took it — Esc
-     * closes, Tab and Shift+Tab go round the fold line, `Update now` and `Close` (those shown).
+     * closes, Tab and Shift+Tab go round the fold line, `Update now` and `Close` (those shown), and
+     * ↑ ↓ PageUp PageDown Home End scroll the body, whichever control has the keyboard (Enter and
+     * Space still press it).
      * @param {KeyboardEvent} event
      * @returns {boolean}
      */
@@ -336,6 +354,16 @@ export function createUpdateDialog(root, deps) {
         event.stopPropagation();
         if (!event.repeat && !runningForm) {
           hide();
+        }
+        return true;
+      }
+      const scroll = Object.hasOwn(SCROLL_KEYS, event.key) ? SCROLL_KEYS[event.key] : undefined;
+      if (scroll !== undefined && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!runningForm) {
+          const page = Math.max(lines.clientHeight - LINE_PX, LINE_PX);
+          lines.scrollBy({ top: scroll(page, lines.scrollHeight) });
         }
         return true;
       }

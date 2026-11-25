@@ -103,8 +103,14 @@ export interface ScriptedRepo {
   ahead: number;
   /** The new commits, newest first: what `log` lists (at most its --max-count). */
   commits: { id: string; subject: string }[];
-  /** `ls-tree -l` of docs/news/ per commit id: its output (default none: no notes). */
+  /**
+   * `ls-tree -l` of docs/news/ per commit id: its output (default none: no notes). A commit named
+   * here has the tree docs/news (`cat-file --batch-check`), of `newsTreeSize` bytes.
+   */
   news: Record<string, string>;
+  newsTreeSize: number;
+  /** `config --get-regexp` of the partial-clone settings: its output (default none, exit 1). */
+  partialClone: string | null;
   /** `cat-file blob <id>`: the blob's content, per id. */
   blobs: Record<string, string>;
   /** The commits `log --diff-filter=A` names for the notes' paths, newest first. */
@@ -149,6 +155,8 @@ export function scriptedRepo(root: string, over: Partial<ScriptedRepo> = {}): Sc
     ahead: 0,
     commits: [{ id: NEW, subject: 'the new commit' }],
     news: {},
+    newsTreeSize: 100,
+    partialClone: null,
     blobs: {},
     noteAdders: [],
     migrations: {},
@@ -278,6 +286,23 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
         const id = rest[3] ?? '';
         return runResult({ stdout: repo.news[id] ?? '' });
       }
+      case 'config -z':
+        return repo.partialClone === null
+          ? runResult({ code: 1 })
+          : runResult({ stdout: repo.partialClone });
+      case 'cat-file --batch-check':
+        return runResult({
+          stdout: (call.options?.input ?? '')
+            .split('\n')
+            .filter((line) => line !== '')
+            .map((line) => {
+              const commit = line.split(':')[0] ?? '';
+              return repo.news[commit] === undefined
+                ? `${line} missing\n`
+                : `${'7'.repeat(40)} tree ${repo.newsTreeSize}\n`;
+            })
+            .join(''),
+        });
       case 'cat-file blob': {
         const blob = repo.blobs[rest[1] ?? ''];
         if (blob !== undefined) return runResult({ stdout: blob });

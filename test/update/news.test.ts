@@ -51,7 +51,7 @@ describe('parseNote, for the look', () => {
   });
 
   test('paragraphs split by blank lines (several, or with spaces); CRLF, a BOM and trailing space dropped', () => {
-    const note = parseNote('﻿# Two  \r\n\r\none\r\ntwo  \r\n\r\n \r\n\r\n  three\r\n\n\n');
+    const note = parseNote('\ufeff# Two  \r\n\r\none\r\ntwo  \r\n\r\n \r\n\r\n  three\r\n\n\n');
     assert.deepEqual(note, { title: 'Two', paragraphs: ['one two', 'three'] });
   });
 
@@ -76,10 +76,34 @@ describe('parseNote, for the look', () => {
       '# Title\n',
       '# Title\n\n\n  \n',
       '# Title\n\ntext\0more\n',
-      '# Title\n\ntext �\n',
+      '# Title\n\ntext \ufffd\n',
     ]) {
       assert.equal(parseNote(text), null, JSON.stringify(text));
     }
+  });
+
+  test('the title line must be followed by a blank line, also when a text with a paragraph follows', () => {
+    assert.equal(parseNote('# Title\ntext\n\nmore text\n'), null);
+    assert.deepEqual(parseNote('# Title\n\ntext\n\nmore text\n'), {
+      title: 'Title',
+      paragraphs: ['text', 'more text'],
+    });
+  });
+
+  test('a paragraph that sanitises to nothing is dropped; a title or a whole text that shows nothing is no note', () => {
+    assert.deepEqual(parseNote('# Title\n\n\u0007\u001b[31m\u0001\n\nkept\n\n\u200b \u2060\n'), {
+      title: 'Title',
+      paragraphs: ['kept'],
+    });
+    assert.equal(parseNote('# \u200b\u200b\n\ntext\n'), null, 'a zero-width title');
+    assert.equal(
+      parseNote('# \u2060 \u00a0\n\ntext\n'),
+      null,
+      'a title of a word joiner and a space',
+    );
+    assert.equal(parseNote('# Title\n\n\u0007\u0008\n\n\u200b\n'), null, 'no text that shows');
+    assert.equal(noteProblem(bytes('# \u200b\n\ntext\n')), 'its title is empty');
+    assert.equal(noteProblem(bytes('# Title\n\n\u200b\n')), 'its text is empty');
   });
 
   test('control characters, escape sequences and bidirectional controls are removed', () => {

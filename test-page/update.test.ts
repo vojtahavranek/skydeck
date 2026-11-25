@@ -413,6 +413,53 @@ test('the update notice (F38, S2 16.5)', async (t) => {
   );
 
   await t.test(
+    'markup in a note — its title, its text, a code run: drawn as text, no element made, nothing run',
+    async (t) => {
+      const w = await world(t, chromium);
+      w.c.push('a note with markup', {
+        'docs/news/2026-11-03-markup.md':
+          '# <img src=x onerror="window.hit=1"> <script>window.hit=2</script> `<b>code</b>`\n\n' +
+          'A <img src=y onerror="window.hit=3"> text <script>window.hit=4</script> and ' +
+          '`<img src=z onerror="window.hit=5">` <a href="http://x">link</a>.\n',
+      });
+      await openSettings(w.l.page);
+      await checkNow(w.l.page, /^Last check: [01]s ago — 1 new commit on origin\/main$/);
+      await closeSettings(w.l.page);
+
+      const lines = await openDialog(w.l.page);
+      assert.deepEqual(lines.slice(0, 2), [
+        '<img src=x onerror="window.hit=1"> <script>window.hit=2</script> <b>code</b>',
+        'A <img src=y onerror="window.hit=3"> text <script>window.hit=4</script> and <img src=z onerror="window.hit=5"> <a href="http://x">link</a>.',
+      ]);
+      const made = await readPage(
+        w.l.page,
+        () => {
+          const body = document.querySelector('#update-dialog .update-body') as Element;
+          return {
+            tags: [
+              ...new Set([...body.querySelectorAll('*')].map((e) => e.tagName.toLowerCase())),
+            ].sort(),
+            codes: [...body.querySelectorAll('.update-note code')].map((c) => c.textContent),
+            hit: 'hit' in window,
+          };
+        },
+        null,
+      );
+      assert.deepEqual(
+        made.tags.filter(
+          (tag) => !['button', 'code', 'div', 'li', 'p', 'span', 'ul'].includes(tag),
+        ),
+        [],
+        `only the dialog's own elements: ${made.tags.join(' ')}`,
+      );
+      assert.deepEqual(made.codes, ['<b>code</b>', '<img src=z onerror="window.hit=5">']);
+      assert.equal(made.hit, false, 'nothing ran');
+      await closeDialog(w.l.page);
+      assert.deepEqual(w.l.problems, []);
+    },
+  );
+
+  await t.test(
     'a dialog longer than the window: 20 notes and `… and 1 more`, its body scrolls inside it, the heading and the buttons stay in view; both colour schemes read at least 4.5 : 1',
     async (t) => {
       const w = await world(t, chromium);
@@ -437,17 +484,29 @@ test('the update notice (F38, S2 16.5)', async (t) => {
       assert.ok(lines.includes('… and 1 more'));
       assert.ok(lines.includes('▸ 1 other change'));
 
-      const inView = (): Promise<{ scrolls: boolean; heading: boolean; buttons: boolean }> =>
+      /** Where the body is scrolled, whether its last line lies inside its box, the heading and the buttons in view. */
+      const where = (): Promise<{
+        top: number;
+        scrolls: boolean;
+        lastInside: boolean;
+        heading: boolean;
+        buttons: boolean;
+      }> =>
         readPage(
           w.l.page,
           () => {
             const body = document.querySelector('#update-dialog .update-body') as HTMLElement;
+            const box = body.getBoundingClientRect();
+            const metas = body.querySelectorAll('.update-meta');
+            const last = (metas[metas.length - 1] as Element).getBoundingClientRect();
             const inside = (selector: string): boolean => {
               const r = (document.querySelector(selector) as Element).getBoundingClientRect();
               return r.height > 0 && r.top >= 0 && r.bottom <= window.innerHeight;
             };
             return {
+              top: body.scrollTop,
               scrolls: body.scrollHeight > body.clientHeight,
+              lastInside: last.top >= box.top && last.bottom <= box.bottom + 0.5,
               heading: inside('#update-dialog .update-heading'),
               buttons:
                 inside('#update-dialog .update-now') && inside('#update-dialog .update-close'),
@@ -455,16 +514,44 @@ test('the update notice (F38, S2 16.5)', async (t) => {
           },
           null,
         );
-      assert.deepEqual(await inView(), { scrolls: true, heading: true, buttons: true });
-      await w.l.page.evaluate(() => {
-        const body = document.querySelector('#update-dialog .update-body') as HTMLElement;
-        body.scrollTop = body.scrollHeight;
+      const start = await where();
+      assert.deepEqual(start, {
+        top: 0,
+        scrolls: true,
+        lastInside: false,
+        heading: true,
+        buttons: true,
       });
-      assert.deepEqual(
-        await inView(),
-        { scrolls: true, heading: true, buttons: true },
-        'scrolled to its end',
+      // From the keyboard, Close keeping it: End, Home, PageDown, ↓, ↑.
+      assert.equal(await holder(w.l.page), 'update-close');
+      await w.l.page.keyboard.press('End');
+      const end = await where();
+      assert.ok(end.top > 0, `End scrolls (${end.top})`);
+      assert.equal(end.lastInside, true, 'End brings the last line inside the body');
+      assert.equal(end.heading && end.buttons, true);
+      await w.l.page.keyboard.press('Home');
+      assert.equal((await where()).top, 0, 'Home goes back to the top');
+      await w.l.page.keyboard.press('PageDown');
+      const page = (await where()).top;
+      assert.ok(page > 100, `PageDown scrolls a page (${page})`);
+      await w.l.page.keyboard.press('ArrowDown');
+      assert.equal((await where()).top, page + 40, '↓ a line further');
+      await w.l.page.keyboard.press('ArrowUp');
+      assert.equal((await where()).top, page);
+      await w.l.page.keyboard.press('PageUp');
+      assert.equal((await where()).top, 0);
+      assert.equal(await holder(w.l.page), 'update-close', 'the keyboard stayed on Close');
+      assert.equal(
+        await readPage(w.l.page, () => document.getElementById('update-dialog')?.hidden, null),
+        false,
+        'no key closed the dialog',
       );
+      // By the wheel's way: the body's own scroll.
+      await w.l.page.locator('#update-dialog .update-body').hover();
+      await w.l.page.mouse.wheel(0, 100_000);
+      await until(async () => (await where()).lastInside, 'the wheel brings the last line in');
+      const wheeled = await where();
+      assert.ok(wheeled.top > 0 && wheeled.heading && wheeled.buttons);
       assert.equal((await dialogLines(w.l.page)).at(-1), 'In a terminal instead: skydeck update');
 
       for (const colorScheme of ['light', 'dark'] as const) {

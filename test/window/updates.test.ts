@@ -35,6 +35,7 @@ import {
   retryAfterNs,
 } from '../../src/window/updates.ts';
 import type { Updates } from '../../src/window/updates.ts';
+import { offersUpdateNow } from '../../web/update-text.js';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { fakeProcesses, T0 } from '../helpers/platform.ts';
@@ -491,6 +492,37 @@ describe('what a check gives', () => {
     const stored = w.stored();
     assert.ok(stored?.v === 2 && stored.outcome.kind === 'available');
     assert.deepEqual(stored.outcome.notes, [{ title: 'A `note`', paragraphs: ['It says so.'] }]);
+  });
+
+  test('notes that cannot be read (a git call of theirs fails) take nothing from the update: available, Update now offered, every commit another change', async (t) => {
+    const blob = 'a'.repeat(40);
+    const w = world(t, {
+      repo: {
+        news: { [NEW]: `100644 blob ${blob}      40\tdocs/news/2026-11-25-a.md\0` },
+        answers: { [`cat-file blob ${blob}`]: { code: 128, stderr: 'fatal: missing blob\n' } },
+        noteAdders: [NEW],
+      },
+    });
+
+    const answer = await w.updates.check();
+
+    assert.deepEqual(answer.check, availablePayload());
+    assert.equal(answer.failure, null, 'no failure of the check');
+    assert.ok(answer.check?.state === 'available' && offersUpdateNow(answer.check));
+  });
+
+  test('a stored subject goes through subjectLine: sanitised, clipped to 200 with …', async (t) => {
+    const w = world(t, {
+      repo: { commits: [{ id: NEW, subject: `a\u001b[31m${'s'.repeat(400)}` }] },
+    });
+
+    const answer = await w.updates.check();
+
+    assert.ok(answer.check?.state === 'available');
+    assert.equal(answer.check.others[0], `a${'s'.repeat(198)}…`);
+    const stored = w.stored();
+    assert.ok(stored?.outcome.kind === 'available');
+    assert.equal(stored.outcome.others[0], `a${'s'.repeat(198)}…`);
   });
 
   test('an update known from an earlier fetch, then a check whose fetch fails: it stays, the failure beside it; the next check that works clears it', async (t) => {

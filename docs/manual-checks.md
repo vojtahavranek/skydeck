@@ -3554,8 +3554,8 @@ out: no note yet" and stop here).
    keyboard (Tab goes round it, `Update now` and `Close`), then Enter: open; Space: folded. Press
    Esc and open the dialog again: folded.
 4. **A low window.** Make the window low (drag its bottom edge up) until the dialog does not fit.
-   Expected: its body scrolls with the mouse wheel; `Update available` at its top and the two
-   buttons stay in view. Give the window its size back.
+   Expected: its body scrolls with the mouse wheel, and with PageDown, End, ↑ and Home while
+   `Close` has the keyboard; `Update available` at its top and the two buttons stay in view. Give the window its size back.
 5. **The schemes.** In Settings' Appearance, `Mode` `Light`, then `Dark`, and your colour theme of
    each: open the dialog each time. Expected: every text reads well, the bottom lines a little
    dimmer than the notes. Set `Mode` back to what it was.

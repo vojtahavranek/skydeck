@@ -137,6 +137,16 @@ describe("the dialog's body", () => {
     assert.equal(dialogModel(available({ others: [], otherCount: 0 })).fold, null);
   });
 
+  test('no note shown but notes not read (moreNotes): the update brings notes, so the fold reads `other changes`, folded', () => {
+    const model = dialogModel(available({ notes: [], moreNotes: 3 }));
+    assert.deepEqual(model.fold, {
+      label: '3 other changes',
+      openAtStart: false,
+      items: ['three', 'two', 'one'],
+    });
+    assert.equal(blockText(model.before[0]!), '… and 3 more');
+  });
+
   test('more notes and more other changes than listed: … and <n> more', () => {
     const model = dialogModel(available({ notes: [NOTE, NOTE], moreNotes: 3, otherCount: 25 }));
     assert.equal(blockText(model.before.at(-1) ?? model.before[0]!), '… and 3 more');

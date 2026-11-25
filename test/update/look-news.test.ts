@@ -10,12 +10,13 @@ import type { TestContext } from 'node:test';
 
 import type { Platform } from '../../src/platform/types.ts';
 import { gitOn } from '../../src/update/git.ts';
-import { lookForUpdate, NOTES_READ, report } from '../../src/update/look.ts';
+import { lookForUpdate, NEWS_TREE_BYTES, NOTES_READ, report } from '../../src/update/look.ts';
 import type { Looked, Update } from '../../src/update/look.ts';
 import { NOTE_BYTES } from '../../src/update/news.ts';
 import { gitCheckout, gitTestEnv } from '../helpers/git-checkout.ts';
 import type { GitCheckout } from '../helpers/git-checkout.ts';
 import { realTestPlatform, testPlatform } from '../helpers/platform.ts';
+import type { RunCall } from '../helpers/platform.ts';
 import {
   commitId,
   gitArgs,
@@ -24,7 +25,6 @@ import {
   OLD,
   scriptedGit,
   scriptedRepo,
-  subCommand,
 } from '../helpers/update.ts';
 import type { ScriptedRepo } from '../helpers/update.ts';
 
@@ -39,6 +39,8 @@ const note = (title: string, text: string): string => `# ${title}\n\n${text}\n`;
 describe('the notes an update brings, on the real git', () => {
   interface Real {
     c: GitCheckout;
+    /** The sandbox's real platform with git's test settings. */
+    platform: Platform;
     look(): Promise<Update>;
   }
 
@@ -49,6 +51,7 @@ describe('the notes an update brings, on the real git', () => {
     const platform: Platform = { ...tp.platform, appRoot: c.root };
     return {
       c,
+      platform,
       look: async () =>
         known(
           await lookForUpdate(gitOn(platform, c.root), platform.files, {
@@ -155,22 +158,98 @@ describe('the notes an update brings, on the real git', () => {
     assert.equal(update.otherCount, 0);
   });
 
-  test('a commit that only adds a note that is not well formed is one of the other changes', async (t) => {
+  test("a commit that adds a file of a note's name is a note's commit, also when the note is not well formed", async (t) => {
     const r = real(t, { 'README.md': 'one\n' });
-    const bad = r.c.push('a broken note', { 'docs/news/2026-05-01-bad.md': 'no title\n' });
+    r.c.push('a broken note', { 'docs/news/2026-05-01-bad.md': 'no title\n' });
+    const plain = r.c.push('a plain change', { 'a.txt': 'a\n' });
 
     const update = await r.look();
 
     assert.deepEqual(update.notes, []);
-    assert.deepEqual(update.others, [{ id: bad, subject: 'a broken note' }]);
+    assert.deepEqual(update.others, [{ id: plain, subject: 'a plain change' }]);
     assert.equal(update.otherCount, 1);
+    assert.equal(update.count, 2);
+  });
+
+  test('45 notes, each in its commit, and 3 plain commits: 20 shown, 25 more, 3 other changes — the commits of notes not read are no other changes', async (t) => {
+    const r = real(t, { 'README.md': 'one\n' });
+    const plain = [r.c.commit(r.c.other, 'plain 1', { 'p1.txt': '1\n' })];
+    for (let i = 1; i <= 45; i += 1) {
+      const day = String(i).padStart(2, '0');
+      r.c.commit(r.c.other, `note ${i}`, {
+        [`docs/news/2026-08-${day}-n${i}.md`]: note(`Note ${i}`, `Text ${i}.`),
+      });
+      if (i === 20) plain.push(r.c.commit(r.c.other, 'plain 2', { 'p2.txt': '2\n' }));
+    }
+    plain.push(r.c.commit(r.c.other, 'plain 3', { 'p3.txt': '3\n' }));
+    r.c.git(r.c.other, 'push', '--quiet', 'origin', 'main');
+
+    const update = await r.look();
+
+    assert.equal(update.count, 48);
+    assert.equal(update.notes.length, 20);
+    assert.equal(update.notes[0]?.title, 'Note 45');
+    assert.equal(update.moreNotes, 25);
+    assert.equal(update.otherCount, 3);
+    assert.deepEqual(
+      update.others.map((c) => c.subject),
+      ['plain 3', 'plain 2', 'plain 1'],
+    );
+    assert.match(report(update).join('\n'), /\n {2}Note 26\n {2}… and 25 more$/);
+  });
+
+  test('a note moved to a new name is added by the commit that moves it (no rename is followed)', async (t) => {
+    const r = real(t, {
+      'README.md': 'one\n',
+      'docs/news/2026-01-01-old.md': note('Moved', 'The same text, long enough to be a rename.'),
+    });
+    r.c.push('move the note', {
+      'docs/news/2026-01-01-old.md': null,
+      'docs/news/2026-09-01-new.md': note('Moved', 'The same text, long enough to be a rename.'),
+    });
+
+    const update = await r.look();
+
+    assert.deepEqual(
+      update.notes.map((n) => n.title),
+      ['Moved'],
+    );
+    assert.equal(update.otherCount, 0, "the commit that moves it is the note's commit");
+  });
+
+  test('a partial clone without the blobs: no notes, nothing fetched, the update known as before', async (t) => {
+    const r = real(t, { 'README.md': 'one\n' });
+    r.c.git(r.c.remote, 'config', 'uploadpack.allowFilter', 'true');
+    const partial = join(r.c.root, '..', 'partial');
+    mkdirSync(partial);
+    r.c.git(partial, 'clone', '--quiet', '--filter=blob:none', `file://${r.c.remote}`, '.');
+    r.c.push('a note', { 'docs/news/2026-10-01-p.md': note('Partial', 'Not fetched.') });
+    r.c.git(partial, 'fetch', '--quiet', 'origin');
+    const missing = (): string =>
+      r.c.git(partial, 'rev-list', '--objects', '--missing=print', 'origin/main');
+    assert.match(missing(), /^\?[0-9a-f]+$/m, 'the note blob is missing');
+    const before = missing();
+
+    const platform: Platform = { ...r.platform, appRoot: partial };
+    const looked = await lookForUpdate(gitOn(platform, partial), platform.files, {
+      fetch: 'none',
+      tolerant: true,
+    });
+
+    const update = known(looked);
     assert.equal(update.count, 1);
+    assert.deepEqual(update.notes, []);
+    assert.equal(update.otherCount, 1);
+    assert.equal(missing(), before, 'no object was fetched');
   });
 });
 
 describe('the limits of the notes, on the scripted git', () => {
   interface Looker {
+    /** The `cat-file blob` calls: their arguments. */
     calls: string[][];
+    /** Every call: its arguments and options. */
+    all: RunCall[];
     look(): Promise<Update>;
   }
 
@@ -179,15 +258,19 @@ describe('the limits of the notes, on the scripted git', () => {
     const root = join(tp.sandbox.root, 'checkout');
     mkdirSync(root);
     const calls: string[][] = [];
+    const all: RunCall[] = [];
     const repo = scriptedRepo(root, {
       ...over,
       onCall: (call) => {
-        if (subCommand(call, root) === 'cat-file') calls.push([...gitArgs(call, root)]);
+        all.push(call);
+        const args = gitArgs(call, root);
+        if (args[0] === 'cat-file' && args[1] === 'blob') calls.push([...args]);
       },
     });
     const platform: Platform = { ...tp.platform, runner: scriptedGit(repo), appRoot: root };
     return {
       calls,
+      all,
       look: async () =>
         known(
           await lookForUpdate(gitOn(platform, root), platform.files, {
@@ -253,6 +336,114 @@ describe('the limits of the notes, on the scripted git', () => {
       ['Small'],
     );
     assert.deepEqual(l.calls, [['cat-file', 'blob', 'd'.repeat(40)]]);
+    const read = l.all.find((call) => call.args.includes('blob'));
+    assert.equal(
+      read?.options?.maxOutputBytes,
+      NOTE_BYTES,
+      'the read keeps no more than the bound',
+    );
+  });
+
+  test("the notes' git calls fetch nothing (GIT_NO_LAZY_FETCH); the look's others are as before", async (t) => {
+    const l = looker(t, { ...notes(1), noteAdders: [NEW] });
+
+    await l.look();
+
+    const sub = (call: RunCall): string =>
+      call.args.slice(2).filter((a) => !a.startsWith('-'))[0] ?? '';
+    const offline = l.all.filter((call) => call.options?.env?.['GIT_NO_LAZY_FETCH'] === '1');
+    assert.deepEqual(
+      offline.map((call) => `${sub(call)} ${call.args.includes('blob') ? 'blob' : ''}`.trim()),
+      ['cat-file', 'ls-tree', 'cat-file blob', 'log'],
+      'the old commit has no tree of notes: one listing',
+    );
+    assert.ok(
+      l.all
+        .filter((call) => !offline.includes(call))
+        .every((call) => call.options?.env?.['GIT_NO_LAZY_FETCH'] === undefined),
+    );
+  });
+
+  /** A look whose notes cannot be read: known, every commit one of the other changes. */
+  function noNotes(update: Update): void {
+    assert.equal(update.count, 1);
+    assert.deepEqual(update.notes, []);
+    assert.equal(update.moreNotes, 0);
+    assert.deepEqual(update.others, [{ id: NEW, subject: 'the new commit' }]);
+    assert.equal(update.otherCount, 1);
+  }
+
+  test('a tree of notes larger than the bound: no notes, no listing read', async (t) => {
+    const l = looker(t, { ...notes(2), newsTreeSize: NEWS_TREE_BYTES + 1, noteAdders: [NEW] });
+
+    noNotes(await l.look());
+    assert.ok(!l.all.some((call) => call.args.includes('ls-tree') && call.args.includes('-l')));
+  });
+
+  test('a listing past its cap: no notes; it is read with the cap', async (t) => {
+    const big = noteEntry('2026-06-01-a.md', 'b'.repeat(40)).repeat(30_000);
+    const l = looker(t, { news: { [NEW]: big }, blobs: notes(1).blobs, noteAdders: [NEW] });
+
+    noNotes(await l.look());
+    const listing = l.all.find((call) => call.args.includes('-l'));
+    assert.equal(listing?.options?.maxOutputBytes, 4 * NEWS_TREE_BYTES);
+    assert.deepEqual(l.calls, []);
+  });
+
+  test('a git call of the notes that fails or times out, a missing blob: no notes, the update as before', async (t) => {
+    const blob = '1'.padStart(40, 'b');
+    const failures: Partial<ScriptedRepo>[] = [
+      {
+        answers: {
+          [`cat-file blob ${blob}`]: { code: 128, stderr: `fatal: missing blob ${blob}\n` },
+        },
+      },
+      { answers: { 'cat-file --batch-check': { code: null, timedOut: true } } },
+      {
+        answers: {
+          [`ls-tree -l -z --full-tree ${NEW} -- docs/news/`]: {
+            code: 128,
+            stderr: 'fatal: bad tree\n',
+          },
+        },
+      },
+      {
+        answers: {
+          [`config -z --get-regexp ^(extensions\\.partialclone|remote\\..*\\.promisor)$`]: {
+            code: 3,
+          },
+        },
+      },
+    ];
+    for (const over of failures) {
+      const l = looker(t, { ...notes(1), noteAdders: [NEW], ...over });
+      noNotes(await l.look());
+    }
+    const logFails = looker(t, { ...notes(1), noteAdders: [NEW] });
+    // The adders' log is the last call of the notes: its failure drops the notes read too.
+    const withLog = looker(t, {
+      ...notes(1),
+      answers: {
+        [`log --diff-filter=A --no-renames --no-show-signature --no-color -z --format=%H ${OLD}..${NEW} -- docs/news/2026-06-01-n1.md`]:
+          { code: 128, stderr: 'fatal: x\n' },
+      },
+    });
+    noNotes(await withLog.look());
+    assert.equal((await logFails.look()).notes.length, 1, 'without a failure the note is there');
+  });
+
+  test('a partial clone (its settings): no notes, nothing of them read', async (t) => {
+    for (const setting of ['extensions.partialclone\norigin\0', 'remote.origin.promisor\ntrue\0']) {
+      const l = looker(t, { ...notes(1), noteAdders: [NEW], partialClone: setting });
+      noNotes(await l.look());
+      assert.ok(!l.all.some((call) => call.args.includes('cat-file')));
+    }
+    const off = looker(t, {
+      ...notes(1),
+      noteAdders: [NEW],
+      partialClone: 'remote.origin.promisor\nfalse\0',
+    });
+    assert.equal((await off.look()).notes.length, 1);
   });
 
   test('a symbolic link, a directory and an entry of another folder are no notes', async (t) => {
@@ -271,6 +462,11 @@ describe('the limits of the notes, on the scripted git', () => {
 
     assert.deepEqual(update.notes, []);
     assert.deepEqual(l.calls, []);
+  });
+
+  test('unread notes are counted: with no note read the update still brings notes (moreNotes)', async (t) => {
+    const l = looker(t, { ...notes(NOTES_READ + 2), behind: 50 });
+    assert.equal((await l.look()).moreNotes, NOTES_READ - 20 + 2);
   });
 
   test('the other changes: the commits that add no note, newest first, at most 20, and their count', async (t) => {
