@@ -2949,7 +2949,7 @@ In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git rem
    that says what is new — the notes the update brings, when it brings any (W53 looks at them
    closely), and the other changes under `▸ <n> other changes`, or `▾ <n> changes` open when it
    brings no note, whose subjects are those `skydeck update --check` lists in W —, small at the
-   bottom `<version> → <version> on origin/main  <id> → <id>` (the ids in the terminal's font) and
+   bottom `<version> → <version> on origin/main (<id> → <id>)` (the ids in the terminal's font) and
    `In a terminal instead: skydeck update`, and two
    buttons, `Update now` and `Close`; `Close` has the keyboard, and Tab goes round the fold line,
    `Update now` and `Close`. Ctrl+Shift+N says `close the dialog first (Esc)`. Press Esc
@@ -3596,7 +3596,7 @@ out: no note yet" and stop here).
    word between backticks in a note (if any) in the terminal's font, without the backticks; no
    Markdown shown as markup. Then `▸ <n> other changes` (when some commits add no note), the
    database note as a block marked at its left (when step 1 printed the database line), and small
-   at the bottom `<version> → <version> on origin/main  <the id you wrote down> → <id>` (the
+   at the bottom `<version> → <version> on origin/main (<the id you wrote down> → <id>)` (the
    versions of step 1's first line) and `In a terminal instead: skydeck update`; the ids and
    `skydeck update` in the terminal's font.
 3. **The fold.** Click `▸ <n> other changes`. Expected: `▾`, and under it the subjects of the
@@ -3646,15 +3646,16 @@ this change and is green; its log names the tag it made. In W: `cd ~/skydeck`, t
 2. **doctor.** In W: `skydeck doctor`. Expected: its first line `info     skydeck` and the line of
    step 1, word for word.
 3. **Settings.** Click the gear. Expected: the group `Updates` shows `skydeck <version>`, the
-   version of step 1, above its `Last check: …` line. Click `Check now`: the version line stays
-   as it is.
+   version of step 1, above its `Last check: …` line. Click `Check now`: the version line then
+   names HEAD's version as the check found it — the same as `skydeck --version` in W prints now,
+   also when the check's fetch brought HEAD's own tag (then `skydeck <tag>`, no `+<n>` any more).
 4. **The dialog**, only when the title bar shows `Update available` (else write down "left out:
    up to date" and leave steps 4 and 5 out). In W: `skydeck update --check`. Expected: its first
    line `<k> new commits on origin/main (<version> → <version>, <id>..<id>):`, the new version
    the highest tag of the newest commit (`+<n>` when its own tag has not been made yet) — the next
    minor when a listed commit brings a note (`what is new:` lists it), else the next patch —; the
    other lines as in W32. Click `Update available`. Expected: small at the bottom `<version> →
-   <version> on origin/main  <id> → <id>`, the same versions and ids, the ids in the terminal's
+   <version> on origin/main (<id> → <id>)`, the same versions and ids, the ids in the terminal's
    font.
 5. **Update now**, only when you want the update now. Click `Update now`. Expected: `skydeck is
    being updated to <new version>. The window comes back by itself.`, then the reload and the bar

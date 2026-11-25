@@ -348,7 +348,7 @@ async function apply(
     // 3. The window's server again, only when the stopped one had a page.
     await record({ state: 'applied' });
     const done = await bringBack(ctx, hold, step1, launcher, cwd, env, fromWindow);
-    // 4. The result: the version the update brought (its short id when not even its pair is known).
+    // 4. The result: the version the update brought (its short id when it has none).
     const name = versionName(update.newVersion, update.newId);
     if (done === 'ok') {
       hold.out(`updated to ${name}`);

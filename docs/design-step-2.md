@@ -1832,7 +1832,7 @@ Server → page:
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
 | `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; from issue #166 also `restart`; else null); `ended`, for `end-session` (above) and from issue #166 for `restart` once its program was hung up (absent for a refusal); from follow-up F36, for `settings`, `setting-set` and `setting-default` only, `settings`: the settings screen as below; from follow-up F38, for `update-check`, `update-look`, `update-apply` (also with a refusal) and `update-seen` only, `update`: the check's state as below. |
 | `settings` | Follow-up F36, 12.13: `settings`, the settings screen, to every page after a change: `path` (the file's), `backup` (where its copy goes), `exists`, `problem` (why the window changes nothing in the file until it is mended by hand, or null) and `settings`, in the server's table's order, each with `key`, `group`, `meaning`, `kind` (`change` or `show`), `names` (`program`, `folder` or `port` for a shown one, else null), `control` (`number`, `text` or `choice`), `choices`, `nullable`, `applies` (`now`, `restart`, `commands` or `install`), `default` and `defaultText`, `inFile`, `value` (exact) and `valueText`, `pending` (the running server uses another value) and `runningText`. Every text but `value` is sanitised. |
-| `update` | Follow-up F38, 16.5: `update`, the check for a newer skydeck, to a page right after its `start` and to every page on each change: `checking` (one runs), `check` (null: this server's own first check or look has not ended — it sends no stored outcome before), `checkedAtNs` (when the last check ended, whatever it found, or null), `fetchedAtNs` (when the last fetch that worked ended, or null) and `failure` (`{ atNs, line }` when the last check failed — its fetch, a git call of its look, or the check itself —, else null). `check` is `{ state: 'cannot', summary }` (the look could not tell: its line), `{ state: 'current', summary }` (`skydeck is up to date (<branch> at <version>, <id>, as <upstream>)`, or `nothing new on <upstream>: this checkout has <n> commits that it does not have`) or `{ state: 'available', summary, from, to, versions, upstream, notes, moreNotes, others, otherCount, upgradesDatabase, blocked }` (`<n> new commits on <upstream>`; `from` and `to` HEAD's and the new commit's full ids; `versions` their versions as the server writes them, `0.9.16 → 0.9.19` (one not known: its short id), or null when neither is known; `upstream` its short name; `notes` the notes of what is new the update brings, newest first, at most 20, each `{ title, paragraphs }` in runs `{ text, code }` cut by the server at the backticks, and `moreNotes` how many more; `others` the subjects of the newest commits that add none, at most 20, and `otherCount` how many there are; `upgradesDatabase` whether it changes the database's upgrade steps; `blocked` why it cannot be applied as it is, or null; 16.5 "What an update brings"). Milestone 2's three fields: `applying` (`{ to, sinceNs, name }` while an update started from a window runs — the commit's full id, since when, and how the running form names it, its version or else its short id —, else null), `log` (`<stateDir>/update.log`, what the page names while the server is away, 6.3) and `result` (`{ ok, text }`: how the last update from the window ended, `updated to <version>` or why not, until a page sends `update-seen`; else null). `version`: the version of the server's checkout (`0.9.16`, or `0.9.16+2`; 16.5 "The window's check"), read once at the server's first tick, for the settings screen; null until then, and when it has none. Every text sanitised and clipped to 300 characters (`result`'s to 600). |
+| `update` | Follow-up F38, 16.5: `update`, the check for a newer skydeck, to a page right after its `start` and to every page on each change: `checking` (one runs), `check` (null: this server's own first check or look has not ended — it sends no stored outcome before), `checkedAtNs` (when the last check ended, whatever it found, or null), `fetchedAtNs` (when the last fetch that worked ended, or null) and `failure` (`{ atNs, line }` when the last check failed — its fetch, a git call of its look, or the check itself —, else null). `check` is `{ state: 'cannot', summary }` (the look could not tell: its line), `{ state: 'current', summary }` (`skydeck is up to date (<branch> at <version>, <id>, as <upstream>)`, or `nothing new on <upstream>: this checkout has <n> commits that it does not have`) or `{ state: 'available', summary, from, to, versions, upstream, notes, moreNotes, others, otherCount, upgradesDatabase, blocked }` (`<n> new commits on <upstream>`; `from` and `to` HEAD's and the new commit's full ids; `versions` their versions as the server writes them, `0.9.16 → 0.9.19` (one not known: its short id), or null when neither is known; `upstream` its short name; `notes` the notes of what is new the update brings, newest first, at most 20, each `{ title, paragraphs }` in runs `{ text, code }` cut by the server at the backticks, and `moreNotes` how many more; `others` the subjects of the newest commits that add none, at most 20, and `otherCount` how many there are; `upgradesDatabase` whether it changes the database's upgrade steps; `blocked` why it cannot be applied as it is, or null; 16.5 "What an update brings"). Milestone 2's three fields: `applying` (`{ to, sinceNs, name }` while an update started from a window runs — the commit's full id, since when, and how the running form names it, its version or else its short id —, else null), `log` (`<stateDir>/update.log`, what the page names while the server is away, 6.3) and `result` (`{ ok, text }`: how the last update from the window ended, `updated to <version>` or why not, until a page sends `update-seen`; else null). `version`: the version of the server's checkout (`0.9.16`, or `0.9.16+2`; 16.5 "The window's check"), read at the server's first tick and then from each look that gets as far as HEAD (a check, the dialog's look: a tag a check's fetch brought shows at once), for the settings screen; null until then, and when it has none. Every text sanitised and clipped to 300 characters (`result`'s to 600). |
 | `notify` | `sessionId`, `title` (the row's, sanitised), `reason` (the kind: `asks`, `ended` or `finished`, 12.4; the page writes the words), `detail` (the row's attention detail, else null) (13). |
 | `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. `restore-progress`: one report line of a restore, sanitised, to every page, whoever asked for the restore (11.3, 12.7; stage C). |
 | `bye` | `reason` (5.5). |
@@ -2873,7 +2873,7 @@ Update available
    it afterwards. Going back to 1546b37:
    docs/install.md, "Going back".
 
- 0.9.16 → 0.9.19 on origin/main  1546b37 → c75af0e
+ 0.9.16 → 0.9.19 on origin/main (1546b37 → c75af0e)
  In a terminal instead: skydeck update
 
                      [ Update now ]  [ Close ]
@@ -2886,8 +2886,8 @@ or Space opens and closes the list of the other changes' subjects under it (`▾
 `aria-expanded`), folded at every open of the dialog; with no note at all the line reads `<n>
 changes` and the list is open from the start; with no other change there is no such line; when
 the update changes the database's upgrade steps, the database note, a block marked at its left;
-and small, in `--dim`, `<old version> → <new version> on <upstream>` followed by the two ids in the
-terminal's font (`1546b37 → c75af0e`; with neither version known, the ids alone, `<old> → <new> on
+and small, in `--dim`, `<old version> → <new version> on <upstream> (<old> → <new>)`, the two ids in
+brackets in the terminal's font (with neither version known, the ids alone, `<old> → <new> on
 <upstream>`), and `In a terminal instead: skydeck update`. The versions are the server's text
 (`versions`), the commits' own (design 8, the version line: `0.9.16`, or `0.9.16+2` past the
 nearest version tag; a commit without one is named by its short id there).
@@ -5860,7 +5860,8 @@ user's second click.
   is read at each tick: a change applies at once. Check now (`act update-check`) checks whatever
   the setting says; with `"off"` a server that finds
   a stored outcome looks once without the network. At its first tick, whatever the setting says,
-  the server reads its checkout's version once (`version`, for the settings screen: design 8's
+  the server reads its checkout's version (`version`, for the settings screen, and from then on
+  each look that gets as far as HEAD gives it anew: design 8's
   rule on HEAD, from the tags and the history git has, without the network, each call within 10
   seconds; none when HEAD has none or git cannot say, and then the settings screen shows no
   version line; in a marked test sandbox without the seam no git runs and there is none). One check runs at a time; a request while one
@@ -6460,21 +6461,31 @@ each page's storage (follow-up F41, 12.14) unless a case asks for a context with
 - The workflow CI checks; one other workflow writes: `Version` (`.github/workflows/version.yml`),
   the one that makes the version tags (design 8, the version line). It runs at every push to `main`
   and when the owner starts it by hand (Actions > Version > Run workflow, on `main`, with `bump`
-  `minor` or `major`); never for a pull request. One job on Ubuntu 24.04 with Node 24, the same
+  `minor` or `major`); never for a pull request, and only in this repository (a fork that turns
+  Actions on makes no version tags of its own, which would clash with this repository's when the
+  fork fetches them). One job on Ubuntu 24.04 with Node 24, the same
   pinned `actions/checkout` (the whole history and the tags) and `actions/setup-node` as CI, no
   cache, no secret but the job's own token, `permissions: contents: write` and nothing else, in a
   concurrency group of its own that cancels nothing (GitHub keeps one run waiting: a push that
   comes while one waits takes its place, and the next run's rule covers its commits). It runs
   `node scripts/next-version-tag.ts`, which prints the tag to make on the checked-out commit or
-  nothing (the rule is `scripts/version-tag.ts`: none when the commit carries a version tag; the
-  start `v0.9.0` when none is on its first-parent history; the next minor when a commit since the
-  nearest version tag (first parent) adds a note's file in `docs/news/`, else the next patch; by
-  hand, the next minor or major from the nearest; none when that tag exists already), then `git tag
-  <tag> HEAD` and `git push origin refs/tags/<tag>`, the tag passed through the step's output and
-  `env:`. No text of the event stands in a `run:` line (the input reaches the script through
+  nothing (the rule is `scripts/version-tag.ts`; versions on `main` never go backwards and a run
+  never stalls in silence: none when the commit carries a version tag; the start `v0.9.0` when none
+  is on its first-parent history; else after the HIGHEST version tag of that history, the next
+  minor when a commit after the nearest tagged commit (first parent) adds a note's file in
+  `docs/news/`, else the next patch; by hand, the next minor or major after the highest, and only
+  when the commit is the head of `origin/main` as the run fetched it, else the run fails (main
+  moved, or an old run was run again); when the next version's tag stands already on another
+  commit, none when that commit lies later on main's first-parent line (this one was passed over),
+  else the run fails with a line that names the tag and the commit and says what to do: remove a
+  stray tag, or step past it by hand with `minor`), then — after the step checks that the name is
+  exactly `v<n>.<n>.<n>` — `git tag <tag> HEAD` and `git push origin refs/tags/<tag>`, the tag
+  passed through the step's output and `env:`. No text of the event stands in a `run:` line (the input reaches the script through
   `env:`, which takes only `minor`, `major` or nothing; a tag's name is numbers only), nothing is
-  ever forced, deleted or written to a branch; `test/version-workflow.test.ts` holds all of that
-  on the file as text, and `test/scripts/version-tag.test.ts` the rule on real repositories.
+  ever forced, deleted or written to a branch; `test/version-workflow.test.ts` holds the file
+  exactly (a strict reader of its plain YAML, and the whole of it compared with what it must be:
+  every key of the workflow, the job, each step, each `with:` and `env:`, every value and every
+  `${{ }}`), and `test/scripts/version-tag.test.ts` the rule on real repositories.
 
 ## 18. Manual checks for step 2
 

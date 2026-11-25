@@ -2411,8 +2411,8 @@ branch follows, and restarts the window's server for the new code. In this order
      Parked: set a session aside
    ```
 
-   `0.9.16 → 0.9.19` are the versions of the commit the checkout is at and of the newest one (as
-   `--version` counts them, the new one before anything is applied); the ids are the first 7
+   `0.9.16 → 0.9.19` are the versions of the commit the checkout is at and of the newest one (the
+   nearest version tag of each, as `--version` reads it; the new one's before anything is applied); the ids are the first 7
    digits of each commit's id, for reading only; the update itself uses the whole id. `what is new:` and the titles under it come only when the update brings notes of
    what is new (the files of `docs/news/`, newest first); the window's dialog shows their text. When the new commits change `src/store/migrations.ts`, one more line says so:
    `this update changes the database's upgrade steps: it may upgrade the database, which an older
@@ -2567,7 +2567,7 @@ after your second click (below).
   line reads `3 changes` and the list is open. When the update may upgrade the database, a marked
   note says so and which commit to go back to (see "Going back" below). Small at the bottom: the
   version the checkout is at and the new one, then their commits (`0.9.16 → 0.9.19 on origin/main
-  1546b37 → c75af0e`), and `In a terminal instead: skydeck update`. When the checkout cannot be updated as it is — a change to a
+  (1546b37 → c75af0e)`), and `In a terminal instead: skydeck update`. When the checkout cannot be updated as it is — a change to a
   tracked file that is not committed, commits of your own that the remote does not have — the
   dialog says why and `Once that is set right, in a WSL terminal of your own: skydeck update`;
   when the branch follows no branch of a remote any more, `skydeck cannot tell here whether there
@@ -2652,8 +2652,14 @@ fetch also removes a tag only your checkout has.
 
 For the repository's owner, the first two numbers by hand: on GitHub, Actions > Version > Run
 workflow, on `main`, with `bump` `minor` (`0.10.0`) or `major` (`1.0.0`): it tags the head of
-`main`. Or push a tag yourself (`git tag v1.0.0 <commit of main>`, `git push origin v1.0.0`): the
-workflow goes on from it. It never moves or deletes a tag.
+`main` (it refuses when `main` moved since the run was started: start it again). Or tag the head of
+`main` yourself (`git fetch`, `git tag v1.0.0 origin/main`, `git push origin v1.0.0`): the
+workflow goes on from it. Versions never go backwards: the next one always follows the highest
+version tag of `main`'s history, wherever it stands, so a tag on an older commit of `main` takes
+effect from the next change on. The workflow never moves or deletes a tag; when the tag it would
+make stands already on another commit (a stray tag), its run fails and says which tag and commit:
+remove that tag (`git push --delete origin <tag>`), or run the workflow by hand with `minor` to
+step past it.
 
 ### Updating by hand
 

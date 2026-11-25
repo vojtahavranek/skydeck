@@ -27,7 +27,7 @@ type AvailablePayload = Extract<UpdateCheckPayload, { state: 'available' }>;
 
 /**
  * A stored `available` outcome (record version 3): the scripted repository's one new commit, no
- * note, no version known (the scripted git names no package.json by default).
+ * note, no version known (the scripted git names no version tag by default).
  */
 export function availableOutcome(over: Partial<AvailableOutcome> = {}): AvailableOutcome {
   return {

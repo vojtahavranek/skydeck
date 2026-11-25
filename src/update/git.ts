@@ -247,28 +247,6 @@ export function gitFailure(
   );
 }
 
-/** `config` of the settings that make a checkout a partial clone (read by partialCloneIn). */
-export const PARTIAL_CLONE_ARGS: readonly string[] = [
-  'config',
-  '-z',
-  '--get-regexp',
-  '^(extensions\\.partialclone|remote\\..*\\.promisor)$',
-];
-
-/**
- * Whether PARTIAL_CLONE_ARGS' output names a partial clone, whose missing objects a git that does
- * not know GIT_NO_LAZY_FETCH would fetch: `<key> LF <value> NUL` (`<key> NUL` without a value), a
- * partialclone that names a remote, or a promisor that is true.
- */
-export function partialCloneIn(output: string): boolean {
-  return output.split('\0').some(
-    (entry) =>
-      /^extensions\.partialclone\n./i.test(entry) ||
-      // A promisor key without a value is true to git.
-      /^remote\..*\.promisor(\n(true|yes|on|1))?$/is.test(entry),
-  );
-}
-
 /** A full commit id: 40 hexadecimal digits (SHA-1), or 64 (SHA-256). */
 const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 

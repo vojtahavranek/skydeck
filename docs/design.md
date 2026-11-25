@@ -1193,8 +1193,9 @@ could not be resumed; see above`).
   within 2 seconds. The version is that commit's: a version is a git tag `v<major>.<minor>.<patch>`
   (decimal numbers without leading zeros; nothing else is a version tag, `v1.2` or `v1.2.3-rc1`
   are not) on a commit of `main`, made by the workflow Version (design-step-2.md 17.5) at every
-  push to `main`: the next minor when the pushed commits add a note in `docs/news/` (a change a
-  user can see), else the next patch; the first, `v0.9.0`; a major or minor by hand, by the owner
+  push to `main`: after the highest version tag of the history (versions never go backwards), the
+  next minor when the pushed commits add a note in `docs/news/` (a change a user can see), else the
+  next patch; the first, `v0.9.0`; a major or minor by hand, by the owner
   (the workflow run by hand, or a tag pushed). A commit's version is the nearest version tag on its
   first-parent history (the highest when a commit carries several): `0.9.16` at the tag, `0.9.16+3`
   three commits past it (a merge whose tag has not arrived yet, commits of the checkout's own).
