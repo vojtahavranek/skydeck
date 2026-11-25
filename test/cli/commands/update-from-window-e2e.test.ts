@@ -265,7 +265,7 @@ function locks(dir: string): string[] {
 const short = (id: string): string => id.slice(0, 7);
 
 describe('Update now end to end: a real server, the real launcher, a real fast-forward', () => {
-  test('applied: the old server ends, the copy is at the pushed commit, a new server of another build runs with the same environment and core limit, the page that comes back gets `updated to <id>`, the log ends with it, no Edge, a terminal keeps running', async (t) => {
+  test('applied: the old server ends, the copy is at the pushed commit, a new server of another build runs with the same environment and core limit, the page that comes back gets `updated to <version>`, the log ends with it, no Edge, a terminal keeps running', async (t) => {
     const h = harness(t);
     const opened = await runSkydeck(h.platform, ['window', '--print-url']);
     assert.equal(opened.code, 0, opened.stderr);
@@ -309,7 +309,8 @@ describe('Update now end to end: a real server, the real launcher, a real fast-f
 
     const back = await comingBack(t, h, before.pid);
     const told = await back.update((u) => u.result !== null, 'the result after the update');
-    assert.deepEqual(told.result, { ok: true, text: `updated to ${short(made)}` });
+    // The version the dialog's look named (the copy's package.json set the pair in its one commit).
+    assert.deepEqual(told.result, { ok: true, text: 'updated to 0.9.1' });
     const after = h.server();
     assert.ok(after !== null);
     assert.notEqual(after.pid, before.pid);

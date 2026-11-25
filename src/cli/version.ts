@@ -14,10 +14,9 @@
 // write it into the checkout) and fetching nothing (GIT_NO_LAZY_FETCH).
 import { dirname } from 'node:path';
 
-import pkg from '../../package.json' with { type: 'json' };
 import type { Platform, RunResult } from '../platform/types.ts';
 import { gitEnv } from '../update/git.ts';
-import { pairOf, versionOf } from '../update/version.ts';
+import { RUNNING_PAIR, versionOf } from '../update/version.ts';
 import type { VersionGit } from '../update/version.ts';
 
 /**
@@ -25,9 +24,6 @@ import type { VersionGit } from '../update/version.ts';
  * version's chain of calls shares it (each of its calls gets what is left).
  */
 export const VERSION_GIT_MS = 2_000;
-
-/** The pair of the running code's package.json: the version when HEAD's cannot be read. */
-const RUNNING_PAIR = pairOf(pkg.version) ?? pkg.version;
 
 /** Of each call's output only this much is kept: one commit line, or whether anything changed. */
 const KEPT_BYTES = 4096;

@@ -21,7 +21,10 @@ export const NEW = 'fedcba9876543210fedcba9876543210fedcba98';
 type AvailableOutcome = Extract<CheckOutcome, { kind: 'available' }>;
 type AvailablePayload = Extract<UpdateCheckPayload, { state: 'available' }>;
 
-/** A stored `available` outcome (record version 2): the scripted repository's one new commit, no note. */
+/**
+ * A stored `available` outcome (record version 3): the scripted repository's one new commit, no
+ * note, no version known (the scripted git names no package.json by default).
+ */
 export function availableOutcome(over: Partial<AvailableOutcome> = {}): AvailableOutcome {
   return {
     kind: 'available',
@@ -29,6 +32,8 @@ export function availableOutcome(over: Partial<AvailableOutcome> = {}): Availabl
     count: 1,
     from: OLD,
     to: NEW,
+    fromVersion: null,
+    toVersion: null,
     notes: [],
     moreNotes: 0,
     others: ['the new commit'],
@@ -46,6 +51,7 @@ export function availablePayload(over: Partial<AvailablePayload> = {}): Availabl
     summary: '1 new commit on origin/main',
     from: OLD,
     to: NEW,
+    versions: null,
     upstream: 'origin/main',
     notes: [],
     moreNotes: 0,
@@ -335,13 +341,20 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
       case 'rev-parse --is-shallow-repository':
         return line('false');
       case 'rev-list --first-parent': {
+        // `HEAD` is the checkout's HEAD as rev-parse answers it.
+        const commitOf = (rev: string): string =>
+          rev !== 'HEAD'
+            ? rev
+            : merged === null
+              ? repo.head
+              : (repo.headAfterMerge ?? repo.fetched);
         if (rest[1] === '--count') {
           const [bump, commit] = (rest[2] ?? '').split('..');
-          const version = repo.versions[commit ?? ''];
+          const version = repo.versions[commitOf(commit ?? '')];
           if (version !== undefined && version.bump === bump) return line(String(version.after));
           break;
         }
-        const version = repo.versions[rest[2] ?? ''];
+        const version = repo.versions[commitOf(rest[2] ?? '')];
         return runResult({ stdout: version === undefined ? '' : `${version.bump}\n` });
       }
       case 'cat-file --batch':

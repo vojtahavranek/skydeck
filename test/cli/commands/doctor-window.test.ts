@@ -467,19 +467,22 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
   function entry(m: WindowMachine, root: string, over: Partial<CheckRecord> = {}): CheckRecord {
     const now = m.platform.clock.nowNs();
     return {
-      v: 2,
+      v: 3,
       root,
       lookedAtNs: String(now - 2n * HOUR),
       checkedAtNs: String(now - 2n * HOUR),
       fetchedAtNs: String(now - 2n * HOUR),
       failure: null,
       head: HEAD,
+      headVersion: null,
       outcome: {
         kind: 'available',
         upstream: 'origin/main',
         count: 3,
         from: HEAD,
         to: TO,
+        fromVersion: null,
+        toVersion: null,
         notes: [{ title: 'A note', paragraphs: ['Its text.'] }],
         moreNotes: 0,
         others: ['one', 'two'],
@@ -535,6 +538,24 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
 
     lineOf(
       r,
+      'info',
+      /^info {5}update: never checked \(the window's server checks when it starts\)$/,
+    );
+  });
+
+  test('a record of version 2 (before the versions): never checked, as for none', async (t) => {
+    const m = machine(t);
+    mkdirSync(root(m), { recursive: true });
+    const { headVersion: _version, outcome, ...rest } = entry(m, root(m));
+    assert.ok(outcome.kind === 'available');
+    const { fromVersion: _from, toVersion: _to, ...outcomeBefore } = outcome;
+    m.deck.store.setKv(
+      'window_update_check',
+      JSON.stringify({ ...rest, v: 2, outcome: outcomeBefore }),
+    );
+
+    lineOf(
+      (await doctorAt(m)).r,
       'info',
       /^info {5}update: never checked \(the window's server checks when it starts\)$/,
     );
@@ -683,7 +704,7 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
     assert.ok(shown.endsWith('…'));
   });
 
-  test('a record of another commit than the checkout is at now', async (t) => {
+  test('a record of another commit than the checkout is at now: its id, and its version when the record knows it', async (t) => {
     const m = machine(t);
     mkdirSync(root(m), { recursive: true });
     writeCheck(m.deck.store, entry(m, root(m), { head: OTHER_HEAD }));
@@ -692,6 +713,13 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
       (await doctorAt(m)).r,
       'info',
       /^info {5}update: last looked 2h ago at 89abcde, which is not the commit this checkout is at now; the window's server checks again when it starts$/,
+    );
+
+    writeCheck(m.deck.store, entry(m, root(m), { head: OTHER_HEAD, headVersion: '0.9.16' }));
+    lineOf(
+      (await doctorAt(m)).r,
+      'info',
+      /^info {5}update: last looked 2h ago at 0\.9\.16 \(89abcde\), which is not the commit this checkout is at now; the window's server checks again when it starts$/,
     );
   });
 

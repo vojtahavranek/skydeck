@@ -41,6 +41,7 @@ const AVAILABLE: Available = {
   summary: '4 new commits on origin/main',
   from: '1546b37aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   to: 'c75af0ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+  versions: null,
   upstream: 'origin/main',
   notes: [NOTE],
   moreNotes: 0,
@@ -79,6 +80,7 @@ function payload(over: Partial<UpdatePayload> = {}): UpdatePayload {
     fetchedAtNs: ago(90n),
     failure: null,
     applying: null,
+    version: null,
     log: '/state/update.log',
     result: null,
     ...over,
@@ -117,6 +119,22 @@ describe("the dialog's body", () => {
       ['1546b37', 'c75af0e', 'skydeck update'],
     );
     assert.equal(UPDATE_TEXTS.terminal, 'In a terminal instead: skydeck update');
+  });
+
+  test("the bottom line with the versions the server gives: `<old> → <new> on <upstream>`, then the ids small after it in the terminal's font", () => {
+    const model = dialogModel(available({ versions: '0.9.16 → 0.9.19' }));
+    assert.deepEqual(reads(model).slice(-2), [
+      '(meta) 0.9.16 → 0.9.19 on origin/main  1546b37 → c75af0e',
+      '(meta) In a terminal instead: skydeck update',
+    ]);
+    const meta = model.after.at(-2);
+    assert.ok(meta !== undefined && meta.kind === 'meta');
+    assert.deepEqual(meta.runs, [
+      { text: '0.9.16 → 0.9.19 on origin/main  ', code: false },
+      { text: '1546b37', code: true },
+      { text: ' → ', code: false },
+      { text: 'c75af0e', code: true },
+    ]);
   });
 
   test('the fold line: one other change; no note at all, `<n> changes` open from the start; no other change, none', () => {
@@ -218,6 +236,20 @@ function expectDatabase(): string {
 }
 
 describe("the settings screen's block", () => {
+  test('the version the server gives comes first, `skydeck <version>`; none before it does', () => {
+    assert.deepEqual(settingsLines(payload({ version: '0.9.16' }), String(NOW)), [
+      'skydeck 0.9.16',
+      'Last check: 1m ago — 4 new commits on origin/main',
+    ]);
+    assert.deepEqual(settingsLines(payload({ version: '0.9', check: null }), String(NOW)), [
+      'skydeck 0.9',
+      UPDATE_TEXTS.never,
+    ]);
+    assert.deepEqual(settingsLines(payload({ version: null }), String(NOW)), [
+      'Last check: 1m ago — 4 new commits on origin/main',
+    ]);
+  });
+
   test('the last check with its age and summary', () => {
     assert.deepEqual(settingsLines(payload(), String(NOW)), [
       'Last check: 1m ago — 4 new commits on origin/main',
@@ -315,14 +347,18 @@ describe('Update now, its running form and the bars (milestone 2)', () => {
     assert.equal(offersUpdateNow(null), false);
   });
 
-  test("the running form's line names the commit's short id, in the terminal's font", () => {
+  test("the running form's line names the commit as the server names it (its version, else its short id), in plain text", () => {
     assert.equal(
-      runningLine(AVAILABLE.to),
+      runningLine('0.9.19'),
+      'skydeck is being updated to 0.9.19. The window comes back by itself.',
+    );
+    assert.equal(
+      runningLine('c75af0e'),
       'skydeck is being updated to c75af0e. The window comes back by itself.',
     );
     assert.deepEqual(
-      runningRuns(AVAILABLE.to).filter((run) => run.code),
-      [{ text: 'c75af0e', code: true }],
+      runningRuns('0.9.19').filter((run) => run.code),
+      [],
     );
     assert.equal(UPDATE_TEXTS.beingUpdated, 'skydeck is being updated');
   });

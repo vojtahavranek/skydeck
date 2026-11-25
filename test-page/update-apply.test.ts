@@ -36,10 +36,10 @@ const LOG = '/home/you/.local/state/skydeck/update.log';
 const LINES = [
   '▾ 1 change',
   'the new commit',
-  '0123456 → 5d6e7f8 on origin/main',
+  '0.9.16 → 0.9.19 on origin/main  0123456 → 5d6e7f8',
   'In a terminal instead: skydeck update',
 ];
-const RUNNING = 'skydeck is being updated to 5d6e7f8. The window comes back by itself.';
+const RUNNING = 'skydeck is being updated to 0.9.19. The window comes back by itself.';
 const STALE_UNSTORED =
   "this window's page is not the one skydeck's server serves, and its key could not be stored, so it cannot reload itself; run skydeck window again";
 const NOT_VALID = "this window's key is not valid; run skydeck window again";
@@ -48,18 +48,21 @@ const NOT_VALID = "this window's key is not valid; run skydeck window again";
 function state(over: Partial<UpdatePayload> = {}): UpdatePayload {
   return {
     checking: false,
-    check: availablePayload({ to: TO }),
+    check: availablePayload({ to: TO, versions: '0.9.16 → 0.9.19' }),
     checkedAtNs: '1794474000000000000',
     fetchedAtNs: '1794474000000000000',
     failure: null,
     applying: null,
+    version: '0.9.16',
     log: LOG,
     result: null,
     ...over,
   };
 }
 
-const APPLYING = state({ applying: { to: TO, sinceNs: '1794474000000000000' } });
+const APPLYING = state({
+  applying: { to: TO, sinceNs: '1794474000000000000', name: '0.9.19' },
+});
 
 /** What the page sent on one connection, and that connection. */
 interface Seen {
@@ -414,6 +417,7 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
         state({
           check: availablePayload({
             to: TO,
+            versions: '0.9.16 → 0.9.19',
             notes: [NOTE],
             others: ['b', 'a'],
             otherCount: 2,
@@ -490,7 +494,7 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
         'a',
         `This checkout cannot be updated as it is: ${why}`,
         'Once that is set right, in a WSL terminal of your own: skydeck update',
-        '0123456 → 5d6e7f8 on origin/main',
+        '0.9.16 → 0.9.19 on origin/main  0123456 → 5d6e7f8',
       ]);
       assert.deepEqual(blocked.buttons, ['Close']);
       await page.keyboard.press('Escape');
@@ -581,7 +585,7 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
 
       // Back: the same port, other files (another build), the result for every page.
       const loadsBefore = loads;
-      const result = state({ check: null, result: { ok: true, text: 'updated to 5d6e7f8' } });
+      const result = state({ check: null, result: { ok: true, text: 'updated to 0.9.19' } });
       const back: Seen[] = [];
       await standinServer(t, {
         port,
@@ -590,7 +594,7 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
       });
       for (const page of w.pages) {
         await connection(page, 'open');
-        await showsText(page, '#update-result-text', /^updated to 5d6e7f8$/);
+        await showsText(page, '#update-result-text', /^updated to 0\.9\.19$/);
         await liftedOn(page);
       }
       assert.equal(loads - loadsBefore, 1, 'the page reloaded once');
@@ -661,8 +665,9 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
         { group: seen.group, checkNow: seen.checkNow },
         { group: true, checkNow: true },
       );
-      assert.equal(seen.lines.length, 1, JSON.stringify(seen.lines));
-      assert.match(seen.lines[0] ?? '', /^Last check: .* — 1 new commit on origin\/main$/);
+      assert.equal(seen.lines.length, 2, JSON.stringify(seen.lines));
+      assert.equal(seen.lines[0], 'skydeck 0.9.16', 'the version first');
+      assert.match(seen.lines[1] ?? '', /^Last check: .* — 1 new commit on origin\/main$/);
     },
   );
 

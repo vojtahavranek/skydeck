@@ -13,6 +13,7 @@
 // the search reads — the version is the pair alone (`0.9`), never a wrong third number; when not
 // even the pair can be read, the caller's own pair, or null. It never throws, but the AbortError
 // of a caller's stop.
+import pkg from '../../package.json' with { type: 'json' };
 import type { Ns, RunResult } from '../platform/types.ts';
 import type { Git } from './git.ts';
 import { PARTIAL_CLONE_ARGS, partialCloneIn } from './git.ts';
@@ -27,6 +28,9 @@ export const PACKAGE_BATCH_BYTES = 1024 * 1024;
 export const PACKAGE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 /** A version as it is shown and stored: three numbers, or the pair alone. */
 export const VERSION_TEXT = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))?$/;
+
+/** The pair of the running code's package.json: the version when a checkout's cannot be read. */
+export const RUNNING_PAIR = pairOf(pkg.version) ?? pkg.version;
 
 /** A full commit id: 40 hexadecimal digits (SHA-1), or 64 (SHA-256). */
 const COMMIT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;

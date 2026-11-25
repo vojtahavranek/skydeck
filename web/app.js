@@ -286,7 +286,7 @@ const state = {
   /** F38: what had the keyboard when the update dialog opened: it gets it back. */
   updateFrom: /** @type {Element | null} */ (null),
   /** F38, milestone 2: the update the last `update` said runs, while connected; null: none. */
-  updateApplying: /** @type {{ to: string; sinceNs: string } | null} */ (null),
+  updateApplying: /** @type {{ to: string; sinceNs: string; name: string } | null} */ (null),
   /** F38: the update's log, as the last `update` named it (the bar while the server is away). */
   updateLog: '',
 };
@@ -1242,7 +1242,7 @@ function showUpdateResult(result) {
  * switcher, the editor with what was typed in it; F41's tour, not marked seen), then the dialog's
  * running form stands over the inert page; the keyboard is given back where it was once it is
  * lifted.
- * @param {{ to: string; sinceNs: string }} applying
+ * @param {{ to: string; sinceNs: string; name: string }} applying
  */
 function applyingShown(applying) {
   // Every other dialog goes first (a text half typed in the editor is dropped): nothing but the

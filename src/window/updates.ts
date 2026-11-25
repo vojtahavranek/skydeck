@@ -23,6 +23,12 @@
  * - The dialog's look runs without the network and replaces the outcome, keeping the times of the
  *   last fetch and the last failure; while a check runs it starts nothing.
  * - A server sends no stored outcome before its own first check or look has ended.
+ * - The versions (src/update/version.ts): each look names HEAD's and the upstream's, kept in the
+ *   record (version 3) and sent as the dialog's `versions`; at its first tick, whatever the
+ *   setting says, the server counts its checkout's once without the network (`version`, for the
+ *   settings screen; the running code's pair when git cannot say, and in a marked sandbox without
+ *   the seam). The running form and the result name `to` by the version the look Update now made
+ *   gives it (`nameOf`), else by its short id.
  * - Update now (milestone 2, S2 16.5 "Update now"): `apply(to)` is refused while the server
  *   stops, an update runs, a check runs or a restore runs, and unless a look made now says
  *   `available`, not blocked, with that `to`. Then `kv window_update_run` says `applying`, every
@@ -43,14 +49,15 @@ import { join } from 'node:path';
 import type { UpdateCheck } from '../platform/config.ts';
 import type { Ns } from '../platform/types.ts';
 import type { Deck } from '../sessions/deck.ts';
-import { gitOn } from '../update/git.ts';
+import { gitOn, GIT_MS } from '../update/git.ts';
 import type { Git } from '../update/git.ts';
-import { counted, lookForUpdate, short, subjectLine } from '../update/look.ts';
+import { counted, lookForUpdate, short, subjectLine, upToDateLine } from '../update/look.ts';
 import type { Looked } from '../update/look.ts';
 import {
   checkoutRoot,
   checkPayload,
   clearRun,
+  nameOf,
   payloadText,
   readCheck,
   readRun,
@@ -60,6 +67,7 @@ import {
 } from '../update/record.ts';
 import type { CheckOutcome, CheckRecord, RunRecord } from '../update/record.ts';
 import { clipLine } from '../update/git.ts';
+import { RUNNING_PAIR, versionGitOf, versionOf } from '../update/version.ts';
 import { sanitize } from '../text/sanitize.ts';
 import { failureKind } from './auth.ts';
 import { serverLog } from './log.ts';
@@ -212,6 +220,8 @@ function outcomeOf(looked: Looked): CheckOutcome {
       count: update.count,
       from: update.oldId,
       to: update.newId,
+      fromVersion: update.oldVersion,
+      toVersion: update.newVersion,
       notes: update.notes,
       moreNotes: update.moreNotes,
       others: update.others.map((commit) => subjectLine(commit.subject)),
@@ -220,13 +230,12 @@ function outcomeOf(looked: Looked): CheckOutcome {
       blocked,
     };
   }
-  const upstream = sanitize(update.upstream);
   return {
     kind: 'current',
     line:
       update.ahead > 0
-        ? `nothing new on ${upstream}: this checkout has ${counted(update.ahead, 'commit', 'commits')} that it does not have`
-        : `skydeck is up to date (${sanitize(update.branch)} at ${update.oldId.slice(0, 7)}, as ${upstream})`,
+        ? `nothing new on ${sanitize(update.upstream)}: this checkout has ${counted(update.ahead, 'commit', 'commits')} that it does not have`
+        : upToDateLine(update),
   };
 }
 
@@ -255,8 +264,14 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   const logPath = join(deck.places.stateDir, 'update.log');
   /** The log's path as the pages get it. */
   const shownLog = sanitize(logPath);
-  /** An update started from this server: since when, to which commit; null: none runs. */
-  let applying: { to: string; sinceNs: string } | null = null;
+  /** An update started from this server: since when, to which commit and its name; null: none runs. */
+  let applying: { to: string; sinceNs: string; name: string } | null = null;
+  /**
+   * The version of the checkout (src/update/version.ts), counted once at the first tick, the
+   * running code's pair when it cannot be read; null until then (S2 16.5, the settings screen).
+   */
+  let version: string | null = null;
+  let versionAsked = false;
   /** apply() has passed its refusals and not yet started the process or failed. */
   let starting = false;
   /** How many of the dialog's looks ran to their end: Update now's look must be one of them. */
@@ -274,15 +289,22 @@ export function createUpdates(deps: UpdatesDeps): Updates {
         ? null
         : { atNs: record.failure.atNs, line: payloadText(record.failure.line) },
     applying,
+    version,
     log: shownLog,
     result,
   });
 
-  /** What a run entry of this checkout says as the result. */
-  const resultOf = (entry: RunRecord): { ok: boolean; text: string } => {
+  /**
+   * What a run entry of this checkout says as the result; `checked`: the record of the look that
+   * Update now made (it names the version of `to`), null: not known (the id is named).
+   */
+  const resultOf = (
+    entry: RunRecord,
+    checked: CheckRecord | null,
+  ): { ok: boolean; text: string } => {
     switch (entry.state) {
       case 'applied':
-        return { ok: true, text: `updated to ${short(entry.to)}` };
+        return { ok: true, text: `updated to ${nameOf(checked, entry.to)}` };
       case 'failed':
         return { ok: false, text: clipLine(sanitize(entry.line), RUN_LINE_MAX) };
       case 'applying':
@@ -290,6 +312,15 @@ export function createUpdates(deps: UpdatesDeps): Updates {
           ok: false,
           text: `an update started from the window at ${isoOf(entry.atNs)} did not record how it ended; its log says: ${shownLog}`,
         };
+    }
+  };
+
+  /** The stored record of the checkout `at`; null when there is none or it cannot be read. */
+  const storedCheck = (at: string): CheckRecord | null => {
+    try {
+      return readCheck(deck.store, at);
+    } catch {
+      return null; // the result then names the id
     }
   };
 
@@ -307,7 +338,7 @@ export function createUpdates(deps: UpdatesDeps): Updates {
     if (entry !== null) {
       try {
         clearRun(deck.store);
-        result = resultOf(entry);
+        result = resultOf(entry, storedCheck(root));
       } catch (error) {
         log(`update: the entry of the last update could not be removed (${failureKind(error)})`);
       }
@@ -366,10 +397,11 @@ export function createUpdates(deps: UpdatesDeps): Updates {
     const fetchWorked = !thrown && ended.kind === 'known' && ended.fetchFailed === null;
     lastCheck = { atNs: nowNs, failed: failureLine !== null };
     keep({
-      v: 2,
+      v: 3,
       root: root ?? '',
       lookedAtNs: at,
       head: thrown ? null : ended.kind === 'cannot' ? ended.head : ended.update.oldId,
+      headVersion: thrown || ended.kind === 'cannot' ? null : ended.update.oldVersion,
       outcome: thrown ? { kind: 'cannot', line: ended.thrown } : outcomeOf(ended),
       checkedAtNs: at,
       fetchedAtNs: fetchWorked ? at : (before?.fetchedAtNs ?? null),
@@ -381,13 +413,14 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   const noCheckout = (): UpdatePayload => {
     if (!stopped) {
       record = {
-        v: 2,
+        v: 3,
         root: '',
         lookedAtNs: String(platform.clock.nowNs()),
         checkedAtNs: null,
         fetchedAtNs: null,
         failure: null,
         head: null,
+        headVersion: null,
         outcome: { kind: 'cannot', line: NO_CHECKOUT_LINE },
       };
       tell();
@@ -451,13 +484,14 @@ export function createUpdates(deps: UpdatesDeps): Updates {
       if (stopped) return payload();
       const before = known();
       keep({
-        v: 2,
+        v: 3,
         root: root ?? '',
         lookedAtNs: String(platform.clock.nowNs()),
         checkedAtNs: before?.checkedAtNs ?? null,
         fetchedAtNs: before?.fetchedAtNs ?? null,
         failure: before?.failure ?? null,
         head: looked.kind === 'cannot' ? looked.head : looked.update.oldId,
+        headVersion: looked.kind === 'cannot' ? null : looked.update.oldVersion,
         outcome: outcomeOf(looked),
       });
       lookEnds += 1;
@@ -488,7 +522,7 @@ export function createUpdates(deps: UpdatesDeps): Updates {
     if (entry === null || entry.state === 'applying') {
       result = { ok: false, text: untold };
     } else {
-      result = resultOf(entry);
+      result = resultOf(entry, known());
     }
     if (entry !== null) {
       try {
@@ -565,7 +599,7 @@ export function createUpdates(deps: UpdatesDeps): Updates {
       const sinceNs = String(platform.clock.nowNs());
       try {
         writeRun(deck.store, { v: 1, root, state: 'applying', to, atNs: sinceNs });
-        applying = { to, sinceNs };
+        applying = { to, sinceNs, name: nameOf(record, to) };
         tell();
         serverLog(platform, logPath, false)(`update to ${short(to)} started from the window`);
         const { command, args } = commandLine(join(checkout, 'bin', 'skydeck'), to);
@@ -603,6 +637,27 @@ export function createUpdates(deps: UpdatesDeps): Updates {
     }
   };
 
+  /**
+   * The checkout's version, once (S2 16.5, the settings screen): without the network, within
+   * GIT_MS; in a marked sandbox without the seam (no git) the running code's pair.
+   */
+  const countVersion = (): void => {
+    if (git === null) {
+      version = RUNNING_PAIR;
+      tell();
+      return;
+    }
+    void versionOf(versionGitOf(git), 'HEAD', GIT_MS, RUNNING_PAIR)
+      .then((counted) => {
+        if (stopped) return;
+        version = counted;
+        tell();
+      })
+      .catch((error: unknown) => {
+        if (!stopped) log(`update check: the version could not be counted (${failureKind(error)})`);
+      });
+  };
+
   /** Whether a check is due at `nowNs` with the setting `every` (read at this tick). */
   const due = (nowNs: Ns, every: Exclude<UpdateCheck, 'off'>): boolean => {
     if (lastCheck === null) return true;
@@ -615,6 +670,10 @@ export function createUpdates(deps: UpdatesDeps): Updates {
     payload,
     tick() {
       try {
+        if (!versionAsked && !stopped) {
+          versionAsked = true;
+          countVersion();
+        }
         if (stopped || git === null) return;
         const first = !started;
         started = true;

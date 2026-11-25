@@ -41,6 +41,7 @@ import type { TestDeck } from '../helpers/deck.ts';
 import { fakeProcesses, T0 } from '../helpers/platform.ts';
 import type { FakeProcesses, FakeRunner } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
+import { RUNNING_PAIR } from '../../src/update/version.ts';
 import {
   availableOutcome,
   availablePayload,
@@ -84,6 +85,11 @@ interface World {
   logs: string[];
   /** How many fetches were made. */
   fetches(): number;
+  /**
+   * The git calls but those of a version (src/update/version.ts: offline, and none of a look's
+   * own): the server counts its checkout's once at its first tick, whatever the setting says.
+   */
+  lookCalls(): readonly unknown[];
   /** The stored entry of this checkout. */
   stored(): CheckRecord | null;
   setUpdateCheck(value: UpdateCheck): void;
@@ -159,6 +165,17 @@ function world(t: TestContext, options: WorldOptions = {}): World {
     told,
     logs,
     fetches: () => runner.calls.filter((call) => gitArgs(call, seam).includes('fetch')).length,
+    lookCalls: () =>
+      runner.calls.filter((call) => {
+        const args = gitArgs(call, seam);
+        const versions =
+          call.options?.env?.['GIT_NO_LAZY_FETCH'] === '1' &&
+          (args[0] === 'config' ||
+            args.includes('--is-shallow-repository') ||
+            args.includes('--first-parent') ||
+            (args[0] === 'cat-file' && args[1] === '--batch'));
+        return !versions;
+      }),
     stored: () => readCheck(d.deck.store, root),
     setUpdateCheck: (value) => {
       config.window.updateCheck = value;
@@ -233,7 +250,7 @@ describe('when a check runs', () => {
     for (let i = 0; i < 3; i++) w.updates.tick();
     await flush();
     assert.equal(w.fetches(), 0);
-    assert.equal(w.runner.calls.length, 0);
+    assert.equal(w.lookCalls().length, 0, 'only the version is counted');
 
     const answer = await w.updates.check();
     assert.equal(w.fetches(), 1);
@@ -490,7 +507,7 @@ describe('what a check gives', () => {
       }),
     );
     const stored = w.stored();
-    assert.ok(stored?.v === 2 && stored.outcome.kind === 'available');
+    assert.ok(stored?.v === 3 && stored.outcome.kind === 'available');
     assert.deepEqual(stored.outcome.notes, [{ title: 'A `note`', paragraphs: ['It says so.'] }]);
   });
 
@@ -637,13 +654,14 @@ describe('what a check gives', () => {
 describe('the store and the server', () => {
   test('a stored entry of another root is not shown; the record names this checkout', async (t) => {
     const other: CheckRecord = {
-      v: 2,
+      v: 3,
       root: '/another/checkout',
       lookedAtNs: '1',
       checkedAtNs: '1',
       fetchedAtNs: '1',
       failure: null,
       head: OLD,
+      headVersion: null,
       outcome: availableOutcome(),
     };
     const w = world(t, {
@@ -655,7 +673,7 @@ describe('the store and the server', () => {
 
     w.updates.tick();
     await flush();
-    assert.equal(w.runner.calls.length, 0, "no look for another checkout's entry");
+    assert.equal(w.lookCalls().length, 0, "no look for another checkout's entry");
     assert.equal(w.updates.payload().check, null);
 
     await w.updates.check();
@@ -668,13 +686,14 @@ describe('the store and the server', () => {
       repo: { quietFetch: () => fetch.promise, fetched: OLD },
       before: (deck, root) => {
         writeCheck(deck.store, {
-          v: 2,
+          v: 3,
           root,
           lookedAtNs: '1',
           checkedAtNs: '1',
           fetchedAtNs: '1',
           failure: null,
           head: OLD,
+          headVersion: null,
           outcome: availableOutcome(),
         });
       },
@@ -694,13 +713,14 @@ describe('the store and the server', () => {
       updateCheck: 'off',
       before: (deck, root) => {
         writeCheck(deck.store, {
-          v: 2,
+          v: 3,
           root,
           lookedAtNs: '1',
           checkedAtNs: '1',
           fetchedAtNs: '1',
           failure: null,
           head: OLD,
+          headVersion: null,
           outcome: { kind: 'current', line: 'old' },
         });
       },
@@ -738,6 +758,7 @@ describe('the store and the server', () => {
           fetchedAtNs: '1',
           failure: null,
           head: OLD,
+          headVersion: null,
           outcome: {
             kind: 'available',
             upstream: 'origin/main',
@@ -752,7 +773,7 @@ describe('the store and the server', () => {
     const off = world(t, { updateCheck: 'off', before });
     off.updates.tick();
     await flush();
-    assert.equal(off.runner.calls.length, 0, 'no look: nothing stored is known');
+    assert.equal(off.lookCalls().length, 0, 'no look: nothing stored is known');
     assert.equal(off.updates.payload().check, null);
 
     const on = world(t, { before });
@@ -760,7 +781,7 @@ describe('the store and the server', () => {
     await flush();
     assert.equal(on.fetches(), 1);
     assert.deepEqual(on.updates.payload().check, availablePayload());
-    assert.equal(on.stored()?.v, 2);
+    assert.equal(on.stored()?.v, 3);
     assert.equal(on.updates.payload().fetchedAtNs, String(T0), 'no time of the old record kept');
   });
 
@@ -878,13 +899,14 @@ describe('a check that fails (review of milestone 1)', () => {
   /** An earlier server's stored entry: an update to NEW known, HEAD then at OLD. */
   const earlier = (deck: Deck, root: string): void => {
     writeCheck(deck.store, {
-      v: 2,
+      v: 3,
       root,
       lookedAtNs: '1',
       checkedAtNs: '1',
       fetchedAtNs: '1',
       failure: null,
       head: OLD,
+      headVersion: null,
       outcome: availableOutcome(),
     });
   };
@@ -987,11 +1009,11 @@ describe('a check that fails (review of milestone 1)', () => {
     assert.equal(answer.failure, null);
     assert.equal(answer.checkedAtNs, String(T0 + 3n * 86_400_000_000_000n));
     // A state of the checkout is no failure: the next check is a day later, not an hour.
-    const calls = w.runner.calls.length;
+    const calls = w.lookCalls().length;
     w.d.clock.setNs(T0 + 3n * 86_400_000_000_000n + RETRY_AFTER_FAILURE_NS);
     w.updates.tick();
     await flush();
-    assert.equal(w.runner.calls.length, calls);
+    assert.equal(w.lookCalls().length, calls);
   });
 
   test('a failed fetch is not lost when the look then ends as changed while the fetch ran', async (t) => {
@@ -1159,7 +1181,8 @@ describe('Update now: the start of the updater', () => {
     ]);
     assert.notEqual(join(w.seam, 'bin', 'skydeck'), join(process.cwd(), 'bin', 'skydeck'));
     assert.match(readFileSync(log, 'utf8'), LOG_LINE);
-    assert.deepEqual(answer.update.applying, { to: NEW, sinceNs: String(T0) });
+    // No version is known of the scripted commit (no package.json): the short id names it.
+    assert.deepEqual(answer.update.applying, { to: NEW, sinceNs: String(T0), name: 'fedcba9' });
     assert.equal(answer.update.log, log);
   });
 
@@ -1239,7 +1262,7 @@ describe('Update now: the start of the updater', () => {
 
     assert.deepEqual(atStart, {
       entry: { v: 1, root: w.root, state: 'applying', to: NEW, atNs: String(T0) },
-      told: { ...w.updates.payload(), applying: { to: NEW, sinceNs: String(T0) } },
+      told: { ...w.updates.payload(), applying: { to: NEW, sinceNs: String(T0), name: 'fedcba9' } },
     });
   });
 });
@@ -1817,5 +1840,103 @@ describe('Update now: the guards of review 2', () => {
     t.after(() => next.stop());
     assert.deepEqual(next.payload().result, { ok: true, text: 'updated to fedcba9' });
     assert.equal(w.d.deck.store.getKv(RUN_KEY), null);
+  });
+});
+
+describe('the versions (S2 16.5)', () => {
+  const BUMP = 'b'.repeat(40);
+  const VERSIONS = {
+    [OLD]: { bump: BUMP, pair: '0.9', after: 16 },
+    [NEW]: { bump: BUMP, pair: '0.9', after: 19 },
+  };
+
+  test("the server's checkout's version, counted once at the first tick whatever the setting says, without a fetch", async (t) => {
+    for (const updateCheck of ['off', 'daily'] as const) {
+      const w = world(t, { updateCheck, repo: { versions: VERSIONS } });
+      assert.equal(w.updates.payload().version, null, 'not before the first tick');
+      w.updates.tick();
+      await flush();
+      assert.equal(w.updates.payload().version, '0.9.16');
+      assert.equal(w.told.at(-1)?.version, '0.9.16', 'every page is told');
+      const counted = w.runner.calls.length;
+      w.updates.tick();
+      await flush();
+      if (updateCheck === 'off') assert.equal(w.runner.calls.length, counted, 'counted once');
+      assert.equal(w.fetches(), updateCheck === 'off' ? 0 : 1);
+    }
+  });
+
+  test("a version git cannot count is the running code's pair; a marked sandbox without the seam runs no git and says the pair", async (t) => {
+    const pair = RUNNING_PAIR;
+    const failing = world(t, {
+      updateCheck: 'off',
+      repo: { answers: { 'rev-parse --is-shallow-repository': { code: 128 } } },
+    });
+    failing.updates.tick();
+    await flush();
+    assert.equal(failing.updates.payload().version, pair);
+
+    const none = world(t, { updateCheck: 'off', seam: false });
+    none.updates.tick();
+    await flush();
+    assert.equal(none.updates.payload().version, pair);
+    assert.equal(none.runner.calls.length, 0);
+  });
+
+  test("a check: the dialog gets the versions, the record keeps them, the up-to-date line names HEAD's", async (t) => {
+    const w = world(t, { repo: { versions: VERSIONS } });
+
+    const answer = await w.updates.check();
+
+    assert.ok(answer.check?.state === 'available');
+    assert.equal(answer.check.versions, '0.9.16 → 0.9.19');
+    const stored = w.stored();
+    assert.equal(stored?.headVersion, '0.9.16');
+    assert.ok(stored?.outcome.kind === 'available');
+    assert.equal(stored.outcome.fromVersion, '0.9.16');
+    assert.equal(stored.outcome.toVersion, '0.9.19');
+
+    w.repo.fetched = OLD;
+    const current = await w.updates.check();
+    assert.deepEqual(current.check, {
+      state: 'current',
+      summary: 'skydeck is up to date (main at 0.9.16, 0123456, as origin/main)',
+    });
+  });
+
+  test('Update now: the running form names the version of `to`; the server that follows says `updated to <version>`, from the record of the look Update now made', async (t) => {
+    const w = world(t, { repo: { versions: VERSIONS } });
+    await w.updates.check();
+
+    const answer = await w.updates.apply(NEW);
+
+    assert.equal(answer.ok, true);
+    assert.deepEqual(answer.update.applying, { to: NEW, sinceNs: String(T0), name: '0.9.19' });
+    writeRun(w.d.deck.store, { v: 1, root: w.root, state: 'applied', to: NEW, atNs: '1' });
+    const next = createUpdates({
+      deck: w.deck,
+      changed: () => {},
+      log: () => {},
+      serverEnv: SERVER_ENV,
+      coreSoft: null,
+      originDir: () => '/',
+      restoreRunning: () => false,
+      stopping: () => false,
+    });
+    t.after(() => next.stop());
+    assert.deepEqual(next.payload().result, { ok: true, text: 'updated to 0.9.19' });
+  });
+
+  test('the result without a record of the version (the first update into the versions: the look was stored by the code before): the short id', async (t) => {
+    const w = world(t, {
+      before: (deck, root) => {
+        deck.store.setKv(
+          CHECK_KEY,
+          JSON.stringify({ v: 2, root, outcome: availableOutcome() }), // not a record to this code
+        );
+        writeRun(deck.store, { v: 1, root, state: 'applied', to: NEW, atNs: '1' });
+      },
+    });
+    assert.deepEqual(w.updates.payload().result, { ok: true, text: 'updated to fedcba9' });
   });
 });

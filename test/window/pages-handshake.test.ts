@@ -880,6 +880,7 @@ describe("pages: F38's update message", () => {
     fetchedAtNs: '1',
     failure: null,
     applying: null,
+    version: '0.9.16',
     log: '/state/update.log',
     result: null,
   };

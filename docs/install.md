@@ -2564,8 +2564,8 @@ after your second click (below).
   click (or Enter or Space) opens the list of their subjects; when the update brings no note, the
   line reads `3 changes` and the list is open. When the update may upgrade the database, a marked
   note says so and which commit to go back to (see "Going back" below). Small at the bottom: the
-  commit the checkout is at and the new one (`1546b37 → c75af0e on origin/main`), and `In a
-  terminal instead: skydeck update`. When the checkout cannot be updated as it is — a change to a
+  version the checkout is at and the new one, then their commits (`0.9.16 → 0.9.19 on origin/main
+  1546b37 → c75af0e`), and `In a terminal instead: skydeck update`. When the checkout cannot be updated as it is — a change to a
   tracked file that is not committed, commits of your own that the remote does not have — the
   dialog says why and `Once that is set right, in a WSL terminal of your own: skydeck update`;
   when the branch follows no branch of a remote any more, `skydeck cannot tell here whether there
@@ -2574,8 +2574,8 @@ after your second click (below).
 - **Settings** (the gear). The group **Updates**, after The window: the choice `Check for
   updates` (`window.updateCheck`): `Off` (`"off"`, which stops the checks at the start and by the
   clock), `Every 15 minutes` (`"15min"`), `Every hour` (`"hourly"`, the default) or `Every day`
-  (`"daily"`), saved as you pick it and used at once; then a line that says when the last
-  check ended and what it found (`Last check: 2h ago — 3 new commits on origin/main`), or, when it
+  (`"daily"`), saved as you pick it and used at once; then the version that runs (`skydeck
+  0.9.16`), a line that says when the last check ended and what it found (`Last check: 2h ago — 3 new commits on origin/main`), or, when it
   failed, when and why (`The last check failed 5m ago: git fetch from origin failed: …`) and what
   is known from the last fetch that worked (`Known from 2h ago: …`); and `Check now`, which checks
   at once, also with `Off`.
@@ -2595,14 +2595,15 @@ The dialog's `Update now` does what `skydeck update` does, in the same order, wi
 terminal: the window's server starts `skydeck update` of its own checkout in the background, which
 stops the server, fast-forwards the checkout to the commit the dialog listed (by its id — it does
 not fetch again, so nothing can ask for a passphrase), and starts the new server with the
-environment the old one had. Every window shows `skydeck is being updated to <id>. The window comes
+environment the old one had. Every window shows `skydeck is being updated to 0.9.19. The window comes
 back by itself.`, closes any other dialog it showed (a text half typed in it is dropped) and takes
 no keys or clicks meanwhile; the sessions keep running. Two clicks are always
 needed: `Update available`, then `Update now`. Once the update has stopped the window's server, the
 window is always brought back, also when the window that clicked was closed meanwhile (unlike
 `skydeck update` typed in a terminal, which opens no window that was not open).
 
-- **It worked.** The window reloads itself and a bar says `updated to <id>`; its × dismisses it in
+- **It worked.** The window reloads itself and a bar says `updated to 0.9.19` (the new version; the
+  first update into a skydeck that has versions names its commit instead); its × dismisses it in
   every window.
 - **git refused the merge** (a file of yours where the new commit puts one, say). The checkout is
   as it was and the window comes back on the old code; the bar gives git's line (`the update could
@@ -2624,7 +2625,7 @@ window is always brought back, also when the window that clicked was closed mean
 - **A window that comes back late.** If the window is not back within `skydeck window`'s waits
   and the terminal the server was started from is long closed, no second window opens, and the
   log's last line says `…, but skydeck window ended with exit 1; run skydeck window` although the
-  server runs; the window that comes back later shows `updated to <id>`. Running `skydeck window`
+  server runs; the window that comes back later shows `updated to <version>`. Running `skydeck window`
   then is harmless: it says that a window is already open.
 
 The log, `<stateDir>/update.log`, holds the update's own lines, as the terminal would have shown
