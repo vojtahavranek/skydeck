@@ -75,7 +75,7 @@ import { createCards } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
 import { createEndDialog } from './end-dialog.js';
-import { asksFirst, asksPark, cannotEndText, END_TEXTS, PARK_TEXTS, textsOf } from './end-text.js';
+import { asksFirst, asksPark, cannotEndText, END_TEXTS, textsOf } from './end-text.js';
 import { serverNow } from './format.js';
 import { createHelp } from './help.js';
 import { cancels, listKey, switcherKey, windowChord } from './keys.js';
@@ -388,7 +388,10 @@ const ender = createEndDialog(dom.endDialog, {
     if (choice === 'end') {
       endSession(session.sessionId, session.term, session.fromList, session.mark);
     } else if (session.mark === 'park') {
-      keepParked(session.sessionId, session.fromList);
+      // `Park, keep it running`: exactly `w` on a running session before the dialog. The dialog
+      // followed every list up to this press (`ender.update`, in the same task as the list), so
+      // its session is listed and not parked: a list that showed otherwise had closed it.
+      sendPark(session.sessionId, session.fromList, PARKED_RUNNING);
     } else {
       keepRunning(session.sessionId, session.fromList);
     }
@@ -1730,7 +1733,7 @@ function openEnder(row, fromList, mark = 'done') {
     return;
   }
   // F44's one guard needs no check in the dialog's buttons (`keepRunning` → `sendDone`,
-  // `keepParked` → `sendPark`, `endSession`): the dialog opens only past `markDone`'s or
+  // `sendPark`, `endSession`): the dialog opens only past `markDone`'s or
   // `markParked`'s guard, and while it is shown it is modal, so no list key and no header control
   // can make this page's `w` or `d` leave meanwhile.
   // The key help lies over every dialog: it goes, so that nothing hides this one (as for the
@@ -1862,25 +1865,6 @@ function keepRunning(sessionId, fromList) {
     return;
   }
   sendDone(sessionId, fromList, DONE_RUNNING);
-}
-
-/**
- * F44's `Park, keep it running`: exactly `w` on a running session as before the dialog — parked,
- * the toast of a running session with Undo, the same selection rule.
- * @param {string} sessionId
- * @param {boolean} fromList
- */
-function keepParked(sessionId, fromList) {
-  const row = sessionRow(state.list, sessionId);
-  if (row === null) {
-    toast.show(PARK_TEXTS.gone, null);
-    return;
-  }
-  if (row.parked === true) {
-    toast.show(PARK_TEXTS.parkedElsewhere, null);
-    return;
-  }
-  sendPark(sessionId, fromList, PARKED_RUNNING);
 }
 
 /**

@@ -22,13 +22,22 @@
 //
 // Follow-up F44 (S2 12.15): the same dialog asks for `w` and the header's `Park` (`open` with the
 // mark `park`), with the words of a parking (web/end-text.js `PARK_TEXTS`: `Park: <title>`, `End
-// session and park`, `Park, keep it running`, `Cancel`) and the same rules, but one: the keyboard
-// starts on `End session and park` when the session is not working as the dialog opens, on `Park,
-// keep it running` when it is (the owner's choice). It follows its session as for Done, and also
-// closes when the session is parked elsewhere.
+// session and park`, `Park, keep it running`, `Cancel`) and the same rules, but two. The keyboard
+// starts on `End session and park` only when skydeck knows the session is idle (`parkPhase`), else
+// on `Park, keep it running`, and the warning line says why (working, asking, cannot tell); a change
+// away from idle while it is shown moves a keyboard on End to Keep, nothing moves it towards End
+// (the owner's choice, ruled on review 1). And a typed character (ruled on review 1, in the manner
+// of the restart dialog): on End by the dialog's own start only a fresh Enter presses it, Space
+// there counts as typed; once a key that types a character came while it asks, the keyboard is on
+// `Cancel` until it closes (Tab and the arrows move nothing, Enter and Space cancel, a click still
+// presses); after the user's own Tab or arrow, with nothing typed, Enter and Space press as for
+// Done. So a word typed into the list by mistake never ends a session: only `w` directly followed
+// by Enter does. It follows its session as for Done, and also closes when the session is parked
+// elsewhere.
 
 /** @import { ListMessage, RowPayload } from '../src/window/protocol.ts' */
-import { cutTitle, dialogFollows, END_TEXTS, textsOf } from './end-text.js';
+import { cutTitle, dialogFollows, END_TEXTS, parkPhase, parkWarning, textsOf } from './end-text.js';
+import { typesCharacter } from './keys.js';
 import { sessionRow } from './pane.js';
 
 /**
@@ -111,22 +120,42 @@ export function createEndDialog(root, deps) {
 
   /**
    * The dialog shown: the session and the terminal it was opened for, whether `d` (or `w`) in the
-   * list opened it, its mark, whether the session works now and whether it is marked done now.
-   * @type {{ sessionId: string, term: string, fromList: boolean, mark: DialogMark, working: boolean, done: boolean } | null}
+   * list opened it, its mark, whether the session works now and whether it is marked done now;
+   * for the dialog "Park" its phase (`parkPhase`), whether a key that types a character came
+   * (`typed`) and whether the user moved the keyboard with Tab or an arrow (`moved`).
+   * @type {{ sessionId: string, term: string, fromList: boolean, mark: DialogMark, working: boolean, done: boolean, phase: import('./end-text.js').ParkPhase, typed: boolean, moved: boolean } | null}
    */
   let current = null;
 
-  /** @param {boolean} working */
-  const setWorking = (working) => {
+  /**
+   * The session's state at a list: the warning line, and a keyboard on End moved to the second
+   * button when the session turned working (Done's), or for Park left idle or changed to another
+   * phase that is not idle. Never by itself towards the End button: only away from it.
+   * @param {RowPayload} row
+   */
+  const setState = (row) => {
     if (current === null) {
       return;
     }
-    const turned = working && !current.working;
+    const working = row.state === 'working';
+    let away = working && !current.working;
     current.working = working;
-    warning.hidden = !working;
     box.dataset['working'] = working ? 'true' : 'false';
-    if (turned && document.activeElement === endButton) {
-      keepButton.focus(); // never by itself towards the End button: only away from it
+    if (current.mark === 'park') {
+      const phase = parkPhase(row);
+      away = phase !== 'idle' && phase !== current.phase;
+      current.phase = phase;
+      box.dataset['phase'] = phase;
+      const words = parkWarning(phase);
+      warning.hidden = words === null;
+      if (words !== null && warning.textContent !== words) {
+        warning.textContent = words;
+      }
+    } else {
+      warning.hidden = !working;
+    }
+    if (away && document.activeElement === endButton && !current.typed) {
+      keepButton.focus();
     }
   };
 
@@ -200,8 +229,18 @@ export function createEndDialog(root, deps) {
       if (current !== null || typeof row.terminal !== 'string') {
         return;
       }
-      const working = row.state === 'working';
-      current = { sessionId: row.id, term: row.terminal, fromList, mark, working, done: row.done };
+      const phase = parkPhase(row);
+      current = {
+        sessionId: row.id,
+        term: row.terminal,
+        fromList,
+        mark,
+        working: row.state === 'working',
+        done: row.done,
+        phase,
+        typed: false,
+        moved: false,
+      };
       const texts = textsOf(mark);
       prefix.textContent = texts.heading;
       line.textContent = texts.running;
@@ -211,12 +250,12 @@ export function createEndDialog(root, deps) {
       cancelButton.textContent = texts.cancel;
       box.dataset['mark'] = mark;
       box.dataset['session'] = row.id;
-      box.dataset['working'] = working ? 'true' : 'false';
+      // Its first state as any later one; `phase` already set, so that nothing counts as a change.
+      setState(row);
       setTitle(row);
-      warning.hidden = !working;
       root.hidden = false;
-      // Done's: never on End by itself (ruled). Park's: on End unless it works (the owner's).
-      (mark === 'park' && !working ? endButton : keepButton).focus();
+      // Done's: never on End by itself (ruled). Park's: on End only when known idle (ruled).
+      (mark === 'park' && phase === 'idle' ? endButton : keepButton).focus();
     },
     /**
      * Every list while it is shown: closes it when its session stopped, was marked done (or, the
@@ -242,7 +281,7 @@ export function createEndDialog(root, deps) {
       }
       current.done = follows.stay.done;
       setTitle(follows.stay);
-      setWorking(follows.working);
+      setState(follows.stay);
     },
     /**
      * A keydown while the dialog is shown, from app.js's capture phase: true when the dialog took
@@ -260,12 +299,34 @@ export function createEndDialog(root, deps) {
       const isEscape = event.key === 'Escape' && !event.shiftKey;
       const isTab = event.key === 'Tab';
       const isArrow = (event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.shiftKey;
-      const isPress = PRESS_KEYS.has(event.key) && !event.shiftKey;
-      if (!isEscape && !isTab && !isArrow && !isPress) {
+      let isPress = PRESS_KEYS.has(event.key) && !event.shiftKey;
+      // The dialog "Park" (ruled on review 1): a key that types a character is text typed into the
+      // list by mistake — Space too while the keyboard is on End by the dialog's own start, where
+      // only a fresh Enter presses —; the dialog takes it, so that the rest of a word reaches no
+      // list key, and from then on the keyboard stays on Cancel.
+      let isTyped = false;
+      if (current.mark === 'park') {
+        const onEndByStart = document.activeElement === endButton && !current.moved;
+        if (event.key === ' ' && onEndByStart) {
+          isPress = false;
+        }
+        isTyped = !isPress && typesCharacter(event);
+      }
+      if (!isEscape && !isTab && !isArrow && !isPress && !isTyped) {
         return false;
       }
       event.preventDefault();
       event.stopPropagation();
+      if (isTyped) {
+        current.typed = true;
+      }
+      if (current.typed) {
+        cancelButton.focus(); // Tab and the arrows move nothing, Enter and Space cancel
+        if (!event.repeat && (isEscape || isPress)) {
+          press('cancel');
+        }
+        return true;
+      }
       const at = buttons.indexOf(/** @type {HTMLButtonElement} */ (document.activeElement));
       if (at === -1) {
         // Something outside took the keyboard (a click on the toast): it comes back to the safe
@@ -281,6 +342,7 @@ export function createEndDialog(root, deps) {
       if (isEscape) {
         press('cancel');
       } else if (isTab || isArrow) {
+        current.moved = true; // the user's own move: Enter and Space press where it lands
         // ← and → walk as Shift+Tab and Tab do (ruled): End is one ← from where it starts.
         const back = isTab ? event.shiftKey : event.key === 'ArrowLeft';
         const step = back ? -1 : 1;

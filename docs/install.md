@@ -974,7 +974,8 @@ effect.
   and `skydeck window --restart`. A session whose program ends gives its number up at once — also
   one marked done that you let keep running, and with its ended terminal still on screen; a row
   under Recent or Earlier never shows a number, and Ctrl+Shift+1…9 never go to an ended session.
-  A session you park gives its number up at once too, while it goes on running ("Parked" below).
+  A session you park gives its number up at once too, whether it goes on running or you end it
+  as you park it ("Parked" below).
   A terminal of the window that has no number (the tenth and later ones) takes a number as soon as
   one is free, a parked session's terminal never: the first such row under Open takes the lowest
   free number, and its row goes to that number's place, as a new terminal with that number would;
@@ -1096,13 +1097,20 @@ waits for a person or for another part of the work. `w` in the list ("waits") or
 header parks the selected session: it moves under **Parked** and keeps its group. A session that
 runs in a terminal of the window, which skydeck can end, is not parked yet: a dialog `Park: <title>`
 asks whether to end it too, since a parked session need not hold its resources. **End session and
-park** (where the keyboard starts, unless the session is working) ends it and parks it: the toast
+park** (where the keyboard starts when the session waits for your next prompt) ends it and parks it: the toast
 says `Ending the session…`, then `Ended and parked: listed under Parked.` (or, when it has not ended
 within 10 seconds, `Parked. It has not ended yet: end it inside claude if it stays open.`); it is
 listed under Parked, not running, and you resume it from its row as any other. **Park, keep it
-running** (where the keyboard starts while the session is working; → or Tab takes it there) parks
-it and leaves it running; **Cancel** or Esc does nothing. A typed `w` and then Enter therefore ends
-an idle session: resume it from its row. Every other session is parked at once: one that does not
+running** (where the keyboard starts in every other state, with a line that says why: it is
+working, it is asking you something, or skydeck cannot tell whether it is working; → or Tab takes
+it there) parks it and leaves it running; **Cancel** or Esc does nothing. On `End session and
+park` where the dialog put the keyboard, only Enter presses it: Space does not. Once you type a
+letter (or any character, that Space too) while the dialog asks, the keyboard stays on `Cancel`
+until it closes: the arrows and Tab move nothing, and Enter or Space cancel; a click still presses
+any button. So `w` and then Enter, typed at once, end an idle session and park it — the quick way,
+on purpose: resume it from its row if you did not mean it — but a word with a `w` typed into the
+list by mistake (`wow`, `now `, `wow what a show `) ends nothing. skydeck learns that a session
+started working a moment after it did, so `w` and Enter in that moment can still end it. Every other session is parked at once: one that does not
 run, and one that runs where skydeck cannot end it, whose toast says so (`Parked. skydeck cannot end
 this one: end it in its terminal.`). The toast says `Parked: listed under Parked. It comes back when
 you send it a prompt.` (`…, and it keeps running. …` for one kept running), with `Undo` for 5

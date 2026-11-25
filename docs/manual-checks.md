@@ -3384,8 +3384,9 @@ open a dialog. In that dialog the outlined button has the keyboard: → moves it
    seconds `park-3` is under Open with the number 3.
 7. **A parked session that asks.** Click `park-1`, Enter (`Focus: terminal`), type `Use the Bash
    tool to run the command date.` and Enter, and wait until Claude Code asks for the permission
-   (keep the window in front). Then Ctrl+Shift+L (`Focus: list`), `w`, → and Enter in the dialog.
-   Expected: `park-1` is
+   (keep the window in front). Then Ctrl+Shift+L (`Focus: list`) and `w`: the dialog says `It is
+   asking you something: ending it now stops the current turn.` with `Park, keep it running`
+   outlined; press Enter. Expected: `park-1` is
    under Parked with its `asks` mark beside `parked 0s`; the title bar's `need you` count leaves
    it out; Ctrl+Shift+J says `no session needs you` (or goes to another session that needs you,
    never to `park-1`). Click another Windows program and wait 20 seconds: no desktop notification
@@ -3428,7 +3429,20 @@ open a dialog. In that dialog the outlined button has the keyboard: → moves it
     Ctrl+Shift+L (`Focus: list`) and `w`. Expected: the dialog also says `It is working: ending it
     now stops the current turn.`, and `Park, keep it running` is outlined (not the End button).
     Press Esc: the dialog closes, nothing was parked, and the session goes on answering.
-15. **The end.** For each throwaway session: type `/exit` and Enter in its terminal, then `d` in
+15. **Words typed by mistake.** Once every session under Open waits for your next prompt (no
+    answer under way), click the top row of Open, Ctrl+Shift+L (`Focus: list`), and type `wow what
+    a show ` (with the last space). Expected: each `w` opens the dialog, a letter after it puts the
+    outline on `Cancel`, and the space after the word closes it; the last word's `w` and space
+    leave it open with `Cancel` outlined (press Esc); nothing is ended and nothing is parked; the
+    `a` shows the done sessions (press `a` again). Then `w` and in the dialog type `x`:
+    `Cancel` is outlined; press ← and Tab: the outline stays on `Cancel`; press Enter: the dialog
+    closes, nothing done. Then `w` and Space: `Cancel` is outlined, the dialog stays; Esc.
+16. **A session that asks.** In a session under Open, Enter (`Focus: terminal`), type `Use the Bash
+    tool to run the command date.` and Enter, and wait until Claude Code asks for the permission.
+    Ctrl+Shift+L (`Focus: list`), `w`. Expected: the dialog also says `It is asking you something:
+    ending it now stops the current turn.`, and `Park, keep it running` is outlined. Esc, then answer
+    the permission in its terminal.
+17. **The end.** For each throwaway session: type `/exit` and Enter in its terminal, then `d` in
     the list (`Focus: list`) to mark it done (done ends a parking too).
 
 Write down: for each step whether it went as expected, and the words where they differ; your Edge

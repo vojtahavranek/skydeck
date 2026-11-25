@@ -942,6 +942,8 @@ const CANNOT_PARK_WORDS = 'Parked. skydeck cannot end this one: end it in its te
 const BACKGROUND_PARK_WORDS =
   "Parked. It runs in Claude Code's background: end it in claude agents.";
 const PARKED_FIELDS = { parked: true, parkedAtNs: '1794473940000000000' };
+const UNKNOWN = 'skydeck cannot tell whether it is working: ending it now may stop a turn.';
+const ASKING = 'It is asking you something: ending it now stops the current turn.';
 
 /** Selects `id` in the list and gives the list the keyboard, then presses `w`. */
 async function wFrom(page: Page, id: string): Promise<void> {
@@ -1222,15 +1224,16 @@ test('F44: the dialog "Park" for a session the window can end', async (t) => {
       assert.deepEqual(w.acts(), [], 'walking presses nothing');
       await page.keyboard.press('Control+Shift+L');
       assert.equal(await keyMessage(page), 'close the dialog first (Esc)');
-      await page.keyboard.press('w');
-      await page.keyboard.press('j');
       assert.equal((await ender(page)).focus, PARK_END);
+      // A list key is a typed character here (ruled on review 1): the keyboard goes to Cancel.
+      await page.keyboard.press('j');
+      assert.equal((await ender(page)).focus, CANCEL);
       assert.deepEqual(w.acts(), []);
     },
   );
 
   await t.test(
-    'the keyboard: on End when idle, on Keep when working; moved off End when it turns working; never back towards End by itself',
+    'the keyboard: on End when idle, on Keep when working; moved off End when it turns working; never back towards End by itself (Done’s rule, here with `working`)',
     async (t) => {
       const d = await one(t, chromium);
       const { page, w } = d;
@@ -1271,18 +1274,25 @@ test('F44: the dialog "Park" for a session the window can end', async (t) => {
   );
 
   await t.test(
-    'held keys: the `w` that opened it and its auto-repeats press nothing; an auto-repeated Enter or Space presses nothing; a fresh Enter presses End once',
+    'held keys: a held `w` presses nothing and its auto-repeats are typed characters (the keyboard on Cancel); an auto-repeated Enter or Space presses nothing; a fresh Enter presses End once, held on nothing more',
     async (t) => {
       const { page, w } = await one(t, chromium);
       await clickRow(page, S1);
       await toZone(page, 'list');
       await page.keyboard.down('w');
       await shown(page, true);
-      await page.keyboard.down('w'); // held: an auto-repeat
+      assert.equal((await ender(page)).focus, PARK_END);
+      await page.keyboard.down('w'); // held: an auto-repeat, a `w` typed again
       await page.keyboard.down('w');
       await page.keyboard.up('w');
       await sleep(300);
       assert.deepEqual(w.acts(), [], 'the held w parked nothing');
+      assert.equal((await ender(page)).focus, CANCEL);
+      await page.keyboard.press('Escape');
+      await shown(page, false);
+      // Pressed once, not held: on End; auto-repeats with no press in the dialog press nothing.
+      await page.keyboard.press('w');
+      await shown(page, true);
       assert.equal((await ender(page)).focus, PARK_END);
       const cdp = await page.context().newCDPSession(page);
       for (const [key, code, keyCode] of [
@@ -1305,8 +1315,18 @@ test('F44: the dialog "Park" for a session the window can end', async (t) => {
         });
       }
       await sleep(300);
-      assert.deepEqual(w.acts(), [], 'no auto-repeat pressed End');
+      assert.deepEqual(w.acts(), [], 'no auto-repeat pressed anything');
       assert.equal((await ender(page)).shown, true);
+      // The auto-repeated Space was a typed character: Cancel. A fresh Enter cancels.
+      assert.equal((await ender(page)).focus, CANCEL);
+      await page.keyboard.press('Enter');
+      await shown(page, false);
+      await sleep(200);
+      assert.deepEqual(w.acts(), []);
+      // `w` and a fresh Enter, held on: End once.
+      await toZone(page, 'list');
+      await page.keyboard.press('w');
+      await shown(page, true);
       await page.keyboard.down('Enter');
       await w.act(1);
       await page.keyboard.down('Enter');
@@ -1342,53 +1362,214 @@ test('F44: the dialog "Park" for a session the window can end', async (t) => {
   );
 
   await t.test(
-    'w then Enter at once, and words with a `w` typed into the list: an idle session is ended and parked (the owner’s accepted cost), a working one parked and kept running',
+    'w then a fresh Enter, at once: an idle session ended and parked (the owner’s quick path), a working one parked and kept running; words with a `w` typed into the list end and park nothing (ruled on review 1)',
     async (t) => {
       for (const working of [false, true]) {
         const more = working ? { state: 'working' } : {};
         const d = await one(t, chromium, more);
         const { page, w } = d;
-        const want = working
-          ? { kind: 'park', sessionId: S1 }
-          : { kind: 'end-session', term: TERM_A, sessionId: S1, mark: 'park' };
-        let n = 0;
-        for (const keys of [
+        await clickRow(page, S1);
+        await toZone(page, 'list');
+        await inOneTask(page, [
+          { key: 'w', code: 'KeyW' },
+          { key: 'Enter', code: 'Enter' },
+        ]);
+        const act = await w.act(1);
+        assert.deepEqual(
+          actsAfter(w),
           [
-            { key: 'w', code: 'KeyW' },
-            { key: 'Enter', code: 'Enter' },
+            working
+              ? { kind: 'park', sessionId: S1 }
+              : { kind: 'end-session', term: TERM_A, sessionId: S1, mark: 'park' },
           ],
-          'wow\n',
-          'w ',
-        ] as (KeyboardEventInit[] | string)[]) {
+          `working ${working}`,
+        );
+        w.answer(act, { ok: true, ...(working ? {} : { ended: false }) });
+        await shown(page, false);
+        await parkedAndBack(d, more);
+        // Words: the `w` opens the dialog, the next character sends the keyboard to Cancel, and
+        // a Space or an Enter after it cancels. (No `n`, `l`, `t`, `g`, `p` or `d` in them: those
+        // are the list's keys for other dialogs; `a` shows done sessions.) A word ending in `w`
+        // and Space on a working session parks it and keeps it running (Space with nothing typed
+        // presses Keep where the keyboard starts, ruled): never an end.
+        let sent = 1;
+        for (const typed of ['wow\n', 'wow', 'would\n', 'wow what a show ', 'ww\n', 'w w\n']) {
           await clickRow(page, S1);
           await toZone(page, 'list');
-          if (typeof keys === 'string') {
-            for (const character of keys) {
-              await page.keyboard.press(
-                character === '\n' ? 'Enter' : character === ' ' ? 'Space' : character,
-              );
-            }
-          } else {
-            await inOneTask(page, keys);
+          for (const character of typed) {
+            await page.keyboard.press(
+              character === '\n' ? 'Enter' : character === ' ' ? 'Space' : character,
+            );
           }
-          n += 1;
-          const act = await w.act(n);
-          assert.deepEqual(
-            actsAfter(w, n - 1),
-            [want],
-            `${JSON.stringify(keys)}, working ${working}`,
-          );
-          w.answer(act, { ok: true, ...(working ? {} : { ended: false }) });
-          await shown(page, false);
-          await page.waitForSelector('#toast:not([hidden]) .toast-undo', {
-            state: 'attached',
-            timeout: PAGE_WAIT_MS,
-          });
           await sleep(300);
-          assert.equal(w.acts().length, n, 'one act');
-          await parkedAndBack(d, more);
+          if ((await ender(page)).shown) {
+            assert.equal((await ender(page)).focus, CANCEL, JSON.stringify(typed));
+            await page.keyboard.press('Escape');
+            await shown(page, false);
+          }
+          // A `w` that opens the dialog directly followed by Space: `wow what a show ` (its last
+          // word) and `w w⏎` (its first).
+          if (working && (typed.endsWith('show ') || typed.startsWith('w '))) {
+            const park = await w.act(sent + 1);
+            assert.deepEqual(
+              actsAfter(w, sent),
+              [{ kind: 'park', sessionId: S1 }],
+              JSON.stringify(typed),
+            );
+            sent += 1;
+            w.answer(park, { ok: true });
+            await parkedAndBack(d, more);
+          }
+          assert.equal(
+            w.acts().length,
+            sent,
+            `${JSON.stringify(typed)}, working ${working}: nothing sent but that`,
+          );
+        }
+        assert.equal(
+          w.acts().some((one, at) => at > 0 && one['kind'] === 'end-session'),
+          false,
+          'nothing typed ended a session',
+        );
+        // With nothing typed, Space presses Keep where the keyboard starts on it (working), and
+        // is a typed character on End by the dialog's own start (idle).
+        await clickRow(page, S1);
+        await toZone(page, 'list');
+        await page.keyboard.press('w');
+        await shown(page, true);
+        await page.keyboard.press('Space');
+        if (working) {
+          await w.act(sent + 1);
+          assert.deepEqual(actsAfter(w, sent), [{ kind: 'park', sessionId: S1 }]);
+        } else {
+          assert.equal((await ender(page)).focus, CANCEL);
+          await page.keyboard.press('Escape');
+          await sleep(200);
+          assert.equal(w.acts().length, 1);
         }
       }
+    },
+  );
+
+  await t.test(
+    'a typed character sends the keyboard to Cancel until the dialog closes: Tab and the arrows move nothing, Enter and Space cancel, a click still presses; after the user’s own move, with nothing typed, Space presses where it lands',
+    async (t) => {
+      const d = await one(t, chromium);
+      const { page, w } = d;
+      for (const closing of ['Space', 'Enter'] as const) {
+        await wFrom(page, S1);
+        await shown(page, true);
+        await page.keyboard.press('x');
+        assert.equal((await ender(page)).focus, CANCEL);
+        for (const key of ['Tab', 'Shift+Tab', 'ArrowLeft', 'ArrowRight']) {
+          await page.keyboard.press(key);
+          assert.equal((await ender(page)).focus, CANCEL, `${closing}: ${key} moves nothing`);
+        }
+        await page.keyboard.press(closing);
+        await shown(page, false);
+        assert.equal(await active(page), '#list', `${closing}: the keyboard back on the list`);
+      }
+      assert.deepEqual(w.acts(), [], 'nothing sent');
+      // A click still presses any button.
+      await wFrom(page, S1);
+      await shown(page, true);
+      await page.keyboard.press('x');
+      await page.click('#end-dialog .end-end');
+      const end = await w.act(1);
+      assert.deepEqual(actsAfter(w), [
+        { kind: 'end-session', term: TERM_A, sessionId: S1, mark: 'park' },
+      ]);
+      w.answer(end, { ok: false, error: 'it was parked meanwhile' });
+      await toastIs(page, 'End session: it was parked meanwhile', false);
+      // The user's own moves (→ then ←, back on End): Space presses End.
+      await wFrom(page, S1);
+      await shown(page, true);
+      await page.keyboard.press('ArrowRight');
+      await page.keyboard.press('ArrowLeft');
+      assert.equal((await ender(page)).focus, PARK_END);
+      await page.keyboard.press('Space');
+      const second = await w.act(2);
+      assert.deepEqual(actsAfter(w, 1), [
+        { kind: 'end-session', term: TERM_A, sessionId: S1, mark: 'park' },
+      ]);
+      w.answer(second, { ok: true, ended: false });
+      await parkedAndBack(d);
+      // Starting on Keep (it works): a typed character sends it to Cancel too.
+      d.set({
+        sections: { open: [endable(S1, TERM_A, 1, { state: 'working' })], week: [row(S2)] },
+      });
+      await sleep(300);
+      await wFrom(page, S1);
+      await shown(page, true);
+      assert.equal((await ender(page)).focus, PARK_KEEP);
+      await page.keyboard.press('o');
+      assert.equal((await ender(page)).focus, CANCEL);
+      await page.keyboard.press('Space');
+      await shown(page, false);
+      await sleep(200);
+      assert.equal(w.acts().length, 2);
+    },
+  );
+
+  await t.test(
+    'the keyboard starts on End only when skydeck knows it is idle: on Keep, with a true warning, while it works, asks something or skydeck cannot tell; any change away from idle while shown moves it off End; nothing moves it back',
+    async (t) => {
+      const d = await one(t, chromium);
+      const { page, w } = d;
+      const states: [string, Row, string][] = [
+        ['working', { state: 'working' }, WORKING],
+        ['asking (a permission)', { state: 'waiting', stateDetail: 'permission' }, ASKING],
+        ['running (skydeck cannot tell)', { state: 'running' }, UNKNOWN],
+      ];
+      for (const [what, more, words] of states) {
+        // At open.
+        d.set({ sections: { open: [endable(S1, TERM_A, 1, more)], week: [row(S2)] } });
+        await sleep(300);
+        await wFrom(page, S1);
+        await shown(page, true);
+        assert.deepEqual(
+          [(await ender(page)).focus, (await ender(page)).warning],
+          [PARK_KEEP, words],
+          `${what} at open`,
+        );
+        await page.keyboard.press('Escape');
+        await shown(page, false);
+        // While shown, from idle.
+        d.set({ sections: { open: [endable(S1, TERM_A, 1)], week: [row(S2)] } });
+        await sleep(300);
+        await wFrom(page, S1);
+        await shown(page, true);
+        assert.deepEqual(
+          [(await ender(page)).focus, (await ender(page)).warning],
+          [PARK_END, null],
+        );
+        d.set({ sections: { open: [endable(S1, TERM_A, 1, more)], week: [row(S2)] } });
+        await eventually(async () => (await ender(page)).warning === words, `${what}: its warning`);
+        assert.equal((await ender(page)).focus, PARK_KEEP, `${what}: moved off End`);
+        d.set({ sections: { open: [endable(S1, TERM_A, 1)], week: [row(S2)] } });
+        await eventually(async () => (await ender(page)).warning === null, `${what}: idle again`);
+        assert.equal((await ender(page)).focus, PARK_KEEP, `${what}: nothing moves it back`);
+        await page.keyboard.press('Escape');
+        await shown(page, false);
+      }
+      // The user's own move to End while it works, then it asks: moved off End again.
+      d.set({
+        sections: { open: [endable(S1, TERM_A, 1, { state: 'working' })], week: [row(S2)] },
+      });
+      await sleep(300);
+      await wFrom(page, S1);
+      await shown(page, true);
+      await page.keyboard.press('ArrowLeft');
+      assert.equal((await ender(page)).focus, PARK_END);
+      d.set({
+        sections: {
+          open: [endable(S1, TERM_A, 1, { state: 'waiting', stateDetail: 'permission' })],
+          week: [row(S2)],
+        },
+      });
+      await eventually(async () => (await ender(page)).warning === ASKING, 'asking');
+      assert.equal((await ender(page)).focus, PARK_KEEP);
+      assert.deepEqual(w.acts(), []);
     },
   );
 
@@ -1450,6 +1631,27 @@ test('F44: the dialog "Park" for a session the window can end', async (t) => {
           `${what}: nothing parked, nothing ended`,
         );
       }
+    },
+  );
+
+  await t.test(
+    'opened on a session marked done, it follows the mark: undone elsewhere it stays, marked done again elsewhere it closes with its toast',
+    async (t) => {
+      const d = await one(t, chromium, { done: true });
+      const { page, w } = d;
+      await wFrom(page, S1);
+      await shown(page, true);
+      d.set({ sections: { open: [endable(S1, TERM_A, 1)], week: [row(S2)] } });
+      await sleep(400);
+      assert.equal((await ender(page)).shown, true, 'undone elsewhere: it stays');
+      d.set({ sections: { open: [endable(S1, TERM_A, 1, { done: true })], week: [row(S2)] } });
+      await shown(page, false);
+      await toastIs(
+        page,
+        'It was marked done in another window: nothing was ended or parked.',
+        false,
+      );
+      assert.deepEqual(w.acts(), []);
     },
   );
 

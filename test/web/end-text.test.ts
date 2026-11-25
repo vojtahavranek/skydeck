@@ -18,6 +18,8 @@ import {
   dialogFollows,
   END_TEXTS,
   PARK_TEXTS,
+  parkPhase,
+  parkWarning,
   textsOf,
   TITLE_MAX,
 } from '../../web/end-text.js';
@@ -273,6 +275,8 @@ test('F44: the words of the dialog "Park" and its toasts; textsOf picks them by 
     heading: 'Park: ',
     running: 'This session is still running.',
     working: 'It is working: ending it now stops the current turn.',
+    unknown: 'skydeck cannot tell whether it is working: ending it now may stop a turn.',
+    asking: 'It is asking you something: ending it now stops the current turn.',
     end: 'End session and park',
     keep: 'Park, keep it running',
     cancel: 'Cancel',
@@ -355,4 +359,22 @@ test('F44: dialogFollows with the mark `park`: it stays while its session runs t
         sessionRow,
       ),
   );
+});
+
+test('F44, review 1: parkPhase is idle only for a session that waits with nothing pending; parkWarning says why for the rest', () => {
+  const cases: [string, RowPayload, string, string | null][] = [
+    ['waiting, nothing pending', row(S1), 'idle', null],
+    ['working', row(S1, { state: 'working' }), 'working', PARK_TEXTS.working],
+    [
+      'waiting for a permission (a detail)',
+      row(S1, { stateDetail: 'permission' }),
+      'asking',
+      PARK_TEXTS.asking,
+    ],
+    ['running: skydeck cannot tell', row(S1, { state: 'running' }), 'unknown', PARK_TEXTS.unknown],
+  ];
+  for (const [what, given, phase, warning] of cases) {
+    assert.equal(parkPhase(given), phase, what);
+    assert.equal(parkWarning(parkPhase(given)), warning, what);
+  }
 });

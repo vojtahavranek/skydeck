@@ -31,6 +31,7 @@
 
 /** @import { ListMessage, ResultMessage, RowPayload, SelectedPayload } from '../src/window/protocol.ts' */
 import { flagsControls } from './flags-line.js';
+import { typesCharacter } from './keys.js';
 import { cutTitle } from './end-text.js';
 import { flagsText as flagsFieldText } from './favourite-text.js';
 import { sessionRow } from './pane.js';
@@ -467,7 +468,7 @@ export function createRestartDialog(root, deps) {
       // A key that types a character (ruled): text typed into the list by mistake. The dialog takes
       // it, so that the rest of a word reaches no list key, and from then on the keyboard stays on
       // Cancel: Tab and the arrows move nothing, Enter and Space cancel, Esc closes.
-      const isTyped = !isPress && [...event.key].length === 1;
+      const isTyped = !isPress && typesCharacter(event);
       if (!isEscape && !isTab && !isArrow && !isPress && !isTyped) {
         return false;
       }

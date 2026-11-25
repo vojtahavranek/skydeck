@@ -51,6 +51,10 @@ export const PARK_TEXTS = {
   heading: 'Park: ',
   running: END_TEXTS.running,
   working: END_TEXTS.working,
+  /** The warning while skydeck cannot tell whether it works (state `running`, design 6.2). */
+  unknown: 'skydeck cannot tell whether it is working: ending it now may stop a turn.',
+  /** The warning while it asks the user something in the middle of a turn. */
+  asking: 'It is asking you something: ending it now stops the current turn.',
   end: 'End session and park',
   keep: 'Park, keep it running',
   cancel: END_TEXTS.cancel,
@@ -69,6 +73,38 @@ export const PARK_TEXTS = {
   parkedElsewhere: 'It was parked in another window: nothing was ended.',
   gone: 'It left the list: nothing was parked.',
 };
+
+/**
+ * @typedef {'idle' | 'working' | 'asking' | 'unknown'} ParkPhase
+ */
+
+/**
+ * The dialog "Park"'s reading of a row (ruled on review 1): `idle` only when skydeck knows it waits
+ * for the user's next prompt with nothing pending (state `waiting`, no detail); `asking` when it
+ * waits for an answer in the middle of a turn (a permission, a question: a detail); `working`; and
+ * `unknown` for `running`, where skydeck cannot tell (design 6.2). Only `idle` lets the keyboard
+ * start on, or stay on, `End session and park`.
+ * @param {RowPayload} row
+ * @returns {ParkPhase}
+ */
+export function parkPhase(row) {
+  if (row.state === 'working') {
+    return 'working';
+  }
+  if (row.state === 'waiting') {
+    return row.stateDetail === null ? 'idle' : 'asking';
+  }
+  return 'unknown';
+}
+
+/**
+ * The warning line of the dialog "Park" in `phase`, or null (idle).
+ * @param {ParkPhase} phase
+ * @returns {string | null}
+ */
+export function parkWarning(phase) {
+  return phase === 'idle' ? null : PARK_TEXTS[phase];
+}
 
 /**
  * The words of the dialog of `mark`, and of its toasts.

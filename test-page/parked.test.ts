@@ -665,6 +665,115 @@ test('F44: parking a session in the window', async (t) => {
     },
   );
 
+  // Ruled on review 1: a word typed into the list by mistake never ends a session, and nothing
+  // it types chains from one session to the next.
+  for (const working of [false, true]) {
+    await t.test(
+      `words with a \`w\` typed into the list, fast and slow, over ${working ? 'working' : 'idle'} sessions: nothing ended${working ? '; only a `w` directly followed by Space parks one, kept running' : ', nothing parked'}`,
+      async (t) => {
+        const w = await world(t, chromium, { running: [S1, S2, S3] });
+        if (working) {
+          for (const id of [S1, S2, S3]) {
+            const term = w.server.hub.list().find((info) => info.expectedSessionId === id)?.id;
+            assert.ok(term !== undefined);
+            assert.equal(w.server.hub.input(term, Buffer.from('/busy\r')), 'ok');
+          }
+          await w.api.list(
+            (list) =>
+              [S1, S2, S3].every((id) =>
+                list.sections.some((section) =>
+                  section.rows.some((row) => row.id === id && row.state === 'working'),
+                ),
+              ),
+            'the three work',
+          );
+          await sleep(500); // the page's list too
+        }
+        const dialogShown = (): Promise<boolean> =>
+          readPage(
+            w.page,
+            () =>
+              document.getElementById('end-dialog')?.hidden === false ||
+              [...document.querySelectorAll('.editor')].some((one) => !(one as HTMLElement).hidden),
+            null,
+          );
+        for (const delay of [0, 150]) {
+          for (const typed of ['wow', 'would', 'now ', 'wow what a show ']) {
+            const before = (await acts(w.page)).length;
+            await pick(w.page, S1);
+            await w.page.keyboard.type(typed, { delay });
+            await sleep(400);
+            for (let i = 0; i < 3 && (await dialogShown()); i++) {
+              await w.page.keyboard.press('Escape');
+              await sleep(150);
+            }
+            assert.equal(await dialogShown(), false, `${typed} (${delay} ms): closed`);
+            const sent = (await acts(w.page)).slice(before);
+            const parks =
+              working && typed === 'wow what a show ' ? [{ kind: 'park', sessionId: S1 }] : [];
+            assert.deepEqual(sent, parks, `${typed} (${delay} ms)`);
+            if (parks.length > 0) {
+              await under(w.page, S1, 'parked');
+              const back = await w.api.act({ kind: 'unpark', sessionId: S1 });
+              assert.equal(back.ok, true, JSON.stringify(back));
+              await under(w.page, S1, 'open');
+            }
+          }
+        }
+        assert.equal(
+          (await acts(w.page)).some((one) => one.kind === 'end-session'),
+          false,
+          'nothing ended',
+        );
+        assert.equal(
+          readRecords(w.d.record).filter((one) => one.ev === 'hup').length,
+          0,
+          'no program hung up',
+        );
+        assert.deepEqual(await idsIn(w.page, 'open'), [S1, S2, S3]);
+        assert.deepEqual(w.problems, []);
+      },
+    );
+  }
+
+  await t.test(
+    'the run `w`, Enter over three idle rows ends and parks one row each time, the selection moving on',
+    async (t) => {
+      const w = await world(t, chromium, { running: [S1, S2, S3] });
+      await pick(w.page, S1);
+      for (const [id, next] of [
+        [S1, S2],
+        [S2, S3],
+        [S3, null],
+      ] as const) {
+        assert.equal(await selectedRow(w.page), id);
+        await w.page.keyboard.press('w');
+        await w.page.waitForSelector('#end-dialog:not([hidden])', {
+          state: 'attached',
+          timeout: PAGE_WAIT_MS,
+        });
+        await w.page.keyboard.press('Enter');
+        await selectionIs(w.page, next, `after ${id}`);
+        assert.equal(await zone(w.page), 'Focus: list');
+      }
+      assert.deepEqual(
+        (await acts(w.page)).map((one) => `${one.kind} ${one.sessionId}`),
+        [S1, S2, S3].map((id) => `end-session ${id}`),
+      );
+      await untilDrawn(
+        w.page,
+        (rows) =>
+          [S1, S2, S3].every((id) => rows.some((row) => row.id === id && row.section === 'parked')),
+        'the three under Parked',
+      );
+      await until(
+        () => readRecords(w.d.record).filter((one) => one.ev === 'hup').length === 3,
+        'three hang-ups',
+      );
+      assert.deepEqual(w.problems, []);
+    },
+  );
+
   await t.test(
     'a held w with rows after the selected one parks one row and sends one act: its auto-repeats do nothing, also once the selection moved on',
     async (t) => {

@@ -157,9 +157,10 @@ comes back by itself.
 A session whose work went to review, or that waits for someone, need not crowd Open: press `w` in
 the list (`Focus: list`), or **Park** in the header. It moves under **Parked** (its number 1-9 is
 free for the next session) and stays quiet (no notification, not counted as needing you). If it runs
-in a terminal of the window, a dialog asks first: **End session and park** (Enter, unless it is
-working) ends it too, so that it holds nothing while it waits; **Park, keep it running** (→, then
-Enter) leaves it running. A message with **Undo** shows
+in a terminal of the window, a dialog asks first: **End session and park** (Enter, when it waits
+for your next prompt) ends it too, so that it holds nothing while it waits; **Park, keep it
+running** (where the keyboard starts while it works or asks you something; else →, then Enter)
+leaves it running. A letter typed while the dialog asks puts the keyboard on Cancel. A message with **Undo** shows
 for 5 seconds. Send it a prompt and it comes back under Open by itself; `w` on its row (or
 **Unpark**) brings it back at once.
 

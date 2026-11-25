@@ -4537,7 +4537,8 @@ and stay inside; Enter or Space press the one that has the keyboard, at a fresh 
 `d` that opened it, an auto-repeat, or a key held since before it opened presses nothing). The
 keyboard always starts on the second button, `Mark done, keep it running` (ruled at review: any
 word ending in `d` typed into the list by mistake before Enter or Space must never end a session,
-and no rule about typed characters or a dead time stops that); it comes to the End button only by
+and no rule about typed characters or a dead time stops that; the dialog "Park" reaches the same
+end with a rule about typed characters, below and 12.15, and Done's dialog is unchanged by it); it comes to the End button only by
 the user's own Tab, Shift+Tab, arrow or click, so `d`, ←, Enter ends a session. When the session
 turns working while the dialog is shown, a keyboard on the End button moves back to the second
 button, and nothing moves it by itself towards the End button. Ctrl+Shift+H is refused while the
@@ -4558,8 +4559,11 @@ gone after `d` (a row of Open: nothing else is selected).
 
 **The dialog "Park"** (follow-up F44, 12.15; the owner's decision of 2026-11-25) is this dialog for
 `w` and the header's `Park`, in a parking's words: `End session and park` ends the session as `End
-session and mark done` does and parks it in place of marking it done. One rule differs: there the
-keyboard starts on the End button unless the session is working (12.15 says why the owner chose so).
+session and mark done` does and parks it in place of marking it done. Two rules differ (12.15 says
+them and why): there the keyboard starts on the End button when the session is known to be idle,
+with a warning line for every other state, and a typed character sends the keyboard to `Cancel`
+until the dialog closes, as in the dialog "Restart" (Space too, while the keyboard is on End by the
+dialog's own start).
 
 A session ended so is an ordinary ended one: once its program has exited the server stores an `end`
 of detail `exit` for each of its holders that belonged to the terminal (no spool file, raw detail
@@ -5091,21 +5095,38 @@ session need not hold its resources, so ending it is offered first). `w` or the 
 a session not parked whose row carries `endable` (12.10: it runs in the row's terminal of the
 window and that terminal can be ended; also one marked done, since parking ends its done mark)
 parks nothing yet: the dialog "Park", 12.10's dialog in a parking's words, asks — `Park: <title>`
-(cut and isolated as there), `This session is still running.`, while it works `It is working:
-ending it now stops the current turn.`, and `End session and park` (the primary one), `Park, keep
-it running`, `Cancel`. **The keyboard starts on `End session and park`** when the session is not
-working as the dialog opens, on `Park, keep it running` when it is (the owner's choice: parking is
-mostly done to sessions that wait, and ending them is what saves their resources). This is the one
-difference from Done's dialog, whose keyboard always starts on its second button so that a word
-ending in `d` typed into the list by mistake never ends a session; here a word with a `w` typed into
-the list by mistake and then Enter or Space ends an idle session. The owner accepted that cost: the
-session is listed under Parked and resumed from its row. When the session turns working while the
-dialog is shown, a keyboard on the End button moves to the second button; nothing moves it by
-itself towards the End button, so a session that stops working meanwhile leaves the keyboard where
-it is. Everything else is 12.10's: Esc is Cancel; Tab and →, Shift+Tab and ← walk the three and stay
-inside; Enter or Space press at a fresh press only (the `w` that opened it, an auto-repeat, a key
-held since before it opened press nothing); Ctrl+Shift+H is refused while it is shown and opening
-it hides the key help; it belongs to its session and terminal and closes by itself, nothing done,
+(cut and isolated as there), `This session is still running.`, a warning line unless the session
+is known to be idle — `It is working: ending it now stops the current turn.`, `It is asking you
+something: ending it now stops the current turn.` (it waits for an answer in the middle of a turn: a
+permission, a question) or `skydeck cannot tell whether it is working: ending it now may stop a
+turn.` (state `running`, design 6.2) —, and `End session and park` (the primary one), `Park, keep it
+running`, `Cancel`. Two rules differ from Done's dialog. **Where the keyboard starts:** on `End
+session and park` only when skydeck knows the session is idle — `waiting` for the user's next
+prompt with nothing pending — as the dialog opens; in every other state on `Park, keep it running`
+(the owner's choice: parking is mostly done to sessions that wait, and ending them is what saves
+their resources; ruled on review 1 that "not working" means "known idle", so that Enter never
+stops a turn by itself). Any change away from idle while the dialog is shown (it works, asks, or
+skydeck can no longer tell) moves a keyboard on the End button to the second button; nothing moves
+it by itself towards the End button, so a session that becomes idle meanwhile leaves the keyboard
+where it is. A named limit: the page learns that a session turned working a moment after it did
+(the next list), so `w` and Enter in that moment can still end it. **Typed characters** (ruled on
+review 1, in the manner of the dialog "Restart"): while the keyboard is on the End button by the
+dialog's own start, only a fresh Enter presses it, and Space there counts as a typed character;
+once a key that types a character comes while the dialog asks (a letter, a digit, a sign, that
+Space; not with Ctrl, Alt or Meta; an auto-repeat of the `w` that opened it too), the keyboard goes
+to `Cancel` and stays there until the dialog closes: Tab and the arrows move nothing, Enter and
+Space cancel, Esc closes, and a click still presses any button. After the user's own Tab,
+Shift+Tab or arrow, with nothing typed, Enter and Space press the button that has the keyboard, as
+in 12.10; on `Park, keep it running` where the keyboard starts, a fresh Enter or Space with nothing
+typed presses it. So the whole cost the owner accepted is this: `w` directly followed by a fresh
+Enter ends one idle session (the quick path, on purpose), and nothing typed chains — after `wow`,
+`would`, `now ` or `wow what a show ` typed into the list by mistake no session is ended, and an
+idle one is not parked either (a working one is parked and kept running when a `w` that opens the
+dialog is directly followed by Space, as `w`, Space parked it before the dialog). The session ended
+so is listed under Parked and resumed from its row. Everything else is 12.10's: Esc is Cancel; Tab
+and →, Shift+Tab and ← walk the three and stay inside; Enter or Space press at a fresh press only
+(an auto-repeat, or a key held since before it opened, presses nothing); Ctrl+Shift+H is refused
+while it is shown and opening it hides the key help; it belongs to its session and terminal and closes by itself, nothing done,
 with the toast `It stopped by itself: nothing was parked.`, `It was parked in another window:
 nothing was ended.`, `It was marked done in another window: nothing was ended or parked.` or `It
 left the list: nothing was parked.`; Cancel changes nothing and gives the keyboard back. `Park,
@@ -6374,7 +6395,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W47 | **Real claude**, follow-up F40: carry over after `/clear` in a window terminal — the bar without a click, a click on it leaves the keyboard in the prompt, `Carry over`, `×`, two clears, `c` from the list with the list changing under it, a session cleared outside the window, and an old cleared session that shows no bar (manual-checks.md, "Carry over after /clear"). | F40 | 12.6, 12.9, design 7.1 |
 | W48 | The list's width in the owner's Edge (issue #192): the handle shows its cursor and tooltip on the border, a drag changes the width live and stops at 240 and 800 px and where the right side keeps 320 px; after a reload and after the window is closed and opened again the width is there with no jump; a narrower window shows less and a wider one the kept width again; a double click gives 400 px back, also one with a slight slip; the list's scroll bar right beside the border scrolls the list and leaves its width; a drag with `Focus: terminal`, over a throwaway session's terminal, leaves the keyboard in the prompt and types nothing into it; the terminal fits its new width; a browser tab (`--print-url`) keeps its own width. At the end a double click puts 400 px back. | #192 | 12.1, 12.9 |
 | W49 | **Real claude**, issue #188 part 1: a throwaway session resumed from its card's `Other flags…` with another `--model` — the field filled with the flags it was started with, `f` from the list, the header showing the new flag once Claude Code has started, a plain `Resume here` keeping it (manual-checks.md, "Resuming with other flags"). | #188 | 12.6, 12.9, design 7.6 |
-| W50 | **Real claude**, follow-up F44: Parked on throwaway sessions — `w`, the toast and Undo; the number freed and taken by a new session, and the lowest free one back under Open; a prompt brings it back, a key typed and not sent does not; `skydeck park` and `skydeck unpark` in W show within seconds; a parked session that asks shows its mark, sends no notification and Ctrl+Shift+J passes it; `skydeck window --restart` keeps it parked without a number; `w` on a running session asks first (the dialog "Park", the keyboard on its End button), `End session and park` ends it and lists it under Parked, not running, and resumed from its row it stays parked; after `w` the selection is on the next row and the list has not moved, three `w` in a row park three sessions and nothing is typed into the session the selection moved to; `w` on a row under Parked brings it back, still selected and in view; `/clear` in a parked session; `w` on a US and a Czech layout (manual-checks.md, "Parked"). | F44 | 7.6, 12.1, 12.4, 12.9, 12.15, design 7.1 |
+| W50 | **Real claude**, follow-up F44: Parked on throwaway sessions — `w`, the toast and Undo; the number freed and taken by a new session, and the lowest free one back under Open; a prompt brings it back, a key typed and not sent does not; `skydeck park` and `skydeck unpark` in W show within seconds; a parked session that asks shows its mark, sends no notification and Ctrl+Shift+J passes it; `skydeck window --restart` keeps it parked without a number; `w` on a running session asks first (the dialog "Park", the keyboard on its End button when idle, on Keep with a warning while it works), `End session and park` ends it and lists it under Parked, not running, and resumed from its row it stays parked; words with a `w` typed into the list end nothing; after `w` the selection is on the next row and the list has not moved, three `w` in a row park three sessions and nothing is typed into the session the selection moved to; `w` on a row under Parked brings it back, still selected and in view; `/clear` in a parked session; `w` on a US and a Czech layout (manual-checks.md, "Parked"). | F44 | 7.6, 12.1, 12.4, 12.9, 12.15, design 7.1 |
 | W51 | **Real claude**, issue #166 with part 2 of #188: a throwaway session restarted from the header's `Restart` and with `r` — the keyboard on Cancel, `Restarting…`, the same conversation, the same number and place, not done, no notification —, then with `Other flags…` and another `--model`, the header showing it once Claude Code has started, a plain restart passing it on (manual-checks.md, "Restarting a session from the window"). | #166, #188 | 12.5, 12.10, design 7.6 |
 | W52 | How often the window checks for a newer skydeck by itself (follow-up F38's choice, the owner's decision of 2026-11-24): Settings' `Check for updates` shows the setup's value and its four words in order; `Every 15 minutes` saved, and a check by the clock within 16 minutes of the last one without a click; `Every day` makes none in twenty minutes; `Off` and `Check now`; the setup's value put back (manual-checks.md, "How often updates are checked"). | F38 | 10.1, 12.13, 16.5 |
 
