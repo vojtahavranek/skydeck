@@ -34,7 +34,7 @@ flags"; W50 checks parking a session (follow-up F44), at "Parked"; W51 checks re
 from the window (issue #166), at "Restarting a session from the window"; W52 checks how often the
 window checks for a newer skydeck by itself (follow-up F38's choice), at "How often updates are
 checked"; W53 checks the notes of what is new in the update dialog, at "What is new in
-the update dialog".
+the update dialog"; W54 checks the version number, at "The version number".
 
 Setup:
 
@@ -1906,8 +1906,9 @@ stop here and write that down: the update would refuse (a change of your own to 
 and this check changes nothing of yours.
 
 1. **Look first.** Type `skydeck update --check`. Expected: one of
-   - `skydeck is up to date (main at <id>, as origin/main)` — write it down and leave step 2 out;
-   - `<n> new commits on origin/main (<old>..<new>):`, one line per commit (two spaces, a 7-digit
+   - `skydeck is up to date (main at <version>, <id>, as origin/main)` — write it down and leave
+     step 2 out;
+   - `<n> new commits on origin/main (<old version> → <new version>, <old>..<new>):`, one line per commit (two spaces, a 7-digit
      id, two spaces, its subject; at most 20, then `… and <m> more`), perhaps the line `this update
      changes the database's upgrade steps: …`, and last `run skydeck update to apply it`.
 
@@ -1921,7 +1922,7 @@ and this check changes nothing of yours.
    line `skydeck: stopped skydeck's window server; <n> terminals in the window keep running`; then
    `skydeck: waiting up to 7 s for the open window to come back; --new-window opens one now` (it
    may be missing when the window was back sooner); `skydeck window: a window is already open`;
-   and last `updated to <new>`, the id of step 1's first line. `echo $?` prints `0`. In the window,
+   and last `updated to <new version>`, the version of step 1's first line. `echo $?` prints `0`. In the window,
    meanwhile: for a few seconds `skydeck's server is not answering (since <time>)…`, then the page
    reloads itself and the list and the terminal come back. (A window whose key could not be stored
    says `this window's page is not the one skydeck's server serves, and its key could not be
@@ -2938,16 +2939,18 @@ In W: `cd ~/skydeck`, `git status --short` (write down what it prints), `git rem
 (write down the line, or that there is none).
 
 1. **Check now.** Click the gear. Expected: the short screen's fourth group, `Updates`, after
-   `The window`: the choice `Check for updates`, then one line — `Last check: <age> ago —
-   skydeck is up to date (main at <id>, as origin/main)`, or `… — <n> new commits on origin/main` —
-   and `Check now`. Click `Check now`. Expected: `Checking…` for a moment, then `Last check: 0s ago
+   `The window`: the choice `Check for updates`, then `skydeck <version>` (the version that runs,
+   as `skydeck --version` in W names it), one line — `Last check: <age> ago — skydeck is up to date
+   (main at <version>, <id>, as origin/main)`, or `… — <n> new commits on origin/main` — and `Check
+   now`. Click `Check now`. Expected: `Checking…` for a moment, then `Last check: 0s ago
    — …` (or `1s`). When it says that new commits are there, the title bar shows `Update available`
    right before `Switch…` and the gear; when it says up to date, it shows none. Press Esc: the screen closes, the keyboard is back where it was.
 2. **The dialog**, only when the title bar shows `Update available`. Click it. Expected: a dialog
    that says what is new — the notes the update brings, when it brings any (W53 looks at them
    closely), and the other changes under `▸ <n> other changes`, or `▾ <n> changes` open when it
    brings no note, whose subjects are those `skydeck update --check` lists in W —, small at the
-   bottom `<id> → <id> on origin/main` and `In a terminal instead: skydeck update`, and two
+   bottom `<version> → <version> on origin/main (<id> → <id>)` (the ids in the terminal's font) and
+   `In a terminal instead: skydeck update`, and two
    buttons, `Update now` and `Close`; `Close` has the keyboard, and Tab goes round the fold line,
    `Update now` and `Close`. Ctrl+Shift+N says `close the dialog first (Esc)`. Press Esc
    (do not press `Update now` here): it closes. Nothing was applied: `git log -1 --format=%h` prints
@@ -2987,20 +2990,22 @@ many sessions the title bar counts and which slots the Open section shows; in W,
 (write down its `problem` lines, if any) and `git log -1 --format=%h`.
 
 7. **Update now.** Click `Update available`, then `Update now`. Expected: the dialog shows
-   `skydeck is being updated to <id>. The window comes back by itself.` with no button, and
+   `skydeck is being updated to <version>. The window comes back by itself.` (the new version of
+   the dialog's bottom line) with no button, and
    Ctrl+Shift+N says `skydeck is being updated`. Within a few seconds the bar `skydeck is being
    updated (since <time>): … the update's log says why: <path of update.log> — read it first; then,
    in a WSL terminal: skydeck window` may show for a moment; then the window reloads itself and a
-   bar says `updated to <id>`, the id the dialog listed. No second window opens. Click the bar's ×:
+   bar says `updated to <version>`, the version the dialog listed. No second window opens. Click the bar's ×:
    it goes.
 8. **Everything still there.** Expected: the title bar counts the same sessions, Open shows the
    same slots, and each terminal shows its session (its screen rebuilt). In W, `git log -1
    --format=%h` prints the id of step 7, `skydeck doctor` prints no `problem` line that the setup
    of this half did not have, and its `update:` line says up to date. `tail -5
-   ~/.local/state/skydeck/update.log` ends with `updated to <id>`.
+   ~/.local/state/skydeck/update.log` ends with `updated to <version>`.
 9. **The dialog again.** Expected: no `Update available` in the title bar. In Settings' group
    `Updates`, `Check now`
-   says `Last check: 0s ago — skydeck is up to date (main at <id>, as origin/main)`.
+   says `Last check: 0s ago — skydeck is up to date (main at <version>, <id>, as origin/main)`,
+   the version of step 7.
 
 Leaves behind: the remote's address as it was, `window.updateCheck` as it was, the remote-tracking
 refs as a `git fetch` leaves them, and `kv window_update_check` with the last check. `git status
@@ -3583,7 +3588,7 @@ origin/main -- docs/news/`: it must name at least one file that is added (else w
 out: no note yet" and stop here).
 
 1. **The command line.** In W: `skydeck update --check`. Expected: the lines as before — `<n> new
-   commits on origin/main (…):` and one line per commit —, then `what is new:` and, indented, the
+   commits on origin/main (<version> → <version>, …):` and one line per commit —, then `what is new:` and, indented, the
    titles of the notes the diff above added, newest first; then the database line when there is
    one, and `run skydeck update to apply it`.
 2. **The dialog.** Click `Update available`. Expected: the notes, each its title heavier than its
@@ -3591,8 +3596,9 @@ out: no note yet" and stop here).
    word between backticks in a note (if any) in the terminal's font, without the backticks; no
    Markdown shown as markup. Then `▸ <n> other changes` (when some commits add no note), the
    database note as a block marked at its left (when step 1 printed the database line), and small
-   at the bottom `<the id you wrote down> → <id> on origin/main` and `In a terminal instead:
-   skydeck update`; the ids and `skydeck update` in the terminal's font.
+   at the bottom `<version> → <version> on origin/main (<the id you wrote down> → <id>)` (the
+   versions of step 1's first line) and `In a terminal instead: skydeck update`; the ids and
+   `skydeck update` in the terminal's font.
 3. **The fold.** Click `▸ <n> other changes`. Expected: `▾`, and under it the subjects of the
    commits that add no note, newest first. Click it again: folded. Press Tab until it has the
    keyboard (Tab goes round it, `Update now` and `Close`), then Enter: open; Space: folded. Press
@@ -3610,3 +3616,60 @@ Write down: for each step whether it went as expected, and the words where they 
 version and your colour themes; how the notes read to you.
 
 Not tried before this check was written: all of it, in Edge.
+
+## The version number
+
+The check of the version number (design.md 8, the version line; design-step-2.md 12.1, 12.13,
+16.5, 17.5; [install.md](install.md), "Check that skydeck starts" and "The version"): W54, on your
+own installation, once the workflow Version has made its first tags (the merge of this change makes
+`v0.9.0`). It applies nothing but in its last step, and only when the dialog lists commits. The
+tests make tags on throwaway repositories in the sandbox and read the workflow file as text; only
+here do the workflow's runs on GitHub, your remote's tags and your clone meet. Commands are typed
+in W, a WSL terminal of your own (never a `!` command inside Claude Code).
+
+## W54. The version number
+
+Setup: skydeck updated to a commit that has the version number (`skydeck update`, W32; an update
+into it from the window ends with `updated to <id>`, once: the window before it named no version);
+the window open. On GitHub, the repository's Actions: the workflow `Version` ran for the merge of
+this change and is green; its log names the tag it made. In W: `cd ~/skydeck`, then `git fetch
+--quiet origin`, `git tag --list 'v*'` (write the tags down) and `git log --first-parent --format=%h
+-n 3` (write down the ids).
+
+1. **The version line.** In W: `skydeck --version`. Expected: one line, `<version> (<id>, <date>)`:
+   the id the first of the setup's three, the date that commit's; the version the highest tag of
+   that commit (`0.9.0` for the merge of this change), or `<tag>+<n>` when HEAD is n commits past
+   the nearest tagged commit; `, modified` only when `git status --short` lists a tracked file. When
+   the setup's list of tags is empty, write that down: then it says `unversioned (…)`, which is
+   right for a clone without tags. `git status --short` prints what it printed before (the version
+   is read, nothing is written).
+2. **doctor.** In W: `skydeck doctor`. Expected: its first line `info     skydeck` and the line of
+   step 1, word for word.
+3. **Settings.** Click the gear. Expected: the group `Updates` shows `skydeck <version>`, the
+   version of step 1, above its `Last check: …` line. Click `Check now`: the version line then
+   names HEAD's version as the check found it — the same as `skydeck --version` in W prints now,
+   also when the check's fetch brought HEAD's own tag (then `skydeck <tag>`, no `+<n>` any more).
+4. **The dialog**, only when the title bar shows `Update available` (else write down "left out:
+   up to date" and leave steps 4 and 5 out). In W: `skydeck update --check`. Expected: its first
+   line `<k> new commits on origin/main (<version> → <version>, <id>..<id>):`, the new version
+   the highest tag of the newest commit (`+<n>` when its own tag has not been made yet) — the next
+   minor when a listed commit brings a note (`what is new:` lists it), else the next patch —; the
+   other lines as in W32. Click `Update available`. Expected: small at the bottom `<version> →
+   <version> on origin/main (<id> → <id>)`, the same versions and ids, the ids in the terminal's
+   font.
+5. **Update now**, only when you want the update now. Click `Update now`. Expected: `skydeck is
+   being updated to <new version>. The window comes back by itself.`, then the reload and the bar
+   `updated to <new version>`. In W, `skydeck --version` names it, and Settings' group `Updates`
+   says `skydeck <new version>`.
+6. **The workflow**, after a merge of your own that brings a note (or the next one that does).
+   Expected: in GitHub's Actions a green `Version` run for it, and in W, after `git fetch --quiet
+   origin`, `git tag --points-at origin/main` prints the next minor tag; after a merge without a
+   note, the next patch tag. Nothing else in the repository changed (no branch, no other tag).
+
+Leaves behind: the checkout as it was (or, after step 5, at the new commit), the remote-tracking
+refs and tags as `git fetch` leaves them.
+
+Write down: for each step whether it went as expected, and the words where they differ; the
+setup's tags; whether the versions read well to you beside the ids.
+
+Not tried before this check was written: all of it, on your installation and on GitHub.

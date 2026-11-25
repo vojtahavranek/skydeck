@@ -1186,14 +1186,32 @@ could not be resumed; see above`).
 
   Before every other line, three `info` lines say what runs (follow-up F20); none is ever a
   problem, none changes the exit code, and none names a path. (1) `skydeck <version line>`, the
-  line `skydeck --version` prints: `<package version> (<short commit>, <commit date>)` of the
-  checkout the running code is in, wherever it is run from, with `, modified` after the date when
-  tracked files differ from that commit, and `<package version> (commit unknown)` when git is
-  missing, the app root is not a git checkout (git's search stops there), or an answer is not a
-  commit or does not come within 2 seconds. Two git calls side by side, `log -1` and `status
-  --porcelain --untracked-files=no`, never through a shell, without the variables that point git at
-  another repository (`GIT_DIR` and its kin, as for `skydeck update`) and with no optional lock, so
-  that nothing is written in the checkout; `--version` never fails and prints nothing on stderr.
+  line `skydeck --version` prints: `<version> (<short commit>, <commit date>)` of the checkout the
+  running code is in, wherever it is run from, with `, modified` after the date when tracked files
+  differ from that commit, and `<version> (commit unknown)` when git is missing, the app root is
+  not a git checkout (git's search stops there), or an answer is not a commit or does not come
+  within 2 seconds. The version is that commit's: a version is a git tag `v<major>.<minor>.<patch>`
+  (decimal numbers without leading zeros; nothing else is a version tag, `v1.2` or `v1.2.3-rc1`
+  are not) on a commit of `main`, made by the workflow Version (design-step-2.md 17.5) at every
+  push to `main`: after the highest version tag of the history (versions never go backwards), the
+  next minor when the pushed commits add a note in `docs/news/` (a change a user can see), else the
+  next patch; the first, `v0.9.0`; a major or minor by hand, by the owner
+  (the workflow run by hand, or a tag pushed). A commit's version is the nearest version tag on its
+  first-parent history (the highest when a commit carries several): `0.9.16` at the tag, `0.9.16+3`
+  three commits past it (a merge whose tag has not arrived yet, commits of the checkout's own).
+  With none reachable — no tag made yet, a shallow clone that does not reach one, a fetch that
+  brings no tags (`remote.<name>.tagOpt=--no-tags`), more than 10,000 commits past one, a call that
+  fails or does not answer in time — there is no version: the line says `unversioned (<short
+  commit>, <commit date>)`, and every other place shows the commit ids as it did before versions;
+  never a guess (src/update/version.ts). `package.json`'s `"version"` is `0.0.0` and means
+  nothing. The tags reach an installation by the fetches skydeck already makes (`skydeck update`,
+  the window's check): git brings the tags that point at the commits it has. Four git calls side
+  by side, each within the 2 seconds: `log -1`, `status --porcelain --untracked-files=no`, and the
+  version's two (`for-each-ref` of the tags, `rev-list --first-parent` of HEAD), never through a
+  shell, without the variables that point git at another repository (`GIT_DIR` and its kin, as for
+  `skydeck update`), with no optional lock, so that nothing is written in the checkout, and with
+  `GIT_NO_LAZY_FETCH=1` (they read only refs, commits and tag objects, which a partial clone has);
+  `--version` never fails and prints nothing on stderr.
   (2) `Claude Code <version>`: the first line `<claudeCommand> --version` prints (no shell, stdin
   closed, doctor's environment without the launcher's own variables as in design-step-2.md 5.2,
   5 seconds, at most 4 KiB read, control characters dropped, at most 60 characters kept),

@@ -143,10 +143,15 @@ bin/skydeck --version
 ```
 
 It prints one line: the version, the commit the checkout is at and the date of that commit, such as
-`0.1.0 (f1fce49, 2026-11-19)`. `, modified` follows the date when files git tracks in the checkout
+`0.9.16 (f1fce49, 2026-11-25)`. `, modified` follows the date when files git tracks in the checkout
 were changed since that commit (a new file of your own does not count), and
-`0.1.0 (commit unknown)` means git could not tell (git is missing, or the folder is not a git
-checkout). Give this line when you report a problem. With a `node` older than 24.12 it prints one
+`unversioned (commit unknown)` means git could not tell (git is missing, or the folder is not a
+git checkout). The version is a tag of the repository's `main`, made at every change that is
+merged: a change you can see (one that brings a note of what is new) raises the second number
+(`0.10.0`), a fix the third (`0.9.17`); `0.9.16+2` means two commits past `0.9.16` whose own tag
+your checkout has not fetched yet. `unversioned` in place of a version means that git finds no
+version tag behind the commit (a clone made before the first tag, or one that fetches no tags);
+"The version" under "Updating" says more. Give this line when you report a problem. With a `node` older than 24.12 it prints one
 line and exits 1:
 
 ```
@@ -379,7 +384,7 @@ exit code is 0 (the window's own lines, under Window after the terminal's, are l
 
 ```
 Versions
-info     skydeck 0.1.0 (f1fce49, 2026-11-19)
+info     skydeck 0.9.16 (f1fce49, 2026-11-25)
 info     Claude Code 2.1.0
 info     system: Ubuntu 24.04.1 LTS, Linux 6.6.87.2-microsoft-standard-WSL2
 
@@ -2398,7 +2403,7 @@ branch follows, and restarts the window's server for the new code. In this order
    20 commits (then `… and <n> more`):
 
    ```
-   3 new commits on origin/main (1a2b3c4..5d6e7f8):
+   3 new commits on origin/main (0.9.16 → 0.9.19, 1a2b3c4..5d6e7f8):
      5d6e7f8  the newest commit's subject
      4c5d6e7  the one before
      3b4c5d6  the oldest new one
@@ -2406,13 +2411,14 @@ branch follows, and restarts the window's server for the new code. In this order
      Parked: set a session aside
    ```
 
-   The ids are the first 7 digits of each commit's id, for reading only; the update itself uses
-   the whole id. `what is new:` and the titles under it come only when the update brings notes of
+   `0.9.16 → 0.9.19` are the versions of the commit the checkout is at and of the newest one (the
+   nearest version tag of each, as `--version` reads it; the new one's before anything is applied); the ids are the first 7
+   digits of each commit's id, for reading only; the update itself uses the whole id. `what is new:` and the titles under it come only when the update brings notes of
    what is new (the files of `docs/news/`, newest first); the window's dialog shows their text. When the new commits change `src/store/migrations.ts`, one more line says so:
    `this update changes the database's upgrade steps: it may upgrade the database, which an older
    checkout cannot open; a copy of the database as it was is kept first, and docs/install.md
    ("Going back") says how to return to 1a2b3c4`, with the commit the checkout is at (see "Going
-   back" below). With nothing new it says `skydeck is up to date (main at 1a2b3c4, as origin/main)` and does nothing
+   back" below). With nothing new it says `skydeck is up to date (main at 0.9.16, 1a2b3c4, as origin/main)` and does nothing
    else: no server is looked at, stopped or started.
 2. **`--check` ends here**, with `run skydeck update to apply it`. Its fetch has changed what a
    `git fetch` changes — the remote-tracking refs (`origin/main`), the tags it follows, and what
@@ -2428,7 +2434,7 @@ branch follows, and restarts the window's server for the new code. In this order
    (`skydeck: waiting up to 7 s for the open window to come back; …`), which reloads itself and
    connects again (`skydeck window: a window is already open`). When no window was open it starts
    nothing and says `skydeck: the window's server was stopped for the update; skydeck window starts
-   it again`. Last, `updated to 5d6e7f8`.
+   it again`. Last, `updated to 0.9.19`, the version it brought.
 
 The look and the fetch can be ended with Ctrl+C: nothing is changed. **Once the stop of the
 window's server has begun — or the fast-forward, when there is no server of this checkout to stop —
@@ -2537,9 +2543,9 @@ More ends, each with exit 1:
     git refused and wrote nothing that matters; only the look after it could not tell (a file came
     into the checkout meanwhile, or the look took too long). `git status`, move away (or commit)
     what git names — it is yours —, `skydeck window`, then `skydeck update` again. No reset.
-- `updated to <id>, but skydeck window ended with exit <n>; run skydeck window`: the update is in,
+- `updated to <version>, but skydeck window ended with exit <n>; run skydeck window`: the update is in,
   but the new `skydeck window` failed (its own lines above say why); run `skydeck window`.
-- `updated to <id>, but skydeck window could not be started or was ended by a signal; run skydeck
+- `updated to <version>, but skydeck window could not be started or was ended by a signal; run skydeck
   window`: the update is in, but the new `skydeck window` did not run to its end; run
   `skydeck window`.
 
@@ -2560,8 +2566,8 @@ after your second click (below).
   click (or Enter or Space) opens the list of their subjects; when the update brings no note, the
   line reads `3 changes` and the list is open. When the update may upgrade the database, a marked
   note says so and which commit to go back to (see "Going back" below). Small at the bottom: the
-  commit the checkout is at and the new one (`1546b37 → c75af0e on origin/main`), and `In a
-  terminal instead: skydeck update`. When the checkout cannot be updated as it is — a change to a
+  version the checkout is at and the new one, then their commits (`0.9.16 → 0.9.19 on origin/main
+  (1546b37 → c75af0e)`), and `In a terminal instead: skydeck update`. When the checkout cannot be updated as it is — a change to a
   tracked file that is not committed, commits of your own that the remote does not have — the
   dialog says why and `Once that is set right, in a WSL terminal of your own: skydeck update`;
   when the branch follows no branch of a remote any more, `skydeck cannot tell here whether there
@@ -2570,8 +2576,8 @@ after your second click (below).
 - **Settings** (the gear). The group **Updates**, after The window: the choice `Check for
   updates` (`window.updateCheck`): `Off` (`"off"`, which stops the checks at the start and by the
   clock), `Every 15 minutes` (`"15min"`), `Every hour` (`"hourly"`, the default) or `Every day`
-  (`"daily"`), saved as you pick it and used at once; then a line that says when the last
-  check ended and what it found (`Last check: 2h ago — 3 new commits on origin/main`), or, when it
+  (`"daily"`), saved as you pick it and used at once; then the version that runs (`skydeck
+  0.9.16`), a line that says when the last check ended and what it found (`Last check: 2h ago — 3 new commits on origin/main`), or, when it
   failed, when and why (`The last check failed 5m ago: git fetch from origin failed: …`) and what
   is known from the last fetch that worked (`Known from 2h ago: …`); and `Check now`, which checks
   at once, also with `Off`.
@@ -2591,14 +2597,15 @@ The dialog's `Update now` does what `skydeck update` does, in the same order, wi
 terminal: the window's server starts `skydeck update` of its own checkout in the background, which
 stops the server, fast-forwards the checkout to the commit the dialog listed (by its id — it does
 not fetch again, so nothing can ask for a passphrase), and starts the new server with the
-environment the old one had. Every window shows `skydeck is being updated to <id>. The window comes
+environment the old one had. Every window shows `skydeck is being updated to 0.9.19. The window comes
 back by itself.`, closes any other dialog it showed (a text half typed in it is dropped) and takes
 no keys or clicks meanwhile; the sessions keep running. Two clicks are always
 needed: `Update available`, then `Update now`. Once the update has stopped the window's server, the
 window is always brought back, also when the window that clicked was closed meanwhile (unlike
 `skydeck update` typed in a terminal, which opens no window that was not open).
 
-- **It worked.** The window reloads itself and a bar says `updated to <id>`; its × dismisses it in
+- **It worked.** The window reloads itself and a bar says `updated to 0.9.19` (the new version; the
+  first update into a skydeck that has versions names its commit instead); its × dismisses it in
   every window.
 - **git refused the merge** (a file of yours where the new commit puts one, say). The checkout is
   as it was and the window comes back on the old code; the bar gives git's line (`the update could
@@ -2620,11 +2627,41 @@ window is always brought back, also when the window that clicked was closed mean
 - **A window that comes back late.** If the window is not back within `skydeck window`'s waits
   and the terminal the server was started from is long closed, no second window opens, and the
   log's last line says `…, but skydeck window ended with exit 1; run skydeck window` although the
-  server runs; the window that comes back later shows `updated to <id>`. Running `skydeck window`
+  server runs; the window that comes back later shows `updated to <version>`. Running `skydeck window`
   then is harmless: it says that a window is already open.
 
 The log, `<stateDir>/update.log`, holds the update's own lines, as the terminal would have shown
 them; `skydeck uninstall --purge` removes it with the server's logs.
+
+### The version
+
+skydeck's version, `0.9.16`, is a tag of the repository, `v0.9.16`, made on `main` by one GitHub
+workflow, Version (`.github/workflows/version.yml`), at every change that is merged: the next
+minor version (`0.10.0`) when the change brings a note of what is new (`docs/news/`), else the next
+patch version (`0.9.17`). Nobody writes a version in a change; `package.json`'s `"version"` is
+`0.0.0` and means nothing. The tags reach your checkout with the fetches skydeck already makes
+(`skydeck update`, the window's check): git brings the tags that point at the commits it has.
+`skydeck --version` and doctor's first line, Settings' group Updates (`skydeck 0.9.16`), the
+update dialog's bottom line (`0.9.16 → 0.9.19 on origin/main`, with the commits after it), and
+`skydeck update` name it. A commit past the nearest version tag reads `0.9.16+2` (two commits past
+it: a change whose tag has not been fetched yet, or commits of your own). Without a version tag
+behind the commit (a clone that fetches no tags, `remote.origin.tagOpt=--no-tags`; a shallow clone
+that does not reach one) there is no version: `skydeck --version` says `unversioned`, and every
+other place shows the commits' ids as before. With `fetch.prune` and `fetch.pruneTags` set, a
+fetch also removes a tag only your checkout has.
+
+For the repository's owner, the first two numbers by hand: on GitHub, Actions > Version > Run
+workflow, on `main`, with `bump` `minor` (`0.10.0`) or `major` (`1.0.0`): it tags the head of
+`main` (it refuses when `main` moved since the run was started: start it again). Or tag the head of
+`main` yourself (`git fetch`, `git tag v1.0.0 origin/main`, `git push origin v1.0.0`): the
+workflow goes on from it. Versions never go backwards: the next one always follows the highest
+version tag of `main`'s history, wherever it stands, so a tag on an older commit of `main` takes
+effect from the next change on. The workflow never moves or deletes a tag; when the tag it would
+make stands already on another commit (a stray tag), its run fails and says which tag and commit.
+Remove that tag first (`git push --delete origin <tag>`) and push again or run the workflow by
+hand; or step past it by hand, with `minor` (with `major` when the stray tag is the next minor).
+While `main` has no version yet, only removing the stray tag helps. A commit pushed while a later
+one was tagged first gets no tag of its own (it reads as `+<n>` of the tag before it).
 
 ### Updating by hand
 
@@ -2732,7 +2769,7 @@ terminal of your own:
    interactive list (`skydeck` with no command) in any other terminal too: from here on no skydeck
    may have the database open.
 2. Put the checkout back at the commit the update left. `skydeck update` named it: the first id of
-   its first line (`3 new commits on origin/main (1a2b3c4..5d6e7f8):`, so `1a2b3c4`), and the line
+   its first line (`3 new commits on origin/main (0.9.16 → 0.9.19, 1a2b3c4..5d6e7f8):`, so `1a2b3c4`), and the line
    about the database's upgrade steps (`… says how to return to 1a2b3c4`); `git pull` shows it as
    `Updating 1a2b3c4..5d6e7f8`.
 

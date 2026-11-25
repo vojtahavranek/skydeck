@@ -1,22 +1,29 @@
 // The version line (follow-up F20): `skydeck --version` prints it, and it is the first line of
-// `skydeck doctor`: `<package version> (<short commit>, <commit date>[, modified])`, or
-// `<package version> (commit unknown)`. The commit is the one of the checkout the running code is
-// in (`platform.appRoot`), wherever the command runs from, so that a tester can say what they run.
+// `skydeck doctor`: `<version> (<short commit>, <commit date>[, modified])`, or `<version> (commit
+// unknown)`. The commit is the one of the checkout the running code is in (`platform.appRoot`),
+// wherever the command runs from, so that a tester can say what they run; the version is that
+// commit's (src/update/version.ts: `0.9.16`, `0.9.16+3` past the tag), and `unversioned` when it has
+// none (no version tag reachable, or git cannot say).
 //
 // It runs often (by people and by scripts), so it never fails, never writes and never waits long:
-// two git calls side by side, as argument lists through the platform's runner (never a shell),
-// each stopped after VERSION_GIT_MS, in the command's environment without the variables that would
+// four git calls side by side — `log -1`, `status`, and the version's two (the tags, the
+// first-parent history) —, as argument lists through the platform's runner (never a shell), each
+// stopped after VERSION_GIT_MS, in the command's environment without the variables that would
 // point git at another repository (src/update/git.ts), with git's search for the repository stopped
-// at the app root, and with no optional lock: `status` would otherwise refresh the index and
-// write it into the checkout.
+// at the app root, with no optional lock (`status` would otherwise refresh the index and write it
+// into the checkout) and fetching nothing (GIT_NO_LAZY_FETCH).
 import { dirname } from 'node:path';
 
-import pkg from '../../package.json' with { type: 'json' };
 import type { Platform, RunResult } from '../platform/types.ts';
 import { gitEnv } from '../update/git.ts';
+import { versionOf } from '../update/version.ts';
+import type { VersionGit } from '../update/version.ts';
 
-/** How long each git call may take before it is stopped and the commit counts as unknown. */
+/** How long each git call may take before it is stopped and what it would tell counts as unknown. */
 export const VERSION_GIT_MS = 2_000;
+
+/** The line's first word for a commit without a version. */
+export const UNVERSIONED = 'unversioned';
 
 /** Of each call's output only this much is kept: one commit line, or whether anything changed. */
 const KEPT_BYTES = 4096;
@@ -32,13 +39,14 @@ export interface CheckoutFacts {
 
 /** The version line and HEAD's full id (doctor hands the id to its update line, F38); never throws. */
 export async function checkoutFacts(platform: Platform): Promise<CheckoutFacts> {
-  let commit: { text: string; id: string } | null = null;
-  try {
-    commit = await checkoutCommit(platform);
-  } catch {
-    // a platform or a runner that failed: the commit is not known
-  }
-  return { line: `${pkg.version} (${commit?.text ?? 'commit unknown'})`, id: commit?.id ?? null };
+  const [commit, version] = await Promise.all([
+    checkoutCommit(platform).catch((): null => null), // a platform or a runner that failed
+    headVersion(platform).catch((): null => null),
+  ]);
+  return {
+    line: `${version ?? UNVERSIONED} (${commit?.text ?? 'commit unknown'})`,
+    id: commit?.id ?? null,
+  };
 }
 
 /** The version line; it never throws. */
@@ -46,18 +54,39 @@ export async function versionLine(platform: Platform): Promise<string> {
   return (await checkoutFacts(platform)).line;
 }
 
-/** `<short commit>, <date>[, modified]` and the full id, or null when git cannot say. */
-async function checkoutCommit(platform: Platform): Promise<{ text: string; id: string } | null> {
-  const root = platform.appRoot;
-  const env = {
+/** git's environment for the line: see the head of this file. */
+function lineEnv(platform: Platform): Record<string, string> {
+  return {
     ...gitEnv(platform.env),
     // The app root itself, never a folder above it: a copy of skydeck that is not a checkout but
     // lies inside one would otherwise report that other repository's commit. The variable is a
     // list split at colons, so a colon in the path above the app root makes it name no ceiling: such
     // a copy then reports the outer commit (a checkout with a colon in its path is read rightly).
-    GIT_CEILING_DIRECTORIES: dirname(root),
+    GIT_CEILING_DIRECTORIES: dirname(platform.appRoot),
     GIT_OPTIONAL_LOCKS: '0',
+    GIT_NO_LAZY_FETCH: '1',
   };
+}
+
+/** HEAD's version (src/update/version.ts), each call within VERSION_GIT_MS; null: none. */
+async function headVersion(platform: Platform): Promise<string | null> {
+  const root = platform.appRoot;
+  const env = lineEnv(platform);
+  const git: VersionGit = {
+    run: (args, { timeoutMs, maxBytes }) =>
+      platform.runner.run('git', ['-C', root, '--no-optional-locks', ...args], {
+        env,
+        timeoutMs,
+        maxOutputBytes: maxBytes,
+      }),
+  };
+  return versionOf(git, 'HEAD', VERSION_GIT_MS);
+}
+
+/** `<short commit>, <date>[, modified]` and the full id, or null when git cannot say. */
+async function checkoutCommit(platform: Platform): Promise<{ text: string; id: string } | null> {
+  const root = platform.appRoot;
+  const env = lineEnv(platform);
   const git = (args: readonly string[]): Promise<RunResult> =>
     platform.runner.run('git', ['-C', root, '--no-optional-locks', ...args], {
       env,

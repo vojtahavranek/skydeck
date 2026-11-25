@@ -310,7 +310,7 @@ export function createUpdateDialog(root, deps) {
     /**
      * Milestone 2: the running form while `applying` is set — shown (opened when it was not), one
      * line, no button, the keyboard on the dialog itself; null lifts it (the dialog closes).
-     * @param {{ to: string } | null} applying
+     * @param {{ name: string } | null} applying
      */
     running(applying) {
       if (applying === null) {
@@ -327,7 +327,7 @@ export function createUpdateDialog(root, deps) {
       runningForm = true;
       answered = false;
       offered = null;
-      draw(lineModel(runningRuns(applying.to)));
+      draw(lineModel(runningRuns(applying.name)));
       updateNow.hidden = true;
       close.hidden = true;
       box.focus();

@@ -9,7 +9,6 @@ import { join } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
-import pkg from '../../../package.json' with { type: 'json' };
 import type { Platform, RunResult, Runner } from '../../../src/platform/types.ts';
 import { reportLines } from '../../helpers/doctor.ts';
 import { claudeFolders, run } from '../../helpers/install.ts';
@@ -19,7 +18,9 @@ import type { FakeRunner, TestPlatform } from '../../helpers/platform.ts';
 import { standinCommand } from '../../helpers/standin.ts';
 
 const ID = `f1fce49${'0'.repeat(33)}`;
-const SKYDECK = `info     skydeck ${pkg.version} (f1fce49, 2026-11-19)`;
+/** The fake git names no version tag: the line has no version. */
+const NONE = 'unversioned';
+const SKYDECK = `info     skydeck ${NONE} (f1fce49, 2026-11-19)`;
 const OS_RELEASE = '/etc/os-release';
 const UBUNTU = 'NAME="Ubuntu"\nVERSION_ID="24.04"\nPRETTY_NAME="Ubuntu 24.04.1 LTS"\nID=ubuntu\n';
 const WSL_KERNEL = '6.6.87.2-microsoft-standard-WSL2';
@@ -156,7 +157,7 @@ describe('doctor: the three lines at the top (follow-up F20)', () => {
     assert.equal(firstThree(modified)[0], `${SKYDECK.slice(0, -1)}, modified)`);
 
     const unknown = await doctor(t, d, { answers: { 'git log': { code: null, notFound: true } } });
-    assert.equal(firstThree(unknown)[0], `info     skydeck ${pkg.version} (commit unknown)`);
+    assert.equal(firstThree(unknown)[0], `info     skydeck ${NONE} (commit unknown)`);
   });
 
   test('before every other line: a configuration that cannot be read, then its problem; nothing started for Claude Code', async (t) => {

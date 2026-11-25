@@ -5,9 +5,10 @@
 // before the window is brought back, read (and removed) by the server that follows. Each entry
 // names its checkout (`root`): one database serves every checkout of the user, and an entry of
 // another checkout is none to a reader of this one. The readers are strict: a value that is not
-// exactly such a record reads as none. The check's record is of version 2 (the notes of what is
-// new, S2 16.5): one of version 1, the shape before, reads as none, and so does a version 2 one to
-// the code before, which wants 1; the server then makes its own check, with no migration. Every line of git's or of a refusal is clipped to LINE_MAX
+// exactly such a record reads as none. The check's record is of version 3 (the versions of the
+// commits, S2 16.5; version 2 brought the notes of what is new): one of an earlier version, a shape
+// before, reads as none, and so does a version 3 one to the code before, which wants 2; the server
+// then makes its own check, with no migration. Every line of git's or of a refusal is clipped to LINE_MAX
 // (a run entry's to RUN_LINE_MAX) before it is stored, and sanitised and clipped again in the
 // page's payload.
 import type { Files } from '../platform/types.ts';
@@ -18,6 +19,7 @@ import { clipLine } from './git.ts';
 import { counted, LISTED } from './look.ts';
 import { clipText, clipTitle, NOTES_SHOWN, runsOf } from './news.ts';
 import type { Note } from './news.ts';
+import { VERSION_TEXT, versionName } from './version.ts';
 
 export const CHECK_KEY = 'window_update_check';
 export const RUN_KEY = 'window_update_run';
@@ -31,9 +33,10 @@ export type CheckOutcome =
   /** Nothing would come: `skydeck is up to date …` or `nothing new on …`. */
   | { kind: 'current'; line: string }
   /**
-   * `count` commits on `upstream`, from HEAD's `from` to the newest, `to`; the notes of what is
-   * new they bring and how many more, the subjects of the other changes (the commits that add no
-   * note) and how many there are; whether they change the database's upgrade steps.
+   * `count` commits on `upstream`, from HEAD's `from` to the newest, `to`, and their versions
+   * (src/update/version.ts; null: not known); the notes of what is new they bring and how many
+   * more, the subjects of the other changes (the commits that add no note) and how many there are;
+   * whether they change the database's upgrade steps.
    */
   | {
       kind: 'available';
@@ -41,6 +44,8 @@ export type CheckOutcome =
       count: number;
       from: string;
       to: string;
+      fromVersion: string | null;
+      toVersion: string | null;
       notes: Note[];
       moreNotes: number;
       others: string[];
@@ -51,7 +56,7 @@ export type CheckOutcome =
     };
 
 export interface CheckRecord {
-  v: 2;
+  v: 3;
   /** The checkout the look was of: checkoutRoot's answer. */
   root: string;
   /** When the look ended (ns, decimal). */
@@ -67,6 +72,8 @@ export interface CheckRecord {
   failure: { atNs: string; line: string } | null;
   /** HEAD's full id at the look; null when the look did not get that far. */
   head: string | null;
+  /** The version of `head` (src/update/version.ts); null when not known or no head. */
+  headVersion: string | null;
   outcome: CheckOutcome;
 }
 
@@ -96,6 +103,8 @@ function hasKeys(value: Record<string, unknown>, keys: readonly string[]): boole
 const isText = (value: unknown): value is string => typeof value === 'string';
 const isDecimal = (value: unknown): value is string => isText(value) && DECIMAL.test(value);
 const isCommit = (value: unknown): value is string => isText(value) && COMMIT_ID.test(value);
+const isVersion = (value: unknown): value is string | null =>
+  value === null || (isText(value) && VERSION_TEXT.test(value));
 const isCount = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 
@@ -115,7 +124,7 @@ function isOutcome(value: unknown): value is CheckOutcome {
       return hasKeys(value, ['kind', 'line']) && isText(value['line']);
     case 'available': {
       const { upstream, count, from, to, notes, moreNotes, others, otherCount } = value;
-      const { upgradesDatabase, blocked } = value;
+      const { fromVersion, toVersion, upgradesDatabase, blocked } = value;
       return (
         hasKeys(value, [
           'kind',
@@ -123,6 +132,8 @@ function isOutcome(value: unknown): value is CheckOutcome {
           'count',
           'from',
           'to',
+          'fromVersion',
+          'toVersion',
           'notes',
           'moreNotes',
           'others',
@@ -135,6 +146,8 @@ function isOutcome(value: unknown): value is CheckOutcome {
         count > 0 &&
         isCommit(from) &&
         isCommit(to) &&
+        isVersion(fromVersion) &&
+        isVersion(toVersion) &&
         Array.isArray(notes) &&
         notes.length <= NOTES_SHOWN &&
         notes.every(isNote) &&
@@ -164,12 +177,14 @@ function asRecord(value: unknown): CheckRecord | null {
     'fetchedAtNs',
     'failure',
     'head',
+    'headVersion',
     'outcome',
   ];
   if (!hasKeys(value, keys)) {
     return null;
   }
-  const { v, root, lookedAtNs, checkedAtNs, fetchedAtNs, failure, head, outcome } = value;
+  const { v, root, lookedAtNs, checkedAtNs, fetchedAtNs, failure, head, headVersion, outcome } =
+    value;
   const failureOk =
     failure === null ||
     (isObject(failure) &&
@@ -177,7 +192,7 @@ function asRecord(value: unknown): CheckRecord | null {
       isDecimal(failure['atNs']) &&
       isText(failure['line']));
   if (
-    v !== 2 ||
+    v !== 3 ||
     !isText(root) ||
     root === '' ||
     !isDecimal(lookedAtNs) ||
@@ -185,6 +200,8 @@ function asRecord(value: unknown): CheckRecord | null {
     !(fetchedAtNs === null || isDecimal(fetchedAtNs)) ||
     !failureOk ||
     !(head === null || isCommit(head)) ||
+    !isVersion(headVersion) ||
+    (head === null && headVersion !== null) ||
     !isOutcome(outcome)
   ) {
     return null;
@@ -246,6 +263,23 @@ export function payloadText(text: string): string {
   return clipLine(sanitize(text));
 }
 
+/**
+ * The versions an available update goes between, `0.9.16 → 0.9.19` (one not known: the commit's
+ * short id); null when neither is known (the page then shows the ids alone).
+ */
+export function versionsText(outcome: Extract<CheckOutcome, { kind: 'available' }>): string | null {
+  if (outcome.fromVersion === null && outcome.toVersion === null) return null;
+  return `${versionName(outcome.fromVersion, outcome.from)} → ${versionName(outcome.toVersion, outcome.to)}`;
+}
+
+/** How the result and the running form name the commit `to`: its version as the record of the look knows it, else its short id. */
+export function nameOf(record: CheckRecord | null, to: string): string {
+  const outcome = record?.outcome;
+  return outcome?.kind === 'available' && outcome.to === to
+    ? versionName(outcome.toVersion, to)
+    : versionName(null, to);
+}
+
 /** What the page is told of a record's outcome (UpdatePayload.check). */
 export function checkPayload(record: CheckRecord): UpdateCheckPayload {
   const { outcome } = record;
@@ -261,6 +295,7 @@ export function checkPayload(record: CheckRecord): UpdateCheckPayload {
         ),
         from: outcome.from,
         to: outcome.to,
+        versions: versionsText(outcome),
         upstream: payloadText(outcome.upstream),
         // A note is sanitised and clipped again, and cut into its runs here: the page parses
         // nothing (S2 4.3).

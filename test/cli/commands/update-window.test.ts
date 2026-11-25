@@ -220,6 +220,7 @@ describe('skydeck update with a real window server (U5, U8)', () => {
   test('a window open: the server stopped before the merge, the new code’s server started after it by the copy’s own launcher; the window comes back — no Edge', async (t) => {
     const h = harness(t);
     const old = h.c.id();
+    h.c.git(h.c.root, 'tag', 'v0.9.0'); // the copy's one commit carries a version tag
     const made = h.c.push('a new module', { 'src/added.ts': 'export {};\n' });
     const opened = await runSkydeck(h.platform, ['window', '--print-url']);
     assert.equal(opened.code, 0, opened.stderr);
@@ -233,7 +234,8 @@ describe('skydeck update with a real window server (U5, U8)', () => {
     assert.equal(r.code, 0, r.stderr);
     assert.equal(
       r.stdout,
-      `1 new commit on origin/main (${short(old)}..${short(made)}):\n  ${short(made)}  a new module\nupdated to ${short(made)}\n`,
+      // The new commit's own tag has not been made: one past the copy's.
+      `1 new commit on origin/main (0.9.0 → 0.9.0+1, ${short(old)}..${short(made)}):\n  ${short(made)}  a new module\nupdated to 0.9.0+1\n`,
     );
     assert.equal(
       r.stderr,
@@ -265,6 +267,7 @@ describe('skydeck update with a real window server (U5, U8)', () => {
     const r = await runUpdate(h.platform, h.d.s);
 
     assert.equal(r.code, 0, r.stderr);
+    // No version tag in the copy: the commit's id, as before versions.
     assert.match(r.stdout, new RegExp(`\\nupdated to ${short(made)}\\n$`));
     assert.equal(
       r.stderr,
