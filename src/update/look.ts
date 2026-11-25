@@ -8,7 +8,14 @@ import type { Files } from '../platform/types.ts';
 import { SkydeckError } from '../platform/errors.ts';
 import { clip } from '../text/clip.ts';
 import { sanitize } from '../text/sanitize.ts';
-import { changedFiles, commitOf, gitFailure, GIT_MS } from './git.ts';
+import {
+  changedFiles,
+  commitOf,
+  gitFailure,
+  GIT_MS,
+  PARTIAL_CLONE_ARGS,
+  partialCloneIn,
+} from './git.ts';
 import type { Git, QuietFetchOptions } from './git.ts';
 import { NEWS_DIR, NOTE_BYTES, NOTE_FILE, NOTES_SHOWN, parseNote } from './news.ts';
 import type { Note } from './news.ts';
@@ -361,23 +368,10 @@ const OFFLINE = { offline: true } as const;
 
 /** Whether the checkout is a partial clone, whose missing objects an older git would fetch. */
 async function partialClone(git: Git): Promise<boolean> {
-  const args = [
-    'config',
-    '-z',
-    '--get-regexp',
-    '^(extensions\\.partialclone|remote\\..*\\.promisor)$',
-  ];
-  const result = await git.run(args);
+  const result = await git.run(PARTIAL_CLONE_ARGS);
   if (result.code === 1 && !result.timedOut) return false; // no such setting
-  if (result.code !== 0 || result.timedOut) throw gitFailure(args, result, GIT_MS);
-  // `<key> LF <value> NUL` (`<key> NUL` without a value): a partialclone that names a remote, or
-  // a promisor that is true.
-  return result.stdout.split('\0').some(
-    (entry) =>
-      /^extensions\.partialclone\n./i.test(entry) ||
-      // A promisor key without a value is true to git.
-      /^remote\..*\.promisor(\n(true|yes|on|1))?$/is.test(entry),
-  );
+  if (result.code !== 0 || result.timedOut) throw gitFailure(PARTIAL_CLONE_ARGS, result, GIT_MS);
+  return partialCloneIn(result.stdout);
 }
 
 /**

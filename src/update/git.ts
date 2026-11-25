@@ -6,7 +6,7 @@
 // `skydeck update`'s fetch is the exception: it is the owner's own command in their own terminal
 // (runInteractive), with no timeout. The window's fetch is the other: it never asks (fetchQuietly).
 import { SkydeckError } from '../platform/errors.ts';
-import type { Env, Platform, RunResult } from '../platform/types.ts';
+import type { Env, Ns, Platform, RunResult } from '../platform/types.ts';
 import { clip } from '../text/clip.ts';
 import { sanitize } from '../text/sanitize.ts';
 
@@ -127,8 +127,13 @@ export interface OutputOptions {
 export interface Git {
   /** The checkout (`platform.appRoot`). */
   root: string;
-  /** `git -C <root> <args>` with a timeout (GIT_MS unless given); a SkydeckError when git is not found. */
-  run(args: readonly string[], timeoutMs?: number): Promise<RunResult>;
+  /**
+   * `git -C <root> <args>` with a timeout (GIT_MS unless given) and `options` as for output(); a
+   * SkydeckError when git is not found.
+   */
+  run(args: readonly string[], timeoutMs?: number, options?: OutputOptions): Promise<RunResult>;
+  /** The platform's clock that cannot step (Clock.monotonicNs): a budget of several calls. */
+  monotonicNs(): Ns;
   /**
    * From now on every call runs in a session of its own (RunOptions.newSession): the terminal's
    * Ctrl+C and hang-up reach none of them. `skydeck update` calls it right before the merge, so that
@@ -183,7 +188,8 @@ export function gitOn(platform: Platform, root: string, gitOptions: GitOptions =
   };
   return {
     root,
-    run: (args, timeoutMs) => run(args, timeoutMs),
+    run: (args, timeoutMs, options) => run(args, timeoutMs, options),
+    monotonicNs: () => platform.clock.monotonicNs(),
     ownSessions() {
       ownSessions = true;
     },
@@ -241,6 +247,28 @@ export function gitFailure(
 ): SkydeckError {
   return new SkydeckError(
     `git ${subCommandOf(args)} failed: ${failureReason(result, timeoutMs)}; nothing was changed`,
+  );
+}
+
+/** `config` of the settings that make a checkout a partial clone (read by partialCloneIn). */
+export const PARTIAL_CLONE_ARGS: readonly string[] = [
+  'config',
+  '-z',
+  '--get-regexp',
+  '^(extensions\\.partialclone|remote\\..*\\.promisor)$',
+];
+
+/**
+ * Whether PARTIAL_CLONE_ARGS' output names a partial clone, whose missing objects a git that does
+ * not know GIT_NO_LAZY_FETCH would fetch: `<key> LF <value> NUL` (`<key> NUL` without a value), a
+ * partialclone that names a remote, or a promisor that is true.
+ */
+export function partialCloneIn(output: string): boolean {
+  return output.split('\0').some(
+    (entry) =>
+      /^extensions\.partialclone\n./i.test(entry) ||
+      // A promisor key without a value is true to git.
+      /^remote\..*\.promisor(\n(true|yes|on|1))?$/is.test(entry),
   );
 }
 
