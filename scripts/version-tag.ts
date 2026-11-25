@@ -9,14 +9,16 @@
 //   minor (`minor+1`, patch 0) when a commit after the NEAREST tagged commit (first parent; a merge
 //   compared with its first parent) adds a file with a note's name right under docs/news/
 //   (src/update/news.ts: a note changed or removed is none), else the next patch.
+// - Every run needs main as it fetched it (`origin/main`; without it a Refusal: it cannot tell).
+//   On a push, when a later commit of main's first-parent line than H carries a version tag
+//   already (H was passed over), none: H could only come out above that commit.
 // - Run by hand with `bump` (`minor` or `major`): only when H is the head of `origin/main` as this
 //   run fetched it (else a Refusal: main moved, or an old run is re-run); from the highest version
 //   tag of the history, H's own included, `major` gives `(major+1).0.0` and `minor`
 //   `major.(minor+1).0`; none at all: START.
-// - The name it computes already stands on another commit C: on a push, when C lies on main's
-//   first-parent line (`origin/main` as this run fetched it) and H on C's, before it (H was passed
-//   over: a later commit of main is tagged), none; else a Refusal that names the tag and C (a stray
-//   tag: remove it, or step past it with a run by hand).
+// - The name it computes already stands on another commit (a stray tag): a Refusal that names the
+//   tag and that commit, and says to remove it first, or which bump by hand steps past it (minor,
+//   or major when the stray tag is the next minor; none when main has no version yet).
 // - One tag per run, on H: commits pushed together get one, on the last.
 // Every git call that fails is an Error: the workflow then fails and makes nothing.
 import { NEWS_DIR, NOTE_FILE } from '../src/update/news.ts';
@@ -81,18 +83,20 @@ async function chainOf(git: GitOutput, commit: string): Promise<string[]> {
     .filter((line) => line !== '');
 }
 
-/**
- * Whether `head` was passed over by `at`: `at` lies on main's first-parent line as this run fetched
- * it (MAIN_REF), and `head` on `at`'s, before it. A commit of another branch is never so.
- */
-async function passedOver(git: GitOutput, head: string, at: string): Promise<boolean> {
-  let main: string[];
+/** The commit `origin/main` names in this run's checkout; a Refusal when it has none. */
+async function mainOf(git: GitOutput): Promise<string> {
+  let main = '';
   try {
-    main = await chainOf(git, MAIN_REF);
+    main = (await git(['rev-parse', '--verify', '--quiet', `${MAIN_REF}^{commit}`])).trim();
   } catch {
-    return false; // no main fetched: it cannot be told, so it is refused
+    // no such ref: refused below
   }
-  return main.includes(at) && (await chainOf(git, at)).includes(head);
+  if (main === '') {
+    throw new Refusal(
+      `this run cannot see main (its checkout has no ${MAIN_REF}), so it cannot tell what to tag; nothing was tagged: run it again`,
+    );
+  }
+  return main;
 }
 
 /** The tag to make on `head` (a commit, or `HEAD`), or null for none; a Refusal when it may not. */
@@ -103,20 +107,21 @@ export async function nextVersionTag(
 ): Promise<string | null> {
   const [tags, chain] = await Promise.all([git(TAGS_ARGS), chainOf(git, head)]);
   const headId = chain[0] ?? head;
+  const main = await mainOf(git);
+  const { byCommit, names } = versionTagsOf(tags);
   if (bump !== '') {
-    let main = '';
-    try {
-      main = (await git(['rev-parse', '--verify', '--quiet', `${MAIN_REF}^{commit}`])).trim();
-    } catch {
-      // no such ref: refused below
-    }
     if (main !== headId) {
       throw new Refusal(
-        `this run is not on the head of main (${headId.slice(0, 7)}; main is at ${main === '' ? 'no commit' : main.slice(0, 7)}): main moved since the run was started, or an old run was run again; start the workflow by hand again, on main`,
+        `this run is not on the head of main (${headId.slice(0, 7)}; main is at ${main.slice(0, 7)}): main moved since the run was started, or an old run was run again; start the workflow by hand again, on main`,
       );
     }
+  } else {
+    // Passed over: a later commit of main's first-parent line carries a version already, so this
+    // one never gets one (it could only come out above that commit's).
+    const mainChain = await chainOf(git, main);
+    const at = mainChain.indexOf(headId);
+    if (at > 0 && mainChain.slice(0, at).some((commit) => byCommit.has(commit))) return null;
   }
-  const { byCommit, names } = versionTagsOf(tags);
   const nearest = nearestVersion(chain, byCommit);
   const highest = highestVersion(chain, byCommit);
   let next: Version;
@@ -136,10 +141,24 @@ export async function nextVersionTag(
   const tag = tagName(next);
   if (!names.has(tag)) return tag;
   const at = names.get(tag) ?? null;
-  if (bump === '' && at !== null && (await passedOver(git, headId, at))) {
-    return null; // a later commit of main carries the version already
-  }
+  // What a run by hand can step past it with: the first of minor and major whose name is neither
+  // this one nor taken; none when there is no version on main yet (every bump is the start then).
+  const past =
+    highest === null
+      ? undefined
+      : (
+          [
+            ['minor', tagName({ major: highest.major, minor: highest.minor + 1, patch: 0 })],
+            ['major', tagName({ major: highest.major + 1, minor: 0, patch: 0 })],
+          ] as const
+        ).find(([, name]) => name !== tag && !names.has(name))?.[0];
+  const advice =
+    highest === null
+      ? 'there is no version on main yet, so only removing it lets the first one be made'
+      : past === undefined
+        ? 'no run by hand steps past it'
+        : `or run the workflow by hand with bump ${past} to step past it`;
   throw new Refusal(
-    `the next version's tag ${tag} stands already on ${at === null ? 'an object that is not a commit' : `commit ${at.slice(0, 7)}`}, which is not later on main than ${headId.slice(0, 7)}: remove that tag if it is a stray one (git push --delete origin ${tag}), or run the workflow by hand with bump minor to step past it`,
+    `the next version's tag ${tag} stands already on ${at === null ? 'an object that is not a commit' : `commit ${at.slice(0, 7)}`}, which is not later on main than ${headId.slice(0, 7)}: remove that tag first if it is a stray one (git push --delete origin ${tag}); ${advice}`,
   );
 }

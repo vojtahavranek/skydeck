@@ -6475,10 +6475,13 @@ each page's storage (follow-up F41, 12.14) unless a case asks for a context with
   minor when a commit after the nearest tagged commit (first parent) adds a note's file in
   `docs/news/`, else the next patch; by hand, the next minor or major after the highest, and only
   when the commit is the head of `origin/main` as the run fetched it, else the run fails (main
-  moved, or an old run was run again); when the next version's tag stands already on another
-  commit, none when that commit lies later on main's first-parent line (this one was passed over),
-  else the run fails with a line that names the tag and the commit and says what to do: remove a
-  stray tag, or step past it by hand with `minor`), then — after the step checks that the name is
+  moved, or an old run was run again); on a push, none when a later commit of main's first-parent
+  line already carries a version tag (this one was passed over: it could only come out above that
+  commit's); every run fails when its checkout has no `origin/main` (it cannot tell, and says so:
+  run it again); when the next version's tag stands already on another commit, the run fails with
+  a line that names the tag and the commit and says what to do: remove a stray tag first, or step
+  past it by hand with `minor` (`major` when the stray tag is the next minor; nothing but removing
+  it while main has no version yet)), then — after the step checks that the name is
   exactly `v<n>.<n>.<n>` — `git tag <tag> HEAD` and `git push origin refs/tags/<tag>`, the tag
   passed through the step's output and `env:`. No text of the event stands in a `run:` line (the input reaches the script through
   `env:`, which takes only `minor`, `major` or nothing; a tag's name is numbers only), nothing is

@@ -62,8 +62,30 @@ function scalar(text: string, where: string): Value {
   return text;
 }
 
+/**
+ * Every character is printable ASCII (0x20 to 0x7e) or a line feed: YAML takes other line breaks
+ * (a carriage return, U+0085, U+2028, U+2029) and other spaces, which could hide a line from a
+ * reader that splits at line feeds only, or make a comment of a key. The first other one fails,
+ * named by its line and its code point.
+ */
+function asciiOnly(text: string): void {
+  let line = 1;
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code === 0x0a) {
+      line += 1;
+      continue;
+    }
+    assert.ok(
+      code >= 0x20 && code <= 0x7e,
+      `line ${line}: U+${code.toString(16).toUpperCase().padStart(4, '0')} is not printable ASCII`,
+    );
+  }
+}
+
 /** The file as a Value; an assertion fails on anything this reader does not take. */
 function readWorkflow(text: string): Value {
+  asciiOnly(text);
   const raw = text.split('\n');
   for (const line of raw) {
     assert.ok(!/^\s*\t/.test(line), 'no tab in an indentation');
@@ -252,6 +274,30 @@ describe('the strict reader refuses what it does not take', () => {
   const refuses = (text: string): void => {
     assert.throws(() => readWorkflow(text), assert.AssertionError, text);
   };
+
+  test('any character but printable ASCII and LF, before anything is read: a CR, U+2028, U+0085, a no-break space, a tab', () => {
+    for (const [text, named] of [
+      ['a: 1\r\nb: 2\n', 'line 1: U+000D'],
+      ['on:\n  push: {} # x\rpull_request_target:\n', 'line 2: U+000D'],
+      ['a: 1 # x\u2028b: 2\n', 'line 1: U+2028'],
+      ['a: 1 # x\u0085b: 2\n', 'line 1: U+0085'],
+      ['a: 1\u00a0# b: 2\n', 'line 1: U+00A0'],
+      ['a:\n\tb: 1\n', 'line 2: U+0009'],
+      ['# a dash \u2014 in a comment\n', 'line 1: U+2014'],
+    ] as const) {
+      assert.throws(
+        () => readWorkflow(text),
+        (error: unknown) => {
+          assert.ok(error instanceof assert.AssertionError);
+          assert.match(
+            error.message,
+            new RegExp(`^${named.replace('+', '\\+')} is not printable ASCII`),
+          );
+          return true;
+        },
+      );
+    }
+  });
 
   test('a key twice, an anchor, a tag, a flow mapping, a tab, a second document, a dangling key', () => {
     refuses('a: 1\na: 2\n');

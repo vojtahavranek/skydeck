@@ -2657,9 +2657,11 @@ workflow, on `main`, with `bump` `minor` (`0.10.0`) or `major` (`1.0.0`): it tag
 workflow goes on from it. Versions never go backwards: the next one always follows the highest
 version tag of `main`'s history, wherever it stands, so a tag on an older commit of `main` takes
 effect from the next change on. The workflow never moves or deletes a tag; when the tag it would
-make stands already on another commit (a stray tag), its run fails and says which tag and commit:
-remove that tag (`git push --delete origin <tag>`), or run the workflow by hand with `minor` to
-step past it.
+make stands already on another commit (a stray tag), its run fails and says which tag and commit.
+Remove that tag first (`git push --delete origin <tag>`) and push again or run the workflow by
+hand; or step past it by hand, with `minor` (with `major` when the stray tag is the next minor).
+While `main` has no version yet, only removing the stray tag helps. A commit pushed while a later
+one was tagged first gets no tag of its own (it reads as `+<n>` of the tag before it).
 
 ### Updating by hand
 

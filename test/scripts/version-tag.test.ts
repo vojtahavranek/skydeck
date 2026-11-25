@@ -220,6 +220,67 @@ describe("the tag a push makes (D1')", () => {
     r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main');
     assert.equal(await r.next('minor'), 'v0.10.0');
   });
+
+  test('the advice names a bump that steps past the stray tag: major when it is the next minor; none but removing it when main has no version yet', async (t) => {
+    const refusal = async (r: Repo): Promise<string> => {
+      let message = '';
+      await assert.rejects(r.next(), (error: unknown) => {
+        assert.ok(error instanceof Refusal);
+        message = error.message;
+        return true;
+      });
+      return message;
+    };
+    // The stray tag is the next minor, and the push adds a note.
+    const minor = repo(t);
+    minor.tag('v0.9.0');
+    minor.c.git(minor.c.root, 'checkout', '--quiet', '-b', 'elsewhere');
+    minor.plain('x');
+    minor.tag('v0.10.0');
+    minor.c.git(minor.c.root, 'checkout', '--quiet', 'main');
+    minor.c.commit(minor.c.root, 'a note', { 'docs/news/2026-11-25-thing.md': note('A thing') });
+    const told = await refusal(minor);
+    assert.match(told, /tag v0\.10\.0 stands already/);
+    assert.match(
+      told,
+      /remove that tag first if it is a stray one \(git push --delete origin v0\.10\.0\); or run the workflow by hand with bump major to step past it$/,
+    );
+    minor.c.git(minor.c.root, 'push', '--quiet', 'origin', 'main');
+    assert.equal(await minor.next('major'), 'v1.0.0', 'the advice holds');
+
+    // No version tag on main, the start on a branch: nothing but removing it.
+    const none = repo(t);
+    none.c.git(none.c.root, 'checkout', '--quiet', '-b', 'elsewhere');
+    none.plain('x');
+    none.tag('v0.9.0');
+    none.c.git(none.c.root, 'checkout', '--quiet', 'main');
+    none.plain('a');
+    const start = await refusal(none);
+    assert.match(start, /tag v0\.9\.0 stands already/);
+    assert.match(
+      start,
+      /there is no version on main yet, so only removing it lets the first one be made$/,
+    );
+    assert.doesNotMatch(start, /bump/);
+  });
+
+  test('a passed-over commit run again gets no version when a later commit of main carries one, also after a tag by hand on an older commit', async (t) => {
+    const r = repo(t);
+    const old = r.c.id();
+    r.tag('v0.9.0');
+    r.plain('c1');
+    r.tag('v0.9.1');
+    const passed = r.plain('passed over');
+    r.plain('b');
+    r.tag('v0.9.2'); // its run came first
+    r.tag('v1.0.0', old); // by hand, on an old commit
+    r.c.git(r.c.root, 'push', '--quiet', 'origin', 'main');
+    r.c.git(r.c.root, 'checkout', '--quiet', '--detach', passed);
+    assert.equal(await r.next(), null, 'not v1.0.1 above its tagged descendant');
+    r.c.git(r.c.root, 'checkout', '--quiet', 'main');
+    r.plain('next');
+    assert.equal(await r.next(), 'v1.0.1', 'the next push goes on from the highest');
+  });
 });
 
 describe("a bump by hand (D1')", () => {
@@ -266,8 +327,17 @@ describe("a bump by hand (D1')", () => {
     }
     r.c.git(r.c.root, 'checkout', '--quiet', 'main');
     r.c.git(r.c.root, 'update-ref', '-d', MAIN_REF);
-    await assert.rejects(r.next('minor'), Refusal, 'no main fetched at all');
-    assert.equal(await r.next(), 'v0.9.1', 'a push does not need it');
+    for (const bump of ['', 'minor'] as const) {
+      await assert.rejects(r.next(bump), (error: unknown) => {
+        assert.ok(error instanceof Refusal);
+        assert.equal(
+          error.message,
+          `this run cannot see main (its checkout has no ${MAIN_REF}), so it cannot tell what to tag; nothing was tagged: run it again`,
+        );
+        assert.doesNotMatch(error.message, /--delete/, 'no advice to remove a tag');
+        return true;
+      });
+    }
   });
 
   test('bumpOf: empty, minor or major; anything else is none', () => {

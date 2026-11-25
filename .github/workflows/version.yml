@@ -2,8 +2,9 @@ name: Version
 
 # The version tags (design.md 8, the version line; design-step-2.md 17.5): at every push to main,
 # this workflow tags the pushed commit `v<major>.<minor>.<patch>`, the next version after the
-# nearest version tag on its first-parent history — the next minor when the pushed commits add a
-# note in docs/news/, else the next patch; the start, v0.9.0, when there is none. Run by hand
+# highest version tag on its first-parent history: the next minor when the commits since the
+# nearest tagged one add a note in docs/news/, else the next patch; the start, v0.9.0, when there is
+# none. Run by hand
 # (Actions > Version > Run workflow, on main) with `bump` it makes the next minor or major. The
 # rules are scripts/version-tag.ts, which the suite tests; this file only runs its entry and pushes
 # the one tag it names.
@@ -19,13 +20,16 @@ name: Version
 # - only in this repository: a fork that turns Actions on makes no version tags of its own (they
 #   would clash with this repository's when the fork fetches them);
 # - versions never go backwards (the next one follows the highest version tag of the history), and
-#   a run never stalls in silence: when the next version's tag stands already on another commit,
-#   the run ends green only when that commit is later on main (this one was passed over), else it
-#   fails with a line that names the tag and says what to do; a run by hand fails when main has
-#   moved since it was started (an old run run again).
+#   a run never stalls in silence: a pushed commit after which main already carries a version tag
+#   (it was passed over) gets none, green; when the next version's tag stands already on another
+#   commit, the run fails with a line that names the tag and says what to do; a run by hand fails
+#   when main has moved since it was started (an old run run again), and every run fails when its
+#   checkout cannot see main.
+# The file holds printable ASCII and line feeds only (the test refuses anything else: a carriage
+# return or another line break YAML takes could hide a line from it).
 # Runs queue in one group and are never cancelled. GitHub keeps at most one run waiting in a group:
 # a push that comes while one waits takes its place. Nothing is lost by it: the next run tags its
-# own commit by the rule over everything since the nearest tag.
+# own commit by the rule over everything since the nearest tagged commit, after the highest tag.
 on:
   push:
     branches: [main]
