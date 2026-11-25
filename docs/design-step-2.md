@@ -832,6 +832,18 @@ object, then closes stdin:
             "build": "<server build>" } }
 ```
 
+`openedNs` is the terminal's **opening stamp**: when the server opened it, the server's clock — but
+never a stamp that is not later than every opening stamp the server knows, those it gave and those
+of the terminals it found again (7.3, from their `hello`). The clock gives one value to several
+opens: it counts whole milliseconds, so two opens within one millisecond read the same value, and
+it never goes back, so while the wall clock is behind its last value it gives that value again.
+Then the next stamp is the highest known one plus 1 ns. So no two terminals of one server share an
+opening stamp, and the stamps rise in the order the terminals were opened, also across a restart
+of the server (issue #213); every order "by opening time" (7.6, 12.1) is the opening order. A kept
+terminal whose stamp is ahead of the new server's clock pulls the stamps of the terminals opened
+after it ahead too, by 1 ns each, until the clock passes it. A keeper whose hello comes late (7.3)
+is known from its hello on.
+
 `startBy` is the **start deadline**, no later than the resume lock holds: for a resume, the time
 the lock was taken plus `LOCK_TTL_NS` minus `LOCK_START_TOLERANCE_NS` (55 s, design 7.6); for a
 new session, the clock when `prepareNew` ran plus the same 55 s (it stores no row when there is
