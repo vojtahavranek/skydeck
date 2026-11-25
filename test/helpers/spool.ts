@@ -8,6 +8,11 @@ import { BOOT_A, statLine } from './platform.ts';
 export interface SpoolFields {
   event: 'SessionStart' | 'SessionEnd';
   timeNs: bigint;
+  /**
+   * #207: the `uptime` line as the hook writes it after `time_ns` (`'119174.07'`; '' when it could
+   * not read /proc/uptime). Absent: no such line, as an older hook writes.
+   */
+  uptime?: string;
   /** null: `claude_pid` is empty (and so is `stat`, as the hook does when it has no process). */
   pid: number | null;
   /** An object is written as `JSON.stringify(input) + '\n'`; a string is written unchanged. */
@@ -27,6 +32,15 @@ export interface SpoolFields {
    * has the line). Default ['claude']; null: `argv_b64` is empty.
    */
   argv?: readonly string[] | null;
+}
+
+/**
+ * The `uptime` value the hook would write for an uptime of `cs` centiseconds (`119174.07`), ''
+ * for none: for a test that writes an event of a process whose other events the real hook wrote,
+ * so that the process stays ordered by its uptimes (design 5.3 "Order", #207).
+ */
+export function uptimeText(cs: bigint | null): string {
+  return cs === null ? '' : `${cs / 100n}.${String(cs % 100n).padStart(2, '0')}`;
 }
 
 /** `${timeNs}-${pid ?? 0}-${seq}.ev` */
@@ -49,6 +63,7 @@ export function spoolText(fields: SpoolFields): string {
     'v=1',
     `event=${fields.event}`,
     `time_ns=${fields.timeNs}`,
+    ...(fields.uptime === undefined ? [] : [`uptime=${fields.uptime}`]),
     `claude_pid=${fields.pid ?? ''}`,
     `session_env=${sessionEnv}`,
     `entrypoint_env=${fields.entrypointEnv ?? 'cli'}`,

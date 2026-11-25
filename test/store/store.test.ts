@@ -117,9 +117,9 @@ function sessionPr(store: Store, sessionId = S1, url = URL1): SessionPrRow | und
 }
 
 describe('migrations', () => {
-  test('there are five migrations and the schema version is their count', () => {
-    assert.equal(MIGRATIONS.length, 5);
-    assert.equal(SCHEMA_VERSION, 5);
+  test('there are six migrations and the schema version is their count', () => {
+    assert.equal(MIGRATIONS.length, 6);
+    assert.equal(SCHEMA_VERSION, 6);
   });
 
   test('migration 1 is the SQL of design 9.2 character for character', () => {
@@ -168,6 +168,16 @@ describe('migrations', () => {
     assert.ok(match, 'design-step-2.md 10.2 has no "Migration 5" SQL block');
     assert.equal(MIGRATIONS[4], match[1]);
   });
+
+  test('migration 6 (#207) is the SQL of design-step-2.md 10.2 character for character', () => {
+    const design = readFileSync(
+      join(import.meta.dirname, '..', '..', 'docs', 'design-step-2.md'),
+      'utf8',
+    );
+    const match = /^\*\*Migration 6\*\* [^\n]*:\n\n```sql\n([\s\S]*?)\n```$/m.exec(design);
+    assert.ok(match, 'design-step-2.md 10.2 has no "Migration 6" SQL block');
+    assert.equal(MIGRATIONS[5], match[1]);
+  });
 });
 
 describe('openStore', () => {
@@ -203,7 +213,7 @@ describe('openStore', () => {
       foreignKeys: 1,
     });
     assert.equal(mode(path), 0o600);
-    assert.equal(store.getKv('schema_version'), '5');
+    assert.equal(store.getKv('schema_version'), '6');
     const tables = rawRows(
       path,
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
@@ -274,7 +284,7 @@ describe('openStore', () => {
 
     const second = reopen();
 
-    assert.equal(second.getKv('schema_version'), '5');
+    assert.equal(second.getKv('schema_version'), '6');
     assert.equal(second.events().length, 1);
   });
 
@@ -563,9 +573,12 @@ describe('latestEventOfProcess', () => {
     store.insertEvent(ev({ spoolName: 'a.ev', timeNs: T0 }));
     store.insertEvent(ev({ spoolName: 'b.ev', timeNs: T0 + 2n * SEC }));
 
-    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, 51234567, T0 + SEC)?.spoolName, 'a.ev');
     assert.equal(
-      store.latestEventOfProcess(BOOT_A, 4242, 51234567, T0 + 3n * SEC)?.spoolName,
+      store.latestEventOfProcess(BOOT_A, 4242, 51234567, { timeNs: T0 + SEC })?.spoolName,
+      'a.ev',
+    );
+    assert.equal(
+      store.latestEventOfProcess(BOOT_A, 4242, 51234567, { timeNs: T0 + 3n * SEC })?.spoolName,
       'b.ev',
     );
   });
@@ -574,8 +587,8 @@ describe('latestEventOfProcess', () => {
     const { store } = fresh(t);
     store.insertEvent(ev({ timeNs: T0 }));
 
-    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, 51234567, T0)?.id, 1);
-    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, 51234567, T0 - 1n), null);
+    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, 51234567, { timeNs: T0 })?.id, 1);
+    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, 51234567, { timeNs: T0 - 1n }), null);
   });
 
   test('events at the same time are told apart by id', (t) => {
@@ -583,28 +596,37 @@ describe('latestEventOfProcess', () => {
     store.insertEvent(ev({ spoolName: 'a.ev' }));
     store.insertEvent(ev({ spoolName: 'b.ev', kind: 'end', detail: 'exit' }));
 
-    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, 51234567, T0)?.spoolName, 'b.ev');
+    assert.equal(
+      store.latestEventOfProcess(BOOT_A, 4242, 51234567, { timeNs: T0 })?.spoolName,
+      'b.ev',
+    );
   });
 
   test('a null process start matches only rows whose proc_start is NULL', (t) => {
     const { store } = fresh(t);
     store.insertEvent(ev({ spoolName: 'a.ev', procStart: 51234567 }));
 
-    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, null, T0 + SEC), null);
+    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, null, { timeNs: T0 + SEC }), null);
 
     store.insertEvent(ev({ spoolName: 'b.ev', procStart: null }));
 
-    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, null, T0 + SEC)?.spoolName, 'b.ev');
-    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, 51234567, T0 + SEC)?.spoolName, 'a.ev');
+    assert.equal(
+      store.latestEventOfProcess(BOOT_A, 4242, null, { timeNs: T0 + SEC })?.spoolName,
+      'b.ev',
+    );
+    assert.equal(
+      store.latestEventOfProcess(BOOT_A, 4242, 51234567, { timeNs: T0 + SEC })?.spoolName,
+      'a.ev',
+    );
   });
 
   test('another boot, pid or process start gives null', (t) => {
     const { store } = fresh(t);
     store.insertEvent(ev());
 
-    assert.equal(store.latestEventOfProcess(BOOT_B, 4242, 51234567, T0 + SEC), null);
-    assert.equal(store.latestEventOfProcess(BOOT_A, 4243, 51234567, T0 + SEC), null);
-    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, 51234568, T0 + SEC), null);
+    assert.equal(store.latestEventOfProcess(BOOT_B, 4242, 51234567, { timeNs: T0 + SEC }), null);
+    assert.equal(store.latestEventOfProcess(BOOT_A, 4243, 51234567, { timeNs: T0 + SEC }), null);
+    assert.equal(store.latestEventOfProcess(BOOT_A, 4242, 51234568, { timeNs: T0 + SEC }), null);
   });
 });
 

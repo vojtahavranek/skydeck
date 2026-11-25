@@ -363,7 +363,9 @@ function switchByHook(d: TestDeck, how: 'resume' | 'clear', atNs: Ns): void {
 
 /** The session the process 4242 holds by its latest event (null after an end). */
 function heldBy4242(d: TestDeck): string | null {
-  const latest = d.deck.store.latestEventOfProcess(BOOT_A, 4242, START, T0 + 3600n * SEC);
+  const latest = d.deck.store.latestEventOfProcess(BOOT_A, 4242, START, {
+    timeNs: T0 + 3600n * SEC,
+  });
   return latest === null || latest.kind === 'end' ? null : latest.sessionId;
 }
 
@@ -481,4 +483,67 @@ test('a failure of the database itself ends the reconcile at once', (t) => {
   });
   assert.throws(() => reconcile(deck), /database is locked/);
   assert.equal(attempts, 1);
+});
+
+test("#207: an observed event carries the machine's uptime, and is stamped not below the process's stamps", (t) => {
+  const d = setup(t);
+  d.proc.setUptimeCs(4_200n);
+  // A hook stamped this process's start 5 s ahead of the clock now (the wall clock has stepped
+  // back since), without a launch command: reconcile adds one, as an observed event.
+  const fields = {
+    event: 'SessionStart' as const,
+    timeNs: T0 + 5n * SEC,
+    uptime: '41.00',
+    pid: 4242,
+    input: hookInput('SessionStart', S1, { source: 'startup' }),
+    argv: null,
+  };
+  writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, 1)), spoolText(fields));
+  assert.equal(ingestSpool(d.deck).ingested, 1);
+
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  const [made] = observed(d);
+  assert.deepEqual(made?.argv, ['claude', '--model', 'opus']);
+  assert.equal(made?.uptimeCs, 4_200n);
+  assert.equal(made?.timeNs, T0 + 5n * SEC + 1n, 'just after the stored stamp, not the clock');
+  const latest = d.deck.store.latestEventOfProcess(BOOT_A, 4242, START, null);
+  assert.equal(latest?.kind, 'observed');
+});
+
+test("#207: the process's latest event is the latest in its order, not by stamp: a /clear stamped before the start it follows is the one the live file agrees with", (t) => {
+  const d = setup(t);
+  const hook = (
+    sessionId: string,
+    source: string,
+    timeNs: Ns,
+    uptime: string,
+    seq: number,
+  ): void => {
+    const fields = {
+      event: 'SessionStart' as const,
+      timeNs,
+      uptime,
+      pid: 4242,
+      input: hookInput('SessionStart', sessionId, { source }),
+      argv: ['claude', '--model', 'opus'],
+    };
+    writeFileSync(join(d.deck.places.spoolDir, spoolName(fields, seq)), spoolText(fields));
+  };
+  hook(S1, 'startup', T0 + 5n * SEC, '41.00', 1);
+  hook(S2, 'clear', T0 + 3n * SEC, '41.50', 2); // the wall clock stepped back between them
+  assert.equal(ingestSpool(d.deck).ingested, 2);
+  live(d, { sessionId: S2 }, T0 + 10n * SEC);
+  d.clock.advanceMs(20_000);
+
+  assert.deepEqual(reconcile(d.deck), { observed: 0 }, 'the hook spoke last: nothing observed');
+});
+
+test('#207: with the clock past every stamp, the observed event is stamped with the clock; without an uptime it has none', (t) => {
+  const d = setup(t);
+  hookStart(d);
+  live(d, { sessionId: S2 });
+  assert.deepEqual(reconcile(d.deck), { observed: 1 });
+  const [made] = observed(d);
+  assert.equal(made?.timeNs, T0);
+  assert.equal(made !== undefined && 'uptimeCs' in made, false);
 });

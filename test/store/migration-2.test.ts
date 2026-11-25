@@ -26,6 +26,7 @@ import {
   uncommittedWrite,
   withoutParkedColumn,
   withoutTicketStatus,
+  withoutUptime,
 } from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
 
@@ -124,8 +125,9 @@ function opened(t: TestContext, path: string, options?: { busyTimeoutMs?: number
 function assertMigrated(schema1Dump: DatabaseDump, newest: DatabaseDump): void {
   const before = withMigration3(schema1Dump);
   // F19: the open goes on with migration 4, which only adds the table ticket_status, empty, and
-  // F44's migration 5, which only adds the column parked_at_ns to session_meta, NULL in every row.
-  const after = withoutTicketStatus(withoutParkedColumn(newest));
+  // F44's migration 5, which only adds the column parked_at_ns to session_meta, NULL in every row;
+  // #207: and with migration 6, which only adds the nullable column uptime_cs to events.
+  const after = withoutUptime(withoutTicketStatus(withoutParkedColumn(newest)));
   assert.deepEqual(
     after.schema.filter((entry) => !isAttention(entry)),
     before.schema,

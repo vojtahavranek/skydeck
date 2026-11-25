@@ -3,7 +3,8 @@
  * what `bin/skydeck-hook` writes and what Claude Code's hook inputs look like (design principle 9).
  * Pure: it reads no file and calls no program; whether a path exists is asked through a callback.
  */
-import type { Ns } from '../platform/types.ts';
+import { uptimeCsFromText } from '../platform/time.ts';
+import type { Ns, UptimeCs } from '../platform/types.ts';
 import {
   absolutizePathFlags,
   copiedSessionOf,
@@ -16,6 +17,12 @@ import { argvFromCmdline, procStartFromStat } from './procstat.ts';
 export interface SpoolEvent {
   spoolName: string;
   timeNs: Ns;
+  /**
+   * #207: the `uptime` key as centiseconds (`uptimeCsFromText`): the machine's uptime when the
+   * hook took `time_ns`. Absent when the key is missing (an older hook), empty (/proc/uptime could
+   * not be read) or in another form: never an error.
+   */
+  uptimeCs?: UptimeCs;
   kind: 'start' | 'end';
   detail:
     'startup' | 'resume' | 'clear' | 'compact' | 'fork' | 'unknown' | 'switch' | 'exit' | 'other';
@@ -146,7 +153,9 @@ function recordedCommand(encoded: string): string[] | null {
  * The hook writes a value that contained a newline or a carriage return as empty, and a claude_pid
  * that is not all digits as empty (name part 0), so pwd, session_env and entrypoint_env may be
  * empty: empty means "unknown", never a valid value. Keys other than v, event, time_ns and boot_id
- * may be missing, with the same meaning; keys this version does not know are ignored.
+ * may be missing, with the same meaning; keys this version does not know are ignored (so a skydeck
+ * from before #207 reads a file with `uptime` as before). An `uptime` that is not seconds with two
+ * decimals gives no `uptimeCs` and no error.
  *
  * The launch command is normalised: `argv` is storableArgv(absolutizePathFlags(recorded, cwd,
  * exists)), so no positional argument, no removed flag (with its values) and no value of an unknown
@@ -177,6 +186,7 @@ export function parseSpoolFile(
     throw new SpoolParseError('claude_pid is not digits');
   const pid = pidText === '' ? 0 : Number(pidText);
   if (!Number.isSafeInteger(pid)) throw new SpoolParseError('claude_pid is too large');
+  const uptimeCs = uptimeCsFromText(keys.get('uptime') ?? '');
 
   let parsed: unknown;
   try {
@@ -209,6 +219,7 @@ export function parseSpoolFile(
   return {
     spoolName: name,
     timeNs,
+    ...(uptimeCs === null ? {} : { uptimeCs }),
     kind: isStart ? 'start' : 'end',
     detail,
     rawDetail,

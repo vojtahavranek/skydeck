@@ -111,6 +111,10 @@ CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
   // adds a nullable column, so a reader of schema 4 still reads correctly; an older skydeck refuses
   // the database at its open.
   'ALTER TABLE session_meta ADD COLUMN parked_at_ns INTEGER;  -- F44: when the user parked the session; NULL for none',
+  // Migration 6 (#207): the SQL of design-step-2.md 10.2, character for character. It only adds a
+  // nullable column, so a reader of schema 5 still reads correctly; an older skydeck refuses the
+  // database at its open.
+  "ALTER TABLE events ADD COLUMN uptime_cs INTEGER;  -- #207: /proc/uptime at the event in centiseconds, which orders one process's events; NULL for none",
 ];
 
 export const SCHEMA_VERSION: number = MIGRATIONS.length;

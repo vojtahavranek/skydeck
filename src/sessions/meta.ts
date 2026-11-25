@@ -11,6 +11,7 @@ import type { Ns } from '../platform/types.ts';
 import { sanitize } from '../text/sanitize.ts';
 import type { MetaPatch } from '../store/types.ts';
 import type { Deck } from './deck.ts';
+import { ACTIVITY_STARTS } from './derive.ts';
 import type { ListRow } from './list.ts';
 import { readTicket } from './ticket.ts';
 
@@ -103,11 +104,20 @@ export function discardKeptNote(deck: Deck, sessionId: string): void {
 /**
  * Hides the session from now on (7.1), and ends its parking in the same statement (follow-up F44:
  * Open, Parked and Done exclude one another, so every caller of this ends a parking). The session
- * itself is not touched.
+ * itself is not touched. The done time is the clock now, but never below what would make the
+ * session active again (a start, a transcript's input): the wall clock can be behind such a stamp
+ * after it stepped back, and the session would then never be hidden (#207; a parking has the same
+ * rule for its input, `parkTime`). A stamp from a clock that was far ahead keeps it hidden until
+ * there is activity stamped after that stamp.
  */
 export function markDone(deck: Deck, sessionId: string): void {
   const now = deck.platform.clock.nowNs();
-  deck.store.updateMeta(sessionId, { doneAtNs: now, parkedAtNs: null }, now);
+  const latest = deck.store.latestActivityNs(sessionId, ACTIVITY_STARTS);
+  deck.store.updateMeta(
+    sessionId,
+    { doneAtNs: latest !== null && latest > now ? latest : now, parkedAtNs: null },
+    now,
+  );
 }
 
 /**

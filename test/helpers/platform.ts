@@ -155,6 +155,8 @@ export interface FakeProc extends Proc {
   setFdTarget(pid: number, fd: number, target: string | null): void;
   /** The ports tcpListening finds listening; null: /proc/net/tcp* cannot be read. */
   setTcpListening(ports: readonly number[] | null): void;
+  /** What uptimeCs answers from now on (#207). */
+  setUptimeCs(cs: bigint | null): void;
 }
 
 export function fakeProc(
@@ -166,11 +168,14 @@ export function fakeProc(
     tcpListening?: readonly number[] | null;
     /** What kernelRelease answers; default '6.6.0-test' (follow-up F20). */
     kernelRelease?: string | null;
+    /** What uptimeCs answers; default null: the server's own events carry none (#207). */
+    uptimeCs?: bigint | null;
   } = {},
 ): FakeProc {
   let bootId = init.bootId ?? null;
   const kernelRelease = init.kernelRelease === undefined ? '6.6.0-test' : init.kernelRelease;
   let memAvailableMb = init.memAvailableMb ?? null;
+  let uptimeCs = init.uptimeCs ?? null;
   let listening = init.tcpListening === undefined ? [] : init.tcpListening;
   const fdTargets = new Map<string, string>();
   const processes = new Map<number, FakeProcess>(
@@ -199,6 +204,10 @@ export function fakeProc(
     },
     memAvailableMb: () => memAvailableMb,
     kernelRelease: () => kernelRelease,
+    uptimeCs: () => uptimeCs,
+    setUptimeCs: (cs) => {
+      uptimeCs = cs;
+    },
     setBootId: (id) => {
       bootId = id;
     },

@@ -23,12 +23,13 @@ import {
   isTicketStatusEntry,
   schema1Database,
   withoutParkedColumn,
+  withoutUptime,
 } from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
 
 const TICKET = 'https://tickets.example.com/browse/ABC-12';
 
-/** The newest schema version, as kv holds it (F44: an open goes on with migration 5). */
+/** The newest schema version, as kv holds it (F44 and #207: an open goes on with migrations 5 and 6). */
 const NEWEST = String(SCHEMA_VERSION);
 
 /**
@@ -74,14 +75,15 @@ function opened(t: TestContext, path: string): Store {
 }
 
 /**
- * `after` is `before` (a schema-3 database) migrated to 4: sqlite_master is as it was and holds
+ * `newest` is `before` (a schema-3 database) migrated to 4: sqlite_master is as it was and holds
  * migration 4's table and its key's index besides; every row of every table is as it was, but kv
  * schema_version, which is the newest; `ticket_status` is empty.
  */
 function assertMigrated(before: DatabaseDump, newest: DatabaseDump): void {
   // F44: the open goes on with migration 5, which only adds the column parked_at_ns to
-  // session_meta, NULL in every row.
-  const after = withoutParkedColumn(newest);
+  // session_meta, NULL in every row; #207: and with migration 6, which only adds the nullable
+  // column uptime_cs to events.
+  const after = withoutUptime(withoutParkedColumn(newest));
   assert.deepEqual(
     after.schema.filter((entry) => !isTicketStatusEntry(entry)),
     before.schema,
