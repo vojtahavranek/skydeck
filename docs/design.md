@@ -1190,24 +1190,27 @@ could not be resumed; see above`).
   running code is in, wherever it is run from, with `, modified` after the date when tracked files
   differ from that commit, and `<version> (commit unknown)` when git is missing, the app root is
   not a git checkout (git's search stops there), or an answer is not a commit or does not come
-  within 2 seconds. The version is that commit's: `<major>.<minor>.<patch>`, the first two numbers
-  of `"version"` in the commit's `package.json` (set by hand, by a deliberate decision; its third
-  number is always 0 and means nothing), and the number of commits of the commit's first-parent
-  history after the one that last changed that pair (that one is `.0`; every pull request is
-  squashed into one commit, so it counts merged changes). It is read from git's objects (never the
-  work tree) and fetches nothing; when git cannot count — a shallow clone that does not reach the
-  commit that set the pair, a partial clone, a call that fails or does not answer in time, a
-  `package.json` in the history that cannot be read, more than 100 changes of it without a change
-  of the pair — it is the pair alone (`0.9`), and the pair of the running code's `package.json`
-  when not even HEAD's can be read; never a wrong third number (src/update/version.ts). Six git
-  calls, all within the 2 seconds from the line's start: `log -1` and `status --porcelain
-  --untracked-files=no` side by side with the version's four rounds (the partial-clone settings
-  and whether the history is shallow side by side; the first-parent commits that change
-  `package.json`, at most 100; their `package.json` in one `cat-file --batch`; the count after the
-  one that changed the pair), never through a shell, without the variables that point git at
-  another repository (`GIT_DIR` and its kin, as for `skydeck update`), with no optional lock, so
-  that nothing is written in the checkout, and with `GIT_NO_LAZY_FETCH=1`; `--version` never fails
-  and prints nothing on stderr.
+  within 2 seconds. The version is that commit's: a version is a git tag `v<major>.<minor>.<patch>`
+  (decimal numbers without leading zeros; nothing else is a version tag, `v1.2` or `v1.2.3-rc1`
+  are not) on a commit of `main`, made by the workflow Version (design-step-2.md 17.5) at every
+  push to `main`: the next minor when the pushed commits add a note in `docs/news/` (a change a
+  user can see), else the next patch; the first, `v0.9.0`; a major or minor by hand, by the owner
+  (the workflow run by hand, or a tag pushed). A commit's version is the nearest version tag on its
+  first-parent history (the highest when a commit carries several): `0.9.16` at the tag, `0.9.16+3`
+  three commits past it (a merge whose tag has not arrived yet, commits of the checkout's own).
+  With none reachable — no tag made yet, a shallow clone that does not reach one, a fetch that
+  brings no tags (`remote.<name>.tagOpt=--no-tags`), more than 10,000 commits past one, a call that
+  fails or does not answer in time — there is no version: the line says `unversioned (<short
+  commit>, <commit date>)`, and every other place shows the commit ids as it did before versions;
+  never a guess (src/update/version.ts). `package.json`'s `"version"` is `0.0.0` and means
+  nothing. The tags reach an installation by the fetches skydeck already makes (`skydeck update`,
+  the window's check): git brings the tags that point at the commits it has. Four git calls side
+  by side, each within the 2 seconds: `log -1`, `status --porcelain --untracked-files=no`, and the
+  version's two (`for-each-ref` of the tags, `rev-list --first-parent` of HEAD), never through a
+  shell, without the variables that point git at another repository (`GIT_DIR` and its kin, as for
+  `skydeck update`), with no optional lock, so that nothing is written in the checkout, and with
+  `GIT_NO_LAZY_FETCH=1` (they read only refs, commits and tag objects, which a partial clone has);
+  `--version` never fails and prints nothing on stderr.
   (2) `Claude Code <version>`: the first line `<claudeCommand> --version` prints (no shell, stdin
   closed, doctor's environment without the launcher's own variables as in design-step-2.md 5.2,
   5 seconds, at most 4 KiB read, control characters dropped, at most 60 characters kept),

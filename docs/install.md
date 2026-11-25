@@ -145,11 +145,13 @@ bin/skydeck --version
 It prints one line: the version, the commit the checkout is at and the date of that commit, such as
 `0.9.16 (f1fce49, 2026-11-25)`. `, modified` follows the date when files git tracks in the checkout
 were changed since that commit (a new file of your own does not count), and
-`0.9 (commit unknown)` means git could not tell (git is missing, or the folder is not a git
-checkout). The version's first two numbers are set by hand in `package.json`, and only a deliberate
-decision changes them; the last one is how many changes were merged since they last changed,
-counted by git (each merged pull request adds one), and it is left out (`0.9`) when git cannot count
-them, in a shallow clone for one. Give this line when you report a problem. With a `node` older than 24.12 it prints one
+`unversioned (commit unknown)` means git could not tell (git is missing, or the folder is not a
+git checkout). The version is a tag of the repository's `main`, made at every change that is
+merged: a change you can see (one that brings a note of what is new) raises the second number
+(`0.10.0`), a fix the third (`0.9.17`); `0.9.16+2` means two commits past `0.9.16` whose own tag
+your checkout has not fetched yet. `unversioned` in place of a version means that git finds no
+version tag behind the commit (a clone made before the first tag, or one that fetches no tags);
+"The version" under "Updating" says more. Give this line when you report a problem. With a `node` older than 24.12 it prints one
 line and exits 1:
 
 ```
@@ -2630,6 +2632,28 @@ window is always brought back, also when the window that clicked was closed mean
 
 The log, `<stateDir>/update.log`, holds the update's own lines, as the terminal would have shown
 them; `skydeck uninstall --purge` removes it with the server's logs.
+
+### The version
+
+skydeck's version, `0.9.16`, is a tag of the repository, `v0.9.16`, made on `main` by one GitHub
+workflow, Version (`.github/workflows/version.yml`), at every change that is merged: the next
+minor version (`0.10.0`) when the change brings a note of what is new (`docs/news/`), else the next
+patch version (`0.9.17`). Nobody writes a version in a change; `package.json`'s `"version"` is
+`0.0.0` and means nothing. The tags reach your checkout with the fetches skydeck already makes
+(`skydeck update`, the window's check): git brings the tags that point at the commits it has.
+`skydeck --version` and doctor's first line, Settings' group Updates (`skydeck 0.9.16`), the
+update dialog's bottom line (`0.9.16 → 0.9.19 on origin/main`, with the commits after it), and
+`skydeck update` name it. A commit past the nearest version tag reads `0.9.16+2` (two commits past
+it: a change whose tag has not been fetched yet, or commits of your own). Without a version tag
+behind the commit (a clone that fetches no tags, `remote.origin.tagOpt=--no-tags`; a shallow clone
+that does not reach one) there is no version: `skydeck --version` says `unversioned`, and every
+other place shows the commits' ids as before. With `fetch.prune` and `fetch.pruneTags` set, a
+fetch also removes a tag only your checkout has.
+
+For the repository's owner, the first two numbers by hand: on GitHub, Actions > Version > Run
+workflow, on `main`, with `bump` `minor` (`0.10.0`) or `major` (`1.0.0`): it tags the head of
+`main`. Or push a tag yourself (`git tag v1.0.0 <commit of main>`, `git push origin v1.0.0`): the
+workflow goes on from it. It never moves or deletes a tag.
 
 ### Updating by hand
 

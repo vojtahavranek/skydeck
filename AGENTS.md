@@ -137,7 +137,8 @@ terminal of their own, first with a new session in a scratch folder they can los
   `docs/design-step-2.md` (the window); a change in behaviour updates it in the same pull request.
 - A change a user can see adds a note in `docs/news/` (its README says the format): what they will
   see and how to use it, in plain words, no internal names. Tests and internal work add none.
-- The version (`skydeck --version`, `0.9.16`): its first two numbers are `"version"` in
-  `package.json`, changed only by a deliberate decision (a pull request that sets `0.10.0` or
-  `1.0.0`; the third number written there stays 0); the last one is counted by git, one per
-  commit on main since the pair last changed, so no pull request touches it.
+- The note decides the version (a git tag the workflow Version makes at every merge to main): a
+  pull request that adds or changes something a user can see adds a note in `docs/news/` and
+  becomes the next minor version; a fix, internal work or tests add NO note and become the next
+  patch version. Nobody writes a version or a tag in a pull request (`package.json` stays
+  `0.0.0`); the major number is the owner's.

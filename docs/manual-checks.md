@@ -3620,45 +3620,55 @@ Not tried before this check was written: all of it, in Edge.
 ## The version number
 
 The check of the version number (design.md 8, the version line; design-step-2.md 12.1, 12.13,
-16.5; [install.md](install.md), "Check that skydeck starts" and "Updating"): W54, on your own
-installation, at the first update after this change. It applies nothing but in its last step, and
-only when the dialog lists commits. The tests count versions on throwaway repositories in the
-sandbox; only here does the count meet your own checkout, its history and your clone. Commands are
-typed in W, a WSL terminal of your own (never a `!` command inside Claude Code).
+16.5, 17.5; [install.md](install.md), "Check that skydeck starts" and "The version"): W54, on your
+own installation, once the workflow Version has made its first tags (the merge of this change makes
+`v0.9.0`). It applies nothing but in its last step, and only when the dialog lists commits. The
+tests make tags on throwaway repositories in the sandbox and read the workflow file as text; only
+here do the workflow's runs on GitHub, your remote's tags and your clone meet. Commands are typed
+in W, a WSL terminal of your own (never a `!` command inside Claude Code).
 
 ## W54. The version number
 
 Setup: skydeck updated to a commit that has the version number (`skydeck update`, W32; an update
-into it from the window ends with `updated to <id>`, once: the window before it named no
-version); the window open. In W: `cd ~/skydeck`, then `git rev-parse --is-shallow-repository`
-(write it down) and `git log --first-parent --format=%h -n 3` (write down the ids).
+into it from the window ends with `updated to <id>`, once: the window before it named no version);
+the window open. On GitHub, the repository's Actions: the workflow `Version` ran for the merge of
+this change and is green; its log names the tag it made. In W: `cd ~/skydeck`, then `git fetch
+--quiet origin`, `git tag --list 'v*'` (write the tags down) and `git log --first-parent --format=%h
+-n 3` (write down the ids).
 
-1. **The version line.** In W: `skydeck --version`. Expected: one line, `0.9.<n> (<id>, <date>)`:
-   the id the first of the setup's three, the date that commit's; `, modified` only when `git
-   status --short` lists a tracked file. With the setup's `true` (a shallow clone) it may read `0.9
-   (<id>, <date>)`: the pair alone, which is right there; write that down. `git status --short`
-   prints what it printed before (the version is read, nothing is written).
+1. **The version line.** In W: `skydeck --version`. Expected: one line, `<version> (<id>, <date>)`:
+   the id the first of the setup's three, the date that commit's; the version the highest tag of
+   that commit (`0.9.0` for the merge of this change), or `<tag>+<n>` when HEAD is n commits past
+   the nearest tagged commit; `, modified` only when `git status --short` lists a tracked file. When
+   the setup's list of tags is empty, write that down: then it says `unversioned (…)`, which is
+   right for a clone without tags. `git status --short` prints what it printed before (the version
+   is read, nothing is written).
 2. **doctor.** In W: `skydeck doctor`. Expected: its first line `info     skydeck` and the line of
    step 1, word for word.
-3. **Settings.** Click the gear. Expected: the group `Updates` shows `skydeck 0.9.<n>`, the
+3. **Settings.** Click the gear. Expected: the group `Updates` shows `skydeck <version>`, the
    version of step 1, above its `Last check: …` line. Click `Check now`: the version line stays
    as it is.
 4. **The dialog**, only when the title bar shows `Update available` (else write down "left out:
    up to date" and leave steps 4 and 5 out). In W: `skydeck update --check`. Expected: its first
-   line `<k> new commits on origin/main (0.9.<n> → 0.9.<m>, <id>..<id>):` with `<m>` = `<n>` +
-   `<k>` (or the next pair at `.0` and up, when one of the new commits changes the first two
-   numbers in `package.json`); the other lines as in W32. Click `Update available`. Expected: small
-   at the bottom `0.9.<n> → 0.9.<m> on origin/main  <id> → <id>`, the same versions and ids, the
-   ids in the terminal's font.
+   line `<k> new commits on origin/main (<version> → <version>, <id>..<id>):`, the new version
+   the highest tag of the newest commit (`+<n>` when its own tag has not been made yet) — the next
+   minor when a listed commit brings a note (`what is new:` lists it), else the next patch —; the
+   other lines as in W32. Click `Update available`. Expected: small at the bottom `<version> →
+   <version> on origin/main  <id> → <id>`, the same versions and ids, the ids in the terminal's
+   font.
 5. **Update now**, only when you want the update now. Click `Update now`. Expected: `skydeck is
-   being updated to 0.9.<m>. The window comes back by itself.`, then the reload and the bar
-   `updated to 0.9.<m>`. In W, `skydeck --version` prints `0.9.<m> (…)`, and Settings'
-   group `Updates` says `skydeck 0.9.<m>`.
+   being updated to <new version>. The window comes back by itself.`, then the reload and the bar
+   `updated to <new version>`. In W, `skydeck --version` names it, and Settings' group `Updates`
+   says `skydeck <new version>`.
+6. **The workflow**, after a merge of your own that brings a note (or the next one that does).
+   Expected: in GitHub's Actions a green `Version` run for it, and in W, after `git fetch --quiet
+   origin`, `git tag --points-at origin/main` prints the next minor tag; after a merge without a
+   note, the next patch tag. Nothing else in the repository changed (no branch, no other tag).
 
 Leaves behind: the checkout as it was (or, after step 5, at the new commit), the remote-tracking
-refs as `git fetch` leaves them.
+refs and tags as `git fetch` leaves them.
 
 Write down: for each step whether it went as expected, and the words where they differ; the
-setup's `is-shallow-repository`; whether the versions read well to you beside the ids.
+setup's tags; whether the versions read well to you beside the ids.
 
-Not tried before this check was written: all of it, on your installation.
+Not tried before this check was written: all of it, on your installation and on GitHub.

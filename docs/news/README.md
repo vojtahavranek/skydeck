@@ -10,6 +10,10 @@ A change a user can see adds a note: what they will see and how to use it, in pl
 internal names (no file, function or issue names, no plan steps). Tests and internal work add none.
 A note is not changed or removed once it is merged: an update shows the notes that are new to it.
 
+A note also decides the version: a change merged with a note added here becomes the next minor
+version (`0.10.0`), one without a note (a fix, internal work, tests) the next patch version
+(`0.9.17`). The workflow Version tags it; nobody writes a version in a change.
+
 ## The format
 
 The file is `docs/news/<yyyy-mm-dd>-<name>.md`, the date it was written and a short name of
