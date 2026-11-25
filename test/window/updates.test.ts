@@ -247,7 +247,7 @@ describe('when a check runs', () => {
     for (let i = 0; i < 3; i++) w.updates.tick();
     await flush();
     assert.equal(w.fetches(), 0);
-    assert.equal(w.lookCalls().length, 0, 'only the version is counted');
+    assert.equal(w.lookCalls().length, 0, 'only the version is read');
 
     const answer = await w.updates.check();
     assert.equal(w.fetches(), 1);
@@ -1178,7 +1178,7 @@ describe('Update now: the start of the updater', () => {
     ]);
     assert.notEqual(join(w.seam, 'bin', 'skydeck'), join(process.cwd(), 'bin', 'skydeck'));
     assert.match(readFileSync(log, 'utf8'), LOG_LINE);
-    // No version is known of the scripted commit (no package.json): the short id names it.
+    // No version is known of the scripted commit (no version tag): the short id names it.
     assert.deepEqual(answer.update.applying, { to: NEW, sinceNs: String(T0), name: 'fedcba9' });
     assert.equal(answer.update.log, log);
   });
@@ -1860,6 +1860,35 @@ describe('the versions (S2 16.5)', () => {
       if (updateCheck === 'off') assert.equal(w.runner.calls.length, counted, 'counted once');
       assert.equal(w.fetches(), updateCheck === 'off' ? 0 : 1);
     }
+  });
+
+  test("Settings' version follows every look: the tag a check's fetch brought shows at once; a look that cannot tell leaves it", async (t) => {
+    const w = world(t, {
+      updateCheck: 'off',
+      repo: { fetched: OLD, versions: { [OLD]: { tag: 'v0.9.16', distance: 1 } } },
+    });
+    w.updates.tick();
+    await flush();
+    assert.equal(w.updates.payload().version, '0.9.16+1', 'the start');
+
+    // The check's fetch brings the tag made for HEAD.
+    w.repo.versions[OLD] = { tag: 'v0.9.17', distance: 0 };
+    const checked = await w.updates.check();
+    assert.equal(checked.version, '0.9.17');
+    assert.deepEqual(checked.check, {
+      state: 'current',
+      summary: 'skydeck is up to date (main at 0.9.17, 0123456, as origin/main)',
+    });
+
+    // The dialog's look too.
+    w.repo.versions[OLD] = { tag: 'v0.9.18', distance: 0 };
+    assert.equal((await w.updates.look()).version, '0.9.18');
+
+    // A look that cannot tell (detached HEAD) leaves the version as it was.
+    w.repo.branch = null;
+    const cannot = await w.updates.look();
+    assert.equal(cannot.check?.state, 'cannot');
+    assert.equal(cannot.version, '0.9.18');
   });
 
   test('no version tag reachable, or a call that fails: no version (Settings shows none); a marked sandbox without the seam runs no git', async (t) => {

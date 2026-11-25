@@ -166,8 +166,8 @@ const SET_RIGHT_RUNS = [
  * note (`<n> changes`, open from the start, when it brings no note; none when every commit adds
  * one); the database note when it changes the database's upgrade steps; why it cannot be applied
  * as it is and the command once that is set right, for one that is blocked; a refusal of `Update
- * now`; and small at the bottom `<old version> → <new version> on <upstream>` with the two ids
- * after it (the ids alone when the server knows neither version) and, for one that can be applied,
+ * now`; and small at the bottom `<old version> → <new version> on <upstream> (<old> → <new>)`, the
+ * ids in brackets (the ids alone when the server knows neither version) and, for one that can be applied,
  * the command for a terminal. Up to date: its summary; one that cannot tell: why, and the command
  * once that is set right; none yet: that no check was made.
  * @param {UpdateCheckPayload | null} check
@@ -247,7 +247,13 @@ export function dialogModel(check, refusal = null) {
     runs:
       check.versions === null
         ? [code(from), plain(' → '), code(to), plain(` on ${check.upstream}`)]
-        : [plain(`${check.versions} on ${check.upstream}  `), code(from), plain(' → '), code(to)],
+        : [
+            plain(`${check.versions} on ${check.upstream} (`),
+            code(from),
+            plain(' → '),
+            code(to),
+            plain(')'),
+          ],
   });
   if (check.blocked === null) {
     after.push({ kind: 'meta', runs: [plain('In a terminal instead: '), code('skydeck update')] });

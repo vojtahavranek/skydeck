@@ -36,7 +36,7 @@ const LOG = '/home/you/.local/state/skydeck/update.log';
 const LINES = [
   '▾ 1 change',
   'the new commit',
-  '0.9.16 → 0.9.19 on origin/main  0123456 → 5d6e7f8',
+  '0.9.16 → 0.9.19 on origin/main (0123456 → 5d6e7f8)',
   'In a terminal instead: skydeck update',
 ];
 const RUNNING = 'skydeck is being updated to 0.9.19. The window comes back by itself.';
@@ -494,7 +494,7 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
         'a',
         `This checkout cannot be updated as it is: ${why}`,
         'Once that is set right, in a WSL terminal of your own: skydeck update',
-        '0.9.16 → 0.9.19 on origin/main  0123456 → 5d6e7f8',
+        '0.9.16 → 0.9.19 on origin/main (0123456 → 5d6e7f8)',
       ]);
       assert.deepEqual(blocked.buttons, ['Close']);
       await page.keyboard.press('Escape');

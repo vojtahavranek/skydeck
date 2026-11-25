@@ -226,7 +226,7 @@ function versionAt(w: World, rev: string): string {
  * then the two ids.
  */
 function bottom(w: World, blocked = false): string[] {
-  const range = `${versionAt(w, 'HEAD')} → ${versionAt(w, 'origin/main')} on origin/main  ${w.c.id().slice(0, 7)} → ${w.c.id('origin/main').slice(0, 7)}`;
+  const range = `${versionAt(w, 'HEAD')} → ${versionAt(w, 'origin/main')} on origin/main (${w.c.id().slice(0, 7)} → ${w.c.id('origin/main').slice(0, 7)})`;
   return blocked ? [range] : [range, 'In a terminal instead: skydeck update'];
 }
 

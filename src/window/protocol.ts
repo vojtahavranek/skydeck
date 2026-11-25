@@ -854,8 +854,8 @@ export interface UpdatePayload {
   /** Milestone 2: an update started from a window runs — to which commit (its full id), since
    *  when, and its name for the running form (its version, else its short id); null: none. */
   applying: { to: string; sinceNs: NsText; name: string } | null;
-  /** The version of the server's checkout (`0.9.16`, or the pair alone), for the settings screen;
-   *  null until it is known. */
+  /** The version of the server's checkout (`0.9.16`, or `0.9.16+2` past its tag), for the settings
+   *  screen: read at the server's first tick, then each look's; null until then, and without one. */
   version: string | null;
   /** The update's log, `<stateDir>/update.log`: where a page that loses its server sends the user. */
   log: string;

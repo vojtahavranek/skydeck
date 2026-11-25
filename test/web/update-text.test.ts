@@ -121,19 +121,20 @@ describe("the dialog's body", () => {
     assert.equal(UPDATE_TEXTS.terminal, 'In a terminal instead: skydeck update');
   });
 
-  test("the bottom line with the versions the server gives: `<old> → <new> on <upstream>`, then the ids small after it in the terminal's font", () => {
+  test("the bottom line with the versions the server gives: `<old> → <new> on <upstream>`, then the ids in brackets in the terminal's font", () => {
     const model = dialogModel(available({ versions: '0.9.16 → 0.9.19' }));
     assert.deepEqual(reads(model).slice(-2), [
-      '(meta) 0.9.16 → 0.9.19 on origin/main  1546b37 → c75af0e',
+      '(meta) 0.9.16 → 0.9.19 on origin/main (1546b37 → c75af0e)',
       '(meta) In a terminal instead: skydeck update',
     ]);
     const meta = model.after.at(-2);
     assert.ok(meta !== undefined && meta.kind === 'meta');
     assert.deepEqual(meta.runs, [
-      { text: '0.9.16 → 0.9.19 on origin/main  ', code: false },
+      { text: '0.9.16 → 0.9.19 on origin/main (', code: false },
       { text: '1546b37', code: true },
       { text: ' → ', code: false },
       { text: 'c75af0e', code: true },
+      { text: ')', code: false },
     ]);
   });
 

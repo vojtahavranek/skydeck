@@ -25,9 +25,9 @@
  * - A server sends no stored outcome before its own first check or look has ended.
  * - The versions (src/update/version.ts): each look names HEAD's and the upstream's, kept in the
  *   record (version 3) and sent as the dialog's `versions`; at its first tick, whatever the
- *   setting says, the server reads its checkout's once without the network (`version`, for the
+ *   setting says, the server reads its checkout's without the network (`version`, for the
  *   settings screen; null without one, and in a marked sandbox without the seam, where no git
- *   runs). The running form and the result name `to` by the version the look Update now made
+ *   runs), and every look that gets as far as HEAD gives it anew. The running form and the result name `to` by the version the look Update now made
  *   gives it (`nameOf`), else by its short id.
  * - Update now (milestone 2, S2 16.5 "Update now"): `apply(to)` is refused while the server
  *   stops, an update runs, a check runs or a restore runs, and unless a look made now says
@@ -267,11 +267,14 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   /** An update started from this server: since when, to which commit and its name; null: none runs. */
   let applying: { to: string; sinceNs: string; name: string } | null = null;
   /**
-   * The version of the checkout (src/update/version.ts), read once at the first tick; null until
-   * then, and when it has none (S2 16.5, the settings screen).
+   * The version of the checkout (src/update/version.ts; S2 16.5, the settings screen): read at the
+   * first tick, then the HEAD's version of every look that got that far (a check, the dialog's
+   * look), so that a tag the check's fetch brought shows; null until then, and when it has none.
    */
   let version: string | null = null;
   let versionAsked = false;
+  /** A look has given the version: the first tick's read, when it ends later, changes nothing. */
+  let versionFromLook = false;
   /** apply() has passed its refusals and not yet started the process or failed. */
   let starting = false;
   /** How many of the dialog's looks ran to their end: Update now's look must be one of them. */
@@ -369,6 +372,11 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   const keep = (next: CheckRecord): void => {
     if (stopped) return;
     record = next;
+    // A look that got as far as HEAD and the upstream gives HEAD's version as it is now.
+    if (next.outcome.kind !== 'cannot') {
+      version = next.headVersion;
+      versionFromLook = true;
+    }
     try {
       writeCheck(deck.store, next);
     } catch (error) {
@@ -638,19 +646,20 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   };
 
   /**
-   * The checkout's version, once (S2 16.5, the settings screen): without the network, each call
-   * within GIT_MS; in a marked sandbox without the seam no git runs and there is none.
+   * The checkout's version at the start (S2 16.5, the settings screen): without the network, each
+   * call within GIT_MS; in a marked sandbox without the seam no git runs and there is none. A look
+   * that ended before it keeps its own.
    */
   const countVersion = (): void => {
     if (git === null) return;
     void versionOf(versionGitOf(git), 'HEAD', GIT_MS)
-      .then((counted) => {
-        if (stopped) return;
-        version = counted;
+      .then((read) => {
+        if (stopped || versionFromLook) return;
+        version = read;
         tell();
       })
       .catch((error: unknown) => {
-        if (!stopped) log(`update check: the version could not be counted (${failureKind(error)})`);
+        if (!stopped) log(`update check: the version could not be read (${failureKind(error)})`);
       });
   };
 
