@@ -686,12 +686,12 @@ export interface BannerPayload {
   /** A restore runs in the server, from any page or command: nothing more can be started. */
   running: boolean;
 }
-/** S2 12.4's three reasons, in their order. */
-export type AttentionReason = 'asks' | 'ended' | 'finished';
+/** S2 12.4's four reasons, in their order (`unread`: the user's mark). */
+export type AttentionReason = 'asks' | 'ended' | 'finished' | 'unread';
 /** S2 12.4: why a row needs you. `detail`: for `asks` the live file's waitingFor, sanitised,
  *  trimmed and cut to 120 UTF-16 units with `…` (plan B13; null without one, or when it is blank
  *  once sanitised); else null. `sinceNs`: asks — the file's statusUpdatedAt, else updatedAt;
- *  ended — window_end_ns; finished — turn_ended_ns; null when not known. Display only (S2 10.2):
+ *  ended — window_end_ns; finished — turn_ended_ns; unread — unread_ns; null when not known. Display only (S2 10.2):
  *  the order is decided by the counter. */
 export interface AttentionPayload {
   reason: AttentionReason;

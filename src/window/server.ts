@@ -95,6 +95,7 @@ import { createTick } from './tick.ts';
 import { createUpdates } from './updates.ts';
 import type { Tick } from './tick.ts';
 import { buildListMessage, keptNow, openRows } from './view/build.ts';
+import { withoutUnread } from './view/attention.ts';
 import { restoreOffer } from './view/search/switcher.ts';
 import { windowTerminal } from './window-terminal.ts';
 import { loadXterm } from './xterm.ts';
@@ -251,7 +252,8 @@ function attentionParts(deps: {
       view: NOTIFIER_VIEW,
       selected: null,
       nowNs: deck.platform.clock.nowNs(),
-      attention: attention.facts(),
+      // S2 13: the user's mark unread plays no part in "starts to need you".
+      attention: withoutUnread(attention.facts()),
       openOrder: deps.openOrder(),
     });
     const rows = new Map(message.sections.flatMap((section) => section.rows).map((r) => [r.id, r]));

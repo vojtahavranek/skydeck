@@ -220,6 +220,8 @@ describe('C1: the rows each combination of a word, the chips, Done and Show done
             seenSeq: null,
             windowEndSeq: 1,
             windowEndNs: NOW - SEC,
+            unreadSeq: null,
+            unreadNs: null,
           },
         ],
         [
@@ -230,6 +232,8 @@ describe('C1: the rows each combination of a word, the chips, Done and Show done
             seenSeq: null,
             windowEndSeq: 2,
             windowEndNs: NOW - SEC,
+            unreadSeq: null,
+            unreadNs: null,
           },
         ],
       ]),

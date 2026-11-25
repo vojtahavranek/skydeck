@@ -313,6 +313,8 @@ function marksOf(over: Partial<AttentionMarks>): AttentionMarks {
     seenSeq: null,
     windowEndSeq: null,
     windowEndNs: null,
+    unreadSeq: null,
+    unreadNs: null,
     ...over,
   };
 }
@@ -485,4 +487,97 @@ test('a parked row still in the kept order places no row of Open: Open is as if 
   );
   assert.deepEqual(ids(withParked, 'open'), ids(without, 'open'));
   assert.deepEqual(ids(withParked, 'parked'), [S1]);
+});
+
+// --- the mark unread (S2 12.4): counted as every reason, quiet when parked ---------------------
+
+/**
+ * S1 runs and is marked unread (the mark at 7); S2 does not run, marked unread at 6; S3 is parked
+ * and marked unread; S4 is done and marked unread (listed with done ones shown); S5 finished a
+ * turn (turn end at 2) and S6 needs nothing; all in one group `G`.
+ */
+function unreadWorld(): { list: ReturnType<typeof rows>; facts: AttentionFacts } {
+  const list = rows(
+    [
+      session(S1, { title: 'unread running', runs: true, pid: 9001 }),
+      session(S2, { title: 'unread stopped', ago: 2n * MIN }),
+      session(S3, { title: 'unread parked', ago: 3n * MIN, parkedAgo: MIN }),
+      {
+        ...session(S4, { title: 'unread done', ago: 4n * MIN }),
+        hidden: true,
+        doneAtNs: NOW - SEC,
+      },
+      session(S5, { title: 'finished', runs: true, pid: 9005 }),
+      session(S6, { title: 'quiet', ago: 5n * MIN }),
+    ],
+    { metas: [S1, S2, S3, S4, S5, S6].map((id) => meta(id, { group: 'G' })) },
+  );
+  const facts: AttentionFacts = {
+    marks: new Map([
+      [S1, marksOf({ unreadSeq: 7, unreadNs: NOW - 9n * SEC })],
+      [S2, marksOf({ unreadSeq: 6, unreadNs: NOW - SEC, seenSeq: 5 })],
+      [S3, marksOf({ unreadSeq: 8, unreadNs: NOW })],
+      [S4, marksOf({ unreadSeq: 9, unreadNs: NOW })],
+      [S5, marksOf({ turnEndedSeq: 2, turnEndedNs: NOW - 2n * SEC })],
+    ]),
+    live: new Map([
+      [S1, liveOf('busy')],
+      [S5, liveOf('idle')],
+    ]),
+  };
+  return { list, facts };
+}
+
+test('unread: a row marked unread needs you, running or not, after those that finished, the oldest mark first; parked it is quiet; done, not unread', () => {
+  const { list, facts } = unreadWorld();
+  const message = buildListMessage(
+    input({ rows: list, attention: facts, view: { showDone: true } }),
+  );
+  assert.deepEqual(rowIn(message, S1).attention, {
+    reason: 'unread',
+    detail: null,
+    sinceNs: String(NOW - 9n * SEC),
+  });
+  assert.equal(rowIn(message, S2).attention?.reason, 'unread');
+  assert.equal(rowIn(message, S3).attention?.reason, 'unread', 'parked: the mark shows');
+  assert.equal(rowIn(message, S4).attention, null, 'done: no mark');
+  assert.deepEqual(
+    [S1, S2, S3, S4, S5, S6].map((id) => rowIn(message, id).needsYou),
+    [true, true, false, false, true, false],
+  );
+  assert.deepEqual(message.needYou, { count: 3, order: [S5, S2, S1] });
+});
+
+test('unread: a closed block counts a row marked unread as needing you', () => {
+  const { list, facts } = unreadWorld();
+  const message = buildListMessage(
+    input({
+      rows: list,
+      attention: facts,
+      view: {
+        closed: [
+          { section: 'open', group: 'G' },
+          { section: 'week', group: 'G' },
+        ],
+      },
+    }),
+  );
+  assert.deepEqual(
+    message.sections.flatMap((s) => s.closedStacks.map((c) => [s.name, c.size, c.needYou])),
+    [
+      ['open', 2, 2],
+      ['week', 2, 1],
+    ],
+  );
+});
+
+test('unread: the switcher ranks a row marked unread `need`, after those that finished; a parked one `parked`', () => {
+  const { list, facts } = unreadWorld();
+  const message = buildListMessage(input({ rows: list, attention: facts, view: { switcher: '' } }));
+  assert.ok(message.switcher);
+  assert.deepEqual(
+    message.switcher.items.filter((item) => item.rank === 'need').map((item) => item.row.id),
+    [S5, S2, S1],
+  );
+  assert.equal(message.switcher.items.find((item) => item.row.id === S3)?.rank, 'parked');
 });

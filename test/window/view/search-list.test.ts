@@ -159,6 +159,8 @@ function marksOf(over: Partial<AttentionMarks>): AttentionMarks {
     seenSeq: null,
     windowEndSeq: null,
     windowEndNs: null,
+    unreadSeq: null,
+    unreadNs: null,
     ...over,
   };
 }

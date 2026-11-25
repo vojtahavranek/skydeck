@@ -20,6 +20,9 @@ export interface AttentionMarks {
   seenSeq: number | null;
   windowEndSeq: number | null;
   windowEndNs: Ns | null;
+  /** Migration 7: the user's mark unread (S2 12.4), its order and its time; null for none. */
+  unreadSeq: number | null;
+  unreadNs: Ns | null;
 }
 /** A session's status at the server's last look (plan B4, B5). `status` and `waitingFor` are the
  *  live file's, as found (not sanitised); `sinceNs` its statusUpdatedAt, else updatedAt. */
@@ -45,7 +48,12 @@ const DETAIL_MAX = 120;
 const STATUS_STRENGTH: readonly string[] = ['waiting', 'busy', 'idle'];
 
 /** S2 12.4's order of the reasons (B6: Ctrl+Shift+J goes through them in this order). */
-const REASON_ORDER: Readonly<Record<AttentionReason, number>> = { asks: 0, ended: 1, finished: 2 };
+const REASON_ORDER: Readonly<Record<AttentionReason, number>> = {
+  asks: 0,
+  ended: 1,
+  finished: 2,
+  unread: 3,
+};
 
 function strength(status: string | null): number {
   const index = status === null ? -1 : STATUS_STRENGTH.indexOf(status);
@@ -132,7 +140,9 @@ function staleTurnEnd(marks: AttentionMarks, live: LiveStatus): boolean {
  * finished — turnEndedSeq is greater than seenSeq (or seenSeq is null), the row is running and its
  * LiveStatus is `idle` (B6), and that idle status did not begin after the recorded turn end (not
  * turnEndedNs and the LiveStatus's sinceNs both known and sinceNs the later: a turn end of an
- * earlier run, ruled on review 2).
+ * earlier run, ruled on review 2);
+ * unread — the user's mark (S2 12.4): unreadSeq is greater than seenSeq (or seenSeq is null), and
+ * the row is not done (a done session needs nothing); running or not, parked or not.
  */
 export function attentionOf(row: ListRow, facts: AttentionFacts): AttentionPayload | null {
   const running = row.state !== 'not-running';
@@ -155,17 +165,38 @@ export function attentionOf(row: ListRow, facts: AttentionFacts): AttentionPaylo
   ) {
     return { reason: 'finished', detail: null, sinceNs: nsText(marks.turnEndedNs) };
   }
+  if (!row.done && unseen(marks.unreadSeq, marks.seenSeq)) {
+    return { reason: 'unread', detail: null, sinceNs: nsText(marks.unreadNs) };
+  }
   return null;
 }
 
+/**
+ * S2 13 (the mark unread): the facts without the user's unread marks, which the notifier judges
+ * "starts to need you" on — the user made the mark, so it never notifies, and a turn that ends
+ * unseen on an unread session still starts to need you (finished). A copy; `facts` is not changed.
+ */
+export function withoutUnread(facts: AttentionFacts): AttentionFacts {
+  const marks = new Map<string, AttentionMarks>();
+  for (const [id, mark] of facts.marks) {
+    marks.set(id, mark.unreadSeq === null ? mark : { ...mark, unreadSeq: null, unreadNs: null });
+  }
+  return { marks, live: facts.live };
+}
+
 /** What orders a row inside its reason (B6): the status time of one that asks, the counter of an
- *  end; null when not known. */
+ *  end or of the mark unread; null when not known. */
 function orderKey(id: string, reason: AttentionReason, facts: AttentionFacts): bigint | null {
   if (reason === 'asks') {
     return facts.live.get(id)?.sinceNs ?? null;
   }
   const marks = facts.marks.get(id);
-  const seq = reason === 'ended' ? marks?.windowEndSeq : marks?.turnEndedSeq;
+  const seq =
+    reason === 'ended'
+      ? marks?.windowEndSeq
+      : reason === 'finished'
+        ? marks?.turnEndedSeq
+        : marks?.unreadSeq;
   return seq === undefined || seq === null ? null : BigInt(seq);
 }
 
@@ -180,7 +211,7 @@ function compareKeys(a: bigint | null, b: bigint | null): number {
 /**
  * B6's order of rows that need you, by id: those that ask by their status time (the longest
  * waiting first; unknown last), then those that ended by window_end_seq, then those that finished
- * by turn_ended_seq (the oldest first); ties by session id.
+ * by turn_ended_seq, then those marked unread by unread_seq (the oldest first); ties by session id.
  */
 export function attentionOrder(
   entries: readonly { id: string; attention: AttentionPayload }[],

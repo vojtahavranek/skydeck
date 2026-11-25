@@ -152,7 +152,7 @@ Design 3's words keep their meaning. New:
 | Open's order | The order of the rows under Open (12.1): computed until the first move by hand, then the server's, kept per session (`window_open_order`, 10.2), so that a row keeps the place it was first drawn at (follow-up F42). |
 | secret, launch token | The long-lived key page and server prove to each other, and the one-use key that lets a new window obtain it (8.2.2, 15.2). |
 | size owner | The page whose size a terminal has (8.2.6). |
-| needs you | A session the user should look at (12.4): it asks something, a turn finished and was not seen, or its window terminal ended unexpectedly. |
+| needs you | A session the user should look at (12.4): it asks something, a turn finished and was not seen, its window terminal ended unexpectedly, or the user marked it unread. |
 | seen | The user has looked at a session in a window (12.4). |
 | runtime directory | `<runtimeDir>`, section 4.2. |
 | pty | A pseudo-terminal: the pair of devices a terminal program runs on. The program reads its keys from it and writes its screen to it; whoever holds the other end (the "master") is its terminal. |
@@ -3041,8 +3041,8 @@ command-line flag. Check W48.
   terminal`, `starting…`).
 - A row that needs you (12.4) has two lines whatever its state, an ended one that is not running
   too: the second is its reason, in place of the state line — `needs you · <detail> · 3m` (`needs
-  you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m` —,
-  its age from the time 12.4 names, left out while that time is not known; the first line then
+  you · 3m` without a detail), `finished · not seen · 2m`, `ended unexpectedly · not seen · 2m`,
+  `marked unread · 2m` —, its age from the time 12.4 names, left out while that time is not known; the first line then
   has no age (stage B, plan B13).
 - A session that is not running has one line: state icon, the ticket key (dim, monospaced) and the
   title, marks (`crashed`, `crashed mid-turn`, `expires 3d`, `expired`, `done`: design 6.3's marks
@@ -3297,7 +3297,7 @@ under both forced themes.
 
 ### 12.4 Attention: needs you and seen
 
-A session **needs you** for one of three reasons, in this order:
+A session **needs you** for one of four reasons, in this order:
 
 1. **asks**: a holder's live-session file has status `waiting` (a dialog is open: permission, a
    question); the detail is `waitingFor`. It ends when the status changes. (Design 6.2's state
@@ -3306,9 +3306,17 @@ A session **needs you** for one of three reasons, in this order:
    `ended-unexpectedly` at the next refresh: `window_end_seq` is set (10.2). It ends when seen.
 3. **finished**: `turn_ended_seq` is greater than `seen_seq`, and the session is running and idle.
    It ends when seen or when the next turn starts.
+4. **unread**: the user marked it so (`u` or the header's `Unread`, 12.5, 12.9): `unread_seq` is
+   greater than `seen_seq` (migration 7, 10.2), and the session is not done (a done session needs
+   nothing); running or not, so a row under Recent or Earlier can be marked too. It ends when the
+   user comes back to it (below: "The mark unread") or marks it read.
+
+A session with several reasons shows the first. A turn that ends unseen on an unread session shows
+`finished`, and coming back clears both; once the earlier reason ends without a look (an ask is
+answered, the next turn starts), the mark shows again.
 
 **A parked session is quiet** (follow-up F44, 12.15; the owner's decision of 2026-11-24). Its marks
-— asks, finished, ended — show in its row as on any row (the bar, the bold title, the reason's
+— asks, finished, ended, unread — show in its row as on any row (the bar, the bold title, the reason's
 line), but it does not **count** as needing you: it sends no desktop notification (13), the title
 bar's `need you` count and the window title's `(n)` leave it out (it is counted by its state
 instead, so the parts still add up), Ctrl+Shift+J skips it, a closed block's caption does not count
@@ -3343,10 +3351,11 @@ value is not later. The detail of an ask is the `waitingFor` sanitised (design 7
 cut to 120 UTF-16 units with `…`, never inside a surrogate pair (a `waitingFor` has no length limit,
 and the list is sent whole); one that is blank once sanitised (empty, or only white space) is no
 detail. The time a row shows is the file's `statusUpdatedAt` (else `updatedAt`) for an ask,
-`window_end_ns` for an end of the window, `turn_ended_ns` for a finished turn. Ctrl+Shift+J's order,
-in full: those that ask by that time, the longest-waiting first and an unknown time last; then those
-that ended by `window_end_seq`; then those that finished by `turn_ended_seq`, the oldest first; ties
-by session id.
+`window_end_ns` for an end of the window, `turn_ended_ns` for a finished turn, `unread_ns` for the
+mark unread. Ctrl+Shift+J's order, in full: those that ask by that time, the longest-waiting first
+and an unknown time last; then those that ended by `window_end_seq`; then those that finished by
+`turn_ended_seq`; then those marked unread by `unread_seq`; each the oldest first; ties by session
+id.
 
 **When a window end is recorded** (stage B's plan, B10). At each refresh that worked — after the
 exits it settled (7.8) — each terminal of the window in state `ended` or `lost` (a keeper that died:
@@ -3401,7 +3410,8 @@ makes the row. The hold is `src/window/seen.ts` on the server's clock (`Clock.af
 clock does not move).
 
 Ctrl+Shift+J selects the next session that needs you: those that ask, the longest-waiting first;
-then those that ended; then those that finished, oldest first. Pressed again it goes on; after the
+then those that ended; then those that finished, oldest first; then those marked unread, the
+oldest mark first. Pressed again it goes on; after the
 last it starts over.
 
 How the page goes (stage B, plan B14): Ctrl+Shift+J selects the id of the list's `needYou.order`
@@ -5270,10 +5280,13 @@ still parked.
 ## 13. Notifications
 
 - When a session starts to need you (12.4: a change from not needing you to needing you, for any
-  of the three reasons) and no window has focus, the server sends `notify` to **one** page: the
+  of the first three reasons; the user's mark unread plays no part) and no window has focus, the server sends `notify` to **one** page: the
   one that had focus last (several windows would otherwise each raise one).
 - How the server judges it (stage B's plan, B12): over the rows a page without a filter lists,
-  against its last judgement. A session whose reason changes does not start to need you; one that
+  against its last judgement. It judges without the marks unread (`withoutUnread` of
+  `src/window/view/attention.ts`): the user made the mark, so marking a session unread never
+  notifies, and a turn that ends unseen on an unread session starts to need you (`finished`) and
+  notifies as on any other. A session whose reason changes does not start to need you; one that
   stops needing you and needs you again later does. The first judgement records and notifies
   nothing, so that a restart does not notify everything that already needed you, and it is made
   only once the server has read the marks and a refresh has worked, with that refresh's window
