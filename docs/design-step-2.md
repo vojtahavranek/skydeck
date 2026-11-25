@@ -4349,7 +4349,8 @@ Open) moves nothing later either; a run of `d` marks one row each time (ruled 20
 of plan D task 37). The header's Done leaves the selection to the main rule.
 
 **After `w`** (follow-up F44, 12.15; the owner's decision of 2026-11-24, beside the exception for
-`d` and on purpose unlike it). When this page's own `w` in the list has parked the selected session,
+`d` and on purpose unlike it). When this page's own `w` in the list has parked the selected session
+— at once, or through either button of the dialog "Park" (12.15), the End button too —,
 the selection moves to the row after it in the section it left, else the one before it, else none
 (no row and no caption is selected, the right side shows no session, and no later list selects a
 row by itself: the most-recently-used order is kept, so Ctrl+Tab goes back to the session just
@@ -4372,7 +4373,8 @@ Otherwise a key pressed in that moment would hand the keyboard to the next row's
 next key to the next row (`w` then Enter on a stopped row resumes it; the next letter belongs to
 it), acting on a session the user never chose. So `w` followed at once by Enter or Esc leaves the selection,
 and the keyboard, with the parked session's own terminal (a prompt typed there brings it back, as
-any prompt does). The
+any prompt does); the same after a button of the dialog "Park" (the terminal of a session it ended
+is closed: the keys reach no program). The
 keyboard stays in the list, so a run of `w` parks one row each and types nothing into the next
 session, also when that one runs. **`w` on a row under Parked** un-parks it and keeps the selection
 with the session: it goes back under Open (or Recent, Earlier), stays selected, and the list follows
@@ -4386,8 +4388,8 @@ the end dialog: while this page's own `w`, `d` or end of a session has not been 
 yet, a `w` and a `d` on that session do nothing (the header's Park and Done too), and from issue
 #166 an `r` (and the header's Restart) opens no dialog "Restart" for it, so a second key on
 the row just marked never un-parks what `w` parked, marks done what `w` parked, or parks what `d`
-marked. The end dialog needs no check of its own: it opens only past `d`'s, and while it is shown it
-is modal, so no list key and no header control is reachable. The second click of
+marked. The end dialog needs no check of its own: it opens only past `d`'s (as the dialog "Park"
+past `w`'s), and while it is shown it is modal, so no list key and no header control is reachable. The second click of
 a double click on a button of the header, or on a pull request's × in its dialog, does nothing
 (ruled for plan D task 38), nor does it on a block's caption, wherever the list has moved under
 it: such a double click opens or closes the block once, and its second click selects no row, takes
@@ -4553,6 +4555,11 @@ open.` with Undo when it has not ended within 10 seconds, or `End session: <why>
 The terminal is closed by the server once the program ended (also after the 10 seconds), so the row
 leaves Open and, done, is hidden; after `d` in the list the selection follows 12.9's rule for a row
 gone after `d` (a row of Open: nothing else is selected).
+
+**The dialog "Park"** (follow-up F44, 12.15; the owner's decision of 2026-11-25) is this dialog for
+`w` and the header's `Park`, in a parking's words: `End session and park` ends the session as `End
+session and mark done` does and parks it in place of marking it done. One rule differs: there the
+keyboard starts on the End button unless the session is working (12.15 says why the owner chose so).
 
 A session ended so is an ordinary ended one: once its program has exited the server stores an `end`
 of detail `exit` for each of its holders that belonged to the terminal (no spool file, raw detail
@@ -5051,8 +5058,8 @@ Done (design 7.1), and the list shows them in a section of their own after Open 
 the last input known then, design 7.1) and clears its done mark in the same statement; `unpark`
 clears the time.
 Parking a session that is parked already writes nothing and keeps its first time (a second page's
-act, the command's). Nothing parks by itself, and parking never stops or moves a process: a running
-session goes on running, under Parked.
+act, the command's). Nothing parks by itself, and the mark never stops or moves a process: a running
+session goes on running, under Parked, unless the user also ends it in the dialog "Park" (below).
 
 **The three states.** Open, Parked and Done exclude one another: parking a done session makes it
 parked and no longer done; marking a parked session done ends its parking (12.10); a session that is
@@ -5068,15 +5075,62 @@ not, and neither does a key typed and not sent. The stored time stays: nothing c
 `unpark` brings it back at once. A session left by `/clear` stays parked, and the session the
 program goes on with is not parked: the mark is not carried (design 7.1, F40's offer is unchanged).
 
-**In the window: one key and one button, no dialog** (the owner's decisions of 2026-11-24). The
+**In the window: one key and one button** (the owner's decisions of 2026-11-24). The
 list's key `w` ("waits", 12.9) parks the selected session, and un-parks a parked one; the header has
 the same control after Done, `Park` (tooltip `park it: it waits under Parked (w)`), `Unpark` on a
 parked row (tooltip `back under Open (w)`), 12.5. The page picks `park` or `unpark` from the row's
-`parked`. Parking a running session leaves it running; no dialog asks anything. A park shows the
+`parked`. The mark itself stops nothing (design principle 6); whether a running session also ends
+is the user's separate answer in a dialog (below). A park shows the
 toast `Parked: listed under Parked. It comes back when you send it a prompt.` — for a running or
 starting session `Parked: listed under Parked, and it keeps running. It comes back when you send it
 a prompt.` — with Undo, which gives back what was there: `unpark`, or `done` for a session that was
-done. Both ways: the Undo after `d` on a parked session parks it again (its age starts again, a named
+done.
+
+**Parking a running session asks whether to end it** (the owner's decision of 2026-11-25: a parked
+session need not hold its resources, so ending it is offered first). `w` or the header's `Park` on
+a session not parked whose row carries `endable` (12.10: it runs in the row's terminal of the
+window and that terminal can be ended; also one marked done, since parking ends its done mark)
+parks nothing yet: the dialog "Park", 12.10's dialog in a parking's words, asks — `Park: <title>`
+(cut and isolated as there), `This session is still running.`, while it works `It is working:
+ending it now stops the current turn.`, and `End session and park` (the primary one), `Park, keep
+it running`, `Cancel`. **The keyboard starts on `End session and park`** when the session is not
+working as the dialog opens, on `Park, keep it running` when it is (the owner's choice: parking is
+mostly done to sessions that wait, and ending them is what saves their resources). This is the one
+difference from Done's dialog, whose keyboard always starts on its second button so that a word
+ending in `d` typed into the list by mistake never ends a session; here a word with a `w` typed into
+the list by mistake and then Enter or Space ends an idle session. The owner accepted that cost: the
+session is listed under Parked and resumed from its row. When the session turns working while the
+dialog is shown, a keyboard on the End button moves to the second button; nothing moves it by
+itself towards the End button, so a session that stops working meanwhile leaves the keyboard where
+it is. Everything else is 12.10's: Esc is Cancel; Tab and →, Shift+Tab and ← walk the three and stay
+inside; Enter or Space press at a fresh press only (the `w` that opened it, an auto-repeat, a key
+held since before it opened press nothing); Ctrl+Shift+H is refused while it is shown and opening
+it hides the key help; it belongs to its session and terminal and closes by itself, nothing done,
+with the toast `It stopped by itself: nothing was parked.`, `It was parked in another window:
+nothing was ended.`, `It was marked done in another window: nothing was ended or parked.` or `It
+left the list: nothing was parked.`; Cancel changes nothing and gives the keyboard back. `Park,
+keep it running` is the park above, with its running words and Undo. `End session and park` sends
+`end-session` with `mark` `park` (8.2.3): the server refuses it where it refuses Done's end (a
+session parked already in place of one marked done), parks the session in the same act (its number
+is freed at once) and ends it as Done's End does — the same 10 seconds, the terminal closed once the
+program ended, the end recorded as a deliberate exit, so never `ended-unexpectedly`, never needing
+you, never offered by restore. The toast says `Ending the session…` until the answer: `Ended and
+parked: listed under Parked.` with Undo (which un-parks it: it shows under Recent and can be
+resumed; it does not bring the program back), `Parked. It has not ended yet: end it inside claude
+if it stays open.` with Undo when it has not ended within 10 seconds, or `End session: <why>` for a
+refusal, with nothing parked. After either button the selection follows 12.9's rule after `w`. A
+session ended and parked is listed under Parked, not running; resumed from its row it stays parked
+until a prompt, with its flags.
+
+No dialog, and parking at once as before, for a session that does not run; for a running session
+the window cannot end, with the toast `Parked. skydeck cannot end this one: end it in its
+terminal.` (another terminal, an older or lost keeper) or `Parked. It runs in Claude Code's
+background: end it in claude agents.` (7.9, F34); for a session still starting in a terminal of the
+window (not a session yet: the running words above); for un-parking (`w` or `Unpark` on a parked
+session); for the Undo of a toast; and for `skydeck park` and every command of the command line
+(nothing ends a session from the command line). A parked session that runs (parked with `keep it
+running`, or resumed from its row) is un-parked by `w` at once, and `d` opens the dialog "Mark done"
+as for any; nothing ends it in one step (a named limit). Both ways: the Undo after `d` on a parked session parks it again (its age starts again, a named
 limit). An un-park shows no toast and has no Undo: `w` on its row, still selected, parks it again.
 Where the selection goes after `w`, and the one guard for `w`, `d` and the end dialog, are 12.9's:
 the selection moves on only while the user stayed in the list, so going to the terminal or opening
@@ -6320,7 +6374,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W47 | **Real claude**, follow-up F40: carry over after `/clear` in a window terminal — the bar without a click, a click on it leaves the keyboard in the prompt, `Carry over`, `×`, two clears, `c` from the list with the list changing under it, a session cleared outside the window, and an old cleared session that shows no bar (manual-checks.md, "Carry over after /clear"). | F40 | 12.6, 12.9, design 7.1 |
 | W48 | The list's width in the owner's Edge (issue #192): the handle shows its cursor and tooltip on the border, a drag changes the width live and stops at 240 and 800 px and where the right side keeps 320 px; after a reload and after the window is closed and opened again the width is there with no jump; a narrower window shows less and a wider one the kept width again; a double click gives 400 px back, also one with a slight slip; the list's scroll bar right beside the border scrolls the list and leaves its width; a drag with `Focus: terminal`, over a throwaway session's terminal, leaves the keyboard in the prompt and types nothing into it; the terminal fits its new width; a browser tab (`--print-url`) keeps its own width. At the end a double click puts 400 px back. | #192 | 12.1, 12.9 |
 | W49 | **Real claude**, issue #188 part 1: a throwaway session resumed from its card's `Other flags…` with another `--model` — the field filled with the flags it was started with, `f` from the list, the header showing the new flag once Claude Code has started, a plain `Resume here` keeping it (manual-checks.md, "Resuming with other flags"). | #188 | 12.6, 12.9, design 7.6 |
-| W50 | **Real claude**, follow-up F44: Parked on throwaway sessions — `w`, the toast and Undo; the number freed and taken by a new session, and the lowest free one back under Open; a prompt brings it back, a key typed and not sent does not; `skydeck park` and `skydeck unpark` in W show within seconds; a parked session that asks shows its mark, sends no notification and Ctrl+Shift+J passes it; `skydeck window --restart` keeps it parked without a number; after `w` the selection is on the next row and the list has not moved, three `w` in a row park three sessions and nothing is typed into the session the selection moved to; `w` on a row under Parked brings it back, still selected and in view; `/clear` in a parked session; `w` on a US and a Czech layout (manual-checks.md, "Parked"). | F44 | 7.6, 12.1, 12.4, 12.9, 12.15, design 7.1 |
+| W50 | **Real claude**, follow-up F44: Parked on throwaway sessions — `w`, the toast and Undo; the number freed and taken by a new session, and the lowest free one back under Open; a prompt brings it back, a key typed and not sent does not; `skydeck park` and `skydeck unpark` in W show within seconds; a parked session that asks shows its mark, sends no notification and Ctrl+Shift+J passes it; `skydeck window --restart` keeps it parked without a number; `w` on a running session asks first (the dialog "Park", the keyboard on its End button), `End session and park` ends it and lists it under Parked, not running, and resumed from its row it stays parked; after `w` the selection is on the next row and the list has not moved, three `w` in a row park three sessions and nothing is typed into the session the selection moved to; `w` on a row under Parked brings it back, still selected and in view; `/clear` in a parked session; `w` on a US and a Czech layout (manual-checks.md, "Parked"). | F44 | 7.6, 12.1, 12.4, 12.9, 12.15, design 7.1 |
 | W51 | **Real claude**, issue #166 with part 2 of #188: a throwaway session restarted from the header's `Restart` and with `r` — the keyboard on Cancel, `Restarting…`, the same conversation, the same number and place, not done, no notification —, then with `Other flags…` and another `--model`, the header showing it once Claude Code has started, a plain restart passing it on (manual-checks.md, "Restarting a session from the window"). | #166, #188 | 12.5, 12.10, design 7.6 |
 | W52 | How often the window checks for a newer skydeck by itself (follow-up F38's choice, the owner's decision of 2026-11-24): Settings' `Check for updates` shows the setup's value and its four words in order; `Every 15 minutes` saved, and a check by the clock within 16 minutes of the last one without a click; `Every day` makes none in twenty minutes; `Off` and `Check now`; the setup's value put back (manual-checks.md, "How often updates are checked"). | F38 | 10.1, 12.13, 16.5 |
 

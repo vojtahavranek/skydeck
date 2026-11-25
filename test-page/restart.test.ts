@@ -552,13 +552,19 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
   );
 
   await t.test(
-    'F44’s one guard: `w` and then `r` at once, before the list that shows the park, open no dialog for the session just parked; once that list came, `r` on it asks as for any',
+    'F44’s one guard: `w` (the dialog "Park": keep it running) and then `r` at once, before the list that shows the park, open no dialog for the session just parked; once that list came, `r` on it asks as for any',
     async (t) => {
       const d = await one(t, chromium);
       const { page, w } = d;
       await clickRow(page, S1);
       await toZone(page, 'list');
       await page.keyboard.press('w');
+      await page.waitForSelector('#end-dialog:not([hidden])', {
+        state: 'attached',
+        timeout: PAGE_WAIT_MS,
+      });
+      await page.keyboard.press('ArrowRight'); // from `End session and park` to the Keep button
+      await page.keyboard.press('Enter');
       const park = await w.act(1);
       assert.deepEqual(actsAfter(w), [{ kind: 'park', sessionId: S1 }]);
       await page.keyboard.press('r');
@@ -1046,7 +1052,11 @@ test('#166: the dialog "Restart" for a session that runs in a terminal of the wi
       await l.page.locator('#cards .card-actions button', { hasText: 'Resume here' }).click();
       const first = await untilTerminalOf(l.page, S1);
       await untilScreen(l.page, promptOf(S1));
+      // Once the window can end it (the header offers Restart then), Park asks first (the dialog
+      // "Park", S2 12.15): keep it running.
+      await eventually(() => headerRestart(l.page), 'the header offers Restart for it');
       await l.page.locator('#cards .header-park').click();
+      await l.page.locator('#end-dialog:not([hidden]) .end-keep').click();
       const sectionOf = () =>
         l.page.evaluate((id) => {
           let section = '';

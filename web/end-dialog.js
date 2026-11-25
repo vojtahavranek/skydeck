@@ -19,16 +19,24 @@
 // (`update`) the dialog follows its own session: one that stopped, was marked done in another
 // window or left the list closes it, nothing done, and `deps.gone` gets the toast's words. Every
 // text reaches the DOM as text.
+//
+// Follow-up F44 (S2 12.15): the same dialog asks for `w` and the header's `Park` (`open` with the
+// mark `park`), with the words of a parking (web/end-text.js `PARK_TEXTS`: `Park: <title>`, `End
+// session and park`, `Park, keep it running`, `Cancel`) and the same rules, but one: the keyboard
+// starts on `End session and park` when the session is not working as the dialog opens, on `Park,
+// keep it running` when it is (the owner's choice). It follows its session as for Done, and also
+// closes when the session is parked elsewhere.
 
 /** @import { ListMessage, RowPayload } from '../src/window/protocol.ts' */
-import { cutTitle, dialogFollows, END_TEXTS } from './end-text.js';
+import { cutTitle, dialogFollows, END_TEXTS, textsOf } from './end-text.js';
 import { sessionRow } from './pane.js';
 
 /**
  * @typedef {'end' | 'keep' | 'cancel'} EndChoice
+ * @typedef {import('./end-text.js').DialogMark} DialogMark
  * @typedef {object} EndDialogDeps
- * @property {(choice: 'end' | 'keep', session: { sessionId: string, term: string, fromList: boolean }) => void} chose
- *   a press of the End or the Keep button, after the dialog closed
+ * @property {(choice: 'end' | 'keep', session: { sessionId: string, term: string, fromList: boolean, mark: DialogMark }) => void} chose
+ *   a press of the End or the Keep button, after the dialog closed; `mark` says which dialog
  * @property {(text: string) => void} gone the dialog closed by itself; the toast's words
  * @property {(choice: EndChoice | 'gone') => void} closed called once whenever the dialog closes
  */
@@ -102,9 +110,9 @@ export function createEndDialog(root, deps) {
   root.hidden = true;
 
   /**
-   * The dialog shown: the session and the terminal it was opened for, whether `d` in the list
-   * opened it, and whether the session works now.
-   * @type {{ sessionId: string, term: string, fromList: boolean, working: boolean } | null}
+   * The dialog shown: the session and the terminal it was opened for, whether `d` (or `w`) in the
+   * list opened it, its mark, whether the session works now and whether it is marked done now.
+   * @type {{ sessionId: string, term: string, fromList: boolean, mark: DialogMark, working: boolean, done: boolean } | null}
    */
   let current = null;
 
@@ -158,6 +166,7 @@ export function createEndDialog(root, deps) {
         sessionId: shown.sessionId,
         term: shown.term,
         fromList: shown.fromList,
+        mark: shown.mark,
       });
     }
   };
@@ -181,39 +190,57 @@ export function createEndDialog(root, deps) {
 
   return {
     /**
-     * Opens the dialog for `row`, which runs in its terminal (`row.terminal`); `fromList`: `d` in
-     * the list opened it (app.js's selection rule after `d`).
+     * Opens the dialog of `mark` (Done's by default) for `row`, which runs in its terminal
+     * (`row.terminal`); `fromList`: `d` (or `w`) in the list opened it (app.js's selection rule).
      * @param {RowPayload} row
      * @param {boolean} fromList
+     * @param {DialogMark} [mark]
      */
-    open(row, fromList) {
+    open(row, fromList, mark = 'done') {
       if (current !== null || typeof row.terminal !== 'string') {
         return;
       }
       const working = row.state === 'working';
-      current = { sessionId: row.id, term: row.terminal, fromList, working };
+      current = { sessionId: row.id, term: row.terminal, fromList, mark, working, done: row.done };
+      const texts = textsOf(mark);
+      prefix.textContent = texts.heading;
+      line.textContent = texts.running;
+      warning.textContent = texts.working;
+      endButton.textContent = texts.end;
+      keepButton.textContent = texts.keep;
+      cancelButton.textContent = texts.cancel;
+      box.dataset['mark'] = mark;
       box.dataset['session'] = row.id;
       box.dataset['working'] = working ? 'true' : 'false';
       setTitle(row);
       warning.hidden = !working;
       root.hidden = false;
-      keepButton.focus(); // never on End by itself (ruled)
+      // Done's: never on End by itself (ruled). Park's: on End unless it works (the owner's).
+      (mark === 'park' && !working ? endButton : keepButton).focus();
     },
     /**
-     * Every list while it is shown: closes it when its session stopped, was marked done or left
-     * the list (`deps.gone` with the toast's words); else follows the title and the working state.
+     * Every list while it is shown: closes it when its session stopped, was marked done (or, the
+     * dialog "Park", parked) or left the list (`deps.gone` with the toast's words); else follows the title and the working state.
      * @param {ListMessage} list
      */
     update(list) {
       if (current === null) {
         return;
       }
-      const follows = dialogFollows(list, current.sessionId, current.term, sessionRow);
+      const follows = dialogFollows(
+        list,
+        current.sessionId,
+        current.term,
+        sessionRow,
+        current.mark,
+        current.done,
+      );
       if ('close' in follows) {
         close('gone');
         deps.gone(follows.close);
         return;
       }
+      current.done = follows.stay.done;
       setTitle(follows.stay);
       setWorking(follows.working);
     },

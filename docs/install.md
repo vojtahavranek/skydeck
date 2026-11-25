@@ -1093,9 +1093,20 @@ requests — …`): look at it before you save.
 
 **Parked.** Some sessions are alive but not yours to move right now: the work went to review, or
 waits for a person or for another part of the work. `w` in the list ("waits") or `Park` in the
-header parks the selected session: it moves under **Parked**, keeps running if it runs, and keeps
-its group. No dialog asks anything. The toast says `Parked: listed under Parked. It comes back when
-you send it a prompt.` (`…, and it keeps running. …` for a running one), with `Undo` for 5 seconds.
+header parks the selected session: it moves under **Parked** and keeps its group. A session that
+runs in a terminal of the window, which skydeck can end, is not parked yet: a dialog `Park: <title>`
+asks whether to end it too, since a parked session need not hold its resources. **End session and
+park** (where the keyboard starts, unless the session is working) ends it and parks it: the toast
+says `Ending the session…`, then `Ended and parked: listed under Parked.` (or, when it has not ended
+within 10 seconds, `Parked. It has not ended yet: end it inside claude if it stays open.`); it is
+listed under Parked, not running, and you resume it from its row as any other. **Park, keep it
+running** (where the keyboard starts while the session is working; → or Tab takes it there) parks
+it and leaves it running; **Cancel** or Esc does nothing. A typed `w` and then Enter therefore ends
+an idle session: resume it from its row. Every other session is parked at once: one that does not
+run, and one that runs where skydeck cannot end it, whose toast says so (`Parked. skydeck cannot end
+this one: end it in its terminal.`). The toast says `Parked: listed under Parked. It comes back when
+you send it a prompt.` (`…, and it keeps running. …` for one kept running), with `Undo` for 5
+seconds; the `Undo` of an ended one un-parks it, and does not start it again.
 After `w` in the list the selection goes to the row after it in the section it left, else the one
 before it, else none (the list does not move; Ctrl+Tab goes back to the parked session); the
 keyboard stays in the list, so `w` again parks the next one. `Park` in the header keeps the session

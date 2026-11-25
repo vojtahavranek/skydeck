@@ -3,6 +3,11 @@
 // itself, and what the toast says of each outcome. A session the window can end is one whose row
 // says so (`endable`, the server's rule: it runs in its terminal of the window, whose keeper knows
 // how and is connected); every other session is marked done at once, as before.
+//
+// Follow-up F44's dialog "Park" (S2 12.15) is the same dialog with its own words (`PARK_TEXTS`):
+// `w` or the header's `Park` on a session not parked that the window can end asks first
+// (`asksPark`), and the dialog follows its session with the words of a parking, also closing when
+// the session is parked elsewhere (`dialogFollows` with the mark `park`).
 
 /** @import { ListMessage, RowPayload } from '../src/window/protocol.ts' */
 
@@ -36,6 +41,43 @@ export const END_TEXTS = {
   gone: 'It left the list: nothing was marked done.',
 };
 
+/** @typedef {'done' | 'park'} DialogMark the dialog's mark: Done's (`d`) or Park's (`w`) */
+
+/**
+ * The dialog "Park"'s words, and the toasts of a park: as Done's, with the words of a parking.
+ * `parkedElsewhere` is its own (the dialog closes when another window parked the session).
+ */
+export const PARK_TEXTS = {
+  heading: 'Park: ',
+  running: END_TEXTS.running,
+  working: END_TEXTS.working,
+  end: 'End session and park',
+  keep: 'Park, keep it running',
+  cancel: END_TEXTS.cancel,
+  ending: END_TEXTS.ending,
+  /** The toast once the program ended (with Undo, which un-parks: the program does not come
+   *  back). */
+  ended: 'Ended and parked: listed under Parked.',
+  /** The toast once the wait is over and the program still runs (with Undo). */
+  notEnded: 'Parked. It has not ended yet: end it inside claude if it stays open.',
+  /** The toast of `w` on a session that runs and cannot be ended from the window. */
+  cannotEnd: 'Parked. skydeck cannot end this one: end it in its terminal.',
+  /** That toast for a session Claude Code runs in its background (F34). */
+  cannotEndBackground: "Parked. It runs in Claude Code's background: end it in claude agents.",
+  stopped: 'It stopped by itself: nothing was parked.',
+  doneElsewhere: 'It was marked done in another window: nothing was ended or parked.',
+  parkedElsewhere: 'It was parked in another window: nothing was ended.',
+  gone: 'It left the list: nothing was parked.',
+};
+
+/**
+ * The words of the dialog of `mark`, and of its toasts.
+ * @param {DialogMark} mark
+ */
+export function textsOf(mark) {
+  return mark === 'park' ? PARK_TEXTS : END_TEXTS;
+}
+
 /**
  * Whether `d` or `Done` on `row` asks first: a session not marked done that the window can end.
  * @param {RowPayload} row
@@ -46,13 +88,25 @@ export function asksFirst(row) {
 }
 
 /**
- * The toast of `d` on a running session the window cannot end: F34's for a session Claude Code
- * runs in its background, else `cannotEnd`.
+ * F44 (S2 12.15): whether `w` or `Park` on `row` asks first: a session not parked that the window
+ * can end (also one marked done: parking ends its done mark).
  * @param {RowPayload} row
+ * @returns {boolean}
+ */
+export function asksPark(row) {
+  return row.parked !== true && row.endable === true && typeof row.terminal === 'string';
+}
+
+/**
+ * The toast of `d` (or, with the mark `park`, of `w`) on a running session the window cannot end:
+ * F34's for a session Claude Code runs in its background, else `cannotEnd`.
+ * @param {RowPayload} row
+ * @param {DialogMark} [mark]
  * @returns {string}
  */
-export function cannotEndText(row) {
-  return row.elsewhere?.background === true ? END_TEXTS.cannotEndBackground : END_TEXTS.cannotEnd;
+export function cannotEndText(row, mark = 'done') {
+  const texts = textsOf(mark);
+  return row.elsewhere?.background === true ? texts.cannotEndBackground : texts.cannotEnd;
 }
 
 /**
@@ -70,19 +124,28 @@ export function cutTitle(title) {
  * What a list means for the dialog of `sessionId` opened over its terminal `term`: `close` with the
  * toast's words when the session left the list, was marked done (elsewhere: this page is modal) or
  * stopped running there — then nothing is done —, else `stay` with its row and whether it works now.
+ * The dialog "Park" (`mark` `park`) closes also when the session was parked elsewhere, and for one
+ * marked done only when it was not done before this list (`wasDone`: its row's `done` at the last
+ * list, a session marked done can be parked).
  * @param {ListMessage} list
  * @param {string} sessionId
  * @param {string} term
  * @param {(list: ListMessage, id: string) => RowPayload | null} rowOf the page's `sessionRow`
+ * @param {DialogMark} [mark]
+ * @param {boolean} [wasDone]
  * @returns {{ close: string } | { stay: RowPayload, working: boolean }}
  */
-export function dialogFollows(list, sessionId, term, rowOf) {
+export function dialogFollows(list, sessionId, term, rowOf, mark = 'done', wasDone = false) {
+  const texts = textsOf(mark);
   const row = rowOf(list, sessionId);
   if (row === null) {
-    return { close: END_TEXTS.gone };
+    return { close: texts.gone };
   }
-  if (row.done) {
-    return { close: END_TEXTS.doneElsewhere };
+  if (mark === 'park' && row.parked === true) {
+    return { close: PARK_TEXTS.parkedElsewhere };
+  }
+  if (row.done && !(mark === 'park' && wasDone)) {
+    return { close: texts.doneElsewhere };
   }
   const terminal = list.terminals.find((candidate) => candidate.id === term);
   const over =
@@ -91,7 +154,7 @@ export function dialogFollows(list, sessionId, term, rowOf) {
     terminal.state === 'lost' ||
     terminal.state === 'not-started';
   if (over || row.terminal !== term || row.state === 'not-running') {
-    return { close: END_TEXTS.stopped };
+    return { close: texts.stopped };
   }
   return { stay: row, working: row.state === 'working' };
 }

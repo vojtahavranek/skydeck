@@ -1,5 +1,6 @@
 // Follow-up F30's rules for the page (web/end-text.js): which `d` asks first in the dialog "Mark
-// done", the heading's cut, and when the dialog closes by itself.
+// done", the heading's cut, and when the dialog closes by itself; F44's dialog "Park" (S2 12.15):
+// which `w` asks first, its words, and when it closes by itself.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -11,10 +12,13 @@ import type {
 } from '../../src/window/protocol.ts';
 import {
   asksFirst,
+  asksPark,
   cannotEndText,
   cutTitle,
   dialogFollows,
   END_TEXTS,
+  PARK_TEXTS,
+  textsOf,
   TITLE_MAX,
 } from '../../web/end-text.js';
 import { sessionRow } from '../../web/pane.js';
@@ -242,4 +246,113 @@ test('F34: no word of the page tells a user to kill a process or names a signal'
   for (const [name, text] of Object.entries(END_TEXTS)) {
     assert.doesNotMatch(text, /kill|signal|\bSIG|pkill|ctrl\+c/i, name);
   }
+});
+
+test('F44: asksPark: only a session not parked that the window can end in its terminal, done or not', () => {
+  const cases: [string, RowPayload, boolean][] = [
+    ['endable, waiting', row(S1), true],
+    ['endable, working', row(S1, { state: 'working' }), true],
+    ['marked done, running (parking ends its done mark)', row(S1, { done: true }), true],
+    ['parked (w un-parks it)', row(S1, { parked: true, slot: null }), false],
+    ['not endable (an older keeper, not connected)', row(S1, { endable: false }), false],
+    ['no endable field (a server before F30)', row(S1, { endable: undefined }), false],
+    [
+      'running in another terminal',
+      row(S1, { terminal: null, slot: null, elsewhere: { pid: 1, tty: null, dir: null } }),
+      false,
+    ],
+    ['not running', row(S1, { state: 'not-running', terminal: null, endable: false }), false],
+  ];
+  for (const [what, given, expected] of cases) {
+    assert.equal(asksPark(given), expected, what);
+  }
+});
+
+test('F44: the words of the dialog "Park" and its toasts; textsOf picks them by the mark', () => {
+  assert.deepEqual(PARK_TEXTS, {
+    heading: 'Park: ',
+    running: 'This session is still running.',
+    working: 'It is working: ending it now stops the current turn.',
+    end: 'End session and park',
+    keep: 'Park, keep it running',
+    cancel: 'Cancel',
+    ending: 'Ending the session…',
+    ended: 'Ended and parked: listed under Parked.',
+    notEnded: 'Parked. It has not ended yet: end it inside claude if it stays open.',
+    cannotEnd: 'Parked. skydeck cannot end this one: end it in its terminal.',
+    cannotEndBackground: "Parked. It runs in Claude Code's background: end it in claude agents.",
+    stopped: 'It stopped by itself: nothing was parked.',
+    doneElsewhere: 'It was marked done in another window: nothing was ended or parked.',
+    parkedElsewhere: 'It was parked in another window: nothing was ended.',
+    gone: 'It left the list: nothing was parked.',
+  });
+  assert.equal(textsOf('park'), PARK_TEXTS);
+  assert.equal(textsOf('done'), END_TEXTS);
+  for (const [name, text] of Object.entries(PARK_TEXTS)) {
+    assert.doesNotMatch(text, /kill|signal|\bSIG|pkill|ctrl\+c/i, name);
+  }
+});
+
+test("F44: cannotEndText with the mark `park`: a park's words, the background's for Claude Code's background", () => {
+  const background = row(S1, {
+    terminal: null,
+    slot: null,
+    elsewhere: { pid: 1, tty: null, dir: null, background: true },
+  });
+  const other = row(S1, {
+    terminal: null,
+    slot: null,
+    elsewhere: { pid: 1, tty: '/dev/pts/2', dir: null, background: false },
+  });
+  assert.equal(cannotEndText(background, 'park'), PARK_TEXTS.cannotEndBackground);
+  assert.equal(cannotEndText(other, 'park'), PARK_TEXTS.cannotEnd);
+  assert.equal(cannotEndText(row(S1, { endable: false }), 'park'), PARK_TEXTS.cannotEnd);
+  assert.equal(cannotEndText(other), END_TEXTS.cannotEnd, "Done's by default");
+});
+
+test('F44: dialogFollows with the mark `park`: it stays while its session runs there (also one done since it opened); it closes with the words of a parking', () => {
+  const follows = (list: ListMessage, wasDone = false) =>
+    dialogFollows(list, S1, TERM, sessionRow, 'park', wasDone);
+  assert.ok('stay' in follows(listOf([row(S1)], [terminal()])));
+  assert.ok(
+    'stay' in follows(listOf([row(S1, { done: true })], [terminal()]), true),
+    'done when it opened: it stays',
+  );
+  const cases: [string, ListMessage, string][] = [
+    [
+      'parked in another window',
+      listOf([row(S1, { parked: true, slot: null })], [terminal()]),
+      PARK_TEXTS.parkedElsewhere,
+    ],
+    [
+      'marked done in another window',
+      listOf([row(S1, { done: true })], [terminal()]),
+      PARK_TEXTS.doneElsewhere,
+    ],
+    ['left the list', listOf([row(S2)], [terminal()]), PARK_TEXTS.gone],
+    ['its terminal ended', listOf([row(S1)], [terminal({ state: 'ended' })]), PARK_TEXTS.stopped],
+    [
+      'it is not running',
+      listOf([row(S1, { state: 'not-running' })], [terminal()]),
+      PARK_TEXTS.stopped,
+    ],
+    [
+      'it runs in another terminal now',
+      listOf([row(S1, { terminal: 'ffffffffffff' })], [terminal()]),
+      PARK_TEXTS.stopped,
+    ],
+  ];
+  for (const [what, list, text] of cases) {
+    assert.deepEqual(follows(list), { close: text }, what);
+  }
+  // Done's dialog is as before: a parked row is nothing to it.
+  assert.ok(
+    'stay' in
+      dialogFollows(
+        listOf([row(S1, { parked: true, slot: null })], [terminal()]),
+        S1,
+        TERM,
+        sessionRow,
+      ),
+  );
 });

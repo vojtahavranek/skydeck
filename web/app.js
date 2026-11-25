@@ -75,7 +75,7 @@ import { createCards } from './cards.js';
 import { createConnection, TEXTS } from './connection.js';
 import { createEditor } from './edit.js';
 import { createEndDialog } from './end-dialog.js';
-import { asksFirst, cannotEndText, END_TEXTS } from './end-text.js';
+import { asksFirst, asksPark, cannotEndText, END_TEXTS, PARK_TEXTS, textsOf } from './end-text.js';
 import { serverNow } from './format.js';
 import { createHelp } from './help.js';
 import { cancels, listKey, switcherKey, windowChord } from './keys.js';
@@ -380,12 +380,15 @@ const editor = createEditor(dom.editor, {
   closed: () => dialogClosed(),
   now: () => listNow(),
 });
-// F30: the dialog "Mark done" of a session the window can end (web/end-dialog.js). Its presses
-// name the session and the terminal it was opened for, never the selection of the moment.
+// F30: the dialog "Mark done" of a session the window can end (web/end-dialog.js), and from F44
+// the dialog "Park" (S2 12.15), the same dialog with the mark `park`. Its presses name the
+// session, the terminal and the mark it was opened for, never the selection of the moment.
 const ender = createEndDialog(dom.endDialog, {
   chose: (choice, session) => {
     if (choice === 'end') {
-      endSession(session.sessionId, session.term, session.fromList);
+      endSession(session.sessionId, session.term, session.fromList, session.mark);
+    } else if (session.mark === 'park') {
+      keepParked(session.sessionId, session.fromList);
     } else {
       keepRunning(session.sessionId, session.fromList);
     }
@@ -1636,13 +1639,14 @@ function answeredDone(/** @type {string} */ sessionId) {
 
 /**
  * F44 (S2 12.15): `w` and the header's Park park the session, or un-park a parked one (the act
- * picked from its row's `parked`, as `d` picks `done` or `undone`); no dialog, whatever its state:
- * parking stops nothing. One act per session at a time, and nothing while this page's own `w`,
- * `d` or end of it has not been decided by its list (the one guard). A park the server took shows
- * the toast with Undo (`undoMark`: `unpark`, or `done` for a session that was done); an un-park
- * shows none. `fromList`: this page's `w` in the list, after which the selection moves to the next
- * row of the section the row left (`leavePark`, at the list that shows it gone); the header's
- * control leaves the selection to the main rule. The row is `sessionRow`'s, as for Done.
+ * picked from its row's `parked`, as `d` picks `done` or `undone`). One act per session at a
+ * time, and nothing while this page's own `w`, `d` or end of it has not been decided by its list
+ * (the one guard). A session not parked that the window can end (`asksPark`) is parked nothing
+ * yet: the dialog "Park" asks first (`openEnder` with the mark `park`); every other one is parked
+ * at once (`sendPark`), a running one the window cannot end with its own toast (`cannotEndText`
+ * with the mark `park`). `fromList`: this page's `w` in the list, after which the selection moves
+ * to the next row of the section the row left (`leavePark`, at the list that shows it gone); the
+ * header's control leaves the selection to the main rule. The row is `sessionRow`'s, as for Done.
  * @param {string} sessionId
  * @param {boolean} fromList
  */
@@ -1653,6 +1657,29 @@ function markParked(sessionId, fromList) {
     return;
   }
   if (state.marking.has(sessionId) || state.leaving?.sessionId === sessionId) {
+    return;
+  }
+  if (asksPark(row)) {
+    openEnder(row, fromList, 'park');
+    return;
+  }
+  // A session still starting in a terminal of the window is no session the window cannot end:
+  // it is not one yet, and runs on (the toast as before the dialog).
+  sendPark(sessionId, fromList, row.starting ? PARKED_RUNNING : cannotEndText(row, 'park'));
+}
+
+/**
+ * The `park` or `unpark` of `markParked` for the session's row as the list has it now: a park the
+ * server took shows the toast with Undo (`undoMark`: `unpark`, or `done` for a session that was
+ * done), for a running or starting session in `runningText` (the dialog's `Park, keep it running`
+ * passes PARKED_RUNNING); an un-park shows none.
+ * @param {string} sessionId
+ * @param {boolean} fromList
+ * @param {string} runningText
+ */
+function sendPark(sessionId, fromList, runningText) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null || state.marking.has(sessionId)) {
     return;
   }
   const parked = row.parked === true;
@@ -1676,34 +1703,41 @@ function markParked(sessionId, fromList) {
     if (parked) {
       return;
     }
-    toast.show(running ? PARKED_RUNNING : PARKED, () =>
+    toast.show(running ? runningText : PARKED, () =>
       undoMark(sessionId, wasDone ? 'done' : 'unpark'),
     );
-    if (state.leaving?.sessionId === sessionId) {
-      state.leaving.answered = true;
-      sendView(); // no list showed the row gone from its section yet: the next one decides
-    }
+    answeredPark(sessionId);
   });
 }
 
+/** A `park` (or an end that parks) of this page's `w` was answered: F44's rule (`leavePark`). */
+function answeredPark(/** @type {string} */ sessionId) {
+  if (state.leaving?.sessionId === sessionId) {
+    state.leaving.answered = true;
+    sendView(); // no list showed the row gone from its section yet: the next one decides
+  }
+}
+
 /**
- * F30: the dialog "Mark done" for `row`, over the page (modal, D2): what had the keyboard is kept
- * for Cancel.
+ * F30: the dialog "Mark done" for `row`, over the page (modal, D2), or from F44 with the mark
+ * `park` the dialog "Park": what had the keyboard is kept for Cancel.
  * @param {RowPayload} row
  * @param {boolean} fromList
+ * @param {import('./end-text.js').DialogMark} [mark]
  */
-function openEnder(row, fromList) {
+function openEnder(row, fromList, mark = 'done') {
   if (modal()) {
     return;
   }
   // F44's one guard needs no check in the dialog's buttons (`keepRunning` → `sendDone`,
-  // `endSession`): the dialog opens only past `markDone`'s guard, and while it is shown it is
-  // modal, so no list key and no header control can make this page's `w` or `d` leave meanwhile.
+  // `keepParked` → `sendPark`, `endSession`): the dialog opens only past `markDone`'s or
+  // `markParked`'s guard, and while it is shown it is modal, so no list key and no header control
+  // can make this page's `w` or `d` leave meanwhile.
   // The key help lies over every dialog: it goes, so that nothing hides this one (as for the
   // switcher), and while it is shown Ctrl+Shift+H is refused (`windowChordGate`).
   help.hide();
   state.enderFrom = document.activeElement;
-  ender.open(row, fromList);
+  ender.open(row, fromList, mark);
   appRoot.inert = true;
 }
 
@@ -1831,29 +1865,62 @@ function keepRunning(sessionId, fromList) {
 }
 
 /**
- * F30's `End session and mark done`: `act end-session` for the session and the terminal the
- * dialog was opened for. The toast says `Ending the session…` until the answer: ended (Undo marks
- * it undone; the program does not come back), not ended within the server's wait (still marked
- * done, as after Keep it running; Undo too), or refused (nothing was done; the server's words).
- * After `d` in the list the selection follows D15's rule for a row that is gone.
+ * F44's `Park, keep it running`: exactly `w` on a running session as before the dialog — parked,
+ * the toast of a running session with Undo, the same selection rule.
+ * @param {string} sessionId
+ * @param {boolean} fromList
+ */
+function keepParked(sessionId, fromList) {
+  const row = sessionRow(state.list, sessionId);
+  if (row === null) {
+    toast.show(PARK_TEXTS.gone, null);
+    return;
+  }
+  if (row.parked === true) {
+    toast.show(PARK_TEXTS.parkedElsewhere, null);
+    return;
+  }
+  sendPark(sessionId, fromList, PARKED_RUNNING);
+}
+
+/**
+ * F30's `End session and mark done`, and from F44 (`mark` `park`) `End session and park`: `act
+ * end-session` for the session and the terminal the dialog was opened for (with `mark` `park` for
+ * the latter; Done's act is as before, without one). The toast says `Ending the session…` until
+ * the answer: ended (Undo marks it undone, or un-parks it; the program does not come back), not
+ * ended within the server's wait (still marked, as after the Keep button; Undo too), or refused
+ * (nothing was done; the server's words). After `d` in the list the selection follows D15's rule
+ * for a row that is gone, after `w` F44's rule for a parked row (`leavePark`).
  * @param {string} sessionId
  * @param {string} term
  * @param {boolean} fromList
+ * @param {import('./end-text.js').DialogMark} [mark]
  */
-function endSession(sessionId, term, fromList) {
+function endSession(sessionId, term, fromList, mark = 'done') {
   if (state.marking.has(sessionId)) {
     return;
   }
-  // F44: the Undo gives back what was there: a parked session is parked again.
-  const parked = sessionRow(state.list, sessionId)?.parked === true;
+  const row = sessionRow(state.list, sessionId);
+  // F44: the Undo gives back what was there: a parked session is parked again, a done one that
+  // was parked is done again.
+  const undo =
+    mark === 'park'
+      ? row?.done === true
+        ? 'done'
+        : 'unpark'
+      : row?.parked === true
+        ? 'park'
+        : 'undone';
+  const texts = textsOf(mark);
   const place = placeOf(sessionId);
   if (fromList && place !== null) {
-    state.leaving = { sessionId, ...place, mark: 'done', listed: false, answered: false };
+    state.leaving = { sessionId, ...place, mark, listed: false, answered: false };
     state.undoTo = null;
   }
   state.marking.add(sessionId);
-  toast.show(END_TEXTS.ending, null, true);
-  void act({ kind: 'end-session', term, sessionId }).then((result) => {
+  toast.show(texts.ending, null, true);
+  const marked = mark === 'park' ? { mark } : {};
+  void act({ kind: 'end-session', term, sessionId, ...marked }).then((result) => {
     state.marking.delete(sessionId);
     if (!result.ok) {
       if (state.leaving?.sessionId === sessionId) {
@@ -1862,10 +1929,14 @@ function endSession(sessionId, term, fromList) {
       toast.show(`End session: ${result.error ?? 'skydeck could not do that'}`, null);
       return;
     }
-    toast.show(result.ended === true ? END_TEXTS.ended : END_TEXTS.notEnded, () =>
-      undoMark(sessionId, parked ? 'park' : 'undone'),
+    toast.show(result.ended === true ? texts.ended : texts.notEnded, () =>
+      undoMark(sessionId, undo),
     );
-    answeredDone(sessionId);
+    if (mark === 'park') {
+      answeredPark(sessionId);
+    } else {
+      answeredDone(sessionId);
+    }
   });
 }
 

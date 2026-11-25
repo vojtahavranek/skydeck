@@ -78,7 +78,7 @@ const SECTIONS = [
       [['d'], 'done, or undone for a done session (an Undo follows a done)'],
       [
         ['w'],
-        'park: the session waits under Parked until you send it a prompt; on a parked one, unpark (an Undo follows a park)',
+        'park: the session waits under Parked until you send it a prompt; one running in a terminal of this window asks first whether to end it; on a parked one, unpark (an Undo follows a park)',
       ],
       [
         ['r'],
