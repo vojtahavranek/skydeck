@@ -6454,6 +6454,24 @@ each page's storage (follow-up F41, 12.14) unless a case asks for a context with
   `~/.cache/ms-playwright` from the cache keyed by both, runs `npx playwright install --with-deps
   chromium` (the browser is downloaded only when the cache missed; the system libraries it needs
   are installed every time) and then `npm run test:page` with its shard.
+- The workflow CI checks; one other workflow writes: `Version` (`.github/workflows/version.yml`),
+  the one that makes the version tags (design 8, the version line). It runs at every push to `main`
+  and when the owner starts it by hand (Actions > Version > Run workflow, on `main`, with `bump`
+  `minor` or `major`); never for a pull request. One job on Ubuntu 24.04 with Node 24, the same
+  pinned `actions/checkout` (the whole history and the tags) and `actions/setup-node` as CI, no
+  cache, no secret but the job's own token, `permissions: contents: write` and nothing else, in a
+  concurrency group of its own that cancels nothing (GitHub keeps one run waiting: a push that
+  comes while one waits takes its place, and the next run's rule covers its commits). It runs
+  `node scripts/next-version-tag.ts`, which prints the tag to make on the checked-out commit or
+  nothing (the rule is `scripts/version-tag.ts`: none when the commit carries a version tag; the
+  start `v0.9.0` when none is on its first-parent history; the next minor when a commit since the
+  nearest version tag (first parent) adds a note's file in `docs/news/`, else the next patch; by
+  hand, the next minor or major from the nearest; none when that tag exists already), then `git tag
+  <tag> HEAD` and `git push origin refs/tags/<tag>`, the tag passed through the step's output and
+  `env:`. No text of the event stands in a `run:` line (the input reaches the script through
+  `env:`, which takes only `minor`, `major` or nothing; a tag's name is numbers only), nothing is
+  ever forced, deleted or written to a branch; `test/version-workflow.test.ts` holds all of that
+  on the file as text, and `test/scripts/version-tag.test.ts` the rule on real repositories.
 
 ## 18. Manual checks for step 2
 
