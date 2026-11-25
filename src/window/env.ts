@@ -120,9 +120,11 @@ function isTerminalVariable(name: string): boolean {
  * S2 7.4: the program's environment from the server's (as serverEnvironment returned it): without
  * the terminal and multiplexer variables, skydeck's own variables (removed again, so that an
  * environment that did not pass through serverEnvironment is safe too) and the variables Claude
- * Code sets for its children; with TERM=xterm-256color, COLORTERM=truecolor, PWD = `cwd`, and
- * WSL_INTEROP = `interop` when a live link is given (otherwise WSL_INTEROP is left as it is).
- * TERM_PROGRAM is never set (Claude Code would take the terminal for an editor's).
+ * Code sets for its children; with TERM=xterm-256color, COLORTERM=truecolor, PWD = `cwd`,
+ * FORCE_HYPERLINK=1 unless the server had one (the window's terminal draws OSC 8 links, and Claude
+ * Code, which cannot tell, would otherwise print a URL as plain text), and WSL_INTEROP = `interop`
+ * when a live link is given (otherwise WSL_INTEROP is left as it is). TERM_PROGRAM is never set
+ * (Claude Code would take the terminal for an editor's).
  */
 export function programEnvironment(
   serverEnv: Readonly<Record<string, string>>,
@@ -144,6 +146,7 @@ export function programEnvironment(
   }
   env.TERM = 'xterm-256color';
   env.COLORTERM = 'truecolor';
+  env.FORCE_HYPERLINK ??= '1';
   env.PWD = options.cwd;
   if (options.interop !== null) {
     env.WSL_INTEROP = options.interop;

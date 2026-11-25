@@ -36,6 +36,7 @@ test('serverEnvironment keeps a variable whatever its name, __proto__ included',
     ['A', 'b'],
     ['TERM', 'xterm-256color'],
     ['COLORTERM', 'truecolor'],
+    ['FORCE_HYPERLINK', '1'],
     ['PWD', CWD],
   ]);
 });
@@ -223,6 +224,7 @@ test("programEnvironment passes the SKYDECK_* variables the hook needs: only sky
     SKYDECK_NODE: '/opt/node/bin/node',
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
+    FORCE_HYPERLINK: '1',
     PWD: CWD,
   });
 });
@@ -310,7 +312,18 @@ test('programEnvironment sets TERM, COLORTERM and PWD, over what the server had'
 
 test('programEnvironment sets TERM, COLORTERM and PWD when the server had none', () => {
   const result = program({});
-  assert.deepEqual(result, { TERM: 'xterm-256color', COLORTERM: 'truecolor', PWD: CWD });
+  assert.deepEqual(result, {
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    FORCE_HYPERLINK: '1',
+    PWD: CWD,
+  });
+});
+
+test('programEnvironment sets FORCE_HYPERLINK=1 and keeps a value the server had', () => {
+  assert.equal(program({}).FORCE_HYPERLINK, '1');
+  assert.equal(program({ FORCE_HYPERLINK: '0' }).FORCE_HYPERLINK, '0');
+  assert.equal(program({ FORCE_HYPERLINK: '1' }).FORCE_HYPERLINK, '1');
 });
 
 test('programEnvironment points WSL_INTEROP at the link when one is given', () => {
@@ -337,6 +350,7 @@ test('programEnvironment passes every other variable unchanged', () => {
     LANG: 'C.UTF-8',
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
+    FORCE_HYPERLINK: '1',
     PWD: CWD,
   });
 });
@@ -366,6 +380,7 @@ test("programEnvironment over serverEnvironment gives a program none of the laun
     PATH: '/usr/bin',
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
+    FORCE_HYPERLINK: '1',
     PWD: CWD,
     WSL_INTEROP: LINK,
   });
