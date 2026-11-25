@@ -791,17 +791,42 @@ export interface SettingsPayload {
   problem: string | null;
   settings: SettingPayload[];
 }
+/** A piece of a note's text (S2 16.5 "What an update brings"): as written, or a code run. */
+export interface TextRun {
+  text: string;
+  code: boolean;
+}
+/** A note of what is new, as the dialog draws it: its title and its paragraphs, in runs. */
+export interface NotePayload {
+  title: TextRun[];
+  paragraphs: TextRun[][];
+}
 /**
  * F38 (S2 16.5): what the last look for a newer skydeck says. `summary`: the look's line for
  * `cannot`; `skydeck is up to date (<branch> at <id>, as <upstream>)` or `nothing new on …` for
- * `current`; `<n> new commits on <upstream>` for `available`, with `lines` exactly `skydeck update
- * --check`'s (the database line included), `to` the new commit's full id and `blocked` why it
- * cannot be applied as it is. Every text sanitised and clipped.
+ * `current`; `<n> new commits on <upstream>` for `available`, with `from` and `to` HEAD's and the
+ * new commit's full ids, `upstream` its short name, `notes` the notes of what is new it brings
+ * (newest first, at most 20) and `moreNotes` how many more, `others` the subjects of the newest
+ * commits that add none (at most 20) and `otherCount` how many there are, `upgradesDatabase`
+ * whether it changes the database's upgrade steps, and `blocked` why it cannot be applied as it
+ * is. Every text sanitised and clipped.
  */
 export type UpdateCheckPayload =
   | { state: 'cannot'; summary: string }
   | { state: 'current'; summary: string }
-  | { state: 'available'; summary: string; to: string; lines: string[]; blocked: string | null };
+  | {
+      state: 'available';
+      summary: string;
+      from: string;
+      to: string;
+      upstream: string;
+      notes: NotePayload[];
+      moreNotes: number;
+      others: string[];
+      otherCount: number;
+      upgradesDatabase: boolean;
+      blocked: string | null;
+    };
 /** F38: the window's check for a newer skydeck, as every page is told it. */
 export interface UpdatePayload {
   /** A check runs. */

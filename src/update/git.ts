@@ -106,6 +106,23 @@ export interface QuietFetchOptions {
   timeoutMs?: number;
 }
 
+/** What a call of Git.output may add to its run. */
+export interface OutputOptions {
+  /**
+   * Only the first that many bytes of each output are kept (RunOptions.maxOutputBytes): a blob or
+   * a listing of a fetched commit, which can be of any size.
+   */
+  maxBytes?: number;
+  /** Written to git's standard input (`cat-file --batch-check`). */
+  input?: string;
+  /**
+   * The call fetches no object (GIT_NO_LAZY_FETCH=1, for a git that knows the variable): in a partial clone a missing
+   * object is a failure, not a fetch from the promisor remote. For the look's reading of the notes
+   * of what is new, which must use no network.
+   */
+  offline?: boolean;
+}
+
 /** git on one checkout. */
 export interface Git {
   /** The checkout (`platform.appRoot`). */
@@ -119,7 +136,7 @@ export interface Git {
    */
   ownSessions(): void;
   /** run(), and its standard output; any failure is gitFailure's SkydeckError. */
-  output(args: readonly string[]): Promise<string>;
+  output(args: readonly string[], options?: OutputOptions): Promise<string>;
   /** `git -C <root> <args>` with the terminal and no timeout: its exit code, null when it did not end by itself. */
   interactive(args: readonly string[]): Promise<number | null>;
   /**
@@ -146,10 +163,18 @@ export function gitOn(platform: Platform, root: string, gitOptions: GitOptions =
   const { signal } = gitOptions;
   const stoppable = signal === undefined ? {} : { signal, killGraceMs: FETCH_GRACE_MS };
   let ownSessions = false;
-  const run = async (args: readonly string[], timeoutMs = GIT_MS): Promise<RunResult> => {
+  const offlineEnv = { ...env, GIT_NO_LAZY_FETCH: '1' };
+  const run = async (
+    args: readonly string[],
+    timeoutMs = GIT_MS,
+    options: OutputOptions = {},
+  ): Promise<RunResult> => {
+    const { maxBytes, input, offline = false } = options;
     const result = await platform.runner.run('git', ['-C', root, ...args], {
-      env,
+      env: offline ? offlineEnv : env,
       timeoutMs,
+      ...(maxBytes === undefined ? {} : { maxOutputBytes: maxBytes }),
+      ...(input === undefined ? {} : { input }),
       ...(ownSessions ? { newSession: true } : {}),
       ...stoppable,
     });
@@ -158,12 +183,12 @@ export function gitOn(platform: Platform, root: string, gitOptions: GitOptions =
   };
   return {
     root,
-    run,
+    run: (args, timeoutMs) => run(args, timeoutMs),
     ownSessions() {
       ownSessions = true;
     },
-    async output(args) {
-      const result = await run(args);
+    async output(args, options) {
+      const result = await run(args, GIT_MS, options);
       if (result.code !== 0 || result.timedOut) throw gitFailure(args, result, GIT_MS);
       return result.stdout;
     },

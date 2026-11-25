@@ -2378,10 +2378,13 @@ branch follows, and restarts the window's server for the new code. In this order
      5d6e7f8  the newest commit's subject
      4c5d6e7  the one before
      3b4c5d6  the oldest new one
+   what is new:
+     Parked: set a session aside
    ```
 
    The ids are the first 7 digits of each commit's id, for reading only; the update itself uses
-   the whole id. When the new commits change `src/store/migrations.ts`, one more line says so:
+   the whole id. `what is new:` and the titles under it come only when the update brings notes of
+   what is new (the files of `docs/news/`, newest first); the window's dialog shows their text. When the new commits change `src/store/migrations.ts`, one more line says so:
    `this update changes the database's upgrade steps: it may upgrade the database, which an older
    checkout cannot open; a copy of the database as it was is kept first, and docs/install.md
    ("Going back") says how to return to 1a2b3c4`, with the commit the checkout is at (see "Going
@@ -2528,14 +2531,18 @@ after your second click (below).
 
 - **The title bar.** While a newer version is known, every window shows `Update available` right
   before `Switch…` and the gear. A click opens a dialog that looks at the checkout again (without the network)
-  and lists the new commits as `skydeck update --check` does, the line about the database's
-  upgrade steps included, and gives the command: `To apply it, in a WSL terminal of your own:
-  skydeck update`. When the checkout cannot be updated as it is — a change to a tracked file that
-  is not committed, commits of your own that the remote does not have — the dialog says why and
-  `Once that is set right, in a WSL terminal of your own: skydeck update`; when the branch follows
-  no branch of a remote any more, `skydeck cannot tell here whether there is an update: …` and the
-  same. Esc or `Close` closes it; `Update now` stands beside `Close` when the update can be
-  applied as the checkout is.
+  and says what is new in plain words: the notes the update brings, each a title and a few
+  sentences, newest first. The other changes are folded under one line, `▸ 3 other changes`: a
+  click (or Enter or Space) opens the list of their subjects; when the update brings no note, the
+  line reads `3 changes` and the list is open. When the update may upgrade the database, a marked
+  note says so and which commit to go back to (see "Going back" below). Small at the bottom: the
+  commit the checkout is at and the new one (`1546b37 → c75af0e on origin/main`), and `In a
+  terminal instead: skydeck update`. When the checkout cannot be updated as it is — a change to a
+  tracked file that is not committed, commits of your own that the remote does not have — the
+  dialog says why and `Once that is set right, in a WSL terminal of your own: skydeck update`;
+  when the branch follows no branch of a remote any more, `skydeck cannot tell here whether there
+  is an update: …` and the same. Esc or `Close` closes it; `Update now` stands beside `Close` when
+  the update can be applied as the checkout is.
 - **Settings** (the gear). The group **Updates**, after The window: the choice `Check for
   updates` (`window.updateCheck`): `Off` (`"off"`, which stops the checks at the start and by the
   clock), `Every 15 minutes` (`"15min"`), `Every hour` (`"hourly"`, the default) or `Every day`

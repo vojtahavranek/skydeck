@@ -14,6 +14,7 @@ import type { Browser, Page } from 'playwright';
 import { createSettings } from '../src/window/settings.ts';
 import type { UpdatePayload } from '../src/window/protocol.ts';
 import { testDeck } from '../test/helpers/deck.ts';
+import { availablePayload } from '../test/helpers/update.ts';
 import { browser, newPage } from './helpers/browser.ts';
 import {
   connection,
@@ -31,7 +32,13 @@ import { until } from './helpers/terminal.ts';
 
 const TO = '5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f80';
 const LOG = '/home/you/.local/state/skydeck/update.log';
-const LINES = ['1 new commit on origin/main (0123456..5d6e7f8):', '  5d6e7f8  the new commit'];
+/** The body of the dialog for state(): the fold open (no note), its one change, the bottom lines. */
+const LINES = [
+  '▾ 1 change',
+  'the new commit',
+  '0123456 → 5d6e7f8 on origin/main',
+  'In a terminal instead: skydeck update',
+];
 const RUNNING = 'skydeck is being updated to 5d6e7f8. The window comes back by itself.';
 const STALE_UNSTORED =
   "this window's page is not the one skydeck's server serves, and its key could not be stored, so it cannot reload itself; run skydeck window again";
@@ -41,13 +48,7 @@ const NOT_VALID = "this window's key is not valid; run skydeck window again";
 function state(over: Partial<UpdatePayload> = {}): UpdatePayload {
   return {
     checking: false,
-    check: {
-      state: 'available',
-      summary: '1 new commit on origin/main',
-      to: TO,
-      lines: LINES,
-      blocked: null,
-    },
+    check: availablePayload({ to: TO }),
     checkedAtNs: '1794474000000000000',
     fetchedAtNs: '1794474000000000000',
     failure: null,
@@ -156,7 +157,10 @@ async function world(t: TestContext, chromium: Browser): Promise<World> {
   };
 }
 
-/** Whether the update dialog shows, its lines, its visible buttons, and whether the page is inert. */
+/**
+ * Whether the update dialog shows, its body's lines (each block, the fold line and each item under
+ * it, as shown), its visible buttons (Update now, Close), and whether the page is inert.
+ */
 function dialogOf(page: Page): Promise<{
   shown: boolean;
   lines: string[];
@@ -170,10 +174,16 @@ function dialogOf(page: Page): Promise<{
       const root = document.getElementById('update-dialog');
       return {
         shown: root?.hidden === false,
-        lines: [...document.querySelectorAll('#update-dialog .update-line')].map(
-          (line) => line.textContent ?? '',
-        ),
-        buttons: [...document.querySelectorAll<HTMLButtonElement>('#update-dialog button')]
+        lines: [
+          ...document.querySelectorAll<HTMLElement>(
+            '#update-dialog :is(.update-note-title, .update-note-text, .update-line, .update-fold, .update-other, .update-database-text, .update-meta)',
+          ),
+        ]
+          .filter((line) => line.offsetParent !== null)
+          .map((line) => line.textContent ?? ''),
+        buttons: [
+          ...document.querySelectorAll<HTMLButtonElement>('#update-dialog .update-actions button'),
+        ]
           .filter((button) => !button.hidden)
           .map((button) => button.textContent ?? ''),
         inert: (document.querySelector('.app') as HTMLElement | null)?.inert === true,
@@ -356,14 +366,11 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
       await liftedOn(page);
 
       const blocked = state({
-        check: {
-          state: 'available',
-          summary: '1 new commit on origin/main',
+        check: availablePayload({
           to: TO,
-          lines: LINES,
           blocked:
             'this checkout has changes that are not committed (1 file, the first: a.txt); commit or undo them first',
-        },
+        }),
       });
       await openDialog(w, page, blocked, 2);
       assert.deepEqual((await dialogOf(page)).buttons, ['Close']);
@@ -384,11 +391,147 @@ test('Update now in the page (F38, milestone 2, S2 16.5)', async (t) => {
       });
       await until(
         async () =>
-          (await dialogOf(page)).lines.at(-1) ===
-          'a check for updates is running; try again once it has ended',
+          (await dialogOf(page)).lines.includes(
+            'a check for updates is running; try again once it has ended',
+          ),
         'the refusal in the dialog',
       );
       assert.equal((await dialogOf(page)).shown, true);
+    },
+  );
+
+  await t.test(
+    'with notes: a redraw keeps the fold as the user left it and the keyboard on it; the fold line gone, the keyboard on Close; the blocked form shows the notes and the fold, no Update now',
+    async (t) => {
+      const w = await world(t, chromium);
+      const [page] = w.pages;
+      assert.ok(page !== undefined);
+      const NOTE = {
+        title: [{ text: 'A note', code: false }],
+        paragraphs: [[{ text: 'Its text.', code: false }]],
+      };
+      const withNotes = (over: Parameters<typeof availablePayload>[0] = {}): UpdatePayload =>
+        state({
+          check: availablePayload({
+            to: TO,
+            notes: [NOTE],
+            others: ['b', 'a'],
+            otherCount: 2,
+            ...over,
+          }),
+        });
+      w.tell(withNotes());
+      await until(
+        async () =>
+          await readPage(page, () => !document.getElementById('update-button')?.hidden, null),
+        'the title bar shows Update available',
+      );
+      await page.locator('#update-button').click();
+      w.answer(await w.act('update-look', 1), { ok: true, update: withNotes() });
+      await until(async () => (await dialogOf(page)).lines[0] === 'A note', 'the notes drawn');
+      assert.deepEqual((await dialogOf(page)).lines.slice(0, 3), [
+        'A note',
+        'Its text.',
+        '▸ 2 other changes',
+      ]);
+      // A click opens and closes the fold without taking the keyboard off Close.
+      assert.equal((await dialogOf(page)).focus, 'update-close');
+      await page.locator('#update-dialog .update-fold').click();
+      await until(
+        async () => (await dialogOf(page)).lines.includes('▾ 2 other changes'),
+        'a click opens the fold',
+      );
+      assert.equal((await dialogOf(page)).focus, 'update-close', 'the keyboard stays on Close');
+      await page.locator('#update-dialog .update-fold').click();
+      await until(
+        async () => (await dialogOf(page)).lines.includes('▸ 2 other changes'),
+        'a click closes it',
+      );
+      await page.keyboard.press('Tab');
+      assert.equal((await dialogOf(page)).focus, 'update-fold');
+      await page.keyboard.press('Enter');
+      await until(
+        async () => (await dialogOf(page)).lines.includes('▾ 2 other changes'),
+        'the fold opened',
+      );
+
+      // Another window's check: drawn again, the fold still open, the keyboard still on it.
+      w.tell(withNotes({ others: ['c', 'b', 'a'], otherCount: 3 }));
+      await until(
+        async () => (await dialogOf(page)).lines.includes('▾ 3 other changes'),
+        'drawn again, open',
+      );
+      const again = await dialogOf(page);
+      assert.deepEqual(again.lines.slice(2, 6), ['▾ 3 other changes', 'c', 'b', 'a']);
+      assert.equal(again.focus, 'update-fold');
+
+      // Every commit a note's: the fold line goes, the keyboard to Close.
+      w.tell(withNotes({ others: [], otherCount: 0 }));
+      await until(
+        async () => !(await dialogOf(page)).lines.some((line) => line.endsWith('other changes')),
+        'the fold line gone',
+      );
+      assert.equal((await dialogOf(page)).focus, 'update-close');
+
+      const why =
+        'this checkout has changes that are not committed (1 file, the first: a.txt); commit or undo them first';
+      w.tell(withNotes({ blocked: why }));
+      await until(
+        async () =>
+          (await dialogOf(page)).lines.includes(`This checkout cannot be updated as it is: ${why}`),
+        'the blocked form',
+      );
+      const blocked = await dialogOf(page);
+      assert.deepEqual(blocked.lines, [
+        'A note',
+        'Its text.',
+        '▾ 2 other changes',
+        'b',
+        'a',
+        `This checkout cannot be updated as it is: ${why}`,
+        'Once that is set right, in a WSL terminal of your own: skydeck update',
+        '0123456 → 5d6e7f8 on origin/main',
+      ]);
+      assert.deepEqual(blocked.buttons, ['Close']);
+      await page.keyboard.press('Escape');
+      await liftedOn(page);
+    },
+  );
+
+  await t.test(
+    'the running form: ↑ ↓ PageUp PageDown Home End do nothing there and reach nothing behind it (taken and cancelled)',
+    async (t) => {
+      const w = await world(t, chromium);
+      const [page] = w.pages;
+      assert.ok(page !== undefined);
+      w.tell(APPLYING);
+      await runningOn(page);
+      await page.evaluate(() => {
+        const seen = { capture: [] as string[], bubble: [] as string[] };
+        Object.assign(window, { seenKeys: seen });
+        // After app.js's own capture listener: it sees whether the key was cancelled.
+        addEventListener(
+          'keydown',
+          (event) => seen.capture.push(`${event.key}:${event.defaultPrevented}`),
+          true,
+        );
+        addEventListener('keydown', (event) => seen.bubble.push(event.key));
+      });
+      const keys = ['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'End', 'Home'];
+      for (const key of keys) await page.keyboard.press(key);
+      const seen = await readPage(
+        page,
+        () => (window as unknown as { seenKeys: { capture: string[]; bubble: string[] } }).seenKeys,
+        null,
+      );
+      assert.deepEqual(
+        seen.capture,
+        keys.map((key) => `${key}:true`),
+      );
+      assert.deepEqual(seen.bubble, [], 'stopped where the dialog took them');
+      const d = await dialogOf(page);
+      assert.equal(d.lines.join('\n'), RUNNING);
+      assert.equal(d.focus, 'edit-dialog update-dialog', 'the keyboard still on the form');
     },
   );
 

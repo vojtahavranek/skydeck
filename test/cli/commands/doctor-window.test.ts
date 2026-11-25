@@ -467,7 +467,7 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
   function entry(m: WindowMachine, root: string, over: Partial<CheckRecord> = {}): CheckRecord {
     const now = m.platform.clock.nowNs();
     return {
-      v: 1,
+      v: 2,
       root,
       lookedAtNs: String(now - 2n * HOUR),
       checkedAtNs: String(now - 2n * HOUR),
@@ -478,8 +478,13 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
         kind: 'available',
         upstream: 'origin/main',
         count: 3,
+        from: HEAD,
         to: TO,
-        lines: ['3 new commits on origin/main (0123456..fedcba9):'],
+        notes: [{ title: 'A note', paragraphs: ['Its text.'] }],
+        moreNotes: 0,
+        others: ['one', 'two'],
+        otherCount: 2,
+        upgradesDatabase: false,
         blocked: null,
       },
       ...over,
@@ -500,6 +505,36 @@ describe("doctor: the window's last check for a newer skydeck (F38)", () => {
     );
     assert.equal(gitCalls.length, 2, JSON.stringify(gitCalls));
     assert.ok(gitCalls.every((args) => !args.includes('fetch')));
+  });
+
+  test('a record of the shape before (version 1, before the notes of what is new): never checked, as for none', async (t) => {
+    const m = machine(t);
+    mkdirSync(root(m), { recursive: true });
+    const { outcome } = entry(m, root(m));
+    assert.ok(outcome.kind === 'available');
+    m.deck.store.setKv(
+      'window_update_check',
+      JSON.stringify({
+        ...entry(m, root(m)),
+        v: 1,
+        outcome: {
+          kind: 'available',
+          upstream: outcome.upstream,
+          count: outcome.count,
+          to: outcome.to,
+          lines: ['3 new commits on origin/main (0123456..fedcba9):'],
+          blocked: null,
+        },
+      }),
+    );
+
+    const { r } = await doctorAt(m);
+
+    lineOf(
+      r,
+      'info',
+      /^info {5}update: never checked \(the window's server checks when it starts\)$/,
+    );
   });
 
   test('an update known: how many, on which branch, when fetched, and the command', async (t) => {

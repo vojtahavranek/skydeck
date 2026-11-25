@@ -45,7 +45,7 @@ import type { Ns } from '../platform/types.ts';
 import type { Deck } from '../sessions/deck.ts';
 import { gitOn } from '../update/git.ts';
 import type { Git } from '../update/git.ts';
-import { counted, lookForUpdate, report, short } from '../update/look.ts';
+import { counted, lookForUpdate, short, subjectLine } from '../update/look.ts';
 import type { Looked } from '../update/look.ts';
 import {
   checkoutRoot,
@@ -210,8 +210,13 @@ function outcomeOf(looked: Looked): CheckOutcome {
       kind: 'available',
       upstream: sanitize(update.upstream),
       count: update.count,
+      from: update.oldId,
       to: update.newId,
-      lines: report(update),
+      notes: update.notes,
+      moreNotes: update.moreNotes,
+      others: update.others.map((commit) => subjectLine(commit.subject)),
+      otherCount: update.otherCount,
+      upgradesDatabase: update.upgradesDatabase,
       blocked,
     };
   }
@@ -361,7 +366,7 @@ export function createUpdates(deps: UpdatesDeps): Updates {
     const fetchWorked = !thrown && ended.kind === 'known' && ended.fetchFailed === null;
     lastCheck = { atNs: nowNs, failed: failureLine !== null };
     keep({
-      v: 1,
+      v: 2,
       root: root ?? '',
       lookedAtNs: at,
       head: thrown ? null : ended.kind === 'cannot' ? ended.head : ended.update.oldId,
@@ -376,7 +381,7 @@ export function createUpdates(deps: UpdatesDeps): Updates {
   const noCheckout = (): UpdatePayload => {
     if (!stopped) {
       record = {
-        v: 1,
+        v: 2,
         root: '',
         lookedAtNs: String(platform.clock.nowNs()),
         checkedAtNs: null,
@@ -446,7 +451,7 @@ export function createUpdates(deps: UpdatesDeps): Updates {
       if (stopped) return payload();
       const before = known();
       keep({
-        v: 1,
+        v: 2,
         root: root ?? '',
         lookedAtNs: String(platform.clock.nowNs()),
         checkedAtNs: before?.checkedAtNs ?? null,
