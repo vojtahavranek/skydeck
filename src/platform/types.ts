@@ -331,4 +331,10 @@ export interface Platform {
   uid: number;
   /** os.userInfo().username, for /var/lib/systemd/linger/<user>. */
   userName: string;
+  /**
+   * The account's login shell (os.userInfo().shell, from the account database): an absolute path
+   * without NUL, or null when it cannot be read, is empty or is no such path. A session's shell
+   * runs it (design-step-2.md 7.10); the test platforms name a stand-in inside their sandbox.
+   */
+  loginShell: string | null;
 }

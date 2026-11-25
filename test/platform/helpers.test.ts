@@ -11,8 +11,9 @@ import {
 } from 'node:fs';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
+import { spawn } from 'node:child_process';
 import { tmpdir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
@@ -45,6 +46,7 @@ import {
 } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
 import type { Sandbox } from '../helpers/sandbox.ts';
+import { SHELL_PROMPT, shellStandin } from '../helpers/shell-standin.ts';
 import { writeWindowConfig } from '../helpers/window-config.ts';
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -979,6 +981,51 @@ describe('sandbox: step 2', () => {
 
     assert.ok(existsSync(`${s.bin}/sh`));
     assert.ok(existsSync(`${s.bin}/cat`));
+  });
+});
+
+describe('the stand-in login shell (design-step-2.md 7.10)', () => {
+  /** Whether `path` is a file inside `root` (a relative path from it that does not climb out). */
+  function inside(root: string, path: string): boolean {
+    const rel = relative(root, path);
+    return rel !== '' && !rel.startsWith('..') && !rel.startsWith('/');
+  }
+
+  test('both test platforms name an executable stand-in inside their own sandbox', (t) => {
+    for (const tp of [testPlatform(t), realTestPlatform(t)]) {
+      const shell = tp.platform.loginShell;
+
+      assert.ok(shell !== null, 'a loginShell is set');
+      assert.equal(shell, join(tp.sandbox.bin, 'shell-standin'));
+      assert.ok(inside(tp.sandbox.root, shell), `${shell} is inside the sandbox`);
+      assert.ok(fs.statSync(shell).isFile());
+      assert.equal(fs.statSync(shell).mode & 0o777, 0o755);
+      for (const program of ['sh', 'sleep', 'stty']) {
+        assert.ok(existsSync(join(tp.sandbox.bin, program)), program);
+      }
+    }
+  });
+
+  test('run by hand through a pipe it prompts, runs a typed printf, and ends at exit 3 with 3', async (t) => {
+    const s = sandbox(t);
+    const shell = shellStandin(s);
+    const child = spawn(shell, [], { env: s.env(), cwd: s.home, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      out += chunk;
+    });
+    const status = new Promise<number | null>((resolve) => {
+      child.on('exit', (code) => {
+        resolve(code);
+      });
+    });
+
+    child.stdin.write("printf 'typed %s\\n' here\n");
+    child.stdin.write('exit 3\n');
+
+    assert.equal(await status, 3);
+    assert.equal(out, `${SHELL_PROMPT}typed here\n${SHELL_PROMPT}`);
   });
 });
 

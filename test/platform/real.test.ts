@@ -1465,6 +1465,16 @@ describe('real platform: randomness and identity', () => {
     assert.equal(platform.uid, process.getuid?.());
     assert.equal(platform.userName, userInfo().username);
   });
+
+  test("loginShell is null or the account's shell, an absolute path without NUL", () => {
+    const { loginShell } = realPlatform();
+
+    if (loginShell !== null) {
+      assert.ok(loginShell.startsWith('/'), loginShell);
+      assert.equal(loginShell.includes('\0'), false);
+      assert.equal(loginShell, userInfo().shell);
+    }
+  });
 });
 
 describe('real processes: startDetached', () => {

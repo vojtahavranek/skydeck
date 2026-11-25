@@ -79,6 +79,7 @@ export function realPlatform(options: RealPlatformOptions = {}): Platform {
     pid: process.pid,
     uid,
     userName: userNameOf(uid),
+    loginShell: loginShellOf(),
     env,
     homeDir: homedir(),
     // Read when asked: a shell may sit in a directory that was removed, and `--version` must still work.
@@ -106,6 +107,20 @@ function userNameOf(uid: number): string {
   } catch {
     return String(uid);
   }
+}
+
+/**
+ * os.userInfo().shell when it is an absolute path without NUL; null when it throws (no passwd
+ * entry), is empty, or is anything else.
+ */
+function loginShellOf(): string | null {
+  let shell: string | null;
+  try {
+    shell = userInfo().shell;
+  } catch {
+    return null;
+  }
+  return typeof shell === 'string' && shell.startsWith('/') && !shell.includes('\0') ? shell : null;
 }
 
 function errorCode(error: unknown): string | undefined {
