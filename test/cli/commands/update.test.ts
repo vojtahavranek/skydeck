@@ -78,8 +78,17 @@ function updater(
 
 /** The checks before the fetch, in their order (U2 2–6), and HEAD's id. */
 const BEFORE_FETCH = ['rev-parse', 'symbolic-ref', 'for-each-ref', 'status', 'rev-parse'];
-/** What a look at one commit on the upstream calls, after the fetch (U4). */
-const LOOK = ['rev-parse', 'merge-base', 'rev-list', 'log', 'ls-tree', 'ls-tree'];
+/** What a look at one commit on the upstream calls, after the fetch (U4): whether notes can be read and the notes' trees, the commits, the upgrade steps of each. */
+const LOOK = [
+  'rev-parse',
+  'merge-base',
+  'rev-list',
+  'config',
+  'cat-file',
+  'log',
+  'ls-tree',
+  'ls-tree',
+];
 
 /** A fetch that succeeded, and the look again at the branch, HEAD and the status after it (C3). */
 const FETCHED = ['fetch', 'symbolic-ref', 'rev-parse', 'status'];
@@ -439,6 +448,8 @@ describe('skydeck update: how git is run (U3)', () => {
         ['rev-parse', '--verify', 'refs/remotes/origin/main^{commit}'],
         ['merge-base', '--is-ancestor', OLD, NEW],
         ['rev-list', '--count', `${OLD}..${NEW}`],
+        ['config', '-z', '--get-regexp', '^(extensions\\.partialclone|remote\\..*\\.promisor)$'],
+        ['cat-file', '--batch-check'],
         [
           'log',
           '--no-show-signature',
@@ -543,6 +554,25 @@ describe('skydeck update: what it reports (U4)', () => {
     assert.equal(r.stderr, '');
     assert.deepEqual(u.trace(), [...BEFORE_FETCH, ...FETCHED, ...LOOK]);
     assert.ok(!existsSync(u.tp.places.dbPath));
+  });
+
+  test('--check with notes that cannot be read (a missing blob, a tree past its bound): exit 0, the lines as without notes', async (t) => {
+    const blob = 'b'.repeat(40);
+    const news = {
+      [NEW]: `100644 blob ${blob}      40\tdocs/news/2026-11-25-a.md\0`,
+    };
+    for (const over of [
+      { news, answers: { [`cat-file blob ${blob}`]: { code: 128, stderr: 'fatal: missing\n' } } },
+      { news, blobs: { [blob]: '# A\n\nB.\n' }, newsTreeSize: 10_000_000 },
+    ]) {
+      const u = updater(t, { ...over, noteAdders: [NEW] });
+
+      const r = await u.update(['--check']);
+
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(r.stdout, `${ONE_COMMIT}run skydeck update to apply it\n`);
+      assert.equal(r.stderr, '');
+    }
   });
 
   test('21 new commits: newest first, the first 20, then "… and 1 more"', async (t) => {

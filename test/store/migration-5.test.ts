@@ -26,6 +26,7 @@ import {
   dumpDatabase,
   schemaDatabase,
   withoutParkedColumn,
+  withoutUptime,
 } from '../helpers/schema1.ts';
 import type { DatabaseDump } from '../helpers/schema1.ts';
 
@@ -106,12 +107,17 @@ function columnsOf(path: string, table: string): string[] {
 
 const isVersion = (row: Record<string, unknown>): boolean => row['key'] === 'schema_version';
 
+/** The newest schema version, as kv holds it (#207: an open goes on with migration 6). */
+const NEWEST = String(SCHEMA_VERSION);
+
 /**
- * `after` is `before` (a schema-4 database) migrated to 5: sqlite_master is as it was but for
+ * `newest` is `before` (a schema-4 database) migrated to 5: sqlite_master is as it was but for
  * session_meta's statement, which ends in the new column; every row of every table is as it was,
- * but each row of session_meta gains `parked_at_ns` NULL and kv schema_version is '5'.
+ * but each row of session_meta gains `parked_at_ns` NULL and kv schema_version is the newest (#207:
+ * the open goes on with migration 6, whose nullable column uptime_cs of events is left out here).
  */
-function assertMigrated(before: DatabaseDump, after: DatabaseDump): void {
+function assertMigrated(before: DatabaseDump, newest: DatabaseDump): void {
+  const after = withoutUptime(newest);
   assert.deepEqual(
     after.schema,
     before.schema.map((entry) =>
@@ -142,11 +148,13 @@ function assertMigrated(before: DatabaseDump, after: DatabaseDump): void {
     'no kv entry changed but schema_version',
   );
   assert.deepEqual(before.tables['kv']?.filter(isVersion), [{ key: 'schema_version', value: '4' }]);
-  assert.deepEqual(after.tables['kv']?.filter(isVersion), [{ key: 'schema_version', value: '5' }]);
+  assert.deepEqual(after.tables['kv']?.filter(isVersion), [
+    { key: 'schema_version', value: NEWEST },
+  ]);
 }
 
 test('migration 5 is one ALTER TABLE that adds the nullable column parked_at_ns to session_meta', () => {
-  assert.equal(SCHEMA_VERSION, 5);
+  assert.ok(SCHEMA_VERSION >= 5);
   assert.equal(
     MIGRATIONS[4],
     'ALTER TABLE session_meta ADD COLUMN parked_at_ns INTEGER;  -- F44: when the user parked the session; NULL for none',
@@ -168,15 +176,15 @@ test('the fixture is a schema-4 database with a row in every table, a ticket and
   );
 });
 
-test('openStore migrates a schema-4 database to 5: every value kept, the new column NULL in every row, the copy kept holding schema 4', (t) => {
+test('openStore migrates a schema-4 database to 5 (and on to the newest): every value kept, the new column NULL in every row, the copy kept holding schema 4', (t) => {
   const { path, dir } = schema4(t);
   const before = dumpDatabase(path);
 
   const store = opened(t, path);
 
   const copy = `${path}.schema4-${STAMP}`;
-  assert.deepEqual(store.migrated, { version: 5, copy });
-  assert.equal(store.getKv('schema_version'), '5');
+  assert.deepEqual(store.migrated, { version: SCHEMA_VERSION, copy });
+  assert.equal(store.getKv('schema_version'), NEWEST);
   assertMigrated(before, dumpDatabase(path));
   assert.deepEqual(beside(dir), [basename(copy)]);
   assert.deepEqual(dumpDatabase(copy), before, 'the copy is the schema-4 database as it was');
@@ -271,7 +279,7 @@ test('a migration 5 that fails after its ALTER TABLE leaves schema 4 and every v
   assertMigrated(unblocked, dumpDatabase(path));
 });
 
-test('a new database is made at schema 5, with the column and no copy', (t) => {
+test('a new database is made at the newest schema, with the column and no copy', (t) => {
   const dir = join(sandbox(t).root, 'data');
   mkdirSync(dir);
   const path = join(dir, 'skydeck.db');
@@ -279,18 +287,18 @@ test('a new database is made at schema 5, with the column and no copy', (t) => {
   const store = opened(t, path);
 
   assert.equal(store.migrated, null);
-  assert.equal(store.getKv('schema_version'), '5');
+  assert.equal(store.getKv('schema_version'), NEWEST);
   assert.ok(columnsOf(path, 'session_meta').includes('parked_at_ns'));
   assert.deepEqual(beside(dir), []);
   assert.equal(store.updateMeta(SCHEMA1.s1, { parkedAtNs: T0 }, T0).parkedAtNs, T0);
 });
 
-test('a database stamped 6 is refused ("written by a newer skydeck"), and nothing in it changes', (t) => {
+test('a database stamped one above the newest is refused ("written by a newer skydeck"), and nothing in it changes', (t) => {
   const dir = join(sandbox(t).root, 'data');
   mkdirSync(dir);
   const path = join(dir, 'skydeck.db');
   const store = openStore(path, { clock: clockAt(T0) });
-  store.setKv('schema_version', '6');
+  store.setKv('schema_version', String(SCHEMA_VERSION + 1));
   store.close();
   const before = dumpDatabase(path);
 
@@ -301,7 +309,7 @@ test('a database stamped 6 is refused ("written by a newer skydeck"), and nothin
       assert.equal(error.exitCode, 1);
       assert.equal(
         error.message,
-        `the database ${path} was written by a newer skydeck (schema version 6, this one knows 5); update skydeck`,
+        `the database ${path} was written by a newer skydeck (schema version ${SCHEMA_VERSION + 1}, this one knows ${SCHEMA_VERSION}); update skydeck`,
       );
       return true;
     },

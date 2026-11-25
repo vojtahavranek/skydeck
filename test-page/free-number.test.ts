@@ -13,7 +13,7 @@ import type { Page } from 'playwright';
 
 import { procStartOf } from '../test/helpers/keeper.ts';
 import { S1, S2, S3 } from '../test/helpers/platform.ts';
-import { hookInput, spoolName, spoolText } from '../test/helpers/spool.ts';
+import { hookInput, spoolName, spoolText, uptimeText } from '../test/helpers/spool.ts';
 import { connectTestPage } from '../test/helpers/window.ts';
 import { browser } from './helpers/browser.ts';
 import { clickRow, keyMessage, launched, selectedRow, termOf, toZone } from './helpers/shell.ts';
@@ -128,6 +128,10 @@ test('F43: the number of a session whose program ended', async (t) => {
       const fields = {
         event: 'SessionEnd' as const,
         timeNs: d.platform.clock.nowNs(),
+        // With the machine's uptime, as the hook writes it: S1's start has one (#207), and a
+        // process with one event without it is ordered by its wall-clock stamps, which a step
+        // back of the clock can invert.
+        uptime: uptimeText(d.platform.proc.uptimeCs()),
         pid: program.pid,
         procStart,
         bootId: d.platform.proc.bootId() ?? '',

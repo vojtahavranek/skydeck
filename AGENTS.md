@@ -135,3 +135,5 @@ terminal of their own, first with a new session in a scratch folder they can los
   against a real home or `~/.claude`, the real `claude`, the window's real port or the network.
 - The design is `docs/design.md` (section 2, the principles, changes first if one must break) and
   `docs/design-step-2.md` (the window); a change in behaviour updates it in the same pull request.
+- A change a user can see adds a note in `docs/news/` (its README says the format): what they will
+  see and how to use it, in plain words, no internal names. Tests and internal work add none.

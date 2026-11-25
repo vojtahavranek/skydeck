@@ -11,7 +11,6 @@ import type { TestContext } from 'node:test';
 import type { UpdateCheck } from '../../src/platform/config.ts';
 import type { Detached, RunResult } from '../../src/platform/types.ts';
 import type { Deck } from '../../src/sessions/deck.ts';
-import { report } from '../../src/update/look.ts';
 import {
   CHECK_KEY,
   checkoutRoot,
@@ -36,12 +35,22 @@ import {
   retryAfterNs,
 } from '../../src/window/updates.ts';
 import type { Updates } from '../../src/window/updates.ts';
+import { offersUpdateNow } from '../../web/update-text.js';
 import { deckWith, testDeck } from '../helpers/deck.ts';
 import type { TestDeck } from '../helpers/deck.ts';
 import { fakeProcesses, T0 } from '../helpers/platform.ts';
 import type { FakeProcesses, FakeRunner } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
-import { gitArgs, NEW, OLD, scriptedGit, scriptedRepo, updateSeam } from '../helpers/update.ts';
+import {
+  availableOutcome,
+  availablePayload,
+  gitArgs,
+  NEW,
+  OLD,
+  scriptedGit,
+  scriptedRepo,
+  updateSeam,
+} from '../helpers/update.ts';
 import type { ScriptedRepo } from '../helpers/update.ts';
 
 /** Lets every pending promise of the scripted git and the checker run. */
@@ -406,26 +415,13 @@ describe('what a check gives', () => {
           summary: 'nothing new on origin/main: this checkout has 2 commits that it does not have',
         },
       ],
-      [
-        {},
-        {
-          state: 'available',
-          summary: '1 new commit on origin/main',
-          to: NEW,
-          lines: ['1 new commit on origin/main (0123456..fedcba9):', '  fedcba9  the new commit'],
-          blocked: null,
-        },
-      ],
+      [{}, availablePayload()],
       [
         { status: ' M a.txt\0' },
-        {
-          state: 'available',
-          summary: '1 new commit on origin/main',
-          to: NEW,
-          lines: ['1 new commit on origin/main (0123456..fedcba9):', '  fedcba9  the new commit'],
+        availablePayload({
           blocked:
             'this checkout has changes that are not committed (1 file, the first: a.txt); commit or undo them first',
-        },
+        }),
       ],
       [
         { upstream: { ref: '', remote: '', short: '' } },
@@ -446,8 +442,8 @@ describe('what a check gives', () => {
       assert.equal(stored.head, expected?.state === 'cannot' ? null : OLD);
       if (stored.outcome.kind === 'available') {
         assert.deepEqual(
-          stored.outcome.lines,
-          expected?.state === 'available' ? expected.lines : null,
+          stored.outcome.others,
+          expected?.state === 'available' ? expected.others : null,
         );
       }
       assert.equal(answer.failure, null);
@@ -455,33 +451,78 @@ describe('what a check gives', () => {
     }
   });
 
-  test('the lines are those of report(), the database line included', async (t) => {
+  test('an update that changes the upgrade steps says so; the notes it brings and the other changes go with it', async (t) => {
+    const blob = 'a'.repeat(40);
     const w = world(t, {
       repo: {
         migrations: {
           [NEW]: '100644 blob 6666666666666666666666666666666666666666\tsrc/store/migrations.ts\0',
         },
+        news: { [NEW]: `100644 blob ${blob}      40\tdocs/news/2026-11-25-a.md\0` },
+        blobs: { [blob]: '# A `note`\n\nIt says so.\n' },
+        behind: 2,
+        commits: [
+          { id: NEW, subject: 'adds the note' },
+          { id: OLD.replace('0', 'e'), subject: 'another change' },
+        ],
+        noteAdders: [NEW],
       },
     });
 
     const answer = await w.updates.check();
 
-    assert.ok(answer.check?.state === 'available');
-    assert.equal(answer.check.lines.length, 3);
-    assert.match(answer.check.lines[2] ?? '', /^this update changes the database's upgrade steps/);
     assert.deepEqual(
-      answer.check.lines,
-      report({
-        branch: 'main',
-        upstream: 'origin/main',
-        oldId: OLD,
-        newId: NEW,
-        count: 1,
-        ahead: 0,
-        commits: [{ id: NEW, subject: 'the new commit' }],
+      answer.check,
+      availablePayload({
+        summary: '2 new commits on origin/main',
+        notes: [
+          {
+            title: [
+              { text: 'A ', code: false },
+              { text: 'note', code: true },
+            ],
+            paragraphs: [[{ text: 'It says so.', code: false }]],
+          },
+        ],
+        others: ['another change'],
+        otherCount: 1,
         upgradesDatabase: true,
       }),
     );
+    const stored = w.stored();
+    assert.ok(stored?.v === 2 && stored.outcome.kind === 'available');
+    assert.deepEqual(stored.outcome.notes, [{ title: 'A `note`', paragraphs: ['It says so.'] }]);
+  });
+
+  test('notes that cannot be read (a git call of theirs fails) take nothing from the update: available, Update now offered, every commit another change', async (t) => {
+    const blob = 'a'.repeat(40);
+    const w = world(t, {
+      repo: {
+        news: { [NEW]: `100644 blob ${blob}      40\tdocs/news/2026-11-25-a.md\0` },
+        answers: { [`cat-file blob ${blob}`]: { code: 128, stderr: 'fatal: missing blob\n' } },
+        noteAdders: [NEW],
+      },
+    });
+
+    const answer = await w.updates.check();
+
+    assert.deepEqual(answer.check, availablePayload());
+    assert.equal(answer.failure, null, 'no failure of the check');
+    assert.ok(answer.check?.state === 'available' && offersUpdateNow(answer.check));
+  });
+
+  test('a stored subject goes through subjectLine: sanitised, clipped to 200 with …', async (t) => {
+    const w = world(t, {
+      repo: { commits: [{ id: NEW, subject: `a\u001b[31m${'s'.repeat(400)}` }] },
+    });
+
+    const answer = await w.updates.check();
+
+    assert.ok(answer.check?.state === 'available');
+    assert.equal(answer.check.others[0], `a${'s'.repeat(198)}…`);
+    const stored = w.stored();
+    assert.ok(stored?.outcome.kind === 'available');
+    assert.equal(stored.outcome.others[0], `a${'s'.repeat(198)}…`);
   });
 
   test('an update known from an earlier fetch, then a check whose fetch fails: it stays, the failure beside it; the next check that works clears it', async (t) => {
@@ -596,21 +637,14 @@ describe('what a check gives', () => {
 describe('the store and the server', () => {
   test('a stored entry of another root is not shown; the record names this checkout', async (t) => {
     const other: CheckRecord = {
-      v: 1,
+      v: 2,
       root: '/another/checkout',
       lookedAtNs: '1',
       checkedAtNs: '1',
       fetchedAtNs: '1',
       failure: null,
       head: OLD,
-      outcome: {
-        kind: 'available',
-        upstream: 'origin/main',
-        count: 1,
-        to: NEW,
-        lines: ['x'],
-        blocked: null,
-      },
+      outcome: availableOutcome(),
     };
     const w = world(t, {
       updateCheck: 'off',
@@ -634,21 +668,14 @@ describe('the store and the server', () => {
       repo: { quietFetch: () => fetch.promise, fetched: OLD },
       before: (deck, root) => {
         writeCheck(deck.store, {
-          v: 1,
+          v: 2,
           root,
           lookedAtNs: '1',
           checkedAtNs: '1',
           fetchedAtNs: '1',
           failure: null,
           head: OLD,
-          outcome: {
-            kind: 'available',
-            upstream: 'origin/main',
-            count: 1,
-            to: NEW,
-            lines: ['x'],
-            blocked: null,
-          },
+          outcome: availableOutcome(),
         });
       },
     });
@@ -667,7 +694,7 @@ describe('the store and the server', () => {
       updateCheck: 'off',
       before: (deck, root) => {
         writeCheck(deck.store, {
-          v: 1,
+          v: 2,
           root,
           lookedAtNs: '1',
           checkedAtNs: '1',
@@ -697,6 +724,44 @@ describe('the store and the server', () => {
     );
     assert.equal(w.updates.payload().check?.state, 'available');
     assert.equal(w.updates.payload().fetchedAtNs, '1');
+  });
+
+  test('a stored record of the shape before (version 1) is none: with the switch off no look and nothing shown; the switch on, the check is made and stores the new shape', async (t) => {
+    const before = (deck: Deck, root: string): void => {
+      deck.store.setKv(
+        CHECK_KEY,
+        JSON.stringify({
+          v: 1,
+          root,
+          lookedAtNs: '1',
+          checkedAtNs: '1',
+          fetchedAtNs: '1',
+          failure: null,
+          head: OLD,
+          outcome: {
+            kind: 'available',
+            upstream: 'origin/main',
+            count: 1,
+            to: NEW,
+            lines: ['1 new commit on origin/main (0123456..fedcba9):'],
+            blocked: null,
+          },
+        }),
+      );
+    };
+    const off = world(t, { updateCheck: 'off', before });
+    off.updates.tick();
+    await flush();
+    assert.equal(off.runner.calls.length, 0, 'no look: nothing stored is known');
+    assert.equal(off.updates.payload().check, null);
+
+    const on = world(t, { before });
+    on.updates.tick();
+    await flush();
+    assert.equal(on.fetches(), 1);
+    assert.deepEqual(on.updates.payload().check, availablePayload());
+    assert.equal(on.stored()?.v, 2);
+    assert.equal(on.updates.payload().fetchedAtNs, String(T0), 'no time of the old record kept');
   });
 
   test('in a marked sandbox without the seam variable no call reaches the runner at all', async (t) => {
@@ -813,21 +878,14 @@ describe('a check that fails (review of milestone 1)', () => {
   /** An earlier server's stored entry: an update to NEW known, HEAD then at OLD. */
   const earlier = (deck: Deck, root: string): void => {
     writeCheck(deck.store, {
-      v: 1,
+      v: 2,
       root,
       lookedAtNs: '1',
       checkedAtNs: '1',
       fetchedAtNs: '1',
       failure: null,
       head: OLD,
-      outcome: {
-        kind: 'available',
-        upstream: 'origin/main',
-        count: 1,
-        to: NEW,
-        lines: ['1 new commit on origin/main (0123456..fedcba9):'],
-        blocked: null,
-      },
+      outcome: availableOutcome(),
     });
   };
 

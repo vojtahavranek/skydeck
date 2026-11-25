@@ -89,7 +89,8 @@ describe('the check on a running server', () => {
     const found = result.update?.check;
     assert.ok(found?.state === 'available', JSON.stringify(result));
     assert.equal(found.to, pushed);
-    assert.ok(found.lines.some((line) => line.endsWith('a commit the check brings')));
+    assert.deepEqual(found.others, ['a commit the check brings']);
+    assert.deepEqual(found.notes, []);
     assert.equal(found.blocked, null);
     const told = await updateWhere(b, (u) => u.check?.state === 'available', 'B told');
     assert.deepEqual(told.check, found);
@@ -125,6 +126,55 @@ describe('the check on a running server', () => {
     assert.ok(result.update?.check?.state === 'available', JSON.stringify(result));
     assert.equal(result.update.check.to, pushed);
     assert.equal(k.c.id('origin/main'), pushed);
+  });
+
+  test('the notes an update brings, through the check and the dialog’s look: only those the new commit adds, newest first, in runs; the other changes by subject; markup as text', async (t) => {
+    const k = checked(t, 'off');
+    k.c.commit(k.c.root, 'a note the checkout has', {
+      'docs/news/2026-01-01-known.md': '# Known\n\nAlready here.\n',
+    });
+    k.c.git(k.c.root, 'push', '--quiet', 'origin', 'main');
+    k.c.git(k.c.other, 'pull', '--quiet', '--ff-only');
+    const before = k.c.id();
+    k.c.push('a plain change', { 'a.txt': 'a\n' });
+    k.c.push('the first note', {
+      'docs/news/2026-02-01-first.md': '# <b>First</b>\n\nRun `skydeck doctor`\nonce.\n',
+    });
+    k.c.push('the second note and a change to the first', {
+      'docs/news/2026-02-02-second.md': '# Second\n\nOne.\n\nTwo.\n',
+      'docs/news/2026-01-01-known.md': '# Known, changed\n\nAlready here.\n',
+      'docs/news/2026-02-03-broken.md': 'no title line\n',
+    });
+    const server = await k.start();
+    const a = await connectTestPage(t, k.d, server.server);
+
+    for (const kind of ['update-check', 'update-look'] as const) {
+      const result = await a.act({ kind }, WAIT_MS);
+      const found = result.update?.check;
+      assert.ok(found?.state === 'available', JSON.stringify(result));
+      assert.equal(found.from, before);
+      assert.equal(found.upstream, 'origin/main');
+      assert.deepEqual(found.notes, [
+        {
+          title: [{ text: 'Second', code: false }],
+          paragraphs: [[{ text: 'One.', code: false }], [{ text: 'Two.', code: false }]],
+        },
+        {
+          title: [{ text: '<b>First</b>', code: false }],
+          paragraphs: [
+            [
+              { text: 'Run ', code: false },
+              { text: 'skydeck doctor', code: true },
+              { text: ' once.', code: false },
+            ],
+          ],
+        },
+      ]);
+      assert.equal(found.moreNotes, 0);
+      assert.deepEqual(found.others, ['a plain change']);
+      assert.equal(found.otherCount, 1);
+      assert.equal(found.upgradesDatabase, false);
+    }
   });
 });
 

@@ -4,6 +4,8 @@
  */
 import { main } from '../../src/cli/main.ts';
 import type { Platform, RunResult } from '../../src/platform/types.ts';
+import type { CheckOutcome } from '../../src/update/record.ts';
+import type { UpdateCheckPayload } from '../../src/window/protocol.ts';
 import type { Captured } from './capture.ts';
 import { insideSandbox } from './git-checkout.ts';
 import { run } from './install.ts';
@@ -16,6 +18,45 @@ import type { Sandbox } from './sandbox.ts';
 export const OLD = '0123456789abcdef0123456789abcdef01234567';
 export const NEW = 'fedcba9876543210fedcba9876543210fedcba98';
 
+type AvailableOutcome = Extract<CheckOutcome, { kind: 'available' }>;
+type AvailablePayload = Extract<UpdateCheckPayload, { state: 'available' }>;
+
+/** A stored `available` outcome (record version 2): the scripted repository's one new commit, no note. */
+export function availableOutcome(over: Partial<AvailableOutcome> = {}): AvailableOutcome {
+  return {
+    kind: 'available',
+    upstream: 'origin/main',
+    count: 1,
+    from: OLD,
+    to: NEW,
+    notes: [],
+    moreNotes: 0,
+    others: ['the new commit'],
+    otherCount: 1,
+    upgradesDatabase: false,
+    blocked: null,
+    ...over,
+  };
+}
+
+/** The page's `available` check for availableOutcome(): the same facts. */
+export function availablePayload(over: Partial<AvailablePayload> = {}): AvailablePayload {
+  return {
+    state: 'available',
+    summary: '1 new commit on origin/main',
+    from: OLD,
+    to: NEW,
+    upstream: 'origin/main',
+    notes: [],
+    moreNotes: 0,
+    others: ['the new commit'],
+    otherCount: 1,
+    upgradesDatabase: false,
+    blocked: null,
+    ...over,
+  };
+}
+
 /** The id of the i-th new commit (1 = the oldest); its short id is its first seven characters. */
 export function commitId(i: number): string {
   return `${i.toString(16).padStart(7, '0')}${'e'.repeat(33)}`;
@@ -24,6 +65,14 @@ export function commitId(i: number): string {
 /** The ls-tree line of src/store/migrations.ts with blob `blob`, as `ls-tree -z` prints it. */
 export function migrationsEntry(blob: string): string {
   return `100644 blob ${blob}\tsrc/store/migrations.ts\0`;
+}
+
+/**
+ * The ls-tree -l line of a note `docs/news/<name>` with blob `blob` of `size` bytes, as `ls-tree
+ * -l -z` prints it.
+ */
+export function noteEntry(name: string, blob: string, size = 100): string {
+  return `100644 blob ${blob} ${String(size).padStart(7)}\tdocs/news/${name}\0`;
 }
 
 /** What the scripted git answers; every field has a default (scriptedRepo). */
@@ -54,6 +103,20 @@ export interface ScriptedRepo {
   ahead: number;
   /** The new commits, newest first: what `log` lists (at most its --max-count). */
   commits: { id: string; subject: string }[];
+  /**
+   * `ls-tree -l` of docs/news/ per commit id: its output (default none: no notes). A commit named
+   * here has the tree docs/news (`cat-file --batch-check`), of `newsTreeSize` bytes.
+   */
+  news: Record<string, string>;
+  newsTreeSize: number;
+  /** The tree's size for one commit, in place of newsTreeSize. */
+  newsTreeSizes: Record<string, number>;
+  /** `config --get-regexp` of the partial-clone settings: its output (default none, exit 1). */
+  partialClone: string | null;
+  /** `cat-file blob <id>`: the blob's content, per id. */
+  blobs: Record<string, string>;
+  /** The commits `log --diff-filter=A` names for the notes' paths, newest first. */
+  noteAdders: string[];
   /** `ls-tree` of src/store/migrations.ts per commit id: its output (default the same blob). */
   migrations: Record<string, string>;
   /** What `merge --ff-only` answers. */
@@ -93,6 +156,12 @@ export function scriptedRepo(root: string, over: Partial<ScriptedRepo> = {}): Sc
     behind: 1,
     ahead: 0,
     commits: [{ id: NEW, subject: 'the new commit' }],
+    news: {},
+    newsTreeSize: 100,
+    newsTreeSizes: {},
+    partialClone: null,
+    blobs: {},
+    noteAdders: [],
     migrations: {},
     merge: {},
     afterFailedMerge: { head: OLD, status: '' },
@@ -216,6 +285,34 @@ export function scriptedGit(repo: ScriptedRepo): FakeRunner {
             .join(''),
         });
       }
+      case 'ls-tree -l': {
+        const id = rest[3] ?? '';
+        return runResult({ stdout: repo.news[id] ?? '' });
+      }
+      case 'config -z':
+        return repo.partialClone === null
+          ? runResult({ code: 1 })
+          : runResult({ stdout: repo.partialClone });
+      case 'cat-file --batch-check':
+        return runResult({
+          stdout: (call.options?.input ?? '')
+            .split('\n')
+            .filter((line) => line !== '')
+            .map((line) => {
+              const commit = line.split(':')[0] ?? '';
+              return repo.news[commit] === undefined
+                ? `${line} missing\n`
+                : `${'7'.repeat(40)} tree ${repo.newsTreeSizes[commit] ?? repo.newsTreeSize}\n`;
+            })
+            .join(''),
+        });
+      case 'cat-file blob': {
+        const blob = repo.blobs[rest[1] ?? ''];
+        if (blob !== undefined) return runResult({ stdout: blob });
+        break;
+      }
+      case 'log --diff-filter=A':
+        return runResult({ stdout: repo.noteAdders.map((id) => `${id}\0`).join('') });
       case 'ls-tree --full-tree': {
         const id = rest[2] ?? '';
         return runResult({ stdout: repo.migrations[id] ?? DEFAULT_MIGRATIONS });

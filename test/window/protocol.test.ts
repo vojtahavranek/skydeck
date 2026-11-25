@@ -1598,8 +1598,24 @@ describe("parsePageMessage: F38's acts (S2 16.5)", () => {
       check: {
         state: 'available',
         summary: '1 new commit on origin/main',
+        from: '0'.repeat(40),
         to: 'f'.repeat(40),
-        lines: ['1 new commit on origin/main (0123456..fffffff):', '  fffffff  a subject'],
+        upstream: 'origin/main',
+        notes: [
+          {
+            title: [{ text: 'A title', code: false }],
+            paragraphs: [
+              [
+                { text: 'Type ', code: false },
+                { text: 'skydeck update', code: true },
+              ],
+            ],
+          },
+        ],
+        moreNotes: 0,
+        others: ['a subject'],
+        otherCount: 1,
+        upgradesDatabase: true,
         blocked: null,
       },
       fetchedAtNs: '1794474000000000000',

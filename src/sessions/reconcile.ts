@@ -22,7 +22,8 @@ const SETTLE_NS = 2n * NS_PER_SECOND;
  * many. Kept: live files that are trusted (5.5), whose entrypoint is `cli` or absent, and that were
  * last modified more than 2 s before now. Such a process gets an observed event when its latest
  * event does not name the file's session, or when it has no event with a launch command and its
- * /proc/<pid>/cmdline can be read now. An observed event's time is the clock now (D21); its launch
+ * /proc/<pid>/cmdline can be read now. An observed event's time is the clock now (D21), but never
+ * below a stamp already stored for its process, and it carries the machine's uptime (#207); its launch
  * command is storableArgv(absolutizePathFlags(cmdline, file.cwd)), as for a spooled one, so no
  * prompt, removed flag or unknown flag's value is stored (principle 4). F33: a process whose
  * command line makes a copy (`copiedSessionOf`) gets the copy link on its first event when it has
@@ -51,7 +52,7 @@ export function reconcile(deck: Deck): { observed: number } {
     try {
       if (isCandidate(platform, file, now)) {
         const recorded = recordedCommand(platform, file);
-        if (recordObserved(deck, bootId, file, now, storedCommand(platform, file, recorded))) {
+        if (recordObserved(deck, bootId, file, storedCommand(platform, file, recorded))) {
           observed++;
         }
         const copyOf = recorded === null ? null : copiedSessionOf(recorded);
@@ -79,13 +80,14 @@ function recordObserved(
   deck: Deck,
   bootId: string,
   file: LiveFile,
-  now: Ns,
   argv: string[] | null,
 ): boolean {
   const { platform, store } = deck;
   const { pid, procStart } = file;
-  const needed = (atNs: Ns): boolean => {
-    const latest = store.latestEventOfProcess(bootId, pid, procStart, atNs);
+  const needed = (): boolean => {
+    // The process's latest event in its order (5.3 "Order", #207): the observed event is recorded
+    // after every stored one, and stamped not below any of them (below).
+    const latest = store.latestEventOfProcess(bootId, pid, procStart, null);
     if (latest === null) {
       return true;
     }
@@ -99,19 +101,24 @@ function recordObserved(
     // file it was read from, and the file has changed since, so the file wins.
     return latest.kind === 'observed' || latest.timeNs <= file.mtimeNs;
   };
-  if (!needed(now)) {
+  if (!needed()) {
     return false;
   }
   return store.transaction(() => {
-    // Asked again with the write lock held, and with the clock read now: another skydeck may have
-    // recorded this process since, with a time after the `now` of this run.
-    const atNs = platform.clock.nowNs();
-    if (!needed(atNs)) {
+    // Asked again with the write lock held: another skydeck may have recorded this process since.
+    if (!needed()) {
       return false;
     }
+    // The clock now, but never below a stamp stored for the process (#207: the wall clock may have
+    // stepped back since the hook stamped it), and the machine's uptime, which orders the process.
+    const latestNs = store.latestStampOfProcess(bootId, pid, procStart);
+    const clockNs = platform.clock.nowNs();
+    const atNs = latestNs !== null && latestNs >= clockNs ? latestNs + 1n : clockNs;
+    const uptimeCs = platform.proc.uptimeCs();
     store.insertEvent({
       spoolName: null,
       timeNs: atNs,
+      ...(uptimeCs === null ? {} : { uptimeCs }),
       kind: 'observed',
       detail: '',
       rawDetail: null,

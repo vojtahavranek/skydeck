@@ -3,8 +3,12 @@
    .edit-dialog); and the extra block of the settings screen's group Updates (web/settings.js), under
    its switch. The control is told apart by its
    border and weight in --accent on the title bar's own ground, not by an accent ground (white on the
-   dark schemes' --accent is under 4.5 : 1). The dialog's lines are `skydeck update --check`'s, in
-   the terminal's font, each wrapping anywhere. */
+   dark schemes' --accent is under 4.5 : 1). The dialog is set in the window's font: a note's title
+   heavier, its text under it; code runs, commit ids and commands in the terminal's font; the fold
+   line a plain button; the database note a block marked at its left in --wait; the commits and the
+   command small in --dim at the bottom. Its body scrolls inside it, so that the heading and the
+   buttons stay in view. Every text colour is --text or --dim on --panel or --panel2, read at least
+   4.5 : 1 in every scheme and theme (test/web/update-colours.test.ts). */
 .update-button {
   display: flex;
   align-items: center;
@@ -30,17 +34,99 @@
 }
 
 .edit-dialog.update-dialog {
+  display: flex;
+  flex-direction: column;
   width: min(680px, calc(100vw - 24px));
+  overflow: hidden;
 }
-.update-lines {
-  font-size: 12.5px;
+.update-heading,
+.update-actions {
+  flex: none;
+}
+.update-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.update-body [hidden] {
+  display: none;
+}
+.update-code {
+  font-family: var(--term-font);
+  font-size: 0.95em;
+}
+.update-note {
+  margin: 0 0 12px;
+}
+.update-note-title {
+  color: var(--text);
+  font-weight: 600;
+}
+.update-note-text {
+  margin: 2px 0 0;
+  color: var(--text);
 }
 .update-line {
-  margin: 0 0 4px;
+  margin: 0 0 8px;
   color: var(--text);
-  font-family: var(--term-font);
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
+}
+.update-fold {
+  display: block;
+  margin: 0 0 8px;
+  padding: 2px 4px 2px 0;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.update-fold:hover {
+  background: var(--sel);
+}
+.update-fold:focus-visible {
+  outline: 2px solid var(--selline);
+  outline-offset: 1px;
+}
+.update-fold-mark {
+  display: inline-block;
+  width: 1em;
+}
+.update-others {
+  margin: -4px 0 10px;
+  padding: 0 0 0 1em;
+  list-style: none;
+}
+.update-other {
+  margin: 0 0 2px;
+  color: var(--text);
+}
+.update-database {
+  display: flex;
+  gap: 8px;
+  margin: 4px 0 12px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--wait);
+  border-radius: 2px;
+  background: var(--panel2);
+  color: var(--text);
+}
+.update-database-mark {
+  flex: none;
+  font-weight: 700;
+}
+.update-meta {
+  margin: 0 0 2px;
+  color: var(--dim);
+  font-size: 12px;
+}
+.update-after > :not(.update-meta) + .update-meta {
+  margin-top: 12px;
 }
 .update-actions button:focus-visible {
   outline: 2px solid var(--selline);

@@ -132,6 +132,22 @@ function nowNs(): bigint {
   return BigInt(Date.now()) * 1_000_000n;
 }
 
+/** The machine's uptime in centiseconds, the first field of /proc/uptime. */
+function uptimeCs(): bigint {
+  const [seconds, hundredths] = (readFileSync('/proc/uptime', 'utf8').split(' ')[0] ?? '').split(
+    '.',
+  );
+  return BigInt(seconds ?? '') * 100n + BigInt(hundredths ?? '');
+}
+
+/** The `uptime=` line of `head` (#207): /proc/uptime's first field as it was during `ran`. */
+function assertUptime(line: string | undefined, before: bigint, after: bigint): void {
+  const match = /^uptime=([0-9]+)\.([0-9]{2})$/.exec(line ?? '');
+  assert.ok(match, String(line));
+  const cs = BigInt(match[1] ?? '') * 100n + BigInt(match[2] ?? '');
+  assert.ok(before <= cs && cs <= after, `${before} <= ${cs} <= ${after}`);
+}
+
 /** Splits a spool file into its lines before `--` and everything after the `--` line. */
 function split(content: string): { head: string[]; body: string } {
   const marker = content.indexOf('\n--\n');
@@ -145,11 +161,14 @@ describe('hook: the spool file', () => {
     const pid = await startProcess(t);
     const spool = join(s.skydeckHome, 'state', 'spool');
 
+    const before = uptimeCs();
     const ran = run(s, 'SessionStart', { CLAUDE_PID: String(pid) });
+    const after = uptimeCs();
 
     assertSilent(ran);
     const [name, content] = onlySpoolFile(spool);
     const { head, body } = split(content);
+    assertUptime(head[3], before, after);
     const timeLine = head[2] ?? '';
     assert.match(timeLine, /^time_ns=[0-9]{19}$/);
     const timeNs = timeLine.slice('time_ns='.length);
@@ -162,6 +181,7 @@ describe('hook: the spool file', () => {
       'v=1',
       'event=SessionStart',
       `time_ns=${timeNs}`,
+      head[3],
       `claude_pid=${pid}`,
       `session_env=${S1}`,
       'entrypoint_env=cli',
@@ -177,16 +197,20 @@ describe('hook: the spool file', () => {
     const s = hookSandbox(t);
     const pid = await startProcess(t);
 
+    const before = uptimeCs();
     const ran = run(s, 'SessionEnd', { CLAUDE_PID: String(pid) });
+    const after = uptimeCs();
 
     assertSilent(ran);
     const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
     const { head, body } = split(content);
     assert.match(head[2] ?? '', /^time_ns=[0-9]{19}$/);
+    assertUptime(head[3], before, after);
     assert.deepEqual(head, [
       'v=1',
       'event=SessionEnd',
       head[2],
+      head[3],
       `claude_pid=${pid}`,
       `session_env=${S1}`,
       'entrypoint_env=cli',
@@ -282,6 +306,7 @@ describe('hook: a value can never add a line to the file', () => {
         'v',
         'event',
         'time_ns',
+        'uptime',
         'claude_pid',
         'session_env',
         'entrypoint_env',
@@ -309,7 +334,7 @@ describe('hook: a value can never add a line to the file', () => {
     assertSilent(ran);
     const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
     const { head } = split(content);
-    assert.equal(head.length, 9);
+    assert.equal(head.length, 10);
     assert.ok(head.includes('session_env='));
     assert.ok(head.includes('entrypoint_env='));
     assert.ok(head.includes('claude_pid='));
@@ -336,7 +361,7 @@ describe('hook: a value can never add a line to the file', () => {
     assertSilent(ran);
     const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
     const { head } = split(content);
-    assert.equal(head.length, 9);
+    assert.equal(head.length, 10);
     assert.ok(head.includes('session_env='));
     assert.ok(head.includes('entrypoint_env='));
     assert.ok(head.includes('pwd='));
@@ -351,7 +376,7 @@ describe('hook: a value can never add a line to the file', () => {
     assertSilent(ran);
     const [name, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
     assert.match(name, /^[0-9]{19}-0-[0-9]+\.ev$/);
-    assert.equal(split(content).head.length, 9);
+    assert.equal(split(content).head.length, 10);
   });
 });
 
@@ -658,4 +683,147 @@ describe('hook: concurrency and the programs it uses', () => {
     assert.ok(text.startsWith('#!/bin/sh\n'));
     assert.ok((statSync(hook).mode & 0o111) === 0o111);
   });
+});
+
+describe('hook: the uptime beside the time (#207, design 5.2)', () => {
+  /**
+   * The shells the hook is run with: dash, and bash run as `sh` (its POSIX mode); `file` is where
+   * this machine has it, and a shell it does not have skips its cases, saying so.
+   */
+  const SHELLS = [
+    { name: 'dash', files: ['/bin/dash', '/usr/bin/dash'] },
+    { name: 'bash as sh', files: ['/usr/bin/bash', '/bin/bash'] },
+  ].map(({ name, files }) => {
+    const file = files.find((path) => existsSync(path)) ?? null;
+    return {
+      name,
+      file: file ?? '',
+      skip: file === null ? `this machine has no ${files.join(' or ')}` : false,
+    };
+  });
+  const bash = SHELLS[1] ?? { file: '', skip: 'no bash' };
+
+  /**
+   * The hook as it is, but reading its uptime from `path` instead of /proc/uptime (the one place
+   * the text names it), so that an uptime that cannot be read can be tried without touching /proc.
+   */
+  function hookReading(s: Sandbox, path: string): string {
+    const text = readFileSync(hook, 'utf8');
+    assert.equal(text.split('/proc/uptime').length, 2, 'the hook names /proc/uptime once');
+    const copy = join(s.root, 'skydeck-hook-copy');
+    writeFileSync(copy, text.replace('/proc/uptime', path), { mode: 0o755 });
+    return copy;
+  }
+
+  function runWith(s: Sandbox, shell: string, script: string): Ran {
+    const result = spawnSync(shell, [script, 'SessionEnd'], {
+      argv0: 'sh',
+      input: INPUT,
+      env: s.env({ CLAUDE_CODE_SESSION_ID: S1, CLAUDE_CODE_ENTRYPOINT: 'cli' }),
+      cwd: s.root,
+      encoding: 'utf8',
+    });
+    assert.equal(withoutEpipe(result.error), undefined);
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  }
+
+  test('bash started as sh runs in its POSIX mode', { skip: bash.skip }, (t) => {
+    const s = hookSandbox(t);
+    const result = spawnSync(
+      bash.file,
+      ['-c', 'case :$SHELLOPTS: in *:posix:*) echo posix ;; esac'],
+      {
+        argv0: 'sh',
+        env: s.env(),
+        encoding: 'utf8',
+      },
+    );
+    assert.equal(result.stdout, 'posix\n');
+  });
+
+  for (const shell of SHELLS) {
+    test(
+      `${shell.name}: the line is /proc/uptime's first field, written after time_ns`,
+      { skip: shell.skip },
+      (t) => {
+        const s = hookSandbox(t);
+        const before = uptimeCs();
+        const ran = runWith(s, shell.file, hook);
+        const after = uptimeCs();
+
+        assertSilent(ran);
+        const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
+        const { head } = split(content);
+        assert.match(head[2] ?? '', /^time_ns=[0-9]{19}$/);
+        assertUptime(head[3], before, after);
+      },
+    );
+
+    for (const [what, make] of [
+      ['a file that is not there', (_s: Sandbox): string => '/proc/no-uptime-here'],
+      [
+        'a directory',
+        (s: Sandbox): string => {
+          const dir = join(s.root, 'uptime-dir');
+          mkdirSync(dir);
+          return dir;
+        },
+      ],
+      [
+        'a file it may not read',
+        (s: Sandbox): string => {
+          const file = join(s.root, 'uptime-locked');
+          writeFileSync(file, '119174.07 1786233.36\n', { mode: 0o000 });
+          return file;
+        },
+      ],
+    ] as const) {
+      test(
+        `${shell.name}: an uptime it cannot read (${what}) is written empty; silent, exit 0, nothing logged`,
+        { skip: shell.skip },
+        (t) => {
+          if (what === 'a file it may not read' && process.getuid?.() === 0) {
+            t.skip('root reads any file');
+            return;
+          }
+          const s = hookSandbox(t);
+          const script = hookReading(s, make(s));
+          const started = performance.now();
+          const ran = runWith(s, shell.file, script);
+          const took = performance.now() - started;
+
+          assertSilent(ran);
+          const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
+          const { head, body } = split(content);
+          assert.equal(head[3], 'uptime=');
+          assert.match(head[2] ?? '', /^time_ns=[0-9]{19}$/);
+          assert.equal(head.length, 10, 'every other key as always');
+          assert.equal(body, INPUT);
+          assert.equal(
+            existsSync(join(s.skydeckHome, 'state', 'hook.log')),
+            false,
+            'nothing logged',
+          );
+          assert.ok(took < 5000, `${Math.round(took)} ms: no wait`);
+        },
+      );
+    }
+
+    test(
+      `${shell.name}: an uptime that ends in a carriage return is written empty, as any value with one`,
+      { skip: shell.skip },
+      (t) => {
+        const s = hookSandbox(t);
+        const file = join(s.root, 'uptime-crlf');
+        writeFileSync(file, '119174.07\r\n');
+        const ran = runWith(s, shell.file, hookReading(s, file));
+
+        assertSilent(ran);
+        const [, content] = onlySpoolFile(join(s.skydeckHome, 'state', 'spool'));
+        const { head } = split(content);
+        assert.equal(head[3], 'uptime=');
+        assert.equal(content.includes('\r'), false);
+      },
+    );
+  }
 });

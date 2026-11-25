@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { describe, test } from 'node:test';
 
 import type { LiveFile, ProcessKey } from '../../src/claude/live.ts';
 import { EMPTY_FACTS, foldLines } from '../../src/claude/transcripts.ts';
@@ -1857,4 +1857,88 @@ test('F30: an end with detail other but no window end stays unexpected (a closed
   const other = event(P1, S1, T0 + 10n * SEC, 'end', 'other', { rawDetail: 'other' });
   const s = session({ events: [start(P1, S1, T0, 'startup'), other] }, S1);
   assert.deepEqual(s.marks, ['ended-unexpectedly']);
+});
+
+// ---- one process in the order of its uptimes (#207, design 5.3 "Order") ------------------------
+
+describe('a wall clock that stepped back between two events of one process (#207)', () => {
+  // The wall clock went 2.7 s back after the first event: the later stamps are earlier.
+  const STEP = 2_700_000_000n;
+  const up = (cs: bigint): Partial<EventRow> => ({ uptimeCs: cs });
+
+  test('a /clear less than a step after the resume: the process holds the new session', () => {
+    const events = [
+      start(P1, S1, T0, 'resume', undefined, up(1000n)),
+      event(P1, S1, T0 + SEC - STEP, 'end', 'clear', up(1100n)),
+      start(P1, S2, T0 + SEC - STEP + 1_000_000n, 'clear', undefined, up(1101n)),
+    ];
+    const alive = { isAlive: () => true };
+    assert.deepEqual(
+      session({ events, ...alive }, S2).holders.map((holder) => holder.process.pid),
+      [P1.pid],
+    );
+    assert.deepEqual(session({ events, ...alive }, S1).holders, []);
+    assert.equal(session({ events, ...alive }, S1).lastHolding?.endDetail, 'clear');
+    // Without the uptimes (an older hook) the stamps decide, as before #207: the old session.
+    const stamped = events.map(({ uptimeCs: _left, ...rest }) => rest);
+    assert.deepEqual(session({ events: stamped, ...alive }, S2).holders, []);
+    assert.equal(session({ events: stamped, ...alive }, S1).holders.length, 1);
+  });
+
+  test('an /exit less than a step after the start: a deliberate exit, no ended-unexpectedly', () => {
+    const events = [
+      start(P1, S2, T0, 'resume', undefined, up(5000n)),
+      event(P1, S2, T0 + SEC - STEP, 'end', 'exit', up(5100n)),
+    ];
+    const s = session({ events }, S2);
+    assert.deepEqual(s.marks, []);
+    assert.equal(s.lastHolding?.endDetail, 'exit');
+    const stamped = events.map(({ uptimeCs: _left, ...rest }) => rest);
+    assert.deepEqual(session({ events: stamped }, S2).marks, ['ended-unexpectedly'], 'before #207');
+  });
+
+  test("the holding began at the process's latest start in its order, not at the latest stamp", () => {
+    const events = [
+      start(P1, S1, T0, 'startup', undefined, up(1n)),
+      start(P1, S1, T0 - STEP, 'resume', undefined, up(2n)), // an in-session /resume, stamped back
+    ];
+    const live1 = live(P1, S1, 'busy', { statusUpdatedAtNs: T0 - 10n * SEC });
+    const s = session({ events, isAlive: () => true, liveFiles: [live1] }, S1);
+    assert.equal(s.state, 'working');
+    assert.equal(s.sinceNs, T0 - STEP, "the start latest in the process's order");
+  });
+
+  test('one event of the process without an uptime: the whole process on its stamps', () => {
+    const events = [
+      start(P1, S1, T0, 'resume'), // an older hook
+      event(P1, S1, T0 + SEC - STEP, 'end', 'clear', up(1100n)),
+      start(P1, S2, T0 + SEC - STEP + 1_000_000n, 'clear', undefined, up(1101n)),
+    ];
+    assert.deepEqual(session({ events, isAlive: () => true }, S2).holders, []);
+  });
+
+  test('a process that moved on without an end (its hook lost), the move stamped before the start: the holding moved on, not ended unexpectedly', () => {
+    // The holding's end is the process's NEXT event in its order (holdingOf), not by stamp.
+    const events = [
+      start(P1, S1, T0, 'startup', undefined, up(1000n)),
+      start(P1, S2, T0 + SEC - STEP, 'clear', undefined, up(1100n)),
+    ];
+    const s1 = session({ events }, S1);
+    assert.equal(s1.lastHolding?.endDetail, 'moved-on');
+    assert.deepEqual(s1.marks, []);
+    const stamped = events.map(({ uptimeCs: _left, ...rest }) => rest);
+    assert.deepEqual(session({ events: stamped }, S1).marks, ['ended-unexpectedly'], 'before #207');
+  });
+
+  test('two processes are still compared on their times (the latest holding across processes)', () => {
+    // P2 ended S1 later by its stamp, though its uptime is lower than P1's: across processes,
+    // time decides.
+    const events = [
+      start(P1, S1, T0, 'startup', undefined, up(9000n)),
+      event(P1, S1, T0 + SEC, 'end', 'exit', up(9001n)),
+      start(P2, S1, T0 + 2n * SEC, 'resume', undefined, up(10n)),
+      event(P2, S1, T0 + 3n * SEC, 'end', 'other', up(11n)),
+    ];
+    assert.equal(session({ events }, S1).lastHolding?.process.pid, P2.pid);
+  });
 });

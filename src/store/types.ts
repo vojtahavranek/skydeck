@@ -1,4 +1,4 @@
-import type { Ns } from '../platform/types.ts';
+import type { Ns, UptimeCs } from '../platform/types.ts';
 
 /**
  * `scripted`: a scripted run (`claude -p`, an SDK run) started on a session skydeck already knew
@@ -31,8 +31,23 @@ export interface EventRow {
   argv: string[] | null; // start and observed only; stored as a JSON array
   name: string | null;
   payload: string | null; // hook input as received (start/end only)
+  /**
+   * #207: the machine's uptime when the event was stamped (the hook's read of /proc/uptime, the
+   * server's for its own events); absent when there was none (an older hook, an unreadable file).
+   * Orders the events of one process (design 5.3 "Order"); never shown.
+   */
+  uptimeCs?: UptimeCs;
 }
 export type NewEvent = Omit<EventRow, 'id'>;
+
+/**
+ * Where an event lies in the order of its process's events (design 5.3 "Order", #207): its time
+ * and, when it has one, its uptime.
+ */
+export interface ProcessPlace {
+  timeNs: Ns;
+  uptimeCs?: UptimeCs;
+}
 
 /**
  * `clear`, `switch`, `fork`: one process moved from one session to another (design 5.3 "Links").

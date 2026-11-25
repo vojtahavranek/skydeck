@@ -89,6 +89,34 @@ describe('skydeck update with the real git: applying (U5, U8)', () => {
     assert.deepEqual(readdirSync(r.c.root).sort(), ['.git', 'README.md']);
   });
 
+  test('--check with notes: the same lines as without, then `what is new:` and the titles of the notes it adds, newest first, before the database line', async (t) => {
+    const r = real(t, {
+      content: { 'README.md': 'one\n', 'docs/news/2026-01-01-old.md': '# Old\n\nKnown.\n' },
+    });
+    const old = r.c.id();
+    const first = r.c.push('add a note', {
+      'docs/news/2026-02-01-first.md': '# The first `note`\n\nIt says so.\n',
+    });
+    const second = r.c.push('change the upgrade steps', {
+      'src/store/migrations.ts': 'export {};\n',
+      'docs/news/2026-02-02-second.md': '# The second\n\nIt says more.\n',
+      'docs/news/2026-01-01-old.md': '# Old, changed\n\nKnown.\n',
+    });
+
+    const u = await r.update(['--check']);
+
+    assert.equal(u.code, 0, u.stderr);
+    assert.equal(
+      u.stdout,
+      `2 new commits on origin/main (${short(old)}..${short(second)}):\n` +
+        `  ${short(second)}  change the upgrade steps\n  ${short(first)}  add a note\n` +
+        'what is new:\n  The second\n  The first `note`\n' +
+        `this update changes the database's upgrade steps: it may upgrade the database, which an older checkout cannot open; a copy of the database as it was is kept first, and docs/install.md ("Going back") says how to return to ${short(old)}\n` +
+        'run skydeck update to apply it\n',
+    );
+    assert.equal(r.c.id(), old);
+  });
+
   test('up to date: the line, nothing else; then a commit that changes src/store/migrations.ts brings the database line', async (t) => {
     const r = real(t);
     const old = r.c.id();

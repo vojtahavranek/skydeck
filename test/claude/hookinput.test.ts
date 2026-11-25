@@ -857,3 +857,45 @@ describe('parseSpoolFile: what the real hook writes', () => {
     assert.equal(event.payload, input);
   });
 });
+
+describe('the uptime (#207, design 5.2)', () => {
+  test('seconds with two decimals become centiseconds, beside time_ns', () => {
+    assert.equal(parse(start({ uptime: '119174.07' })).uptimeCs, 11_917_407n);
+    assert.equal(parse(end({ uptime: '0.00' })).uptimeCs, 0n);
+    assert.equal(parse(start({ uptime: '999999999999999.99' })).uptimeCs, 99_999_999_999_999_999n);
+    assert.equal(parse(start({ uptime: '119174.07' })).timeNs, START.timeNs, 'the stamp as it is');
+  });
+
+  test('an empty value (the hook could not read /proc/uptime), another form or no line: no uptime, and no error', () => {
+    for (const uptime of [
+      '',
+      '119174',
+      '119174.7',
+      '119174.070',
+      ' 119174.07',
+      '1e3.00',
+      '-1.00',
+      '1234567890123456.00',
+      '119174,07',
+    ]) {
+      const parsed = parse(start({ uptime }));
+      assert.equal('uptimeCs' in parsed, false, JSON.stringify(uptime));
+      assert.equal(parsed.kind, 'start');
+    }
+    assert.equal('uptimeCs' in parse(start({})), false, 'an older hook writes no line');
+  });
+
+  test('an event read without the line is the event read with an empty one', () => {
+    assert.deepEqual(parse(start({ uptime: '' })), parse(start({})));
+    assert.deepEqual(parse(end({ uptime: 'x' })), parse(end({})));
+  });
+
+  test('the key twice is refused, as any key twice', () => {
+    const fields = start({ uptime: '1.00' });
+    const text = spoolText(fields).replace('uptime=1.00\n', 'uptime=1.00\nuptime=2.00\n');
+    assert.throws(
+      () => parseSpoolFile(spoolName(fields, 1), text, never),
+      /the key "uptime" appears twice/,
+    );
+  });
+});

@@ -1,5 +1,10 @@
 /** Nanoseconds since the Unix epoch. */
 export type Ns = bigint;
+/**
+ * Centiseconds since the machine's boot: the first field of /proc/uptime (design 5.2, #207). It
+ * never steps back, unlike the wall clock, and it means something only within one boot.
+ */
+export type UptimeCs = bigint;
 
 /** Wall clock. `sleep` resolves after `ms` milliseconds; the fake one advances its time instead. */
 export interface Clock {
@@ -126,6 +131,12 @@ export interface Proc {
    * (`6.6.87.2-microsoft-standard-WSL2`); null when it cannot be read or is empty (follow-up F20).
    */
   kernelRelease(): string | null;
+  /**
+   * The machine's uptime from /proc/uptime (`uptimeCsFromText` of its first field), the clock one
+   * process's events are ordered by (design 5.3 "Order", #207); null when it cannot be read or is
+   * not in that form.
+   */
+  uptimeCs(): UptimeCs | null;
 }
 
 export interface RunOptions {

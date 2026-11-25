@@ -212,7 +212,7 @@ Added to design 11:
 | `src/window/` | The server: HTTP and WebSocket (8.2), authentication (15), keeper connections (8.1), screen sides (7.2), the view model of the page (12), the server's tick (10.1), Edge and the keep-alive (5, 6), and the `window` terminal (11.2), which only the server uses; from follow-up F19 the reads of a ticket's status (`ticket-fetches.ts`); from follow-up F36 the settings screen's table of every key of `config.json` and the change of one of them (`settings.ts`, 12.13); from follow-up F38 the check for a newer skydeck (`updates.ts`, 16.5). | platform, text, store, claude, sessions, terminals, github, ticket-status (F19), update (F38) |
 | `src/window/carry-over.ts` | Follow-up F40 (design 7.1, 12.6): the offer to carry fields over after `/clear` — the lookups it is computed with from the store (the `clear` link and the mark of the first start, the pull requests attached by hand, the resume lock), its `rev`, the two acts in one transaction each, the kv entries and their removal. | platform, store, sessions, `view/carry-over.ts`, `protocol.ts`'s types, and `auth.ts`'s `failureKind` |
 | `src/window/updates.ts` | Follow-up F38 (16.5): the server's check for a newer skydeck — when it runs, the state every page is told, the stored outcome; it decides everything the page shows of it. Milestone 2: Update now — its refusals, the start of `skydeck update --from-window` (through python3 for the core limit), the run entry, the result. | platform, sessions (the deck), update, text, `log.ts`'s `serverLog`, and `auth.ts`'s `failureKind` |
-| `src/update/` | Follow-up F38: the look for a newer skydeck, one copy for three callers — `skydeck update`, the window's server and `doctor` (the server may not import `src/cli/`): `git.ts` (how skydeck runs git on its own checkout, and the window's fetch that never asks; moved from `src/cli/update-git.ts`), `look.ts` (the look in the command's order and in the window's tolerant one, and `--check`'s lines), `record.ts` (the stored outcome, `kv window_update_check`, and the run entry of an update from the window, `kv window_update_run`). | platform, text, store (types), and `protocol.ts`'s types |
+| `src/update/` | Follow-up F38: the look for a newer skydeck, one copy for three callers — `skydeck update`, the window's server and `doctor` (the server may not import `src/cli/`): `git.ts` (how skydeck runs git on its own checkout, and the window's fetch that never asks; moved from `src/cli/update-git.ts`), `look.ts` (the look in the command's order and in the window's tolerant one, the notes and the other changes an update brings, and `--check`'s lines), `news.ts` (a note of what is new: its name, its parse, its limits, its code runs), `record.ts` (the stored outcome, `kv window_update_check`, and the run entry of an update from the window, `kv window_update_run`). | platform, text, store (types), and `protocol.ts`'s types |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12); from follow-up F37 the move of a session of Open by hand and the slots it gives out (`slot-moves.ts`, 12.9, 7.6); from follow-up F42 Open's order once a move made it the server's, the freeze and the places held after `/clear` (`open-sequence.ts`, 12.1); from follow-up F40 the parts of the offer to carry fields over after `/clear` (`carry-over.ts`, design 7.1: it imports no value). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
@@ -1832,7 +1832,7 @@ Server → page:
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
 | `result` | `id`, `ok`, `lines` (what the command line would print, design 7.6), `error`, `sessionId` (the session a successful `resume` or `new` started, so that the page can select its row, 11.3; from issue #166 also `restart`; else null); `ended`, for `end-session` (above) and from issue #166 for `restart` once its program was hung up (absent for a refusal); from follow-up F36, for `settings`, `setting-set` and `setting-default` only, `settings`: the settings screen as below; from follow-up F38, for `update-check`, `update-look`, `update-apply` (also with a refusal) and `update-seen` only, `update`: the check's state as below. |
 | `settings` | Follow-up F36, 12.13: `settings`, the settings screen, to every page after a change: `path` (the file's), `backup` (where its copy goes), `exists`, `problem` (why the window changes nothing in the file until it is mended by hand, or null) and `settings`, in the server's table's order, each with `key`, `group`, `meaning`, `kind` (`change` or `show`), `names` (`program`, `folder` or `port` for a shown one, else null), `control` (`number`, `text` or `choice`), `choices`, `nullable`, `applies` (`now`, `restart`, `commands` or `install`), `default` and `defaultText`, `inFile`, `value` (exact) and `valueText`, `pending` (the running server uses another value) and `runningText`. Every text but `value` is sanitised. |
-| `update` | Follow-up F38, 16.5: `update`, the check for a newer skydeck, to a page right after its `start` and to every page on each change: `checking` (one runs), `check` (null: this server's own first check or look has not ended — it sends no stored outcome before), `checkedAtNs` (when the last check ended, whatever it found, or null), `fetchedAtNs` (when the last fetch that worked ended, or null) and `failure` (`{ atNs, line }` when the last check failed — its fetch, a git call of its look, or the check itself —, else null). `check` is `{ state: 'cannot', summary }` (the look could not tell: its line), `{ state: 'current', summary }` (`skydeck is up to date (<branch> at <id>, as <upstream>)`, or `nothing new on <upstream>: this checkout has <n> commits that it does not have`) or `{ state: 'available', summary, to, lines, blocked }` (`<n> new commits on <upstream>`; `to` the new commit's full id; `lines` exactly `skydeck update --check`'s, the database line included; `blocked` why it cannot be applied as it is, or null). Milestone 2's three fields: `applying` (`{ to, sinceNs }` while an update started from a window runs — the commit's full id, since when —, else null), `log` (`<stateDir>/update.log`, what the page names while the server is away, 6.3) and `result` (`{ ok, text }`: how the last update from the window ended, `updated to <id>` or why not, until a page sends `update-seen`; else null). Every text sanitised and clipped to 300 characters (`result`'s to 600). |
+| `update` | Follow-up F38, 16.5: `update`, the check for a newer skydeck, to a page right after its `start` and to every page on each change: `checking` (one runs), `check` (null: this server's own first check or look has not ended — it sends no stored outcome before), `checkedAtNs` (when the last check ended, whatever it found, or null), `fetchedAtNs` (when the last fetch that worked ended, or null) and `failure` (`{ atNs, line }` when the last check failed — its fetch, a git call of its look, or the check itself —, else null). `check` is `{ state: 'cannot', summary }` (the look could not tell: its line), `{ state: 'current', summary }` (`skydeck is up to date (<branch> at <id>, as <upstream>)`, or `nothing new on <upstream>: this checkout has <n> commits that it does not have`) or `{ state: 'available', summary, from, to, upstream, notes, moreNotes, others, otherCount, upgradesDatabase, blocked }` (`<n> new commits on <upstream>`; `from` and `to` HEAD's and the new commit's full ids; `upstream` its short name; `notes` the notes of what is new the update brings, newest first, at most 20, each `{ title, paragraphs }` in runs `{ text, code }` cut by the server at the backticks, and `moreNotes` how many more; `others` the subjects of the newest commits that add none, at most 20, and `otherCount` how many there are; `upgradesDatabase` whether it changes the database's upgrade steps; `blocked` why it cannot be applied as it is, or null; 16.5 "What an update brings"). Milestone 2's three fields: `applying` (`{ to, sinceNs }` while an update started from a window runs — the commit's full id, since when —, else null), `log` (`<stateDir>/update.log`, what the page names while the server is away, 6.3) and `result` (`{ ok, text }`: how the last update from the window ended, `updated to <id>` or why not, until a page sends `update-seen`; else null). Every text sanitised and clipped to 300 characters (`result`'s to 600). |
 | `notify` | `sessionId`, `title` (the row's, sanitised), `reason` (the kind: `asks`, `ended` or `finished`, 12.4; the page writes the words), `detail` (the row's attention detail, else null) (13). |
 | `notice` | `kind` (`keepalive-lost`, `keepalive-back`, `gap`, `newer-keeper`, `input-full`, `tick-failed`, `restore-progress`), `term` (the terminal a `gap`, `newer-keeper` or `input-full` notice concerns; null for the others), `text`. `tick-failed` ("skydeck could not refresh the list: <reason>; it tries again") is sent once when a tick fails (10.1) and not again until a tick has succeeded. `restore-progress`: one report line of a restore, sanitised, to every page, whoever asked for the restore (11.3, 12.7; stage C). |
 | `bye` | `reason` (5.5). |
@@ -2375,6 +2375,23 @@ checkout still running stops at its next write (10.1's guard), and nothing remov
 way back is the copy kept before the migration (install.md, "Going back").
 `test/store/migration-5.test.ts` migrates a filled schema-4 database and compares every value.
 
+**Migration 6** (issue #207, the order of one process's events, design 5.2 and 5.3):
+
+```sql
+ALTER TABLE events ADD COLUMN uptime_cs INTEGER;  -- #207: /proc/uptime at the event in centiseconds, which orders one process's events; NULL for none
+```
+
+It adds one nullable column and nothing else, as migration 3 did: every row keeps its values (the
+column is NULL in each; nothing is filled in afterwards) and a reader of schema 5 still reads
+`events`. The column holds the machine's uptime when the event was stamped: the hook's `uptime`
+key (design 5.2), and for the server's own events (the window's end, 12.10; reconcile's
+`observed`, design 5.4) its own read of /proc/uptime. It is never shown: it only orders the events
+of one process (design 5.3 "Order"), whose stamps a wall clock that stepped back can invert. **An
+older skydeck refuses it**, as for migrations 3 to 5, and the way back is the copy kept before the
+migration (design 9.2, install.md "Going back"). A spool file with the new key, read by an older
+skydeck still running, parses as before: the key is not one it knows, and those are ignored.
+`test/store/migration-6.test.ts` migrates a filled schema-5 database and compares every value.
+
 `kv` entries (no migration; `kv` is free text):
 
 | Key | Value |
@@ -2392,7 +2409,7 @@ way back is the copy kept before the migration (install.md, "Going back").
 | `window_slots_withheld` | Follow-up F44 (7.6, 12.15): the terminals whose slot the server withholds (their sessions are parked), a JSON array of terminal ids (12 lower-case hex characters) in id order; absent while there is none. Written whole with `window_slots`, in one transaction, at every write of the slots outside a move (a move's own write leaves it alone), a free slot given to a terminal that waits too (issue #189); pruned to the terminals listed or being found. Applied at each `hello`: such a terminal takes no slot. Read tolerantly: what is not a terminal id is left out. An older skydeck never sees it: after migration 5 it refuses the database. |
 | `window_restore_order` | Follow-up F37, F42 (design 7.8): the order the sessions last had under Open in the window, a JSON array of at most two parts, the newest boot first, each `{ "bootId", "order": [<session id>, …] }`: Open's drawn order (done ones shown) in that boot, with each session that left Open while still a restore's candidate put back after the nearest earlier session still there; at most 500 ids a part. The server takes Open into its own boot's part after each refresh that worked and after a move, writing only when that changes it; nothing changes while Open is empty, so a reboot that ends the keepers first cannot empty it. Read tolerantly: a part F37 wrote, `{ "bootId", "sessions": { <session id>: <slot> } }`, is read as its sessions in the order of their slots. The command's restore reads it too. A limit: an F37 skydeck reads an F42 part as none, restores in list order and drops the part at its next write. |
 | `window_open_order` | Follow-up F42 (12.1): Open's kept order, a JSON array of session ids (at most 500 read, each once); absent until the first move by hand, and while it is absent Open is computed and nothing is written. Written whole at a move (with `window_slots`, one transaction), when a free slot is given to a terminal that waits while an order is kept (issue #189, 7.6: its row at its slot's place, with `window_slots`, one transaction) and, from then on, at every refresh that worked where Open's drawn order changed (the freeze): the drawn order with done ones shown, plus the place held for a process's next session after `/clear`, an in-session `/resume` or a fork in that process (12.9; at most one per running process). A refresh that sees Open empty and holds no place removes it: the kept order ends. A failed write is logged once by kind and tried again at the next refresh. Read tolerantly. An older skydeck leaves it alone; a limit: after a switch back to a version before F42 and forward again, the old kept order wins over the older version's moves until the next move or until a refresh sees Open empty (7.6). |
-| `window_update_check` | Follow-up F38 (16.5): what the window's server's last look for a newer skydeck said, as JSON: `{ v: 1, root, lookedAtNs, checkedAtNs, fetchedAtNs, failure, head, outcome }` — `root` the checkout it looked at (its real path: one database serves every checkout of the user), `checkedAtNs` when the last check ended, whatever it found (null: none yet), `fetchedAtNs` when the last fetch that worked ended (null: never), `failure` `{ atNs, line }` while the last check failed, `head` HEAD's full id at the look, and `outcome` one of `{ kind: 'cannot', line }`, `{ kind: 'current', line }` and `{ kind: 'available', upstream, count, to, lines, blocked }`. Written by the server only, after each check and look; read by it and by `doctor`. Every line in it clipped to 300 characters. A value that is not exactly such a record is read as none, and so is one of another root, which the next look writes over. |
+| `window_update_check` | Follow-up F38 (16.5): what the window's server's last look for a newer skydeck said, as JSON: `{ v: 2, root, lookedAtNs, checkedAtNs, fetchedAtNs, failure, head, outcome }` — `root` the checkout it looked at (its real path: one database serves every checkout of the user), `checkedAtNs` when the last check ended, whatever it found (null: none yet), `fetchedAtNs` when the last fetch that worked ended (null: never), `failure` `{ atNs, line }` while the last check failed, `head` HEAD's full id at the look, and `outcome` one of `{ kind: 'cannot', line }`, `{ kind: 'current', line }` and `{ kind: 'available', upstream, count, from, to, notes, moreNotes, others, otherCount, upgradesDatabase, blocked }` (`notes` each `{ title, paragraphs }` as the look read them, `others` the subjects; 16.5 "What an update brings"). Written by the server only, after each check and look; read by it and by `doctor`. Every line in it clipped to 300 characters, a note's title to 120 and its text to 600. A value that is not exactly such a record is read as none, and so is one of another root, which the next look writes over. Its `v` is 2 since the notes of what is new (2026-11-25): a record of version 1, the shape before, reads as none (the server then makes its own check, `doctor` says `never checked`), and the code before reads a record of version 2 as none; no migration. |
 | `window_update_run` | Follow-up F38 (16.5, "Update now"): the one update started from a window, as JSON: `{ v: 1, root, state, to, atNs }`, and `line` for `failed` — `state` `applying` (written by the server that starts the updater), then `applied` or `failed` (written by `skydeck update --from-window` once the merge's outcome is known, before the window is brought back; nothing after it), `root` the checkout (its real path), `to` the commit the window listed, `atNs` when it was written, `line` the command's line without the bring-back's tail, clipped to 600 characters. Read and removed by the next server of that checkout (its result), or by the server whose updater ended while it ran; an entry of another root is left as it is. A value that is not exactly such a record is read as none. |
 | `window_carry_over_since` | Follow-up F40 (design 7.1): the server's clock at its first start with F40 on this store, a decimal number of nanoseconds (canonical: no sign, no leading zero). Written at the server's start, before its first tick, in one transaction that writes only when there is no usable entry; when that write fails, the tick tries again once a second until it works. A usable entry is never changed or removed. Without one, and with a damaged one (replaced by the next try's time), no `clear` link makes an offer. |
 | `window_carry_over:<session id>` | Follow-up F40: `carried` or `dismissed`, the answer to the offer of that new session; its existence alone ends the offer (a damaged value reads as answered). Removed at the server's start, after its first tick, for a session that has a row, does not run and that the list would not show even with done sessions shown; an entry whose session has no row is left. |
@@ -2838,24 +2855,60 @@ otherwise. A click, through the gate of a window chord (12.9), opens a dialog of
 (12.5: modal, the page inert under it, Esc closes, Tab stays inside, the keyboard goes back where it
 was; while it is shown every window chord says `close the dialog first (Esc)`). The dialog asks the
 server to look again without the network (`act update-look`), so that what it says is true now,
-and draws the answer as text, one line each: `skydeck update --check`'s lines (the database line
-included) and `To apply it, in a WSL terminal of your own: skydeck update`; for a checkout that
-cannot be updated as it is (`blocked`: changes, or commits the upstream does not have), the lines,
-`This checkout cannot be updated as it is: <why>` and `Once that is set right, in a WSL terminal of
-your own: skydeck update`; for an answer that is up to date (the notice was stale), its summary;
-for one that cannot tell (the branch follows no branch of a remote any more, HEAD detached),
-`skydeck cannot tell here whether there is an update: <the look's line>` and the same `Once that is
-set right, …`. `Close` has the keyboard from the start; for an update that can be applied as it
+and draws the answer as text (never as HTML; no link is made), in the window's font, the commit
+ids and commands in the terminal's (owner's picture, 2026-11-24):
+
+```
+Update available
+
+ Parked: set a session aside
+ Press w on a session that waits for someone
+ else. It moves to its own section after Open
+ and comes back when you send it a prompt.
+
+ ▸ 3 other changes
+
+ ! This update may upgrade the database. A copy
+   is kept first; an older skydeck cannot open
+   it afterwards. Going back to 1546b37:
+   docs/install.md, "Going back".
+
+ 1546b37 → c75af0e on origin/main
+ In a terminal instead: skydeck update
+
+                     [ Update now ]  [ Close ]
+```
+
+For an update: the notes of what is new it brings (16.5 "What an update brings"), newest first,
+each its title in a heavier weight and its paragraphs under it, a code run in the terminal's font
+(`… and <n> more` past 20); `▸ <n> other changes` (`1 other change`), a button — a click, Enter
+or Space opens and closes the list of the other changes' subjects under it (`▾` when open,
+`aria-expanded`), folded at every open of the dialog; with no note at all the line reads `<n>
+changes` and the list is open from the start; with no other change there is no such line; when
+the update changes the database's upgrade steps, the database note, a block marked at its left;
+and small, in `--dim`, `<old> → <new> on <upstream>` and `In a terminal instead: skydeck update`.
+For a checkout that cannot be updated as it is (`blocked`: changes, or commits the upstream does
+not have), the same notes, fold and database note, then `This checkout cannot be updated as it
+is: <why>` and `Once that is set right, in a WSL terminal of your own: skydeck update`, and of
+the bottom lines only the commits; for an answer that is up to date (the notice was stale), its
+summary; for one that cannot tell (the branch follows no branch of a remote any more, HEAD
+detached), `skydeck cannot tell here whether there is an update: <the look's line>` and the same
+`Once that is set right, …`. A dialog longer than the window scrolls inside itself; its heading
+and its buttons stay in view. Every text reads at least 4.5 : 1 in both schemes and every colour
+theme. `Close` has the keyboard from the start; for an update that can be applied as it
 is (`available`, not `blocked`) `Update now` stands before it (milestone 2, 16.5 "Update now": it
-sends `act update-apply` with the commit drawn, and a refusal is drawn under the lines; Tab goes
-round the two). While an update runs every connected page closes any other dialog it shows and
+sends `act update-apply` with the commit drawn, and a refusal is drawn under the answer, before
+the bottom lines). Tab and Shift+Tab go round the fold line (when shown), `Update now` (when shown)
+and `Close`; ↑ and ↓, PageUp and PageDown, Home and End scroll the body, whichever of them has the
+keyboard (Enter and Space still press it). While an update runs every connected page closes any other dialog it shows and
 shows the dialog's running form (one line, no button, Esc does nothing, every window chord says
 `skydeck is being updated`), lifted
 when the connection is lost or ends fatal and at every welcome (6.3); a bar under the title bar
 (`#update-result`) says how the last update from the window ended until its × dismisses it on
 every page (`act update-seen`). The look's
 answer goes to every page, so a control the look found stale goes on every page. The page decides
-no rule (4.3): what is known, and whether it can be applied, is the server's.
+no rule (4.3): what is known, and whether it can be applied, is the server's, and so are which
+notes an update brings, their order, their limits and their code runs.
 
 **The theme's mode** (follow-up F13, 2026-11-18: so that the theme can also be chosen by
 hand; from follow-up F39, 2026-11-22, chosen in the settings screen, no longer by the title bar's
@@ -4567,7 +4620,11 @@ dialog's own start).
 
 A session ended so is an ordinary ended one: once its program has exited the server stores an `end`
 of detail `exit` for each of its holders that belonged to the terminal (no spool file, raw detail
-`skydeck-window`; no change of the schema), and design 6.3 reads that holding as a deliberate exit
+`skydeck-window`; no change of the schema), stamped with its clock but never below a time already
+stored for that holder's process, and with the machine's uptime (#207, design 5.3 "Order": after a
+step back of the wall clock it would otherwise lie before the session's own start); the done mark
+is never below the session's latest start either (design 7.1). Design 6.3 reads that holding as a
+deliberate exit
 whatever end Claude Code's own hook sends after its hang-up (reason `other`, design 14), before or
 after it — also when the program ends only after the 10 seconds (the server follows the terminal
 until then). So it is never `ended-unexpectedly` or `was-working`, never needs you as an ended
@@ -5624,8 +5681,10 @@ database before it migrates it, design 9.2; install.md, "Going back", gives the 
    first (design 9.2), and that install.md ("Going back") says how to return to HEAD's commit,
    which it names (`SCHEMA_VERSION` is computed, so
    the file's change is the fact that can be known without running the new code; no file of the
-   new commit is run or imported to learn more). `--check` ends with `run skydeck update to apply
-   it`.
+   new commit is run or imported to learn more). Between the commits and that line, when the update
+   brings notes of what is new ("What an update brings" below), `what is new:` and their titles,
+   one per line, indented two spaces, newest first (past 20, `… and <m> more`); nothing else of the
+   output changes. `--check` ends with `run skydeck update to apply it`.
 3. **It applies**, in exactly this order. First two looks that change nothing: the index lock
    (`rev-parse --git-path index.lock`, against the root) must not exist — else `this checkout's
    git index is locked (<path>): …; nothing was changed`, before the server is looked at, so that
@@ -5717,8 +5776,36 @@ user's second click.
   with what the remote-tracking ref already says; the branch and HEAD are read again after the
   fetch (`this checkout changed while git fetch ran …`); and the two refusals that only stop an
   apply — a changed tracked file, commits the upstream does not have — are kept as why it cannot
-  be applied as it is (`blocked`; the changes line first), the commits and the database line read
-  all the same. A checkout only ahead of its upstream is up to date for the notice (`nothing new on
+  be applied as it is (`blocked`; the changes line first), the commits, the notes and the database
+  line read all the same.
+- **What an update brings** (the owner's decision of 2026-11-24). The repository keeps one small
+  note per change a user can see, `docs/news/<yyyy-mm-dd>-<name>.md` (its README says the format;
+  AGENTS.md part 2 says when one is written; the suite's `test/news.test.ts` holds every note of the
+  checkout to it): a title line `# <title>`, a blank line, a few plain sentences in paragraphs; a
+  run between two backticks is code, nothing else of Markdown means anything
+  (`src/update/news.ts`). The notes an update brings are the note files the upstream's commit has
+  and HEAD's does not, by path — one both have, one changed or removed between them, a file of
+  another name or in another folder are none —, newest first by file name. They are read from git's
+  objects of the two commits, never from the work tree, through `src/update/git.ts`, each call
+  with `GIT_NO_LAZY_FETCH=1` (a git that knows the variable fetches no missing object): `config -z --get-regexp`
+  of the partial-clone settings (a partial clone — `extensions.partialclone`, a `promisor` remote —
+  gets no notes, so that a git that does not know it fetches nothing either); `cat-file --batch-check` of
+  `<commit>:docs/news` for both (no such tree in the new commit: no notes; a tree larger than 256 KiB
+  in either: no notes); `ls-tree -l -z --full-tree <commit> -- docs/news/` of each (regular files
+  only, at most 1 MiB of listing kept, past it no notes); then `cat-file blob` for each new one, at
+  most 40 files read, none larger than 8 KiB and no more than 8 KiB kept of any; `log
+  --diff-filter=A --no-renames -z --format=%H <old>..<new> -- <their paths>` names the commits that
+  add them. Reading the notes never costs the update itself: a call of it that fails or times out,
+  or a limit passed, gives no notes and every commit one of the other changes, and the look goes on
+  as it did before the notes. A note comes from a fetched commit that is not applied: it is foreign text, treated as
+  the subjects are — sanitised, its title clipped to 120 characters and its text (all its
+  paragraphs) to 600, each with `…`; a file that is not a well-formed note (no title line, an empty
+  title or text, binary: a NUL or a byte that is not UTF-8) is not shown and breaks nothing. At
+  most 20 are shown (`… and <n> more`, the files not read counted among them). The other changes
+  are the update's commits that add none of its notes (a note shown or counted in `… and <n> more`;
+  a commit whose note file was read and refused — malformed, empty, binary, over 8 KiB — is one of
+  them), by their subjects as `--check` lists them
+  (newest first, at most 20, then their count), without the ids. A checkout only ahead of its upstream is up to date for the notice (`nothing new on
   <upstream>: this checkout has <n> commits that it does not have`).
 - **The fetch that never asks.** `git -C <root> -c core.askPass= fetch --quiet -- <remote>` through
   the runner, with git's environment of step 1 and `GIT_TERMINAL_PROMPT=0`, an empty `GIT_ASKPASS`
@@ -6388,7 +6475,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W39 | **Real claude**, a throwaway session started after the update: `d` on it while it waits shows the dialog with the keyboard on `Mark done, keep it running`, Esc changes nothing; `d`, ←, Enter ends it (`Ending the session…`, then `Ended and marked done: hidden from the list.`), the row leaves Open; with `a` it is done and not ended unexpectedly, `skydeck show` shows no such mark (so restore does not offer it); undone and resumed, its conversation is there; `d` while it works shows the warning with the keyboard on `Mark done, keep it running`, and Enter keeps it running, marked done. | F30 | 12.10, 7.7 |
 | W41 | The settings screen's Advanced on the owner's own `config.json`, copied aside first: the title bar's gear opens it, `Advanced (14 more settings)` opens it, showing the file's path, `prRefreshMinutes` with its value, its default and `applies at once`, `claudeCommand` as text that `names a program`; `6` and Enter save it (`Saved: it applies at once.`, the file holds 6, `doctor` has no configuration problem, the copy `config.json.skydeck-backup` is the file as it was); `0` is refused beside the field in the file's words, the file unchanged; the old value (or `Default`) puts it back; Esc closes and the keyboard is back where it was. | F36, F39 | 12.13 |
 | W42 | **Real claude**, three throwaway sessions in the window (follow-up F37): Shift+↑, Shift+K, Shift+↓ and Shift+J move the selected one on a US and a Czech layout, the numbers follow and Ctrl+Shift+1…3 reach the rows; Caps Lock alone moves nothing; a refusal at the top, at the last row and under a filter; follow-up F42: a fourth session of another terminal moved above a numbered one, the numbers unchanged, `/clear` in it keeps its place; `skydeck window --restart` keeps the order; follow-up F43: `/exit` in a numbered terminal gives its number up (its row under Recent without one, Ctrl+Shift+1 reaches no session), the next new session takes it, also after `Mark done, keep it running`; issue #189: with nine numbered terminals, a tenth session without a number takes the number a numbered one gives up at its `/exit`, at that number's place, also after a restart. The restore order only where W16's drill runs anyway. | F37, F42, F43, #189 | 7.6, 12.1, 12.9 |
-| W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog lists `skydeck update --check`'s lines and the command, with `Update now` and `Close`; `doctor`'s `update:` line; the group's choice `Check for updates` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
+| W43 | The update notice. First half (nothing is applied): `Check now` in the settings screen's group Updates (the gear) gives the block's line with its age and the title bar's `Update available` exactly when new commits are there; its dialog shows what is new (the notes, the folded other changes, the bottom lines; W53), with `Update now` and `Close`; `doctor`'s `update:` line; the group's choice `Check for updates` off and back; with a remote that needs a passphrase (only where the owner has one) nothing asks; with a private https remote and the Windows credential manager (only where the owner has one) no Windows dialog opens. The remote's address is put back. Second half, on the owner's own installation and only when the dialog lists commits: `Update now`, the running form, the reload, `updated to <id>`, every session still there, no second window, `skydeck doctor` as before. | F38 | 6.3, 12.1, 12.13, 16.3, 16.5 |
 | W44 | The short settings screen in the owner's Edge, on the owner's own `config.json`, copied aside first: the title bar has the gear and no theme switch, and the gear looks like one (no box, no emoji) with the tooltip `Settings`; a click on it from the terminal leaves the terminal its keyboard until the screen opens; the screen shows Appearance, Links, The window and (F38) Updates with eight plain labels (from issue #184 `Copy on select` in The window) and `Advanced (14 more settings)` closed; Mode and Colour theme apply at once and hold after a reload; `Open links in` changed saves at once (`Saved.`, the file holds it) and is put back; a ticket address without `{key}` is refused beside the field, the text kept, the file unchanged; an unchanged ticket address left saves nothing; Advanced opens and closes by keyboard and is closed again at the next opening; Esc closes and the keyboard is back where it was. | F39 | 12.1, 12.13 |
 | W45 | The tour of the window in the owner's Edge (follow-up F41): it starts by itself at the first opening after the update, over the real list; each step's region stands out and its words read well; Enter, → and ← walk it, a click on the page does nothing, Ctrl+Shift+L says `close the tour first (Esc)`; `Done` gives the keyboard back and a reload shows it no more; the key help's `Take the tour` and the switcher's `> tour` start it again and Esc ends it; an InPrivate window with `--print-url`'s address shows it by itself once, in a tab's words. | F41 | 12.9, 12.14 |
 | W46 | **Real claude**, copy on select (issue #184): a drag over text in the terminal, then Ctrl+V into Notepad, gives that text; a double click a word; `Copy on select` off in Settings, a new selection leaves the clipboard with the text copied before; on again, the next selection is copied, without a reload. | #184 | 9.5, 12.13 |
@@ -6398,6 +6485,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W50 | **Real claude**, follow-up F44: Parked on throwaway sessions — `w`, the toast and Undo; the number freed and taken by a new session, and the lowest free one back under Open; a prompt brings it back, a key typed and not sent does not; `skydeck park` and `skydeck unpark` in W show within seconds; a parked session that asks shows its mark, sends no notification and Ctrl+Shift+J passes it; `skydeck window --restart` keeps it parked without a number; `w` on a running session asks first (the dialog "Park", the keyboard on its End button when idle, on Keep with a warning while it works), `End session and park` ends it and lists it under Parked, not running, and resumed from its row it stays parked; words with a `w` typed into the list end nothing; after `w` the selection is on the next row and the list has not moved, three `w` in a row park three sessions and nothing is typed into the session the selection moved to; `w` on a row under Parked brings it back, still selected and in view; `/clear` in a parked session; `w` on a US and a Czech layout (manual-checks.md, "Parked"). | F44 | 7.6, 12.1, 12.4, 12.9, 12.15, design 7.1 |
 | W51 | **Real claude**, issue #166 with part 2 of #188: a throwaway session restarted from the header's `Restart` and with `r` — the keyboard on Cancel, `Restarting…`, the same conversation, the same number and place, not done, no notification —, then with `Other flags…` and another `--model`, the header showing it once Claude Code has started, a plain restart passing it on (manual-checks.md, "Restarting a session from the window"). | #166, #188 | 12.5, 12.10, design 7.6 |
 | W52 | How often the window checks for a newer skydeck by itself (follow-up F38's choice, the owner's decision of 2026-11-24): Settings' `Check for updates` shows the setup's value and its four words in order; `Every 15 minutes` saved, and a check by the clock within 16 minutes of the last one without a click; `Every day` makes none in twenty minutes; `Off` and `Check now`; the setup's value put back (manual-checks.md, "How often updates are checked"). | F38 | 10.1, 12.13, 16.5 |
+| W53 | The update dialog's notes of what is new in the owner's Edge, on the owner's own installation, at the first update after this change that brings a note (nothing is applied): the notes' titles heavier and their text under them, a code run in the terminal's font, the fold of the other changes opened and closed by a click, Enter and Space and folded again at the next open, the Tab round, the database note when there is one, the bottom lines; both schemes and the owner's colour theme read well; a window lower than the dialog scrolls its body with the heading and the buttons in view; `skydeck update --check` lists the titles under `what is new:`. | the notes of what is new | 12.1, 16.5 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's

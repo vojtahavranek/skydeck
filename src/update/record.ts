@@ -5,7 +5,9 @@
 // before the window is brought back, read (and removed) by the server that follows. Each entry
 // names its checkout (`root`): one database serves every checkout of the user, and an entry of
 // another checkout is none to a reader of this one. The readers are strict: a value that is not
-// exactly such a record reads as none. Every line of git's or of a refusal is clipped to LINE_MAX
+// exactly such a record reads as none. The check's record is of version 2 (the notes of what is
+// new, S2 16.5): one of version 1, the shape before, reads as none, and so does a version 2 one to
+// the code before, which wants 1; the server then makes its own check, with no migration. Every line of git's or of a refusal is clipped to LINE_MAX
 // (a run entry's to RUN_LINE_MAX) before it is stored, and sanitised and clipped again in the
 // page's payload.
 import type { Files } from '../platform/types.ts';
@@ -13,7 +15,9 @@ import type { Store } from '../store/store.ts';
 import { sanitize } from '../text/sanitize.ts';
 import type { UpdateCheckPayload } from '../window/protocol.ts';
 import { clipLine } from './git.ts';
-import { counted } from './look.ts';
+import { counted, LISTED } from './look.ts';
+import { clipText, clipTitle, NOTES_SHOWN, runsOf } from './news.ts';
+import type { Note } from './news.ts';
 
 export const CHECK_KEY = 'window_update_check';
 export const RUN_KEY = 'window_update_run';
@@ -26,19 +30,28 @@ export type CheckOutcome =
   | { kind: 'cannot'; line: string }
   /** Nothing would come: `skydeck is up to date …` or `nothing new on …`. */
   | { kind: 'current'; line: string }
-  /** `count` commits on `upstream`, the newest `to`; `lines` are `skydeck update --check`'s. */
+  /**
+   * `count` commits on `upstream`, from HEAD's `from` to the newest, `to`; the notes of what is
+   * new they bring and how many more, the subjects of the other changes (the commits that add no
+   * note) and how many there are; whether they change the database's upgrade steps.
+   */
   | {
       kind: 'available';
       upstream: string;
       count: number;
+      from: string;
       to: string;
-      lines: string[];
+      notes: Note[];
+      moreNotes: number;
+      others: string[];
+      otherCount: number;
+      upgradesDatabase: boolean;
       /** Why it cannot be applied as it is (changes, ahead); null: nothing stands in the way. */
       blocked: string | null;
     };
 
 export interface CheckRecord {
-  v: 1;
+  v: 2;
   /** The checkout the look was of: checkoutRoot's answer. */
   root: string;
   /** When the look ended (ns, decimal). */
@@ -83,6 +96,16 @@ function hasKeys(value: Record<string, unknown>, keys: readonly string[]): boole
 const isText = (value: unknown): value is string => typeof value === 'string';
 const isDecimal = (value: unknown): value is string => isText(value) && DECIMAL.test(value);
 const isCommit = (value: unknown): value is string => isText(value) && COMMIT_ID.test(value);
+const isCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+function isNote(value: unknown): value is Note {
+  if (!isObject(value) || !hasKeys(value, ['title', 'paragraphs'])) return false;
+  const { title, paragraphs } = value;
+  return (
+    isText(title) && Array.isArray(paragraphs) && paragraphs.length > 0 && paragraphs.every(isText)
+  );
+}
 
 function isOutcome(value: unknown): value is CheckOutcome {
   if (!isObject(value)) return false;
@@ -91,16 +114,37 @@ function isOutcome(value: unknown): value is CheckOutcome {
     case 'current':
       return hasKeys(value, ['kind', 'line']) && isText(value['line']);
     case 'available': {
-      const { upstream, count, to, lines, blocked } = value;
+      const { upstream, count, from, to, notes, moreNotes, others, otherCount } = value;
+      const { upgradesDatabase, blocked } = value;
       return (
-        hasKeys(value, ['kind', 'upstream', 'count', 'to', 'lines', 'blocked']) &&
+        hasKeys(value, [
+          'kind',
+          'upstream',
+          'count',
+          'from',
+          'to',
+          'notes',
+          'moreNotes',
+          'others',
+          'otherCount',
+          'upgradesDatabase',
+          'blocked',
+        ]) &&
         isText(upstream) &&
-        typeof count === 'number' &&
-        Number.isSafeInteger(count) &&
+        isCount(count) &&
         count > 0 &&
+        isCommit(from) &&
         isCommit(to) &&
-        Array.isArray(lines) &&
-        lines.every(isText) &&
+        Array.isArray(notes) &&
+        notes.length <= NOTES_SHOWN &&
+        notes.every(isNote) &&
+        isCount(moreNotes) &&
+        Array.isArray(others) &&
+        others.length <= LISTED &&
+        others.every(isText) &&
+        isCount(otherCount) &&
+        otherCount <= count &&
+        typeof upgradesDatabase === 'boolean' &&
         (blocked === null || isText(blocked))
       );
     }
@@ -133,7 +177,7 @@ function asRecord(value: unknown): CheckRecord | null {
       isDecimal(failure['atNs']) &&
       isText(failure['line']));
   if (
-    v !== 1 ||
+    v !== 2 ||
     !isText(root) ||
     root === '' ||
     !isDecimal(lookedAtNs) ||
@@ -165,7 +209,12 @@ export function readCheck(store: Store, root: string): CheckRecord | null {
   return record !== null && record.root === root ? record : null;
 }
 
-/** `record` with every line clipped to LINE_MAX, as it is stored. */
+/** A note within its limits (a stored one is read back as it was written). */
+function clippedNote(note: Note): Note {
+  return { title: clipTitle(note.title), paragraphs: clipText(note.paragraphs) };
+}
+
+/** `record` with every line clipped to LINE_MAX (a note to its limits), as it is stored. */
 export function clippedCheck(record: CheckRecord): CheckRecord {
   const { outcome } = record;
   return {
@@ -179,7 +228,8 @@ export function clippedCheck(record: CheckRecord): CheckRecord {
         ? {
             ...outcome,
             upstream: clipLine(outcome.upstream),
-            lines: outcome.lines.map((line) => clipLine(line)),
+            notes: outcome.notes.map(clippedNote),
+            others: outcome.others.map((line) => clipLine(line)),
             blocked: outcome.blocked === null ? null : clipLine(outcome.blocked),
           }
         : { kind: outcome.kind, line: clipLine(outcome.line) },
@@ -209,8 +259,22 @@ export function checkPayload(record: CheckRecord): UpdateCheckPayload {
         summary: payloadText(
           `${counted(outcome.count, 'new commit', 'new commits')} on ${outcome.upstream}`,
         ),
+        from: outcome.from,
         to: outcome.to,
-        lines: outcome.lines.map(payloadText),
+        upstream: payloadText(outcome.upstream),
+        // A note is sanitised and clipped again, and cut into its runs here: the page parses
+        // nothing (S2 4.3).
+        notes: outcome.notes.map((note) => {
+          const { title, paragraphs } = clippedNote({
+            title: sanitize(note.title),
+            paragraphs: note.paragraphs.map(sanitize),
+          });
+          return { title: runsOf(title), paragraphs: paragraphs.map(runsOf) };
+        }),
+        moreNotes: outcome.moreNotes,
+        others: outcome.others.map(payloadText),
+        otherCount: outcome.otherCount,
+        upgradesDatabase: outcome.upgradesDatabase,
         blocked: outcome.blocked === null ? null : payloadText(outcome.blocked),
       };
   }
