@@ -1003,7 +1003,7 @@ describe('bin/skydeck with the real node', () => {
     assert.equal(r.status, 0);
     // No git on the sandbox's PATH: this checkout's own history is never asked (the commit is
     // test/cli/version.test.ts's, on throwaway checkouts).
-    assert.equal(r.stdout, `${pkg.version} (commit unknown)\n`);
+    assert.equal(r.stdout, `${pkg.version.split('.').slice(0, 2).join('.')} (commit unknown)\n`);
     assert.equal(r.stderr, '');
   });
 

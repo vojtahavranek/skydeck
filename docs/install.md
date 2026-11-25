@@ -143,10 +143,13 @@ bin/skydeck --version
 ```
 
 It prints one line: the version, the commit the checkout is at and the date of that commit, such as
-`0.1.0 (f1fce49, 2026-11-19)`. `, modified` follows the date when files git tracks in the checkout
+`0.9.16 (f1fce49, 2026-11-25)`. `, modified` follows the date when files git tracks in the checkout
 were changed since that commit (a new file of your own does not count), and
-`0.1.0 (commit unknown)` means git could not tell (git is missing, or the folder is not a git
-checkout). Give this line when you report a problem. With a `node` older than 24.12 it prints one
+`0.9 (commit unknown)` means git could not tell (git is missing, or the folder is not a git
+checkout). The version's first two numbers are set by hand in `package.json`, and only a deliberate
+decision changes them; the last one is how many changes were merged since they last changed,
+counted by git (each merged pull request adds one), and it is left out (`0.9`) when git cannot count
+them, in a shallow clone for one. Give this line when you report a problem. With a `node` older than 24.12 it prints one
 line and exits 1:
 
 ```
@@ -379,7 +382,7 @@ exit code is 0 (the window's own lines, under Window after the terminal's, are l
 
 ```
 Versions
-info     skydeck 0.1.0 (f1fce49, 2026-11-19)
+info     skydeck 0.9.16 (f1fce49, 2026-11-25)
 info     Claude Code 2.1.0
 info     system: Ubuntu 24.04.1 LTS, Linux 6.6.87.2-microsoft-standard-WSL2
 

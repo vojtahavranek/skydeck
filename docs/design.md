@@ -1186,14 +1186,28 @@ could not be resumed; see above`).
 
   Before every other line, three `info` lines say what runs (follow-up F20); none is ever a
   problem, none changes the exit code, and none names a path. (1) `skydeck <version line>`, the
-  line `skydeck --version` prints: `<package version> (<short commit>, <commit date>)` of the
-  checkout the running code is in, wherever it is run from, with `, modified` after the date when
-  tracked files differ from that commit, and `<package version> (commit unknown)` when git is
-  missing, the app root is not a git checkout (git's search stops there), or an answer is not a
-  commit or does not come within 2 seconds. Two git calls side by side, `log -1` and `status
-  --porcelain --untracked-files=no`, never through a shell, without the variables that point git at
-  another repository (`GIT_DIR` and its kin, as for `skydeck update`) and with no optional lock, so
-  that nothing is written in the checkout; `--version` never fails and prints nothing on stderr.
+  line `skydeck --version` prints: `<version> (<short commit>, <commit date>)` of the checkout the
+  running code is in, wherever it is run from, with `, modified` after the date when tracked files
+  differ from that commit, and `<version> (commit unknown)` when git is missing, the app root is
+  not a git checkout (git's search stops there), or an answer is not a commit or does not come
+  within 2 seconds. The version is that commit's: `<major>.<minor>.<patch>`, the first two numbers
+  of `"version"` in the commit's `package.json` (set by hand, by a deliberate decision; its third
+  number is always 0 and means nothing), and the number of commits of the commit's first-parent
+  history after the one that last changed that pair (that one is `.0`; every pull request is
+  squashed into one commit, so it counts merged changes). It is read from git's objects (never the
+  work tree) and fetches nothing; when git cannot count — a shallow clone that does not reach the
+  commit that set the pair, a partial clone, a call that fails or does not answer in time, a
+  `package.json` in the history that cannot be read, more than 100 changes of it without a change
+  of the pair — it is the pair alone (`0.9`), and the pair of the running code's `package.json`
+  when not even HEAD's can be read; never a wrong third number (src/update/version.ts). Six git
+  calls, all within the 2 seconds from the line's start: `log -1` and `status --porcelain
+  --untracked-files=no` side by side with the version's four rounds (the partial-clone settings
+  and whether the history is shallow side by side; the first-parent commits that change
+  `package.json`, at most 100; their `package.json` in one `cat-file --batch`; the count after the
+  one that changed the pair), never through a shell, without the variables that point git at
+  another repository (`GIT_DIR` and its kin, as for `skydeck update`), with no optional lock, so
+  that nothing is written in the checkout, and with `GIT_NO_LAZY_FETCH=1`; `--version` never fails
+  and prints nothing on stderr.
   (2) `Claude Code <version>`: the first line `<claudeCommand> --version` prints (no shell, stdin
   closed, doctor's environment without the launcher's own variables as in design-step-2.md 5.2,
   5 seconds, at most 4 KiB read, control characters dropped, at most 60 characters kept),

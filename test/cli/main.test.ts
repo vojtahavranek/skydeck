@@ -18,7 +18,10 @@ describe('main', () => {
       const code = await main([flag], c.ctx);
 
       assert.equal(code, 0);
-      assert.equal(c.stdout(), `${pkg.version} (commit unknown)\n`);
+      assert.equal(
+        c.stdout(),
+        `${pkg.version.split('.').slice(0, 2).join('.')} (commit unknown)\n`,
+      );
       assert.equal(c.stderr(), '');
     });
   }
