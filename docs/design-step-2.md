@@ -2180,6 +2180,22 @@ page last proposed (`attach`, `resize`). The rules:
 The page's xterm.js keeps 5,000 lines of scrollback, as the screen side does (7.2), so that both
 reflow alike and find (9.7) sees what the snapshot holds.
 
+**Two terminals in one area** (issue #199, 7.10, 12.6). While a page shows a session's shell, its
+terminal area holds two terminals: the session's above, the shell's panel below, with the bar
+between them (12.6's split). Each has its own size by the rules above — one size state per
+terminal id, a shell's included, its owner the page that typed into it last, `list.shells`
+carrying whether this page owns it as `list.terminals` does —, and each of the page's two terminal
+views proposes its own terminal's size from its own box when that box changes: showing the panel
+makes the session's terminal lower, so it is told its smaller size, hiding it gives the full
+height back, and a drag of the bar tells both. In an area too low for both the shell takes the
+whole area while it is shown; the session's terminal is not laid out then and proposes nothing,
+so it keeps its last size. A shell's **first size** is its act's (`act shell`, 8.2.3): what fits
+the panel's box as 12.6's rules make it for the terminal area at the press (the stored height, a
+third of the area while none is stored, the whole area when it is too low), counted by the rule
+above for that box, or 80 × 12 while the page cannot tell. While the panel is drawn beside the
+session's terminal, `focus.area` is the session's terminal's: the panel and the bar are counted
+out of it.
+
 #### 8.2.7 Several windows
 
 Any number of pages may attach to one terminal; they share its ordered stream. Input from any of
@@ -4121,9 +4137,27 @@ nothing; `ls` is unchanged.
   every part of the paste before the first refusal can come, so it cannot hold back the rest or
   send the end marker later (a named limit).
 - **A session's shell** (issue #199, 7.10): a panel under the session's terminal, `#shell`
-  under `#terminal` in the right zone, with a bar of 6 px between them; for now a fixed third
-  (34 %) of the zone's height, the session's terminal the rest (both told their sizes, 8.2.6). It
-  is a second instance of the terminal view, with its own terminals, find bar, shown terminal,
+  under `#terminal` in the right zone, with a bar between them (`#shell-bar`). The split
+  (`web/shell-panel.js`, its rules pure in `web/shell-panel-split.js`): the terminal area is the
+  right zone's box less its borders and the cards; each of the two keeps room for at least 4 rows
+  (`least`: what 4 rows of the measured cell and the margin of the text need, 84 px while no cell
+  can be measured); the bar is 6 px; in an area lower than twice `least` and the bar the shell
+  takes the whole area (`data-shell="full"` on the zone: neither the session's terminal nor the bar
+  is laid out, and the key shows and hides the whole-area shell); else (`data-shell="split"`) the
+  shell is the stored height, a third of the area rounded while none is stored, held to `least` …
+  the area less the bar and `least`, and the session's terminal the rest. A `ResizeObserver` on the
+  zone and the cards applies the rules again when the area changes, and each terminal is told its
+  size (8.2.6). **The bar** (modelled on the list's handle, 12.1): a press of the primary button
+  and a move change the height with the pointer, live, within the bounds; the drag begins once the
+  pointer is more than 3 px from the press; the release keeps the height in the page's own
+  `localStorage` under `skydeck-shell-height` (whole px; anything but a whole number of 1 to
+  100,000 counts as none; a begun drag released at its press stores nothing); a double click
+  removes it (back to a third); a `storage` event makes the profile's other pages follow. One
+  height for all sessions, remembered for the window and nothing of it sent to the server; storage
+  that throws keeps nothing, and the height holds for the life of the page. Its tooltip: `Drag to
+  change the height of the shell. Double-click: back to a third.` It takes no keyboard (12.9) and
+  does nothing while a dialog is shown (a drag that meets one ends as at a release). The panel is
+  a second instance of the terminal view, with its own terminals, find bar, shown terminal,
   refit and limit of attached terminals: the page keeps up to 8 session terminals and up to 8
   shells attached, each the least recently shown detached first, and while the window is hidden
   only the shown one of each. `snap`, `size`, `exit`, a terminal's `notice` and the output go to
@@ -4594,7 +4628,7 @@ switcher or the tour shown first says its gate's line, as for every chord:
 | the pane is no terminal of the window: the session does not run, or the New form is over it | the toast `a shell opens under a session's terminal in this window: open the session first (Enter)` |
 | the session runs elsewhere | the toast `a shell opens under a session's terminal in this window; this one runs in another terminal` (`… in Claude Code's background` for one there) |
 | the pane's terminal is ended | the toast `this session has ended: resume it first, then open a shell` |
-| the terminal has no shell | `act shell` with the terminal and a first size of a third of the terminal area (80 × 12 while the view cannot tell); the server's refusal is the toast `Shell: <its words>` (7.10) |
+| the terminal has no shell | `act shell` with the terminal and the first size of the panel's box as 12.6's split makes it for the area at the press (8.2.6; 80 × 12 while the view cannot tell); the server's refusal is the toast `Shell: <its words>` (7.10) |
 | it has a shell, the panel is hidden | the panel is shown and gets the keyboard |
 | the panel is shown and the keyboard is in the shell (anything inside `#shell`) | the panel is hidden, the keyboard goes to the session's terminal; the shell keeps running |
 | the panel is shown and the keyboard is anywhere else (the session's terminal, the list) | the keyboard goes to the shell (the zone becomes the terminal's) |
@@ -4604,9 +4638,12 @@ no keyboard itself. A held key acts once. The toasts for a pane without a termin
 are words from the row's own fields, as `r`'s are; for a terminal the server decides again at the
 act (4.3). **The keyboard** between the two: a click moves it (xterm.js takes the focus at its own
 press); giving the terminal zone the keyboard — Ctrl+Shift+L, a click on the zone, a closed
-dialog — gives it to the side that had it last (the shell only while its panel is drawn), and a
-pane that changes to another terminal starts on the session's side. Find, copy and the raw
-Ctrl+Shift+V act on the view whose element holds the keyboard (9.5, 9.7). No single key of the
+dialog — gives it to the side that had it last (the shell only while its panel is drawn; in an
+area too low for both, where the session's terminal is not laid out, the shell), and a pane that
+changes to another terminal starts on the session's side. Find, copy and the raw Ctrl+Shift+V act
+on the view whose element holds the keyboard (9.5, 9.7). **The bar** between the two (12.6) takes
+no key and no keyboard: it is not focusable and every mousedown on it is cancelled, so a press or a
+drag leaves the keyboard where it was (in the shell, the session's terminal or the list). No single key of the
 list opens a shell (ruled): a sentence typed into the list by mistake would open one at its first
 `s` and type the rest into a login shell, to run at the next Enter.
 
@@ -5035,7 +5072,10 @@ bring the program back), `Marked done. It has not ended yet: end it inside claud
 open.` with Undo when it has not ended within 10 seconds, or `End session: <why>` for a refusal.
 The terminal is closed by the server once the program ended (also after the 10 seconds), so the row
 leaves Open and, done, is hidden; after `d` in the list the selection follows 12.9's rule for a row
-gone after `d` (a row of Open: nothing else is selected).
+gone after `d` (a row of Open: nothing else is selected). While `list.shells` has a shell of the
+dialog's terminal (issue #199, 7.10), a line under the warning says `Ending the session ends its
+shell too.`; it follows every list while the dialog is shown, so it comes and goes with the shell.
+The dialog "Restart" says nothing of it: a restart keeps the shell (7.10, 12.6).
 
 **The dialog "Park"** (follow-up F44, 12.15; the owner's decision of 2026-11-25) is this dialog for
 `w` and the header's `Park`, in a parking's words: `End session and park` ends the session as `End
@@ -5508,7 +5548,7 @@ none: no made-up data.
   | Region | Title | What it says |
   |---|---|---|
   | the list | The list | every session, one row each, of this window and of any terminal; Open, Recent (the last 7 days) and Earlier; the number 1–9 is the slot |
-  | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it, also with other flags (issue #188) |
+  | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it, also with other flags (issue #188); from issue #199 `Ctrl+Shift+S opens a shell under the terminal, in the session’s folder.` (7.10, 12.6) |
   | the key bar | Where the keyboard is | `Focus: list` or `Focus: terminal`; Ctrl+Shift+L moves it; with `Focus: terminal` a letter goes to Claude Code |
   | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park and from issue #166 `r` restart (the version is not raised for them: the tour is not shown again); `/` filter, `a` show done, and from the mark unread `u` mark unread on that line (the line of the letters is full; the version is not raised) |
   | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+J the next session that needs you; Ctrl+Shift+N a new one |
@@ -5623,7 +5663,9 @@ and none is parked, idle or working. The session ended
 so is listed under Parked and resumed from its row. Everything else is 12.10's: Esc is Cancel; Tab
 and →, Shift+Tab and ← walk the three and stay inside; Enter or Space press at a fresh press only
 (an auto-repeat, or a key held since before it opened, presses nothing); Ctrl+Shift+H is refused
-while it is shown and opening it hides the key help; it belongs to its session and terminal and closes by itself, nothing done,
+while it is shown and opening it hides the key help; while the session's terminal has a shell
+(issue #199, 7.10) it says `Ending the session ends its shell too.` under the warning, following
+every list; it belongs to its session and terminal and closes by itself, nothing done,
 with the toast `It stopped by itself: nothing was parked.`, `It was parked in another window:
 nothing was ended.`, `It was marked done in another window: nothing was ended or parked.` or `It
 left the list: nothing was parked.`; Cancel changes nothing and gives the keyboard back. `Park,
@@ -6873,10 +6915,24 @@ with an `s` typed into the list opens none and sends no act;
 each toast, and an act answered `ok` whose shell no list brought opens no panel later; the key's
 four cases and the click; find, copy (written once) and the raw paste on the terminal that has the
 keyboard; after a reload, a cut connection and a restart of the server the panel is hidden, the
-dot shows and the key shows it again with its screen; another session and back; `exit`. The
-header's `Shell` and its dot (`test-page/header.test.ts`, with the header's one height with Shell
-in it). The page tests' stand-in views (`test-page/fixtures/*-view.js`) record only for
-`#terminal`, so that the second view leaves their globals the first view's.
+dot shows and the key shows it again with its screen; another session and back; `exit`; the
+session's end with the panel shown — End session and park, `/exit`, a crash — takes the panel, the
+dot and the shell's program away, and the ended terminal has the whole area; a restart (`r`, the
+header's Restart) keeps the panel under the new terminal with the same shell process, and the
+dialog "Restart" says nothing of it. The dialogs' line `Ending the session ends its shell too.`
+with a shell of the dialog's terminal and not without one, coming and going with the lists
+(`test-page/end-session.test.ts`). The split (`test-page/shell-panel-layout.test.ts`): a third of
+the area at first; both programs told their sizes when the panel shows, hides and is dragged,
+compared with what the page's own terminal view computes for each box (its `fits`), never with a
+constant, and `stty size` in the shell says the same; a drag of 120 px, the height kept in
+`localStorage`, after a reload and for a second session; a drag past either bound stops at 4 rows;
+a double click gives the third back; a window too low for both shows the shell over the whole
+area; the bar takes no keyboard and does nothing under a dialog. Its rules are unit-tested
+(`test/web/shell-panel-split.test.ts`: the third, both bounds, the too-low boundary, the stored
+values that are none, the bar's 6 px against the style sheet). The header's `Shell` and its dot
+(`test-page/header.test.ts`, with the header's one height with Shell in it). The page tests'
+stand-in views (`test-page/fixtures/*-view.js`) record only for `#terminal`, so that the second
+view leaves their globals the first view's.
 
 No test shows a desktop notification or asks for a permission (stage B, plan B17), whatever a
 server sends: every browser context of the suite is made by `newContext` of
@@ -7060,6 +7116,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W53 | The update dialog's notes of what is new in the owner's Edge, on the owner's own installation, at the first update after this change that brings a note (nothing is applied): the notes' titles heavier and their text under them, a code run in the terminal's font, the fold of the other changes opened and closed by a click, Enter and Space and folded again at the next open, the Tab round, the database note when there is one, the bottom lines; both schemes and the owner's colour theme read well; a window lower than the dialog scrolls its body with the heading and the buttons in view; `skydeck update --check` lists the titles under `what is new:`. | the notes of what is new | 12.1, 16.5 |
 | W54 | The version number on the owner's own installation, after the workflow Version made its first tags: the tags in the checkout (`git tag --list 'v*'`); `skydeck --version` and doctor's first line `0.9.<n>[+<k>] (<id>, <date>)`, the nearest version tag of HEAD; Settings' group Updates `skydeck 0.9.<n>` above its last check; with commits listed, `skydeck update --check`'s first line and the dialog's bottom line `<version> → <version> on origin/main` with the ids, a note brought making the next minor; and, when the owner wants the update, the running form and `updated to <version>`; the workflow's run in GitHub's Actions (manual-checks.md, "The version number"). | the version number | 12.1, 12.13, 16.5, 17.5 |
 | W55 | **Real claude**, the mark unread on throwaway sessions: `u` and the header's `Unread` / `Read`, the bar, the line `marked unread · <age>`, the count and `(n) skydeck`, no notification; the mark stays while the window stays on the session, loses and regains the focus and reloads, goes when the selection comes back to it after 1.5 s and at a typing; a turn that ends meanwhile shows `finished` and notifies; a session that asks and one marked done are refused in the toast; `skydeck window --restart` keeps it; `u` on a US and a Czech layout (manual-checks.md, "Marked unread"). | the mark unread | 10.2, 12.4, 12.5, 12.9, 13 |
+| W56 | **Real claude** and the owner's own login shell, a session's shell on a throwaway session (issue #199): Ctrl+Shift+S in Edge's app window opens it under the terminal and Edge takes nothing of the chord; `echo $0` shows the login form and the profile was read; hidden with a command running and shown again with its output; the bar dragged, the height kept over a reload, a double click back to a third, a window too low for both; a program that asks a hidden question; a `claude` started in it reads as running in another terminal; `r`, `skydeck window --restart` and `skydeck update` keep it with its screen and the same pid; End session ends it and its background and foreground jobs, in bash and in zsh, and what a `nohup` job does is written down (manual-checks.md, "A session's shell"). | #199 | 7.10, 8.2.6, 12.5, 12.6, 12.9, 12.10 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
@@ -7165,6 +7222,11 @@ page's own icon (12.12). Checks W30, W31, and W3's icon on the taskbar button.
   offer after a fork, a copy or an in-session `/resume`, and undoing a carry over (the old session
   keeps its fields, and each field is edited as before).
 - **Bells and program notifications** (OSC 9, OSC 777).
+- **More of a session's shell** (issue #199, 7.10): a shell without a session; several shells or
+  tabs of shells per session; a shell as a row of the list, with a number or a mark of its own; a
+  mark or a notification when a command in a hidden shell ends; changing the shell's height by
+  keys; restoring a shell after WSL stopped; a command of the command line for it; an act that ends
+  a shell (only `exit` and its session's end do); a setting for which shell runs.
 - **Rotating the secret by itself** (`--new-secret` does it on request).
 - **A Start-menu shortcut — proposed, needs the user's agreement.** `skydeck window --shortcut`
   would write `skydeck.lnk` into the user's Start menu, running `wsl.exe -d <distribution> --exec
