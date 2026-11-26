@@ -92,7 +92,6 @@ const SECTIONS = [
         ['r'],
         'restart a session running in a terminal of this window: it ends claude and resumes this session here, with the same flags or, with Other flags…, others (r, ←, ←, Enter)',
       ],
-      [['s'], 'the same as Ctrl+Shift+S: a shell under the session’s terminal'],
       [['c'], 'carry over after /clear: to the offer of the selected session'],
       [
         ['f'],

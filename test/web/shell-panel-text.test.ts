@@ -57,11 +57,6 @@ describe("shellPress (issue #199, S2 12.9): every row of the key's table", () =>
       { toast: SHELL_TEXTS.noSession },
     ],
     [
-      'a selection the list hides (s), with its terminal shown',
-      { pane: terminal(), selected: false, shell: null, shown: false, inShell: false },
-      { toast: SHELL_TEXTS.noSession },
-    ],
-    [
       'a session that does not run',
       {
         pane: { kind: 'resume', row: row() },

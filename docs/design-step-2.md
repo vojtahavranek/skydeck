@@ -3781,7 +3781,7 @@ its word, `Shell ●` (its tooltip and label `a shell is open`): the header's on
 nothing is on the list's row. Shell needs about 60 px more of the line, so while it is there
 Restart gives way at 520 px inside, Unread / Read at 452 px and Park / Unpark at 360 px, and Shell
 itself, which carries the mark, last, at 290 px (measured as above: no button cut and the state
-never under Note down to 232 px); `Ctrl+Shift+S` and `s` remain. Then
+never under Note down to 232 px); `Ctrl+Shift+S` remains. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
 F18 the session's ticket first (below, with its status from F19), then the window's chip (12.3),
@@ -4574,14 +4574,13 @@ a Czech layout and would take Claude Code's Ctrl+Shift+-. If the user turns on t
 protocol in a later xterm.js and binds a `ctrl+shift+<x>` in Claude Code, the window shadows that
 binding; the help says so.
 
-**A session's shell** (issue #199, 7.10, 12.6). Ctrl+Shift+S in both zones, `s` in the list zone
-(on the selected row the list shows, E13) and a click on the header's `Shell` (12.5) act on the
-selected session's shell by one pure rule (`shellPress`, `web/shell-panel-text.js`); a dialog, the
+**A session's shell** (issue #199, 7.10, 12.6). Two ways: Ctrl+Shift+S in both zones and a click
+on the header's `Shell` (12.5) act on the selected session's shell by one pure rule (`shellPress`, `web/shell-panel-text.js`); a dialog, the
 switcher or the tour shown first says its gate's line, as for every chord:
 
 | Where it is pressed | What happens |
 |---|---|
-| no session selected (none, a caption; for `s` a selection the list hides) | the toast `no session selected` |
+| no session selected (none, a caption) | the toast `no session selected` |
 | the pane is no terminal of the window: the session does not run, or the New form is over it | the toast `a shell opens under a session's terminal in this window: open the session first (Enter)` |
 | the session runs elsewhere | the toast `a shell opens under a session's terminal in this window; this one runs in another terminal` (`… in Claude Code's background` for one there) |
 | the pane's terminal is ended | the toast `this session has ended: resume it first, then open a shell` |
@@ -4597,8 +4596,9 @@ act (4.3). **The keyboard** between the two: a click moves it (xterm.js takes th
 press); giving the terminal zone the keyboard — Ctrl+Shift+L, a click on the zone, a closed
 dialog — gives it to the side that had it last (the shell only while its panel is drawn), and a
 pane that changes to another terminal starts on the session's side. Find, copy and the raw
-Ctrl+Shift+V act on the view whose element holds the keyboard (9.5, 9.7). A `s` in a word typed
-into the list by mistake opens a shell like the key (a named limit).
+Ctrl+Shift+V act on the view whose element holds the keyboard (9.5, 9.7). No single key of the
+list opens a shell (ruled): a sentence typed into the list by mistake would open one at its first
+`s` and type the rest into a login shell, to run at the next Enter.
 
 **Marking unread** (12.4). In the list zone `u` marks the selected session unread, or read while
 it has a mark seeing clears (ended, finished, unread), as the header's `Unread` / `Read` does
@@ -6857,8 +6857,9 @@ In the browser suite, besides those:
 Issue #199, the session's shell on the page (`test-page/shell-panel.test.ts`, real keys, a real
 test server whose login shell is the stand-in shell): the second view's own members (each view
 its own terminal and channel, `reset`, `drop`, `heightFor`); a list with `shells` draws nothing
-until the page shows a shell; Ctrl+Shift+S in both zones and `s` open one shell under the
-session's terminal with the keyboard in it, and the key again and again never makes a second;
+until the page shows a shell; Ctrl+Shift+S in both zones opens one shell under the session's
+terminal with the keyboard in it, and the key again and again never makes a second; a sentence
+with an `s` typed into the list opens none and sends no act;
 each toast, and an act answered `ok` whose shell no list brought opens no panel later; the key's
 four cases and the click; find, copy (written once) and the raw paste on the terminal that has the
 keyboard; after a reload, a cut connection and a restart of the server the panel is hidden, the

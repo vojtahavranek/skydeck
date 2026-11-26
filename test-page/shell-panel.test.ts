@@ -3,8 +3,8 @@
 // and ignores another's terminal and channel; `reset`, `drop`, `heightFor`), and the page with a
 // list that carries `shells`: nothing is drawn and nothing attached until the page shows a shell.
 // The key (step 2.4), with real keys against a real test server whose shell is the stand-in shell:
-// Ctrl+Shift+S in either zone and `s` in the list open one shell under the session's terminal with
-// the keyboard in it; the refusals' toasts; the key again hides and shows it.
+// Ctrl+Shift+S in either zone opens one shell under the session's terminal with the keyboard in
+// it, and no single key of the list does; the refusals' toasts; the key again hides and shows it.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -304,7 +304,6 @@ test("issue #199: the key opens, shows and hides the session's shell", async (t)
   for (const [way, zone, key] of [
     ['Ctrl+Shift+S in the terminal zone', 'terminal', 'Control+Shift+S'],
     ['Ctrl+Shift+S in the list zone', 'list', 'Control+Shift+S'],
-    ['s in the list', 'list', 's'],
   ] as const) {
     await t.test(
       `A1: ${way} opens one shell under the session's terminal with the keyboard in it; pressing again and again never makes a second`,
@@ -322,13 +321,33 @@ test("issue #199: the key opens, shows and hides the session's shell", async (t)
           await untilPanel(l.page, n % 2 === 1);
         }
         await toZone(l.page, 'list');
-        await l.page.keyboard.press('s');
-        await untilPanel(l.page, true);
+        await l.page.keyboard.press('Control+Shift+S');
+        await untilKeyboard(l.page, 'shell');
+        assert.equal((await panel(l.page)).shown, true);
         assert.equal(shellsOf(l).length, 1, 'never a second shell');
         assert.deepEqual(l.problems, []);
       },
     );
   }
+
+  await t.test(
+    'no single key of the list opens a shell (ruled): a sentence with an `s` typed into the list by mistake sends no act and opens no panel',
+    async (t) => {
+      const l = await inWindow(t, chromium);
+      await toZone(l.page, 'list');
+      await mark(l.page, 'typed');
+
+      for (const delay of [0, 120]) {
+        await l.page.keyboard.type('yes, she is so shy ss', { delay });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+
+      await noActSince(l.page, 'typed');
+      assert.equal((await panel(l.page)).shown, false, 'no panel');
+      assert.deepEqual(shellsOf(l), [], 'no shell');
+      assert.equal(await keyboard(l.page), 'list', 'the keyboard stays in the list');
+    },
+  );
 
   await t.test(
     'A2: a session that does not run and an ended terminal: the toast, no act, no shell',

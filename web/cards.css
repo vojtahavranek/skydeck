@@ -41,7 +41,7 @@
 }
 /* Issue #199: the header's Shell (a terminal of the window that runs) needs about 60 px more of
    the line, its dot included: while it is there each button above gives way 70 px earlier, and
-   Shell, which says that a shell is open, last. `Ctrl+Shift+S` and `s` remain. */
+   Shell, which says that a shell is open, last. `Ctrl+Shift+S` remains. */
 @container card-header (max-width: 520px) {
   .header-top:has(.header-shell) .header-restart {
     display: none;

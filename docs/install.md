@@ -999,11 +999,11 @@ effect.
   the old one's place. A session under Recent or Earlier, and any session while a filter or a chip
   is set, do not move: the key bar says why. Caps Lock alone moves nothing (Shift must be held).
   `c` in the list gives the keyboard to the carry-over bar after `/clear` ("After `/clear`: carry
-  over" below). **Ctrl+Shift+S** (or `s` in the list) opens a shell under the selected session's
+  over" below). **Ctrl+Shift+S** opens a shell under the selected session's
   terminal, in its folder; again it hides it ("A shell under a session" below).
 - **A shell under a session**: when Claude Code asks you to run something yourself — open an SSH
   tunnel, log in somewhere, run a few commands —, press **Ctrl+Shift+S** (in the list or in the
-  terminal), `s` in the list, or `Shell` in the header: a shell opens under the session's terminal,
+  terminal) or `Shell` in the header: a shell opens under the session's terminal,
   in the session's folder, with the keyboard in it, so that you read the instruction above while you
   type below. It is your account's login shell (`/bin/sh` when none is known), started as a login
   shell, with the environment the window's terminals get. One per session. Press the key again
@@ -1020,7 +1020,7 @@ effect.
   header's dot. `exit` closes it; it is ended when its session's program ends (End session, `/exit`,
   a crash) and when you close the session's terminal, and a restart of the session (`r`) keeps it.
   A `claude` you start inside it is a session of its own that runs in another terminal, not in the
-  window's. A `s` in a word typed into the list by mistake opens a shell like the key.
+  window's.
 
 #### Editing a session (stage D)
 

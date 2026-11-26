@@ -36,7 +36,7 @@
  *   | { kind: 'show-done' } | { kind: 'escape' } | { kind: 'reload' }
  *   | { kind: 'edit', what: EditWhat } | { kind: 'done' } | { kind: 'reorder', by: 1 | -1 }
  *   | { kind: 'carry' } | { kind: 'flags' } | { kind: 'park' } | { kind: 'restart' }
- *   | { kind: 'unread' } | { kind: 'shell' }} ListAction
+ *   | { kind: 'unread' }} ListAction
  */
 
 /**
@@ -145,8 +145,9 @@ export function terminalKey(e) {
  * flags…" (`flags`). Follow-up F44: `w` ("waits") parks the selected session, or un-parks a
  * parked one (`park`; app.js decides which). Issue #166: `r` opens the dialog "Restart" (`restart`).
  * S2 12.4: `u` marks the selected session unread, or read while it has a mark seeing clears
- * (`unread`; app.js picks the act from the row's attention). Issue #199: `s` opens, shows or
- * hides the selected session's shell, as Ctrl+Shift+S does (`shell`).
+ * (`unread`; app.js picks the act from the row's attention). Issue #199: no single key of the
+ * list opens a shell (ruled): a sentence typed into the list by mistake would open one at its first
+ * `s` and type the rest into it; Ctrl+Shift+S does, in both zones.
  * @param {KeyLike} e
  * @returns {ListAction | null}
  */
@@ -198,8 +199,6 @@ export function listKey(e) {
       return { kind: 'restart' };
     case 'u':
       return { kind: 'unread' };
-    case 's':
-      return { kind: 'shell' };
   }
   if (e.shiftKey) {
     return null;

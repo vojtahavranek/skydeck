@@ -2504,7 +2504,7 @@ function shellOf(termId) {
 /**
  * Issue #199 (S2 12.9): Ctrl+Shift+S, `s` and the header's `Shell` — what `shellPress` says for
  * the pane: a toast, the act for the pane's terminal, or the panel shown, hidden or given the
- * keyboard. `selected`: a session is selected for this press (for `s`, one the list shows).
+ * keyboard. `selected`: a session is selected for this press.
  * `header`: the header's `Shell`, whose click takes no keyboard: on a shown panel it hides it, as
  * its tooltip says.
  * @param {boolean} selected
@@ -3276,12 +3276,6 @@ function doListKey(action, event) {
       }
       return true;
     }
-    case 'shell':
-      // Issue #199: as Ctrl+Shift+S, on the selected row the list shows (E13); once when held.
-      if (!event.repeat) {
-        pressShell(selectedRow() !== undefined);
-      }
-      return true;
     case 'escape':
       // S2 12.9: Esc clears the filter — the list's, which also clears its field —, then goes
       // back to the terminal; a held Esc does only the first step (Z1, item 6).

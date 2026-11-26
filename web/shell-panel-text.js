@@ -1,4 +1,4 @@
-// Issue #199's words and rule for the page, pure (no DOM): what Ctrl+Shift+S, `s` in the list and
+// Issue #199's words and rule for the page, pure (no DOM): what Ctrl+Shift+S (in both zones) and
 // the header's `Shell` do with the selected session's shell (S2 12.9). Whether a session may have
 // a shell is the server's rule (S2 4.3): the page sends `act shell` for the pane's terminal and
 // shows the server's refusal; the toasts for a pane without a terminal of the window are words
@@ -34,7 +34,7 @@ export const SHELL_TEXTS = {
 /**
  * What a press of the shell's key does (S2 12.9; the gate of a shown dialog, switcher or tour is
  * app.js's, before this):
- * - no session selected (`selected` false: none, a caption, for `s` a selection the list hides):
+ * - no session selected (`selected` false, or the pane shows none or a caption):
  *   the toast `no session selected`;
  * - the pane is no terminal of the window (the session does not run, runs elsewhere, the new form
  *   is over it): a toast that says to open the session first, or where it runs;
