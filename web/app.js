@@ -276,14 +276,13 @@ const state = {
   /** What the shell panel shows now (`renderShell`), to apply a change only. */
   shellKey: '',
   /**
-   * Issue #199 (S2 12.9): while the terminal area is too low for both (the split's `full`), whether
-   * the keyboard was in the session's terminal at the change, the element the change gave it to
-   * (null until given) and whether a key was typed into the shell since; null otherwise.
-   * @type {{ fromSession: boolean, to: Element | null, typed: boolean } | null}
+   * Issue #199 (S2 12.9): while the terminal area is too low for both (the split's `full`, come from
+   * `split`), whether the keyboard was in the session's terminal at the change, the element the
+   * change gave it to (null until given) and whether the user did something with the shell since;
+   * null otherwise.
+   * @type {{ fromSession: boolean, to: Element | null, used: boolean } | null}
    */
-  lowFlip: /** @type {{ fromSession: boolean, to: Element | null, typed: boolean } | null} */ (
-    null
-  ),
+  lowFlip: /** @type {{ fromSession: boolean, to: Element | null, used: boolean } | null} */ (null),
   /** The height of the right side's header (`#cards .card-header`, a hook of contract 2.9) as
    *  last shown; 0 before any (Z1, item 5). */
   headerHeight: 0,
@@ -2590,18 +2589,20 @@ function pressShell(selected, header = false) {
 }
 
 /**
- * Issue #199 (S2 12.9): the split's mode changed (`web/shell-panel.js`). At the change to `full`
- * (an area too low for both) the session's terminal is not laid out: once the render is done the
- * zone gives what had the keyboard there to the shell (`keepKeyboard`, `sideView`), and the page
- * remembers whether the keyboard was in the session's terminal and where it went. At the change
- * back to `split` it goes back to the session's terminal only when it was there, is still where the
- * change put it, no key was typed into the shell meanwhile, no text is selected and no dialog is
- * shown: else it stays. Any other change forgets it and keeps the keyboard where it can be.
+ * Issue #199 (S2 12.9): the split's mode changed (`web/shell-panel.js`). At a change from `split`
+ * to `full` (the area got too low for both) the session's terminal is not laid out: once the render
+ * is done the zone gives what had the keyboard there to the shell (`keepKeyboard`, `sideView`), and
+ * the page remembers whether the keyboard was in the session's terminal and where it went. At the
+ * change back to `split` it goes back to the session's terminal only when it was there, is still
+ * where the change put it, the user did nothing with the shell meanwhile (`shellUsed`: a key, a
+ * press, a paste, a chord that acts on the shell's view), no text is selected and no dialog is
+ * shown: else it stays. A panel that comes already `full` was asked for (the key, the header's
+ * Shell): nothing to give back. Any other change forgets it and keeps the keyboard where it can be.
  * @param {'split' | 'full' | null} mode
  * @param {'split' | 'full' | null} before
  */
 function shellLaidOut(mode, before) {
-  if (mode === 'full') {
+  if (mode === 'full' && before === 'split') {
     const at = document.activeElement;
     const flip = {
       fromSession:
@@ -2611,7 +2612,7 @@ function shellLaidOut(mode, before) {
           state.zone === 'terminal' &&
           state.shellSide === 'session'),
       to: /** @type {Element | null} */ (null),
-      typed: false,
+      used: false,
     };
     state.lowFlip = flip;
     queueMicrotask(() => {
@@ -2630,7 +2631,7 @@ function shellLaidOut(mode, before) {
       before === 'full' &&
       flip !== null &&
       flip.fromSession &&
-      !flip.typed &&
+      !flip.used &&
       flip.to !== null &&
       document.activeElement === flip.to &&
       !textSelected() &&
@@ -2644,16 +2645,16 @@ function shellLaidOut(mode, before) {
     keepKeyboard();
   });
 }
-// A key typed into the shell while the area is too low makes the keyboard's place the user's.
-dom.shell.addEventListener(
-  'keydown',
-  () => {
-    if (state.lowFlip !== null) {
-      state.lowFlip.typed = true;
-    }
-  },
-  true,
-);
+/** Issue #199: the user did something with the shell while the area is too low (`shellLaidOut`). */
+function shellUsed() {
+  if (state.lowFlip !== null) {
+    state.lowFlip.used = true;
+  }
+}
+// A key, a press or a paste in the shell makes the keyboard's place the user's.
+for (const type of ['keydown', 'mousedown', 'pointerdown', 'paste']) {
+  dom.shell.addEventListener(type, () => shellUsed(), true);
+}
 
 /** Issue #199: the keyboard to the shown panel's shell; the zone is the terminal's. */
 function shellKeyboard() {
@@ -3212,9 +3213,11 @@ function doChord(chord, event) {
       openNew();
       return;
     case 'find':
+      shellChord();
       keyboardView().find(); // issue #199: the view that holds the keyboard
       return;
     case 'copy':
+      shellChord();
       keyboardView().copy();
       return;
     case 'paste-raw':
@@ -3226,6 +3229,7 @@ function doChord(chord, event) {
         terminalHasKeyboard() &&
         !isTextField(document.activeElement)
       ) {
+        shellChord();
         keyboardView().pasteRaw();
       }
       return;
@@ -3742,6 +3746,13 @@ function terminalHasKeyboard() {
  */
 function keyboardView() {
   return dom.shell.contains(document.activeElement) ? shellView : terminalView;
+}
+
+/** Issue #199: a chord that acts on the shell's view (it holds the keyboard) is the user's use of it. */
+function shellChord() {
+  if (keyboardView() === shellView) {
+    shellUsed();
+  }
 }
 
 /**

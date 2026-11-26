@@ -30,7 +30,14 @@ import {
   toZone,
 } from './helpers/shell.ts';
 import type { Launched } from './helpers/shell.ts';
-import { promptOf, recordsOf, resumeHere, untilScreen, until } from './helpers/terminal.ts';
+import {
+  inputOf,
+  promptOf,
+  recordsOf,
+  resumeHere,
+  untilScreen,
+  until,
+} from './helpers/terminal.ts';
 
 type Size = { cols: number; rows: number };
 
@@ -414,9 +421,7 @@ test('issue #199: the split of the terminal area between a session and its shell
       const { session: whole } = await untilToldBoxes({ ...l, term }, S1, term, false);
       const { page } = l;
 
-      await page.keyboard.press('Control+Shift+S');
-      await untilPanel(page, true);
-      await untilKeyboard(page, 'shell');
+      await openShell(page); // the stand-in's prompt there before anything is typed
 
       const split = await layout(page);
       assert.equal(split.mode, 'split');
@@ -709,6 +714,122 @@ test('issue #199: the keyboard when the area gets too low and high again, the si
     },
   );
 
+  /** The window made too low for both while no panel is drawn (nothing to wait for but the size). */
+  const lowWindow = async (page: Page): Promise<void> => {
+    await page.setViewportSize({
+      width: VIEW.width,
+      height: await lowHeight(page, VIEW.height, 10),
+    });
+    await until(
+      async () => (await layout(page)).terminalShown && (await layout(page)).area > 0,
+      "the session's terminal in the low window",
+    );
+  };
+  /** A typed line runs in the shell (its echo on the shell's screen). */
+  const runsInShell = async (page: Page, word: string): Promise<void> => {
+    await page.keyboard.type(`echo "${word}-$((1 + 2))"`);
+    await page.keyboard.press('Enter');
+    await untilScreen(page, new RegExp(`^${word}-3$`, 'm'), undefined, '#shell');
+  };
+
+  await t.test(
+    'a shell opened by the key in a too-low window keeps the keyboard when the window is higher',
+    async (t) => {
+      const l = await inWindow(t, chromium, { viewport: VIEW });
+      const { page } = l;
+      await clickSession(page);
+      await untilKeyboard(page, 'terminal');
+      await lowWindow(page);
+      await untilKeyboard(page, 'terminal');
+
+      await openShell(page);
+      assert.equal((await layout(page)).mode, 'full');
+
+      await goHigh(page);
+      assert.equal(await keyboard(page), 'shell', 'the shell the user asked for keeps it');
+      await runsInShell(page, 'asked');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  for (const [how, show] of [
+    ['the key', (page: Page) => page.keyboard.press('Control+Shift+S')],
+    ["the header's Shell", (page: Page) => page.locator('#cards .header-shell').click()],
+  ] as const) {
+    await t.test(
+      `a hidden shell shown by ${how} in a too-low window keeps the keyboard when the window is higher`,
+      async (t) => {
+        const l = await withShell(t, chromium, VIEW);
+        const { page } = l;
+        await page.keyboard.press('Control+Shift+S'); // hidden, the keyboard to the session
+        await untilPanel(page, false);
+        await untilKeyboard(page, 'terminal');
+        await lowWindow(page);
+        await untilKeyboard(page, 'terminal');
+
+        await show(page);
+        await untilPanel(page, true);
+        await untilKeyboard(page, 'shell');
+        assert.equal((await layout(page)).mode, 'full');
+
+        await goHigh(page);
+        assert.equal(await keyboard(page), 'shell', 'the shell the user showed keeps it');
+        await runsInShell(page, 'shown');
+        assert.deepEqual(l.problems, []);
+      },
+    );
+  }
+
+  await t.test(
+    'the area too low by itself, then a click into the shell: the keyboard stays in the shell when the area is high again',
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW);
+      const { page } = l;
+      await clickSession(page);
+      await untilKeyboard(page, 'terminal');
+      await goLow(page);
+      await untilKeyboard(page, 'shell');
+
+      await page.locator('#shell .tv-term:not([hidden]) .xterm-screen').click();
+
+      await goHigh(page);
+      assert.equal(await keyboard(page), 'shell', 'the click made it the user’s');
+      await runsInShell(page, 'clicked');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'the area too low by itself, then a paste into the shell (no key): the keyboard stays in the shell when the area is high again, and the next Enter runs the pasted line there',
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW);
+      const { page, d } = l;
+      await clickSession(page);
+      await untilKeyboard(page, 'terminal');
+      await goLow(page);
+      await untilKeyboard(page, 'shell');
+
+      // A paste as the mouse's menu makes it: the paste event on the shell's text area, no key.
+      await page.evaluate(() => {
+        const data = new DataTransfer();
+        data.setData('text/plain', 'echo "pasted-$((2 + 2))"');
+        const area = document.querySelector('#shell .tv-term:not([hidden]) textarea');
+        area?.dispatchEvent(
+          new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }),
+        );
+      });
+      await untilScreen(page, /echo "pasted-/, undefined, '#shell');
+
+      await goHigh(page);
+      assert.equal(await keyboard(page), 'shell', 'the paste made it the user’s');
+      const sessionInput = inputOf(d.record, S1);
+      await page.keyboard.press('Enter');
+      await untilScreen(page, /^pasted-4$/m, undefined, '#shell');
+      assert.equal(inputOf(d.record, S1), sessionInput, 'nothing reached the session');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
   await t.test(
     'the keyboard in the list stays in the list when the area gets too low and high again',
     async (t) => {
@@ -754,7 +875,6 @@ test('issue #199: the keyboard when the area gets too low and high again, the si
       const l = await withShell(t, chromium, VIEW);
       const { page } = l;
       const least = await leastOf(page);
-      page.on('console', (m) => {});
       const start = await layout(page);
       const grow = (px: number): Promise<void> =>
         page.evaluate((px) => {

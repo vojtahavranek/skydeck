@@ -394,7 +394,8 @@ test("issue #199: the key opens, shows and hides the session's shell", async (t)
 
       // The panel may come and go while the server waits for the end (a list brings the shell).
       await showsText(l.page, '#toast', /^Shell: the shell ended at once \(status 3\)/);
-      assert.equal((await panel(l.page)).shown, false);
+      // The toast comes with the act's answer, the panel goes with the next list.
+      await untilPanel(l.page, false);
       assert.deepEqual(shellsOf(l), []);
     },
   );

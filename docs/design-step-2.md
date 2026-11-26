@@ -4648,8 +4648,9 @@ dialog — gives it to the side that had it last (the shell only while its panel
 area too low for both, where the session's terminal is not laid out, the shell), and a pane that
 changes to another terminal starts on the session's side. When the area is high enough for both
 again, a keyboard that the change to too low took from the session's terminal to the shell goes
-back to the session's terminal, unless it has moved since, a key was typed into the shell, text is
-selected or a dialog is shown. Find, copy and the raw Ctrl+Shift+V act
+back to the session's terminal, unless it has moved since, the user did something with the shell
+meanwhile (a key, a press, a paste, a chord that acts on it), text is selected or a dialog is shown;
+a shell the user opened or showed while the area was too low keeps the keyboard. Find, copy and the raw Ctrl+Shift+V act
 on the view whose element holds the keyboard (9.5, 9.7). **The bar** between the two (12.6) takes
 no key and no keyboard: it is not focusable and every mousedown on it is cancelled, so a press or a
 drag leaves the keyboard where it was (in the shell, the session's terminal or the list). No single key of the
