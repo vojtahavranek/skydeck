@@ -15,6 +15,7 @@ import type { TestContext } from 'node:test';
 
 import type { Platform } from '../../src/platform/types.ts';
 import type { KeeperExit, ShellSpec } from '../../src/window/frames.ts';
+import { KeeperStartError } from '../../src/window/terminals.ts';
 import { PROMPT, procStartOf, sleep, stillRuns, until } from '../helpers/keeper.ts';
 import { attachMirror, framesSpy, info, registrySandbox } from '../helpers/registry.ts';
 import type { Mirror, RegistryBox, TestRegistry } from '../helpers/registry.ts';
@@ -742,16 +743,71 @@ describe('registry: the ending step without a connection, and once only (S2 7.10
       found.map((term) => term.id),
       [of],
     );
-    assert.equal(
-      r2.registry.giveSlots([], () => {}),
-      'ok',
-      'nothing is being found',
-    );
     assert.deepEqual(r2.registry.shells(), []);
     await until(() => !stillRuns(keeper.pid, keeper.procStart), 'its keeper ended', 10_000);
     assert.equal(existsSync(box.files.termPid(shell.spec.id)), false, 'its .pid file');
     assert.equal(existsSync(shell.spec.socket), false, 'its socket');
     assert.equal(r2.registry.input(shell.spec.id, utf8('x')), 'unknown', 'forgotten');
     assert.equal(info(r2.registry, of).state, 'running', 'its session terminal runs on');
+    // Nothing is being found and no shell's keeper may live unheld: a shell opens under it.
+    await r2.registry.spawnShell(box.shellSpec(r2, of));
+    assert.equal(r2.registry.shells().length, 1, 'a new shell is held');
+  });
+
+  test("a throw of the shells' settle in find is logged and goes no further: rediscover answers with the session terminals", async (t) => {
+    const box = await registrySandbox(t);
+    const r1 = box.registry();
+    const a = await startSession(box, r1, 3);
+    const b = await startSession(box, r1, 4);
+    const shell = await openShell(box, r1, a);
+    await r1.registry.stopAll();
+    box.signalKeeper(box.keeperOf(a), 'SIGKILL');
+    const bootId = box.tp.platform.proc.bootId();
+    const start = procStartOf(process.pid);
+    assert.ok(bootId !== null && start !== null);
+    // A doubt (a .pid file of no readable form naming a live process): the orphan's settle says
+    // "not found" once nothing is being found, at the end of the last keeper's finding, and the
+    // registry's log throws for that line.
+    const odd = box.files.termPid('c0ffee00beef');
+    writeFileSync(odd, `${process.pid} ${start} ${bootId} 5 1 shell later\n`);
+    t.after(() => {
+      if (existsSync(odd)) box.tp.platform.files.remove(odd);
+    });
+
+    const r2 = box.registry({ logThrows: (line) => line === notFoundLine(shell.spec.id) });
+    const found = await r2.registry.rediscover();
+
+    assert.deepEqual(
+      found.map((term) => term.id),
+      [b],
+    );
+    assert.ok(r2.log.includes(notFoundLine(shell.spec.id)), 'the fault came');
+    assert.ok(
+      r2.log.includes("terminal registry: the shells' settle failed (Error)"),
+      r2.log.join('\n'),
+    );
+    assert.equal(info(r2.registry, b).state, 'running');
+  });
+
+  test('a lost shell whose keeper may still run (its socket gone, its line alive) is no held keeper: no second shell opens under its terminal', async (t) => {
+    const box = await registrySandbox(t);
+    const r = box.registry();
+    const of = await startSession(box, r, 3);
+    const shell = await openShell(box, r, of);
+    const keeper = box.keeperOf(shell.spec.id);
+    const sockets = r.sockets.length;
+
+    // The socket goes and the connection with it: the reconnect meets ENOENT, the shell is lost.
+    box.tp.platform.files.remove(shell.spec.socket);
+    const last = r.sockets[sockets - 1];
+    assert.ok(last !== undefined);
+    last.destroy();
+    await until(() => r.registry.shells().length === 0, 'the shell lost', 10_000);
+    assert.ok(stillRuns(keeper.pid, keeper.procStart), 'its keeper still runs');
+
+    await assert.rejects(
+      r.registry.spawnShell(box.shellSpec(r, of)),
+      (error: unknown) => error instanceof KeeperStartError && error.kind === 'unseen',
+    );
   });
 });

@@ -652,16 +652,25 @@ export function createRegistry(deps: RegistryDeps): Registry {
     }
   };
 
-  function changed(): void {
-    // Issue #199: the shells' owners and ends, before the listeners read; a throw of it must not
-    // keep the pages from their list.
+  /**
+   * Issue #199: `settleShells`, whose throw is logged and goes no further: not into the pages'
+   * lists (`changed`), nor into `find` (a server's start, its session terminals included) or the
+   * one-second watch's timer (`settleAndAnnounce`). Whether it resolved or ended something.
+   */
+  function safeSettle(): boolean {
     try {
-      settleShells();
+      return settleShells();
     } catch (error) {
       deps.log(
         `terminal registry: the shells' settle failed (${(error as Error)?.name ?? 'error'})`,
       );
+      return false;
     }
+  }
+
+  function changed(): void {
+    // Issue #199: the shells' owners and ends, before the listeners read.
+    safeSettle();
     for (const listener of [...listeners]) {
       try {
         listener();
@@ -1553,8 +1562,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
     const ended = term.shell?.ended ?? null;
     if (term.shell !== null) term.shell.ended = null;
     // Its keeper removes its files once it has read the A: until then its live line is not a
-    // keeper of another terminal that may live (held, `heldIds`).
-    if (!removeFiles) endedShells.add(id);
+    // keeper of another terminal that may live (held, `heldIds`). Only after an exit that was
+    // read: a lost shell whose line is alive (its socket refused or gone) may still run, and is
+    // a keeper that may live unheld.
+    if (!lost) endedShells.add(id);
     forget(term);
     if (removeFiles) {
       for (const path of [files.termSock(id), files.termPid(id)]) {
@@ -1704,7 +1715,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
 
   /** `settleShells` outside a change: what it resolved or ended is announced. */
   function settleAndAnnounce(): void {
-    if (settleShells()) changed();
+    if (safeSettle()) changed();
   }
 
   /** While a found shell's owner is unresolved: a settle once a second (ends with `stopAll`). */

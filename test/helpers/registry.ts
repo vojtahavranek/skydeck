@@ -89,6 +89,8 @@ export interface RegistryBox extends Omit<KeeperBox, 'shellSpec'> {
       moved: ReadonlyMap<string, number | null>,
       withheld: ReadonlySet<string>,
     ) => void;
+    /** A fault: the registry's log throws (after keeping the line) for a line this says yes to. */
+    logThrows?: (line: string) => boolean;
   }): TestRegistry;
   /** A spec for the stand-in in this box (argv, env, record), as keeperSandbox makes it. */
   spec(overrides?: Partial<KeeperSpec>): KeeperSpec;
@@ -157,6 +159,7 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
         moved: ReadonlyMap<string, number | null>,
         withheld: ReadonlySet<string>,
       ) => void;
+      logThrows?: (line: string) => boolean;
     } = {},
   ): TestRegistry => {
     const base = options.platform ?? kb.tp.platform;
@@ -274,6 +277,7 @@ export async function registrySandbox(t: TestContext): Promise<RegistryBox> {
       keepersLog: kb.keepersLog,
       log: (line) => {
         log.push(line);
+        if (options.logThrows?.(line) === true) throw new Error('a fault of the test');
       },
       ...(options.movedSlots === undefined ? {} : { movedSlots: options.movedSlots }),
       ...(options.withheldSlots === undefined ? {} : { withheldSlots: options.withheldSlots }),

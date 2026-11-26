@@ -857,8 +857,8 @@ Keeper version 4 (issue #199, 7.10) knows a second form of the spec, a **session
 new session's, and it alone carries **`file`**, the absolute path of the program to run with
 `argv`: the keeper `exec`s `file` with `argv` as given, so that `argv[0]` can be `-<name>`, the way
 a login shell is told that it is one. A shell's spec without `file` (or with one that is no
-absolute path, or holds a NUL), a session's spec with `file`, and a shell's spec with a lock are
-each a bad spec. A session terminal's `meta` may carry **`shell`**, the id of a shell (12
+absolute path, or holds a NUL), a session's spec with `file`, a shell's spec with a lock, and a
+shell's meta with a key outside its form (exactly its five keys) are each a bad spec. A session terminal's `meta` may carry **`shell`**, the id of a shell (12
 lowercase hex): written only into the meta of the terminal a restart opens while the terminal it
 replaces has a shell (11.2, 7.10). The hello echoes the fields of the meta's form. A shell's
 keeper writes its `.pid` line with the sixth field `shell` (4.2). Nothing else of the keeper
@@ -1223,11 +1223,14 @@ server gives them (`src/window/freed-numbers.ts`, the registry's `giveSlots`) at
 registry — so at each moment a slot becomes free: an exit applied, a `hello` that says the program
 exited, a lost terminal's program that may no longer run, the close of a lost terminal that still
 held one — and after every refresh that worked, so that the gaps a start finds are filled at its
-first refresh. It gives none while a keeper of terms/ is still being found (7.3): that keeper's slot
-is known only at its `hello`, so a slot that looks free may be its own; once every keeper has
-answered or was given up, the true gaps are filled. The server's log says once `freed numbers: none
-given while a keeper is still being found` while that holds a free slot back (a limit: a keeper that
-is never given up and never answers holds it back for as long as it is being found). Never to a
+first refresh. It gives none while a session terminal's keeper of terms/ is still being found
+(7.3): that keeper's slot is known only at its `hello`, so a slot that looks free may be its own;
+once every such keeper has answered or was given up, the true gaps are filled. A session's shell's
+keeper being found holds nothing back (issue #199, 7.10): its `.pid` line says what it is before
+any hello (4.2), and a shell has no slot. The server's log says once `freed numbers: none given
+while a keeper is still being found` while that holds a free slot back (a limit: a session
+terminal's keeper that is never given up and never answers holds it back for as long as it is being
+found). Never to a
 terminal whose program ended, never started or was lost, whose exit came and waits to be applied, or
 whose `hello` said it exited (F43). Free is `nextSlot`'s rule, so a slot held for another terminal
 (moved to a keeper being found, or held otherwise) is never given, and none is taken away from a
@@ -1381,7 +1384,9 @@ while a session that was under Open then still runs, that old kept order wins ov
 meanwhile, and the numbers need not ascend, until the next move or until a refresh sees Open empty.
 
 A session's shell (7.10) has no slot and is no candidate of #189's hand-out, of F44's withholding
-or of a move: each of those rules reads the listed terminals, and a shell is never listed. No
+or of a move: each of those rules reads the listed terminals, and a shell is never listed. A
+shell's keeper that is still being found holds no number back either (above): its `.pid` line,
+read before its finding begins, says that it is a shell's. No
 shell is opened while a shell's keeper (or a `.pid` file of no form this build reads) may live
 that the server does not hold (7.10): it could be that terminal's own shell.
 
@@ -1662,7 +1667,10 @@ when the terminal is not over, has no exit, and its latest hello does not say ex
    (`keepersThatMayLive`, `src/window/runtime.ts`: every `.pid` file whose id the registry does not
    hold and whose line is not dead by design 5.5 — a session's, a shell's, or one that cannot be
    read or holds no line this build reads; held are all the registry's terminals, shells too, in
-   any state, so a shell's own keeper and another session's shell are never a doubt; a keeper
+   any state, and a shell that ended, from the exit the server read until its keeper's files are
+   gone (it removes them once it has read the acknowledgement), so a shell's own keeper and another
+   session's shell are never a doubt — but a shell lost with its keeper's line alive is not held:
+   that keeper may still run it; a keeper
    still being found, and one whose finding gave up after a connect error that was no refusal, are
    not held). **Nothing is ended on that doubt** (4.2: nothing is ended on unknown): the shell stays
    resolved to nothing, listed nowhere and running, the server logs once `terminal <id>: its
@@ -1712,7 +1720,9 @@ limit. The server never escalates: the keeper has no other signal.
 pages attached to it, the keeper is acknowledged, the shell is forgotten (a lost keeper's files
 with it when its line is dead), and the opening's wait is told. A found shell whose hello says its
 program was never started, and whose start nobody waits for any more, is refused (`N`) and
-forgotten at its exit; one whose hello says exited is forgotten after its exit.
+forgotten at its exit: from the refusal on it is out of `shells()` and takes no input (and no
+`G`), so that an open of its terminal meanwhile opens a shell of its own; one whose hello says
+exited is forgotten after its exit.
 
 **Limits.** While a shell's keeper (or a `.pid` file of no readable form) may live and is not held
 — it never says hello, its finding gave up, its file cannot be read — no shell can be opened in the
