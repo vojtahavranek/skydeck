@@ -142,9 +142,11 @@ SHELL_META_FIELDS = ("kind", "of", "openedNs", "build", "dir")
 
 
 def is_shell_meta(meta):
-    """A session's shell's meta (version 4): kind "shell", the terminal it was opened under."""
+    """A session's shell's meta (version 4): exactly kind "shell", the terminal it was opened
+    under ("of"), openedNs, build and dir; any other key makes it no shell's meta."""
     return (
         type(meta) is dict
+        and set(meta) == set(SHELL_META_FIELDS)
         and meta.get("kind") == "shell"
         and is_terminal_id(meta.get("of"))
         and is_ns(meta.get("openedNs"))

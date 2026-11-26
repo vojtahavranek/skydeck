@@ -8,10 +8,12 @@ import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 
 import type { Platform } from '../../src/platform/types.ts';
+import { serverEnvironment } from '../../src/window/env.ts';
 import type { KeeperExit, ShellSpec } from '../../src/window/frames.ts';
+import { createShells, ENDED_AT_ONCE_MS } from '../../src/window/shells.ts';
 import { KeeperStartError } from '../../src/window/terminals.ts';
 import { PROMPT, SESSION, procStartOf, sleep, stillRuns, until } from '../helpers/keeper.ts';
-import { attachMirror, info, registrySandbox } from '../helpers/registry.ts';
+import { attachMirror, framesSpy, info, registrySandbox } from '../helpers/registry.ts';
 import type { Mirror, RegistryBox, TestRegistry } from '../helpers/registry.ts';
 import { SHELL_PROMPT } from '../helpers/shell-standin.ts';
 
@@ -280,10 +282,11 @@ describe('registry: no shell is opened while a keeper may live unheld that is a 
     try {
       const r2 = box.registry();
       await r2.registry.rediscover();
+      // Still being found: not held, not listed; it holds back no number (its line says shell).
+      assert.deepEqual(r2.registry.shells(), []);
       assert.equal(
         r2.registry.giveSlots([], () => {}),
-        'finding',
-        'still being found',
+        'ok',
       );
       const before = pidFiles(box);
 
@@ -396,5 +399,117 @@ describe('registry: no shell is opened while a keeper may live unheld that is a 
     } finally {
       box.signalKeeper(keeper, 'SIGCONT');
     }
+  });
+});
+
+describe('registry: what a shell that is refused or gone leaves behind', () => {
+  test('a found shell refused at its hello (never started) is in no shells(), takes no input, and an open of its terminal meanwhile opens a shell', async (t) => {
+    const box = await registrySandbox(t);
+    const r1 = box.registry();
+    const of = await startSession(box, r1);
+    const spec = box.shellSpec(r1, of);
+    await r1.registry.spawnShell(spec); // no G: a server that stops before it
+    await r1.registry.stopAll();
+    const keeper = box.keeperOf(spec.id);
+    let stopped = false;
+    // The refused keeper is stopped as its N is written: the moment before its exit comes back.
+    const spy = framesSpy(box.tp.platform, (type, path) => {
+      if (type === 'N' && path === spec.socket && !stopped) {
+        stopped = true;
+        box.signalKeeper(keeper, 'SIGSTOP');
+      }
+    });
+    try {
+      const r2 = box.registry({ platform: spy.platform });
+      await r2.registry.rediscover();
+      await until(() => stopped, 'the found shell is refused');
+      r2.registry.setSession(of, SESSION, false);
+
+      assert.deepEqual(r2.registry.shells(), []);
+      assert.equal(r2.registry.input(spec.id, utf8('typed\r')), 'ended');
+      const shells = createShells({
+        registry: r2.registry,
+        files: box.files,
+        platform: box.tp.platform,
+        serverEnv: serverEnvironment(box.s.env()).env,
+        coreSoft: null,
+        interop: () => null,
+        refreshInterop: async () => {},
+        build: 'test-build',
+        log: () => {},
+        stopping: () => false,
+        endedAtOnceMs: ENDED_AT_ONCE_MS,
+      });
+      assert.deepEqual(await shells.open(of, { cols: 80, rows: 24 }), { ok: true });
+      const [opened, ...more] = r2.registry.shells();
+      assert.deepEqual(more, []);
+      assert.ok(opened !== undefined && opened.id !== spec.id, 'a shell of its own');
+      assert.equal(opened.of, of);
+    } finally {
+      if (stopped) box.signalKeeper(keeper, 'SIGCONT');
+    }
+    await until(() => !existsSync(box.files.termPid(spec.id)), 'the refused keeper ended', 10_000);
+  });
+
+  test("a shell's keeper still being found holds back no freed number (#189): giveSlots gives one", async (t) => {
+    const box = await registrySandbox(t);
+    const r1 = box.registry();
+    const a = await startSession(box, r1, 3);
+    const waiting = await startSession(box, r1, null); // opened without a number
+    const shell = await openShell(box, r1, a);
+    await r1.registry.stopAll();
+    const keeper = box.keeperOf(shell.spec.id);
+    box.signalKeeper(keeper, 'SIGSTOP');
+    try {
+      const r2 = box.registry();
+      await r2.registry.rediscover();
+      assert.equal(info(r2.registry, waiting).slot, null);
+      const written: number[] = [];
+
+      const answer = r2.registry.giveSlots([waiting], (_moved, _withheld, given) => {
+        written.push(...given.values());
+      });
+
+      assert.equal(answer, 'ok');
+      assert.deepEqual(written, [1]);
+      assert.equal(info(r2.registry, waiting).slot, 1);
+    } finally {
+      box.signalKeeper(keeper, 'SIGCONT');
+    }
+  });
+
+  test("a shell that ended, its keeper's files not gone yet (the A unread): a shell opens under another terminal at once", async (t) => {
+    const box = await registrySandbox(t);
+    let keeper: { pid: number; procStart: number } | null = null;
+    let socket = '';
+    let paused = false;
+    // Its keeper is stopped as the registry writes its A: it removes nothing meanwhile.
+    const spy = framesSpy(box.tp.platform, (type, path) => {
+      if (type === 'A' && path === socket && keeper !== null && !paused) {
+        paused = true;
+        box.signalKeeper(keeper, 'SIGSTOP');
+      }
+    });
+    const r = box.registry({ platform: spy.platform });
+    const a = await startSession(box, r, 3);
+    const b = await startSession(box, r, 4);
+    const shell = await openShell(box, r, a);
+    socket = shell.spec.socket;
+    keeper = box.keeperOf(shell.spec.id);
+    try {
+      assert.equal(r.registry.input(shell.spec.id, utf8('exit\r')), 'ok');
+      await until(() => shell.ended.length === 1 && paused, 'the shell ended, its A unread');
+      assert.ok(existsSync(box.files.termPid(shell.spec.id)), 'its .pid file is still there');
+
+      const next = await openShell(box, r, b);
+
+      assert.deepEqual(
+        r.registry.shells().map((one) => [one.id, one.of]),
+        [[next.spec.id, b]],
+      );
+    } finally {
+      if (paused) box.signalKeeper(keeper, 'SIGCONT');
+    }
+    await until(() => !existsSync(box.files.termPid(shell.spec.id)), 'its files went', 10_000);
   });
 });

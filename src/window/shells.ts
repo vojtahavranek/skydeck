@@ -21,8 +21,11 @@ import type { Registry } from './terminals.ts';
 const START_BY_NS = 55_000_000_000n;
 /** How long the open waits for the shell's program to start (its T). */
 const START_WAIT_MS = 5000;
-/** A shell that ends this soon after its T could not run (exit 127) or ends at once: an error. */
-const ENDED_AT_ONCE_MS = 400;
+/**
+ * A shell that ends this soon after its T could not run (exit 127) or ends at once: an error. What
+ * the server gives `createShells` (`endedAtOnceMs`).
+ */
+export const ENDED_AT_ONCE_MS = 400;
 const ID_BYTES = 6;
 /** A shell's first size when the act's cannot be used. */
 const FALLBACK = { cols: 80, rows: 12 };
@@ -97,6 +100,8 @@ export interface ShellsDeps {
   build: string;
   log(line: string): void;
   stopping(): boolean;
+  /** How long after its T an end counts as "at once" (the server: `ENDED_AT_ONCE_MS`). */
+  endedAtOnceMs: number;
 }
 
 export interface Shells {
@@ -169,7 +174,7 @@ export function createShells(deps: ShellsDeps): Shells {
         }
         if (shell.program === null) return;
         started = true;
-        cleanups.push(clock.after(ENDED_AT_ONCE_MS, () => finish({ ok: true })));
+        cleanups.push(clock.after(deps.endedAtOnceMs, () => finish({ ok: true })));
       };
       cleanups.push(registry.onChange(check));
       cleanups.push(

@@ -22,6 +22,7 @@ import type { ShellSpec } from '../../src/window/frames.ts';
 import type { ShellInfo, TerminalInfo } from '../../src/window/hub.ts';
 import {
   createShells,
+  ENDED_AT_ONCE_MS,
   shellProgram,
   shellRefusal,
   SHELL_OPEN_TEXTS,
@@ -117,6 +118,7 @@ function scripted(
     build: 'test-build',
     log: () => {},
     stopping: () => options.stopping ?? false,
+    endedAtOnceMs: ENDED_AT_ONCE_MS,
   };
   return { shells: createShells(deps), spawned };
 }
@@ -188,7 +190,8 @@ interface Opening {
   dir: string;
   /** The specs the registry wrote to its keepers' stdin, in order. */
   specs: Record<string, unknown>[];
-  deps(platform?: Platform): ShellsDeps;
+  /** `endedAtOnceMs`: the product's 400 ms unless a test names its own. */
+  deps(platform?: Platform, endedAtOnceMs?: number): ShellsDeps;
   pidFiles(): string[];
 }
 
@@ -223,7 +226,7 @@ async function opening(t: Parameters<typeof registrySandbox>[0]): Promise<Openin
     of: spec.id,
     dir,
     specs,
-    deps: (shellPlatform = box.tp.platform) => ({
+    deps: (shellPlatform = box.tp.platform, endedAtOnceMs = ENDED_AT_ONCE_MS) => ({
       registry: r.registry,
       files: box.files,
       platform: shellPlatform,
@@ -234,6 +237,7 @@ async function opening(t: Parameters<typeof registrySandbox>[0]): Promise<Openin
       build: 'test-build',
       log: () => {},
       stopping: () => false,
+      endedAtOnceMs,
     }),
     pidFiles: () => readdirSync(box.termsDir).filter((name) => name.endsWith('.pid')),
   };
@@ -328,7 +332,8 @@ describe('opening a shell (a real registry)', () => {
     const quits = join(o.box.s.bin, 'quits-at-once');
     writeFileSync(quits, '#!/bin/sh\necho bye\nexit 3\n');
     chmodSync(quits, 0o755);
-    const shells = createShells(o.deps({ ...o.box.tp.platform, loginShell: quits }));
+    // A wait no machine's load can outlast: the exit ends it as soon as it comes.
+    const shells = createShells(o.deps({ ...o.box.tp.platform, loginShell: quits }, 30_000));
 
     assert.deepEqual(await shells.open(o.of, SIZE), {
       ok: false,
@@ -341,11 +346,14 @@ describe('opening a shell (a real registry)', () => {
   test('a shell that runs longer than the wait and then ends: the open answered ok', async (t) => {
     const o = await opening(t);
     const later = join(o.box.s.bin, 'ends-later');
-    writeFileSync(later, '#!/bin/sh\nsleep 1\nexit 0\n');
+    // It ends only once the test lets it, after the open answered: no race with the wait.
+    const go = join(o.box.s.home, 'go');
+    writeFileSync(later, `#!/bin/sh\nwhile [ ! -e '${go}' ]; do sleep 0.1; done\nexit 0\n`);
     chmodSync(later, 0o755);
-    const shells = createShells(o.deps({ ...o.box.tp.platform, loginShell: later }));
+    const shells = createShells(o.deps({ ...o.box.tp.platform, loginShell: later }, 50));
 
     assert.deepEqual(await shells.open(o.of, SIZE), { ok: true });
+    writeFileSync(go, '');
     await until(() => o.r.registry.shells().length === 0, 'it ended later', 10_000);
   });
 });

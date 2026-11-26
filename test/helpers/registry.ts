@@ -523,6 +523,58 @@ export function info(registry: Registry, termId: string): TerminalInfo {
 }
 
 // ---------------------------------------------------------------------------------------------
+// What a registry writes to its keepers
+
+/** What `framesSpy` gives: the platform to build a registry on, and what it wrote, by socket. */
+export interface FramesSpy {
+  platform: Platform;
+  /** The types of the frames written to the keeper at `path`, in order, as one string. */
+  sent(path: string): string;
+  /** The connections opened to the keeper at `path`, in order. */
+  sockets(path: string): Socket[];
+}
+
+/**
+ * `base` whose connections to keepers record each frame written (the registry's side) by socket
+ * path. `before`, when given, is called with each frame's type and path before it is written.
+ */
+export function framesSpy(
+  base: Platform,
+  before?: (type: string, path: string) => void,
+): FramesSpy {
+  const sent = new Map<string, string[]>();
+  const sockets = new Map<string, Socket[]>();
+  return {
+    platform: {
+      ...base,
+      net: {
+        ...base.net,
+        async connectUnix(path) {
+          const socket = await base.net.connectUnix(path);
+          sockets.set(path, [...(sockets.get(path) ?? []), socket]);
+          const reader = frameReader();
+          const write = socket.write.bind(socket) as (...args: unknown[]) => boolean;
+          socket.write = ((...args: unknown[]) => {
+            const [chunk] = args;
+            if (chunk instanceof Uint8Array) {
+              const frames = reader.push(chunk.slice());
+              for (const frame of 'error' in frames ? [] : frames) {
+                before?.(frame.type, path);
+                sent.set(path, [...(sent.get(path) ?? []), frame.type]);
+              }
+            }
+            return write(...args);
+          }) as typeof socket.write;
+          return socket;
+        },
+      },
+    },
+    sent: (path) => (sent.get(path) ?? []).join(''),
+    sockets: (path) => sockets.get(path) ?? [],
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
 // Keepers a test's server starts (plan task 28): the same checks as registrySandbox's
 
 /** What `serverKeepers` gives: the platform to start a server on, and the checked signal. */

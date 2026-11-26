@@ -9,16 +9,14 @@
 // (the shell) ends on the keeper's `E`. That proves the keeper's `E` and the kernel; what bash or
 // zsh do with their own job groups is the manual check's.
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
-import type { Socket } from 'node:net';
+import { existsSync, writeFileSync } from 'node:fs';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
 import type { Platform } from '../../src/platform/types.ts';
-import { frameReader } from '../../src/window/frames.ts';
 import type { KeeperExit, ShellSpec } from '../../src/window/frames.ts';
 import { PROMPT, procStartOf, sleep, stillRuns, until } from '../helpers/keeper.ts';
-import { attachMirror, info, registrySandbox } from '../helpers/registry.ts';
+import { attachMirror, framesSpy, info, registrySandbox } from '../helpers/registry.ts';
 import type { Mirror, RegistryBox, TestRegistry } from '../helpers/registry.ts';
 import { SHELL_PROMPT } from '../helpers/shell-standin.ts';
 
@@ -113,34 +111,6 @@ function watchListing(r: TestRegistry, id: string, of: string): () => boolean {
   return () => listedOver;
 }
 
-/** The frames a registry on the returned platform writes, by keeper socket path, in order. */
-function sentFrames(base: Platform): { platform: Platform; sent: (path: string) => string } {
-  const sent = new Map<string, string[]>();
-  const platform: Platform = {
-    ...base,
-    net: {
-      ...base.net,
-      async connectUnix(path) {
-        const socket: Socket = await base.net.connectUnix(path);
-        const reader = frameReader();
-        const write = socket.write.bind(socket) as (...args: unknown[]) => boolean;
-        socket.write = ((...args: unknown[]) => {
-          const [chunk] = args;
-          if (chunk instanceof Uint8Array) {
-            const frames = reader.push(chunk.slice());
-            for (const frame of 'error' in frames ? [] : frames) {
-              sent.set(path, [...(sent.get(path) ?? []), frame.type]);
-            }
-          }
-          return write(...args);
-        }) as typeof socket.write;
-        return socket;
-      },
-    },
-  };
-  return { platform, sent: (path) => (sent.get(path) ?? []).join('') };
-}
-
 type EndWay = 'end' | '/exit' | 'crash' | 'lost';
 
 /** Ends the session terminal's program the way `how` says. */
@@ -213,7 +183,7 @@ describe("registry: a shell ends with its session's program (S2 7.10)", { concur
 describe('registry: the end between G and T', () => {
   test('the G waits unread when the owner ends: the keeper starts the program all the same, the registry sends E on its T, and it ends', async (t) => {
     const box = await registrySandbox(t);
-    const spy = sentFrames(box.tp.platform);
+    const spy = framesSpy(box.tp.platform);
     const r = box.registry({ platform: spy.platform });
     const of = await startSession(box, r, 3);
     const spec = box.shellSpec(r, of);
@@ -245,7 +215,7 @@ describe('registry: the end between G and T', () => {
 
   test('a shell never sent G when its owner ends is refused (N), starts nothing, and a later start sends nothing', async (t) => {
     const box = await registrySandbox(t);
-    const spy = sentFrames(box.tp.platform);
+    const spy = framesSpy(box.tp.platform);
     const r = box.registry({ platform: spy.platform });
     const of = await startSession(box, r, 3);
     const spec = box.shellSpec(r, of);
@@ -615,5 +585,173 @@ describe("registry: a found shell's owner (S2 7.10)", () => {
       ),
       r2.log.join('\n'),
     );
+  });
+});
+
+/** `base` whose 10-second timers fire after `ms` (the shell's "has not ended" line), nothing else. */
+function fastTenSeconds(base: Platform, ms: number): Platform {
+  return {
+    ...base,
+    clock: {
+      ...base.clock,
+      after: (delay, run) => base.clock.after(delay === 10_000 ? ms : delay, run),
+    },
+  };
+}
+
+/** Types `line` into the shell and waits for one more prompt. */
+async function typeIn(r: TestRegistry, shell: OpenShell, line: string): Promise<void> {
+  const before = count(shell.mirror, SHELL_PROMPT);
+  assert.equal(r.registry.input(shell.spec.id, utf8(`${line}\r`)), 'ok');
+  await until(() => count(shell.mirror, SHELL_PROMPT) > before, `a prompt after ${line}`, 10_000);
+}
+
+const typesOf = (sent: string, type: string): number => sent.split(type).length - 1;
+
+describe('registry: the ending step without a connection, and once only (S2 7.10)', () => {
+  test('the owner ends while the shell has no usable connection: the shell is hung up at its next hello', async (t) => {
+    const box = await registrySandbox(t);
+    const spy = framesSpy(box.tp.platform);
+    const r = box.registry({ platform: spy.platform });
+    const of = await startSession(box, r, 3);
+    const shell = await openShell(box, r, of);
+    const program = programOf(r, shell.spec.id);
+    const keeper = box.keeperOf(shell.spec.id);
+    box.signalKeeper(keeper, 'SIGSTOP');
+    let continued = false;
+    try {
+      for (const socket of spy.sockets(shell.spec.socket)) socket.destroy();
+      await until(
+        () => r.registry.shells()[0]?.state === 'reconnecting',
+        'the shell is being reconnected to',
+        10_000,
+      );
+      await endOwner(box, r, of, 'crash');
+      await until(() => info(r.registry, of).state === 'ended', 'the owner ended', 10_000);
+      assert.deepEqual(r.registry.shells(), [], 'out of shells() at once');
+      assert.equal(typesOf(spy.sent(shell.spec.socket), 'E'), 0, 'no connection: no E yet');
+      assert.ok(stillRuns(program.pid, program.procStart));
+      box.signalKeeper(keeper, 'SIGCONT');
+      continued = true;
+    } finally {
+      if (!continued) box.signalKeeper(keeper, 'SIGCONT');
+    }
+    await until(() => !stillRuns(program.pid, program.procStart), 'hung up at its hello', 15_000);
+    await until(() => !stillRuns(keeper.pid, keeper.procStart), 'its keeper ended', 10_000);
+    const sent = spy.sent(shell.spec.socket);
+    assert.equal(typesOf(sent, 'E'), 1, sent);
+    assert.ok(sent.indexOf('E') > sent.lastIndexOf('C'), `E on the claim after the cut: ${sent}`);
+    assert.deepEqual(
+      shell.ended.map((exit) => exit.signal),
+      [1],
+    );
+  });
+
+  test('a shell being ended takes no input (ended) and is sent no G by start', async (t) => {
+    const box = await registrySandbox(t);
+    const spy = framesSpy(box.tp.platform);
+    const r = box.registry({ platform: spy.platform });
+    const of = await startSession(box, r, 3);
+    const spec = box.shellSpec(r, of);
+    await r.registry.spawnShell(spec); // its hello came; no G
+    const keeper = box.keeperOf(spec.id);
+    box.signalKeeper(keeper, 'SIGSTOP'); // it stays in the registry, being ended
+    let continued = false;
+    try {
+      await endOwner(box, r, of, 'crash');
+      await until(() => info(r.registry, of).state === 'ended', 'the owner ended', 10_000);
+      assert.deepEqual(r.registry.shells(), []);
+      assert.equal(spy.sent(spec.socket), 'CPN', 'the N of the ending step');
+
+      assert.equal(r.registry.input(spec.id, utf8('typed\r')), 'ended');
+      r.registry.start(spec.id);
+
+      assert.equal(spy.sent(spec.socket), 'CPN', 'no I, no G');
+      box.signalKeeper(keeper, 'SIGCONT');
+      continued = true;
+    } finally {
+      if (!continued) box.signalKeeper(keeper, 'SIGCONT');
+    }
+    await until(() => !stillRuns(keeper.pid, keeper.procStart), 'its keeper ended', 10_000);
+    assert.equal(r.programs.has(spec.id), false, 'nothing was started');
+  });
+
+  test('a shell that ignores the hang-up: E once, also after a reconnect, and "the shell has not ended" once, 10 s after the E', async (t) => {
+    const box = await registrySandbox(t);
+    const spy = framesSpy(fastTenSeconds(box.tp.platform, 300));
+    const r = box.registry({ platform: spy.platform });
+    const of = await startSession(box, r, 3);
+    const shell = await openShell(box, r, of);
+    const program = programOf(r, shell.spec.id);
+    t.after(() => {
+      if (stillRuns(program.pid, program.procStart)) process.kill(program.pid, 'SIGKILL');
+    });
+    await typeIn(r, shell, "trap '' HUP");
+    const notEnded = `terminal ${shell.spec.id}: the shell has not ended`;
+
+    await endOwner(box, r, of, 'crash');
+
+    await until(() => spy.sent(shell.spec.socket).includes('E'), 'E sent', 10_000);
+    await until(() => r.log.includes(notEnded), 'the line 10 s after the E', 5000);
+    assert.ok(stillRuns(program.pid, program.procStart), 'it ignores the hang-up');
+    assert.deepEqual(r.registry.shells(), []);
+    const claims = typesOf(spy.sent(shell.spec.socket), 'C');
+    for (const socket of spy.sockets(shell.spec.socket)) socket.destroy();
+    await until(() => typesOf(spy.sent(shell.spec.socket), 'C') > claims, 'claimed again', 10_000);
+    await sleep(1000); // its hello, and more than the line's time again
+    assert.equal(typesOf(spy.sent(shell.spec.socket), 'E'), 1, spy.sent(shell.spec.socket));
+    assert.equal(r.log.filter((line) => line === notEnded).length, 1);
+    assert.deepEqual(r.registry.shells(), []);
+  });
+
+  test('nothing is logged of a shell that has not ended once the registry is stopped', async (t) => {
+    const box = await registrySandbox(t);
+    const spy = framesSpy(fastTenSeconds(box.tp.platform, 300));
+    const r = box.registry({ platform: spy.platform });
+    const of = await startSession(box, r, 3);
+    const shell = await openShell(box, r, of);
+    const program = programOf(r, shell.spec.id);
+    t.after(() => {
+      if (stillRuns(program.pid, program.procStart)) process.kill(program.pid, 'SIGKILL');
+    });
+    await typeIn(r, shell, "trap '' HUP");
+
+    await endOwner(box, r, of, 'crash');
+    await until(() => spy.sent(shell.spec.socket).includes('E'), 'E sent', 10_000);
+    await r.registry.stopAll();
+    await sleep(800);
+
+    assert.equal(r.log.includes(`terminal ${shell.spec.id}: the shell has not ended`), false);
+  });
+
+  test('a found shell whose hello says exited: not being found any more, forgotten, its keeper ends and its files go', async (t) => {
+    const box = await registrySandbox(t);
+    const r1 = box.registry();
+    const of = await startSession(box, r1, 3);
+    const shell = await openShell(box, r1, of);
+    const program = programOf(r1, shell.spec.id);
+    const keeper = box.keeperOf(shell.spec.id);
+    r1.drop(); // its keepers are kept without their A
+    process.kill(program.pid, 'SIGKILL'); // the shell's keeper keeps its exit
+    await until(() => !stillRuns(program.pid, program.procStart), 'the shell ended');
+
+    const r2 = box.registry();
+    const found = await r2.registry.rediscover();
+
+    assert.deepEqual(
+      found.map((term) => term.id),
+      [of],
+    );
+    assert.equal(
+      r2.registry.giveSlots([], () => {}),
+      'ok',
+      'nothing is being found',
+    );
+    assert.deepEqual(r2.registry.shells(), []);
+    await until(() => !stillRuns(keeper.pid, keeper.procStart), 'its keeper ended', 10_000);
+    assert.equal(existsSync(box.files.termPid(shell.spec.id)), false, 'its .pid file');
+    assert.equal(existsSync(shell.spec.socket), false, 'its socket');
+    assert.equal(r2.registry.input(shell.spec.id, utf8('x')), 'unknown', 'forgotten');
+    assert.equal(info(r2.registry, of).state, 'running', 'its session terminal runs on');
   });
 });

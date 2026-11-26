@@ -13,6 +13,7 @@ import * as before from '../fixtures/frames-before-shell/frames.ts';
 import {
   exit,
   keeperSandbox,
+  SESSION,
   shellHello,
   started,
   stillRuns,
@@ -175,6 +176,10 @@ describe('keeper version 4: what is refused (bad-spec, exit 2)', { concurrency: 
     ['a file that is not text', (spec) => ({ ...spec, file: 7 })],
     ['a lock', (spec) => ({ ...spec, lock: '1 2 3' })],
     ['a kind other', (spec) => ({ ...spec, meta: { ...spec.meta, kind: 'other' } })],
+    [
+      "a shell meta with a key outside its form (a session's)",
+      (spec) => ({ ...spec, meta: { ...spec.meta, sessionId: SESSION } }),
+    ],
   ];
   for (const [what, change] of shellCases) {
     test(`a shell spec with ${what}`, async (t) => {

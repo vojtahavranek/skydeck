@@ -443,6 +443,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
   const backlogHigh = testNumber(platform, 'BACKLOG_BYTES', BACKLOG_HIGH);
   const backlogLow = Math.floor(backlogHigh / 4);
   const finding = new Set<string>();
+  /** Issue #199: the keepers being found whose `.pid` line says `shell`: they hold no slot. */
+  const findingShells = new Set<string>();
+  /** Issue #199: shells forgotten at their end whose keeper's files are not gone yet. */
+  const endedShells = new Set<string>();
   /** Issue #166: the place among the terminals without a number that a terminal about to be
    *  spawned takes from the terminal a restart held (`take`), by the new terminal's id. */
   const placed = new Map<string, bigint>();
@@ -649,7 +653,15 @@ export function createRegistry(deps: RegistryDeps): Registry {
   };
 
   function changed(): void {
-    settleShells(); // issue #199: the shells' owners and ends, before the listeners read
+    // Issue #199: the shells' owners and ends, before the listeners read; a throw of it must not
+    // keep the pages from their list.
+    try {
+      settleShells();
+    } catch (error) {
+      deps.log(
+        `terminal registry: the shells' settle failed (${(error as Error)?.name ?? 'error'})`,
+      );
+    }
     for (const listener of [...listeners]) {
       try {
         listener();
@@ -1267,7 +1279,10 @@ export function createRegistry(deps: RegistryDeps): Registry {
     } else if (origin !== 'spawned' && !hello.started && hello.exited === null) {
       // A shell's keeper whose start nobody waits for any more (a spawn that gave up, a server
       // that restarted before G): it is never started; forgotten at its X.
+      // Marked ending too: out of `shells()`, no input, no G, so that an open of its terminal
+      // meanwhile opens a shell of its own instead of finding this one.
       log(id, 'a shell not started is refused');
+      if (term.shell !== null) term.shell.ending = true;
       refuseShell(term, claim);
     }
     watchTail(term, claim);
@@ -1537,6 +1552,9 @@ export function createRegistry(deps: RegistryDeps): Registry {
     const removeFiles = lost && lineIsDead(id);
     const ended = term.shell?.ended ?? null;
     if (term.shell !== null) term.shell.ended = null;
+    // Its keeper removes its files once it has read the A: until then its live line is not a
+    // keeper of another terminal that may live (held, `heldIds`).
+    if (!removeFiles) endedShells.add(id);
     forget(term);
     if (removeFiles) {
       for (const path of [files.termSock(id), files.termPid(id)]) {
@@ -1552,6 +1570,18 @@ export function createRegistry(deps: RegistryDeps): Registry {
 
   // -------------------------------------------------------------------------------------------
   // A shell belongs to its session's terminal (issue #199, S2 7.10)
+
+  /**
+   * The ids the registry holds, for `keepersThatMayLive`: every key of `terms`, and the shells
+   * forgotten at their end whose keeper has not removed its files yet (`endedShells`; one whose
+   * line is dead or gone leaves that set here).
+   */
+  function heldIds(): Set<string> {
+    for (const id of endedShells) {
+      if (keeperState(id) === 'dead') endedShells.delete(id);
+    }
+    return new Set([...terms.keys(), ...endedShells]);
+  }
 
   /** For an owner's resolution: the terminal is not over, has no exit, and no hello said exited. */
   function mayRunAsOwner(term: Term): boolean {
@@ -1596,7 +1626,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
     }
     let doubt: boolean;
     try {
-      doubt = keepersThatMayLive(platform, files, new Set(terms.keys())).length > 0;
+      doubt = keepersThatMayLive(platform, files, heldIds()).length > 0;
     } catch {
       doubt = true; // a read that failed: nothing is known
     }
@@ -1720,7 +1750,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
       shell.hungUp = true;
       claim.link.send('E');
       clock.after(SHELL_END_LOG_MS, () => {
-        if (!term.forgotten) log(term.info.id, 'the shell has not ended');
+        if (!stopped && !term.forgotten) log(term.info.id, 'the shell has not ended');
       });
     } else {
       refuseShell(term, claim);
@@ -1858,7 +1888,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
    */
   function shellUnseen(): boolean {
     try {
-      return keepersThatMayLive(platform, files, new Set(terms.keys())).some(
+      return keepersThatMayLive(platform, files, heldIds()).some(
         (keeper) => keeper.kind !== 'session',
       );
     } catch {
@@ -1915,28 +1945,38 @@ export function createRegistry(deps: RegistryDeps): Registry {
     }
     // 'unknown' lines too: nothing is removed for them, and connecting to a keeper that ended is
     // refused at once (with an unreadable boot id every line is 'unknown').
-    const ids = listKeeperLines(platform, files)
-      .filter((keeper) => keeper.state !== 'dead' && !terms.has(keeper.id))
-      .map((keeper) => keeper.id);
-    const found = await Promise.all(ids.map((id) => find(id)));
+    const keepers = listKeeperLines(platform, files).filter(
+      (keeper) => keeper.state !== 'dead' && !terms.has(keeper.id),
+    );
+    const found = await Promise.all(
+      keepers.map((keeper) => find(keeper.id, keeper.line?.keeper?.shell === true)),
+    );
     // Issue #199: a shell found is held, never a terminal of the answer.
     return found.filter((term): term is Term => term !== null && term.shell === null).map(copy);
   }
 
-  /** Claims a keeper found in terms/; it is listed once its hello came (origin 'found'). */
-  async function find(id: string): Promise<Term | null> {
+  /**
+   * Claims a keeper found in terms/; it is listed once its hello came (origin 'found'). `shell`:
+   * its `.pid` line says it is a session's shell's keeper (it holds no slot, `giveSlots`).
+   */
+  async function find(id: string, shell: boolean): Promise<Term | null> {
     if (finding.has(id)) return null;
     finding.add(id);
+    if (shell) findingShells.add(id);
+    const done = (): void => {
+      finding.delete(id);
+      findingShells.delete(id);
+    };
     const term = newTerm(id, unknownMeta, 1, 1, false);
     try {
       await connect(term, HELLO_MS);
     } catch {
-      finding.delete(id);
+      done();
       settleAndAnnounce(); // issue #199: a doubt about a shell's owner may be gone
       return null; // gone, or refusing: removeDeadKeeperFiles removes it next time
     }
     if (term.hello !== null) {
-      finding.delete(id);
+      done();
       settleAndAnnounce();
       return term;
     }
@@ -1951,7 +1991,7 @@ export function createRegistry(deps: RegistryDeps): Registry {
           if (code === 'ECONNREFUSED' || code === 'ENOENT') break;
         }
       }
-      finding.delete(id);
+      done();
       settleAndAnnounce();
     })();
     return null;
@@ -2223,7 +2263,8 @@ export function createRegistry(deps: RegistryDeps): Registry {
     },
     giveSlots(candidates, write) {
       if (stopped) return 'stopping';
-      if (finding.size > 0) return 'finding';
+      // A shell's keeper being found holds no slot (its line says so before any hello, S2 7.10).
+      if ([...finding].some((id) => !findingShells.has(id))) return 'finding';
       const taken = takenSlots(null);
       const given = new Map<string, number>();
       for (const id of candidates) {
