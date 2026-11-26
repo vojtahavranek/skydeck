@@ -369,6 +369,7 @@ test("issue #199: the key opens, shows and hides the session's shell", async (t)
 
       await l.page.keyboard.press('Control+Shift+S');
 
+      // The panel may come and go while the server waits for the end (a list brings the shell).
       await showsText(l.page, '#toast', /^Shell: the shell ended at once \(status 3\)/);
       assert.equal((await panel(l.page)).shown, false);
       assert.deepEqual(shellsOf(l), []);
@@ -465,6 +466,23 @@ test("issue #199: the key opens, shows and hides the session's shell", async (t)
       await new Promise((resolve) => setTimeout(resolve, 500));
       assert.equal((await panel(page)).shown, false, 'no panel opens');
       assert.equal(await keyboard(page), before, 'the keyboard did not move');
+
+      // A shell that a list brought, and that ended before the act's answer (the server's wait
+      // for an end at once): the panel came and went, and the refusal is still the toast.
+      shells = [];
+      w.list(() => listNow());
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      await clickRow(page, S1);
+      await page.keyboard.press('Control+Shift+S');
+      const third = await w.act(3);
+      shells = [{ id: 'cccccccccccc', of: TERM_A }];
+      w.list(() => listNow());
+      await untilPanel(page, true);
+      shells = [];
+      w.list(() => listNow());
+      await untilPanel(page, false);
+      w.answer(third, { ok: false, error: 'the shell ended at once (status 3)' });
+      await showsText(page, '#toast', /^Shell: the shell ended at once \(status 3\)/);
     },
   );
 });

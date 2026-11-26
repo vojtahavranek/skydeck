@@ -2578,14 +2578,18 @@ function openShell(termId) {
   const asked = { term: termId, answered: false };
   state.shellAsked = asked;
   void act({ kind: 'shell', term: termId, ...size }).then((result) => {
-    if (state.shellAsked !== asked) {
-      return; // a list brought the shell already, or a reconnect forgot the act
-    }
+    const waiting = state.shellAsked === asked; // else a list brought the shell, or a reconnect
     if (result.ok) {
-      asked.answered = true;
+      if (waiting) {
+        asked.answered = true;
+      }
       return;
     }
-    state.shellAsked = null;
+    if (waiting) {
+      state.shellAsked = null;
+    }
+    // Also when a list brought the shell already: one that ended at once was listed while the
+    // server waited for its end, and its panel came and went; the answer says why.
     toast.show(shellRefusedText(result.error ?? result.lines.join(' ')), null);
   });
 }

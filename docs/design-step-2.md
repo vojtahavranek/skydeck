@@ -4124,7 +4124,9 @@ nothing; `ls` is unchanged.
   once its panel was shown, and stays attached while hidden. The page that sent `act shell` shows
   the shell when a list brings it (and, while its terminal is still the pane's, gives it the
   keyboard); an act whose shell the first list after its answer does not bring is forgotten, so a
-  shell another window opens later opens no panel here. Selecting another session keeps each
+  shell another window opens later opens no panel here. A refusal is the toast also when a list
+  brought the shell already: one that ends at once is listed while the server waits for its end,
+  so its panel comes and goes, and the answer says why. Selecting another session keeps each
   session's panel shown or hidden as it was on this page. A shell a list no longer has (its
   `exit`, its session's end) leaves the page, and the keyboard goes to the session's terminal.
   After a reload, a reconnect or a restart of the server every shell is hidden (8.2.5) and the
