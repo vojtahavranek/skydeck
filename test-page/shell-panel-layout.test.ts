@@ -714,6 +714,30 @@ test('issue #199: the keyboard when the area gets too low and high again, the si
     },
   );
 
+  await t.test(
+    'the keyboard the change took to the shell, moved by the user to the list while the area is too low, stays in the list when it is high again',
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW);
+      const { page } = l;
+      await clickSession(page);
+      await untilKeyboard(page, 'terminal');
+      await goLow(page);
+      await untilKeyboard(page, 'shell');
+
+      // A click on the list below its rows: no key and no press in the shell (a chord would be
+      // one: its Ctrl and Shift reach the shell before the page takes its letter).
+      const list = await page.locator('#list').boundingBox();
+      assert.ok(list !== null);
+      await page.mouse.click(list.x + list.width / 2, list.y + list.height - 10);
+      await untilKeyboard(page, 'list');
+
+      await goHigh(page);
+      assert.equal(await keyboard(page), 'list', 'it stays where the user put it');
+      assert.equal(await shownText(page, '#focus-zone'), 'Focus: list');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
   /** The window made too low for both while no panel is drawn (nothing to wait for but the size). */
   const lowWindow = async (page: Page): Promise<void> => {
     await page.setViewportSize({
@@ -876,22 +900,50 @@ test('issue #199: the keyboard when the area gets too low and high again, the si
       const { page } = l;
       const least = await leastOf(page);
       const start = await layout(page);
-      const grow = (px: number): Promise<void> =>
-        page.evaluate((px) => {
-          (document.getElementById('cards') as HTMLElement).style.paddingBottom = `${px}px`;
+      /**
+       * The cards grown by content — an element of `px` px put inside `#cards`, as a bar the page
+       * shows there (the carry-over bar) grows them — and the split read two frames later: the
+       * panel's own observer, not a later list, must have laid it out by then.
+       */
+      const grow = (
+        px: number,
+      ): Promise<{ mode: string | null; terminal: number; shell: number }> =>
+        page.evaluate(async (px) => {
+          const cards = document.getElementById('cards') as HTMLElement;
+          cards.querySelector('[data-test-grow]')?.remove();
+          if (px > 0) {
+            const filler = document.createElement('div');
+            filler.dataset['testGrow'] = '';
+            filler.style.cssText = `height:${px}px;flex:none`;
+            cards.append(filler);
+          }
+          for (let n = 0; n < 2; n++) {
+            await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+          }
+          const zone = document.getElementById('right-zone') as HTMLElement;
+          const height = (id: string): number =>
+            (document.getElementById(id) as HTMLElement).getBoundingClientRect().height;
+          return {
+            mode: zone.dataset['shell'] ?? null,
+            terminal: height('terminal'),
+            shell: height('shell'),
+          };
         }, px);
 
-      // The area 20 px over the rule: both, each at least its least.
-      await grow(start.area - (2 * least + BAR_PX) - 20);
-      await until(async () => {
-        const now = await layout(page);
-        return now.mode === 'split' && now.terminal >= least - 1 && now.shell >= least - 1;
-      }, "both kept at least 4 rows' height");
+      // The area 20 px over the rule: both, each kept at least its least.
+      const over = await grow(start.area - (2 * least + BAR_PX) - 20);
+      assert.equal(over.mode, 'split', JSON.stringify(over));
+      assert.ok(
+        over.terminal >= least - 1 && over.shell >= least - 1,
+        `both kept: ${JSON.stringify(over)}`,
+      );
+      assert.ok((await layout(page)).area < start.area - 100, 'the cards did grow');
       // 10 px under it: the shell over the area.
-      await grow(start.area - (2 * least + BAR_PX) + 10);
-      await until(async () => (await layout(page)).mode === 'full', 'the shell over the area');
-      await grow(0);
-      await until(async () => (await layout(page)).mode === 'split', 'both again');
+      const under = await grow(start.area - (2 * least + BAR_PX) + 10);
+      assert.equal(under.mode, 'full', JSON.stringify(under));
+      const back = await grow(0);
+      assert.equal(back.mode, 'split', JSON.stringify(back));
+      near(back.shell, Math.round(start.area / 3), 'a third again');
       assert.deepEqual(l.problems, []);
     },
   );
