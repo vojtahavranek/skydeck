@@ -3800,7 +3800,9 @@ Unpark (at 640 px Park was cut before); `r`, `u`, `w` and `skydeck park` remain.
 wider than `Done`); no button is cut there. From issue #199 a button **Shell** stands before
 Restart (before Done without it) while the pane is a terminal of the window that is not ended
 (7.10): a click opens the session's shell, shows a hidden one, or hides a shown one, and takes no
-keyboard itself (12.9); its tooltips `open a shell in this session's folder (Ctrl+Shift+S)`, `a
+keyboard itself (12.9): a shell it opens or shows gets the keyboard, as the key's does, since the
+user asked for a shell to type into; one it hides gives the keyboard to the session's terminal only
+when the keyboard was in the shell, and else leaves it where it was (the list, the session); its tooltips `open a shell in this session's folder (Ctrl+Shift+S)`, `a
 shell is open: show it (Ctrl+Shift+S)` and `hide the shell: what runs in it keeps running
 (Ctrl+Shift+S)`. While a shell is open, shown or hidden, a dot in the accent colour stands beside
 its word, `Shell ●` (its tooltip and label `a shell is open`): the header's only mark of a shell,
@@ -4166,13 +4168,15 @@ nothing; `ls` is unchanged.
   memory only (`state.shellsShown`): the panel is drawn while the pane is a terminal that is not
   ended, `list.shells` has a shell of it and the page shows that shell; a shell is attached only
   once its panel was shown, and stays attached while hidden. The page that sent `act shell` shows
-  the shell when a list brings it (and, while its terminal is still the pane's, gives it the
-  keyboard); an act whose shell the first list after its answer does not bring is forgotten, so a
+  the shell when a list brings it (and gives it the keyboard while its terminal is still the
+  pane's, the keyboard is still where it was at the press and no text is selected: what the user
+  typed or clicked meanwhile keeps its place, and a dialog its keyboard); an act whose shell the first list after its answer does not bring is forgotten, so a
   shell another window opens later opens no panel here. A refusal is the toast also when a list
   brought the shell already: one that ends at once is listed while the server waits for its end,
   so its panel comes and goes, and the answer says why. Selecting another session keeps each
   session's panel shown or hidden as it was on this page. A shell a list no longer has (its
-  `exit`, its session's end) leaves the page, and the keyboard goes to the session's terminal.
+  `exit`, its session's end) leaves the page — also one this page hid, whose terminal the view
+  still held —, and the keyboard goes to the session's terminal.
   After a reload, a reconnect or a restart of the server every shell is hidden (8.2.5) and the
   header's dot says it is there (12.5).
 - **A session running in another terminal**: the card of 7.9.
@@ -4634,7 +4638,8 @@ switcher or the tour shown first says its gate's line, as for every chord:
 | the panel is shown and the keyboard is anywhere else (the session's terminal, the list) | the keyboard goes to the shell (the zone becomes the terminal's) |
 
 The header's `Shell` hides a shown panel whatever has the keyboard, as its tooltip says, and takes
-no keyboard itself. A held key acts once. The toasts for a pane without a terminal of the window
+no keyboard itself: the keyboard goes to the session's terminal only when it was in the shell, and
+else stays where it was (12.5). A held key acts once. The toasts for a pane without a terminal of the window
 are words from the row's own fields, as `r`'s are; for a terminal the server decides again at the
 act (4.3). **The keyboard** between the two: a click moves it (xterm.js takes the focus at its own
 press); giving the terminal zone the keyboard — Ctrl+Shift+L, a click on the zone, a closed
@@ -6002,7 +6007,9 @@ check let through; a page's `new` flags become `claude` arguments only after des
 From issue #199 a keeper runs one more thing: a session's shell (7.10), the account's login shell
 from the account database (`Platform.loginShell`), or `/bin/sh` when none is known or it is no
 executable file, with the `argv` the server builds (`-<name>`, a login shell) in the session
-terminal's folder and the environment of 7.4. The spec's `file` exists for it only (7.1): a
+terminal's folder and the environment of 7.4. In a marked test sandbox (`SKYDECK_TEST_NO_WINDOWS=1`)
+the account's shell is not read: `SKYDECK_TEST_LOGIN_SHELL` (an absolute path) names it, else
+there is none (17.3), as `SKYDECK_TEST_PYTHON3` stands for the launcher's python3 there. The spec's `file` exists for it only (7.1): a
 session terminal's keeper still runs `argv[0]`. The server chooses the program, its arguments,
 its folder and its environment; what opens a shell names only the session's terminal.
 

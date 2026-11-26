@@ -1163,6 +1163,8 @@ export interface EditWorld {
   selected(): string | null;
   /** Ends the connection the page uses now, as a server that stopped answering. */
   drop(): void;
+  /** Sends `message` on the connection the page uses now (a `notice`, a `size`). */
+  send(message: Record<string, unknown>): void;
 }
 
 let editSeed = 60;
@@ -1245,6 +1247,9 @@ export async function editWorld(
     selected: () => shown,
     drop() {
       conn().ws.terminate();
+    },
+    send(message) {
+      conn().send(message);
     },
   };
 }

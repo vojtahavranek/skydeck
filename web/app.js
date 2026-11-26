@@ -259,10 +259,14 @@ const state = {
   shellsShown: new Set(),
   /**
    * Issue #199: the terminal a `shell` act of this page was sent for, while no list has brought
-   * its shell — `answered` once the act's result came (the first list after it clears it).
-   * @type {{ term: string, answered: boolean } | null}
+   * its shell — `answered` once the act's result came (the first list after it clears it), `from`
+   * what had the keyboard at the press (the list that brings the shell gives it the keyboard only
+   * while that has it still).
+   * @type {{ term: string, answered: boolean, from: Element | null } | null}
    */
-  shellAsked: /** @type {{ term: string, answered: boolean } | null} */ (null),
+  shellAsked: /** @type {{ term: string, answered: boolean, from: Element | null } | null} */ (
+    null
+  ),
   /**
    * Issue #199: the side of the terminal zone that had the keyboard last: the session's terminal
    * or its shell (the shell only while its panel is drawn).
@@ -2527,11 +2531,13 @@ function shellOf(termId) {
 }
 
 /**
- * Issue #199 (S2 12.9): Ctrl+Shift+S, `s` and the header's `Shell` — what `shellPress` says for
- * the pane: a toast, the act for the pane's terminal, or the panel shown, hidden or given the
- * keyboard. `selected`: a session is selected for this press.
- * `header`: the header's `Shell`, whose click takes no keyboard: on a shown panel it hides it, as
- * its tooltip says.
+ * Issue #199 (S2 12.9): Ctrl+Shift+S (both zones) and the header's `Shell` — what `shellPress`
+ * says for the pane: a toast, the act for the pane's terminal, or the panel shown, hidden or given
+ * the keyboard. `selected`: a session is selected for this press.
+ * `header`: the header's `Shell`, whose click takes no keyboard itself: on a shown panel it hides
+ * it, as its tooltip says, and the keyboard goes to the session's terminal only when it was in the
+ * shell (else it stays where it is); opening or showing a shell gives it the keyboard, as the key
+ * does: the user asked for a shell to type into.
  * @param {boolean} selected
  * @param {boolean} [header]
  */
@@ -2562,10 +2568,15 @@ function pressShell(selected, header = false) {
       return;
     case 'hide':
       if (shell !== null) {
+        const wasInShell = dom.shell.contains(document.activeElement);
         state.shellsShown.delete(shell.id);
         render();
-        setZone('terminal', false);
-        terminalView.focus();
+        if (wasInShell) {
+          setZone('terminal', false);
+          terminalView.focus();
+        } else {
+          keepKeyboard(); // a header click: the keyboard stays where it was (the list, the session)
+        }
       }
       return;
     case 'focus':
@@ -2596,7 +2607,8 @@ function openShell(termId) {
   /** @param {string} side */
   const border = (side) => parseFloat(style.getPropertyValue(`border-${side}-width`)) || 0;
   const width = rect.width - border('left') - border('right');
-  const fitted = shellView.fits(Math.max(1, width), Math.max(1, shellPanel.height()));
+  // Optional in contract 2.9 (the page tests' stand-in views lack it): 80 × 12 without it.
+  const fitted = shellView.fits?.(Math.max(1, width), Math.max(1, shellPanel.height())) ?? null;
   const size =
     fitted !== null && Number.isFinite(fitted.cols) && Number.isFinite(fitted.rows)
       ? {
@@ -2604,7 +2616,7 @@ function openShell(termId) {
           rows: Math.max(1, Math.min(MAX_ROWS, Math.floor(fitted.rows))),
         }
       : { cols: 80, rows: 12 };
-  const asked = { term: termId, answered: false };
+  const asked = { term: termId, answered: false, from: document.activeElement };
   state.shellAsked = asked;
   void act({ kind: 'shell', term: termId, ...size }).then((result) => {
     const waiting = state.shellAsked === asked; // else a list brought the shell, or a reconnect
@@ -2625,7 +2637,8 @@ function openShell(termId) {
 
 /**
  * Issue #199: at a list, the shell `state.shellAsked` waits for: brought, it is shown (and, while
- * its terminal is the pane's, gets the keyboard after the render: the answer); not brought by the
+ * its terminal is the pane's and the keyboard is still where it was at the press, gets the
+ * keyboard after the render: typing done since lands where the user put it); not brought by the
  * first list after the act's answer, the act is forgotten (a shell that ended before that list, or
  * one another window opens later, must not open this page's panel).
  * @param {ListMessage} message
@@ -2645,18 +2658,24 @@ function shellListed(message) {
   }
   state.shellAsked = null;
   state.shellsShown.add(shell.id);
-  return state.pane.kind === 'terminal' && state.pane.term.id === asked.term;
+  return (
+    state.pane.kind === 'terminal' &&
+    state.pane.term.id === asked.term &&
+    document.activeElement === asked.from &&
+    !textSelected()
+  );
 }
 
 /**
- * Issue #199: a shell this page shows that a list no longer has (its `exit`, its session's end)
- * leaves the page: its id the set, its terminal the view; the render then hides the panel and
- * `keepKeyboard` gives the keyboard to the session's terminal.
+ * Issue #199: a shell that a list no longer has (its `exit`, its session's end) leaves the page:
+ * its id the set of the shown ones, and its terminal the view, also one this page hid (still
+ * attached); the render then hides a drawn panel and `keepKeyboard` gives the keyboard to the
+ * session's terminal.
  * @param {ListMessage} message
  */
 function shellsGone(message) {
   const listed = new Set((message.shells ?? []).map((one) => one.id));
-  for (const id of [...state.shellsShown]) {
+  for (const id of new Set([...state.shellsShown, ...shellView.attached()])) {
     if (!listed.has(id)) {
       state.shellsShown.delete(id);
       shellView.drop?.(id);
@@ -3158,10 +3177,8 @@ function doChord(chord, event) {
       return;
     }
     case 'shell':
-      // Issue #199 (S2 12.9): a held key acts once.
-      if (!event.repeat) {
-        pressShell(state.selected !== null);
-      }
+      // Issue #199 (S2 12.9): a held key acts once, as every chord (onKeyDown acts on no repeat).
+      pressShell(state.selected !== null);
       return;
     case 'switcher':
       // E11: Ctrl+Shift+P opens the switcher, and closes it while it is shown.

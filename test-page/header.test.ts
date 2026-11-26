@@ -2159,7 +2159,7 @@ test("issue #199: the header's Shell and its dot", async (t) => {
   );
 
   await t.test(
-    'A1: a click on Shell opens the shell under the session’s terminal with the keyboard in it',
+    'A1: a click on Shell opens the shell under the session’s terminal with the keyboard in it; a click that hides moves the keyboard only out of the shell, never out of the list',
     async (t) => {
       const l = await launched(t, chromium);
       l.d.resumable(S1);
@@ -2188,6 +2188,49 @@ test("issue #199: the header's Shell and its dot", async (t) => {
       await until(l.page, { there: true, tip: SHOWN, dot: true }, 'Shell says it is shown');
       assert.equal((l.server.hub.shells?.() ?? []).length, 1);
       assert.notEqual(await active(l.page), 'BUTTON', 'the click took no keyboard');
+
+      // A click that hides: the keyboard leaves the shell only when it was in it. In the list it
+      // stays in the list, so that the next list keys reach no program.
+      const where = (): Promise<string> =>
+        l.page.evaluate(() => {
+          const at = document.activeElement;
+          if (document.getElementById('shell')?.contains(at) === true) return 'shell';
+          if (document.getElementById('terminal')?.contains(at) === true) return 'terminal';
+          if (document.getElementById('list-zone')?.contains(at) === true) return 'list';
+          return 'other';
+        });
+      const shown = (): Promise<boolean> =>
+        l.page.evaluate(() => (document.getElementById('shell') as HTMLElement).hidden === false);
+      await l.page.keyboard.press('Control+Shift+L');
+      await l.page.waitForFunction(
+        () => document.getElementById('list-zone')?.contains(document.activeElement) === true,
+        null,
+        { timeout: PAGE_WAIT_MS },
+      );
+      await l.page.locator('#cards .header-shell').click();
+      await until(l.page, { there: true, tip: HIDDEN, dot: true }, 'hidden by the click');
+      await sleep(300);
+      assert.equal(await shown(), false);
+      assert.equal(await where(), 'list', 'the keyboard stays in the list');
+      assert.equal(await shownText(l.page, '#focus-zone'), 'Focus: list');
+
+      // Shown again by a click from the list: the shell gets the keyboard (a shell to type into).
+      await l.page.locator('#cards .header-shell').click();
+      await until(l.page, { there: true, tip: SHOWN, dot: true }, 'shown by the click');
+      await l.page.waitForFunction(
+        () => document.getElementById('shell')?.contains(document.activeElement) === true,
+        null,
+        { timeout: PAGE_WAIT_MS },
+      );
+
+      // Hidden by a click while the keyboard is in the shell: it goes to the session's terminal.
+      await l.page.locator('#cards .header-shell').click();
+      await until(l.page, { there: true, tip: HIDDEN, dot: true }, 'hidden again');
+      await l.page.waitForFunction(
+        () => document.getElementById('terminal')?.contains(document.activeElement) === true,
+        null,
+        { timeout: PAGE_WAIT_MS },
+      );
       assert.deepEqual(l.problems, []);
     },
   );

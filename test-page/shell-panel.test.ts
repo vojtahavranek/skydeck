@@ -17,7 +17,7 @@ import type { Browser, Page } from 'playwright';
 import { S1, S2 } from '../test/helpers/platform.ts';
 import { stillRuns } from '../test/helpers/keeper.ts';
 import { SHELL_PROMPT } from '../test/helpers/shell-standin.ts';
-import { startTestServer } from '../test/helpers/window.ts';
+import { connectTestPage, startTestServer } from '../test/helpers/window.ts';
 import { SHELL_TEXTS } from '../web/shell-panel-text.js';
 import { browser, newPage } from './helpers/browser.ts';
 import {
@@ -37,12 +37,14 @@ import {
   showsText,
   TERM_A,
   TERM_B,
+  TERM_C,
   toZone,
 } from './helpers/shell.ts';
 import type { Launched } from './helpers/shell.ts';
 import {
   hexOf,
   inputOf,
+  shownTerm,
   promptOf,
   resumeHere,
   screenText,
@@ -611,7 +613,7 @@ test("issue #199: the keyboard between the session's terminal and its shell, and
   );
 
   await t.test(
-    'A10: find, copy and the raw paste act on the terminal that has the keyboard: the shell, then the session',
+    'A10: find, copy, the paste and the raw Ctrl+Shift+V act on the terminal that has the keyboard: the shell, then the session',
     async (t) => {
       const l = await withShell(t, chromium);
       const { page, d } = l;
@@ -681,6 +683,29 @@ test("issue #199: the keyboard between the session's terminal and its shell, and
       assert.equal(inputOf(d.record, S1), sessionInput, 'the session got nothing');
       await page.keyboard.press('Control+U'); // the shell's line cleared again
 
+      // The raw Ctrl+V (Ctrl+Shift+V, Claude Code's image paste): the byte 16 goes to the terminal
+      // that has the keyboard, as the server's `input` of it says, and to no other.
+      const hub = l.server.hub;
+      const inputs: string[] = [];
+      const input = hub.input.bind(hub);
+      hub.input = (term, data) => {
+        inputs.push(`${term} ${Buffer.from(data).toString('hex')}`);
+        return input(term, data);
+      };
+      t.after(() => {
+        hub.input = input;
+      });
+      const [shellId] = shellsOf(l);
+      await page.keyboard.press('Control+Shift+V');
+      await until(() => inputs.includes(`${shellId} 16`), 'the raw Ctrl+V reached the shell');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.deepEqual(
+        inputs.filter((one) => one.startsWith(l.term)),
+        [],
+        'the session got nothing of it',
+      );
+      await page.keyboard.press('x'); // the byte asked the shell's line for one literal character
+
       // The session's terminal: each acts there.
       await clickIn(page, '#terminal');
       await untilKeyboard(page, 'terminal');
@@ -702,6 +727,17 @@ test("issue #199: the keyboard between the session's terminal and its shell, and
         'the session got the paste',
       );
       assert.ok(!(await screenText(page, '#shell')).includes('pasted-into-session'));
+      const before = inputs.length;
+      await page.keyboard.press('Control+Shift+V');
+      await until(
+        () => inputs.slice(before).includes(`${l.term} 16`),
+        "the raw Ctrl+V reached the session's terminal",
+      );
+      assert.deepEqual(
+        inputs.slice(before).filter((one) => one.startsWith(shellId ?? '-')),
+        [],
+        'the shell got nothing of it',
+      );
       assert.deepEqual(l.problems, []);
     },
   );
@@ -836,7 +872,37 @@ test('issue #199: after a reload, a reconnect and a server restart every shell i
       assert.equal(await dot(page), true, "S2's hidden shell: the dot");
       assert.equal(shellsOf(l).length, 2);
 
-      // `exit` in S1's shell: the panel goes, the keyboard is in S1's terminal.
+      // Another terminal starts on the session's side: from S1's shell to S2, whose shell is shown
+      // too, and back, the keyboard lands in the session's terminal each time, not in its shell.
+      await page.keyboard.press('Control+Shift+S'); // S2's shell shown again, the keyboard in it
+      await untilPanel(page, true);
+      await untilKeyboard(page, 'shell');
+      await page.keyboard.press('Control+Shift+1');
+      await until(async () => (await shownTerm(page)) === l.term, "S1's terminal shown");
+      await untilPanel(page, true);
+      await untilKeyboard(page, 'terminal');
+      await clickIn(page, '#shell');
+      await untilKeyboard(page, 'shell');
+      await page.keyboard.press('Control+Shift+2');
+      await until(async () => (await shownTerm(page)) === s2, "S2's terminal shown");
+      await untilPanel(page, true);
+      await untilKeyboard(page, 'terminal');
+      // The same through the list, where nothing gives the new terminal the keyboard at once: from
+      // S2's shell to the list, S1 selected there, and back to the terminal zone.
+      await clickIn(page, '#shell');
+      await untilKeyboard(page, 'shell');
+      await page.keyboard.press('Control+Shift+L');
+      await untilKeyboard(page, 'list');
+      await page.keyboard.press('k');
+      await until(async () => (await shownTerm(page)) === l.term, "S1's terminal shown again");
+      await untilPanel(page, true);
+      await page.keyboard.press('Control+Shift+L');
+      await untilKeyboard(page, 'terminal');
+
+      // `exit` in S1's shell: the panel goes, the keyboard is in S1's terminal, and the view lets
+      // that shell's terminal go.
+      const s1Shell = (l.server.hub.shells?.() ?? []).find((one) => one.of === l.term)?.id;
+      assert.ok(s1Shell !== undefined);
       await clickRow(page, S1);
       await page.keyboard.press('Enter');
       await untilPanel(page, true);
@@ -848,6 +914,15 @@ test('issue #199: after a reload, a reconnect and a server restart every shell i
       await untilKeyboard(page, 'terminal');
       await until(async () => !(await dot(page)), 'no dot: no shell');
       assert.equal(shellsOf(l).length, 1, "S2's shell runs on");
+      await until(
+        async () =>
+          (await readPage(
+            page,
+            (id) => document.querySelectorAll(`#shell .tv-term[data-term="${id}"]`).length,
+            s1Shell,
+          )) === 0,
+        "the view dropped the ended shell's terminal",
+      );
     },
   );
 });
@@ -1097,6 +1172,261 @@ test("issue #199: the session's end and its restart on the page", async (t) => {
         '#shell',
       );
       assert.deepEqual(l.problems, []);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------------------------
+// Milestone 2's review: what the page does with the keyboard, the views and the streams
+
+const SHELL_A = 'a1a1a1a1a1a1'; // S1's shell, under TERM_A
+const SHELL_C = 'c3c3c3c3c3c3'; // S2's shell, under TERM_C
+const SHELL_E = 'e5e5e5e5e5e5'; // a second shell of S1, after the first one ended
+
+/**
+ * A scripted world: S1 running in TERM_A (slot 1), S2 in TERM_C (slot 2); `shells` are the list's
+ * shells (changed by `set`, which sends the list); acts are only recorded (the test answers).
+ */
+async function scriptedWorld(
+  t: TestContext,
+  chromium: Browser,
+  shells: { id: string; of: string }[] = [],
+): Promise<{
+  page: Page;
+  w: Awaited<ReturnType<typeof editWorld>>;
+  set(next: { id: string; of: string }[]): void;
+}> {
+  const page = await newPage(t, chromium);
+  // Room for both: in an area too low for both the shell takes the whole area, and the keyboard.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  let now = shells;
+  const listNow = (): Record<string, unknown> =>
+    scriptedList(
+      [
+        { id: S1, terminal: TERM_A, slot: 1 },
+        { id: S2, terminal: TERM_C, slot: 2 },
+      ],
+      [
+        { id: TERM_A, slot: 1, sessionId: S1 },
+        { id: TERM_C, slot: 2, sessionId: S2 },
+      ],
+      null,
+      now,
+    );
+  const w = await editWorld(t, page, () => listNow());
+  return {
+    page,
+    w,
+    set(next) {
+      now = next;
+      w.list(() => listNow());
+    },
+  };
+}
+
+/** How many terminal boxes the shells' view holds (shown or not). */
+async function shellBoxes(page: Page): Promise<number> {
+  return readPage(page, () => document.querySelectorAll('#shell .tv-term').length, null);
+}
+
+const settle = (ms = 400): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("issue #199: milestone 2's review — the keyboard, the views and the streams", async (t) => {
+  const chromium = await browser(t);
+
+  await t.test(
+    'a held Ctrl+Shift+S acts once: its auto-repeats do not show the panel again',
+    async (t) => {
+      const { page } = await scriptedWorld(t, chromium, [{ id: SHELL_A, of: TERM_A }]);
+      await clickRow(page, S1);
+      await page.keyboard.press('Control+Shift+S'); // shown, the keyboard in the shell
+      await untilPanel(page, true);
+      await untilKeyboard(page, 'shell');
+
+      // Ctrl+Shift+S held: its first keydown, then three auto-repeats, then its keyup (CDP, as the
+      // held keys of the restart dialog's test are sent; modifiers 2 | 8: Ctrl and Shift).
+      const cdp = await page.context().newCDPSession(page);
+      const key = { key: 'S', code: 'KeyS', windowsVirtualKeyCode: 83, modifiers: 10 };
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key }); // hides
+      for (let n = 0; n < 3; n++) {
+        await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', ...key, autoRepeat: true });
+      }
+      await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key });
+
+      await settle();
+      assert.equal((await panel(page)).shown, false, 'hidden once, not shown again');
+    },
+  );
+
+  await t.test(
+    'a shell this page hid that then ends leaves the view: its terminal detached, no box left, and a second shell of the session makes one box, not two',
+    async (t) => {
+      const { page, w, set } = await scriptedWorld(t, chromium, [{ id: SHELL_A, of: TERM_A }]);
+      await clickRow(page, S1);
+      await page.keyboard.press('Control+Shift+S');
+      await untilPanel(page, true);
+      await untilKeyboard(page, 'shell');
+      await page.keyboard.press('Control+Shift+S');
+      await untilPanel(page, false);
+      assert.equal(await shellBoxes(page), 1, 'hidden: still attached');
+      const before = w.sent.length;
+
+      set([]); // its exit
+      await until(
+        () => w.sent.slice(before).some((one) => one['t'] === 'detach' && one['term'] === SHELL_A),
+        'its terminal detached',
+      );
+      assert.equal(await shellBoxes(page), 0);
+
+      set([{ id: SHELL_E, of: TERM_A }]);
+      await settle();
+      await page.keyboard.press('Control+Shift+S');
+      await untilPanel(page, true);
+      assert.equal(await shellBoxes(page), 1, 'one box');
+    },
+  );
+
+  await t.test(
+    'the shell an act asked for takes the keyboard only while the keyboard is where it was at the press: moved to the session meanwhile, it stays there',
+    async (t) => {
+      const { page, w, set } = await scriptedWorld(t, chromium);
+      await clickRow(page, S1);
+      await toZone(page, 'list');
+      await untilKeyboard(page, 'list');
+      await page.keyboard.press('Control+Shift+S'); // from the list
+      const asked = await w.act(1);
+      assert.deepEqual([asked['kind'], asked['term']], ['shell', TERM_A]);
+      await clickIn(page, '#terminal'); // the user goes on in Claude Code's terminal
+      await untilKeyboard(page, 'terminal');
+
+      set([{ id: SHELL_A, of: TERM_A }]);
+      await untilPanel(page, true);
+      await settle();
+      assert.equal(await keyboard(page), 'terminal', 'the keyboard stays where the user put it');
+      w.answer(asked, { ok: true });
+    },
+  );
+
+  await t.test(
+    'a dialog opened while the act waits keeps the keyboard when the list brings the shell',
+    async (t) => {
+      const { page, w, set } = await scriptedWorld(t, chromium);
+      await clickRow(page, S1);
+      await toZone(page, 'list');
+      await untilKeyboard(page, 'list');
+      await page.keyboard.press('Control+Shift+S');
+      const asked = await w.act(1);
+      await page.keyboard.press('l'); // the label dialog, from the list
+      await page.waitForFunction(
+        () => document.getElementById('editor')?.contains(document.activeElement) === true,
+        null,
+        { timeout: 20_000 },
+      );
+
+      set([{ id: SHELL_A, of: TERM_A }]);
+      await settle(800);
+      assert.equal(
+        await readPage(
+          page,
+          () => document.getElementById('editor')?.contains(document.activeElement) === true,
+          null,
+        ),
+        true,
+        'the dialog keeps the keyboard',
+      );
+      w.answer(asked, { ok: true });
+    },
+  );
+
+  await t.test(
+    "the asked shell takes no keyboard once another session is the pane's, also with that one's shell shown; a hidden window keeps only the shown shell attached; a shell's notice is shown in its view",
+    async (t) => {
+      const { page, w, set } = await scriptedWorld(t, chromium, [{ id: SHELL_C, of: TERM_C }]);
+      // S2's shell shown, then the keyboard back in the list.
+      await clickRow(page, S2);
+      await page.keyboard.press('Control+Shift+S');
+      await untilPanel(page, true);
+      await untilKeyboard(page, 'shell');
+      await page.keyboard.press('Control+Shift+L');
+      await untilKeyboard(page, 'list');
+      // S1 selected, its shell asked for from the list, then S2 selected again (the keyboard in
+      // the list all the while): the list that brings S1's shell gives it no keyboard.
+      await page.keyboard.press('k');
+      await until(async () => (await shownTerm(page)) === TERM_A, "S1's terminal shown");
+      await page.keyboard.press('Control+Shift+S');
+      const asked = await w.act(1);
+      await page.keyboard.press('j');
+      await until(async () => (await shownTerm(page)) === TERM_C, "S2's terminal shown");
+      await untilPanel(page, true); // S2's own shell
+
+      set([
+        { id: SHELL_C, of: TERM_C },
+        { id: SHELL_A, of: TERM_A },
+      ]);
+      await settle(800);
+      assert.equal(await keyboard(page), 'list', 'no keyboard to the other session’s shell');
+      w.answer(asked, { ok: true });
+
+      // Both shells attached (S1's shown once), S2's shown: the window hidden keeps S2's only.
+      await page.keyboard.press('k');
+      await untilPanel(page, true);
+      await page.keyboard.press('j');
+      await until(async () => (await shownTerm(page)) === TERM_C, "S2's terminal shown again");
+      await untilPanel(page, true);
+      assert.equal(await shellBoxes(page), 2);
+      const before = w.sent.length;
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+      await until(
+        () => w.sent.slice(before).some((one) => one['t'] === 'detach' && one['term'] === SHELL_A),
+        "the hidden shell's terminal detached",
+      );
+      assert.ok(
+        !w.sent.slice(before).some((one) => one['t'] === 'detach' && one['term'] === SHELL_C),
+        'the shown one stays',
+      );
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+
+      // A notice of the shown shell (its input refused): on the shell's terminal.
+      w.send({ t: 'notice', kind: 'input-full', term: SHELL_C, text: 'input full' });
+      await page.waitForSelector('#shell .tv-bar[data-kind="input-full"]', {
+        state: 'visible',
+        timeout: 20_000,
+      });
+    },
+  );
+
+  await t.test(
+    "a shell another window resized is drawn at that window's size here, with the hint that another window sizes it",
+    async (t) => {
+      const l = await withShell(t, chromium);
+      const [id] = shellsOf(l);
+      assert.ok(id !== undefined);
+      const other = await connectTestPage(t, l.d, l.server);
+      other.send({ t: 'attach', term: id, cols: 60, rows: 7 });
+      await other.next('snap', 'the other page’s snap');
+      other.send({ t: 'input', term: id, data: ' ' }); // it types: it owns the size
+      other.send({ t: 'resize', term: id, cols: 60, rows: 7 });
+
+      await until(
+        async () =>
+          (await readPage(
+            l.page,
+            () =>
+              document.querySelectorAll('#shell .tv-term:not([hidden]) .xterm-rows > div').length,
+            null,
+          )) === 7,
+        'seven rows here',
+      );
+      await l.page.waitForSelector('#shell .tv-term:not([hidden]) .tv-hint', {
+        state: 'visible',
+        timeout: 20_000,
+      });
     },
   );
 });
