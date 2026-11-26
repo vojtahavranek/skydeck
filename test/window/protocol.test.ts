@@ -184,6 +184,8 @@ const VALID: Record<string, PageMessage> = {
   'act ticket, empty (removes it)': { t: 'act', id: 17, kind: 'ticket', sessionId: S1, text: '' },
   // Follow-up F13: the page's colours again, after a pick in Settings' Appearance or the system's scheme.
   theme: { t: 'theme', theme: { fg: '#24292f', bg: '#fbfbf9' } },
+  // Issue #199: a shell under the session terminal `term`, with its first size.
+  'act shell': { t: 'act', id: 18, kind: 'shell', term: TERM, cols: 120, rows: 13 },
 };
 
 /** The stage D act kinds that name a session (plan D 2.2), one valid message of each. */
@@ -442,7 +444,7 @@ describe('parsePageMessage: what is refused', () => {
 
   test("every act's id is a whole number from 0 (stage A's, stage D's and F18's kinds alike)", () => {
     const acts = Object.entries(VALID).filter(([, message]) => message.t === 'act');
-    assert.equal(acts.length, 22); // #188's two act resume with flags, F44's park and unpark, S2 12.4's unread and read
+    assert.equal(acts.length, 23); // #188's two act resume with flags, F44's park and unpark, S2 12.4's unread and read, #199's shell
     for (const [name, message] of acts) {
       for (const id of [-1, 1.5, 2 ** 53]) {
         refused(page({ ...message, id }));
@@ -1737,6 +1739,30 @@ describe("parsePageMessage: F40's carry over (design 7.1, S2 12.6)", () => {
       }
       refused(page({ ...message, extra: 1 }));
       refused(page({ ...message, sessionId: 'S1' }));
+    }
+  });
+});
+
+describe("parsePageMessage: issue #199's shell (S2 7.10, 15.1)", () => {
+  const shell = VALID['act shell'] as PageMessage;
+
+  test('A12: no field can carry a program, an argument, a folder, an environment or a session: each one more is an unknown field', () => {
+    for (const field of ['program', 'argv', 'file', 'cwd', 'dir', 'env', 'flags', 'sessionId']) {
+      const values: unknown[] = ['/bin/bash', ['-c', 'id'], { HOME: '/' }, '', null];
+      for (const value of values) {
+        const kind = refused(page({ ...shell, [field]: value }));
+        assert.ok(kind.endsWith('unknown field'), `${field}: ${kind}`);
+      }
+    }
+  });
+
+  test('a term that is no terminal id, a size of 0 or over 65535, or a size that is no whole number → refused', () => {
+    for (const term of ['0123456789AB', '0123456789a', '0123456789abc', '', 'x'.repeat(12)]) {
+      refused(page({ ...shell, term }));
+    }
+    for (const size of [0, -1, 65536, 1.5]) {
+      refused(page({ ...shell, cols: size }));
+      refused(page({ ...shell, rows: size }));
     }
   });
 });

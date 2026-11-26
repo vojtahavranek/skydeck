@@ -2,7 +2,8 @@
  * Which holders of a session run in the window, for `skydeck show` (C15, S2 11.4; plan task 78):
  * a holder is in the window when it is a keeper's program or descends from it — S2 7.5's walk
  * (`holderPlace`), up to 8 parents below the program, so 9 below the keeper — and that keeper is
- * alive by its `.pid` line in the runtime directory (S2 4.2, design 5.5). It does not depend on a
+ * alive by its `.pid` line in the runtime directory (S2 4.2, design 5.5) and is no session's shell's
+ * keeper (its line's `shell`, S2 7.10). It does not depend on a
  * running server: it reads the store's record of the directory and the keepers' lines, creates
  * nothing and connects to nothing.
  */
@@ -36,7 +37,9 @@ export function holdersInWindow(deck: Deck, holders: readonly Holder[]): Readonl
     const { dir } = resolveRuntimeDir(deck, 'follow');
     const keepers = new Map<number, { procStart: number; termId: string }>();
     for (const keeper of listKeeperLines(platform, runtimeFiles(dir))) {
-      if (keeper.state === 'alive' && keeper.line !== null) {
+      // A session's shell's keeper (S2 7.10) holds no terminal of a session: a `claude` started
+      // in a shell runs outside the window's terminals, as the window says (S2 7.9).
+      if (keeper.state === 'alive' && keeper.line !== null && keeper.line.keeper?.shell !== true) {
         keepers.set(keeper.line.pid, { procStart: keeper.line.procStart, termId: keeper.id });
       }
     }

@@ -53,30 +53,37 @@ export async function resumeHere(page: Page, sessionId: string): Promise<string>
   return untilTerminalOf(page, sessionId);
 }
 
-/** The rows the shown terminal shows, as text (trailing spaces cut). */
-export async function screenText(page: Page): Promise<string> {
+/**
+ * The rows the shown terminal of the view in `root` shows, as text (trailing spaces cut): the
+ * session terminals' view (`#terminal`) by default; issue #199's shells' view is `#shell`.
+ */
+export async function screenText(page: Page, root = '#terminal'): Promise<string> {
   return readPage(
     page,
-    () => {
-      const box = document.querySelector('#terminal .tv-term:not([hidden])');
+    (root) => {
+      const box = document.querySelector(`${root} .tv-term:not([hidden])`);
       const rows = box?.querySelectorAll('.xterm-rows > div') ?? [];
       return [...rows]
         .map((row) => (row.textContent ?? '').replaceAll(' ', ' ').trimEnd())
         .join('\n');
     },
-    null,
+    root,
   );
 }
 
-/** Waits until the shown terminal shows text matching `pattern`; returns that text. */
+/**
+ * Waits until the shown terminal of the view in `root` (`#terminal` by default) shows text
+ * matching `pattern`; returns that text.
+ */
 export async function untilScreen(
   page: Page,
   pattern: RegExp,
   timeout = PAGE_WAIT_MS,
+  root = '#terminal',
 ): Promise<string> {
   const deadline = performance.now() + timeout;
   for (;;) {
-    const text = await screenText(page);
+    const text = await screenText(page, root);
     if (pattern.test(text)) return text;
     if (performance.now() > deadline) {
       assert.fail(

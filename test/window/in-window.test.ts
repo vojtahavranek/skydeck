@@ -277,6 +277,26 @@ describe('holdersInWindow on a fake /proc', () => {
     assert.deepEqual([...holdersInWindow(d.deck, [below(0)])], []);
   });
 
+  test("a holder below a session's shell's keeper (its line's `shell`) → not in the window; below a session's keeper → in it", (t) => {
+    const d = fakeKeeper(t);
+    assert.deepEqual([...holdersInWindow(d.deck, [below(2)])], [5002], "under a session's keeper");
+
+    const terms = join(d.sandbox.skydeckHome, 'run', 'terms');
+    writeFileSync(
+      join(terms, `${TERM}.pid`),
+      formatPidLine({
+        ...KEEPER,
+        bootId: BOOT_A,
+        keeper: { version: '4', started: true, shell: true },
+      }),
+    );
+    assert.deepEqual(
+      [...holdersInWindow(d.deck, [below(1), below(2)])],
+      [],
+      "under a shell's keeper",
+    );
+  });
+
   test('a keeper line of another boot (dead by design 5.5) → nothing in the window', (t) => {
     const d = fakeKeeper(t, BOOT_B);
     assert.deepEqual([...holdersInWindow(d.deck, [below(1)])], []);

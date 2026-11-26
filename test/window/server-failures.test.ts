@@ -29,7 +29,7 @@ import { readLock } from '../../src/sessions/resume.ts';
 import { SCHEMA_VERSION } from '../../src/store/migrations.ts';
 import { pageProof } from '../../src/window/auth.ts';
 import { controlClient } from '../../src/window/client.ts';
-import { encodeFrame, frameReader, parseHello } from '../../src/window/frames.ts';
+import { encodeFrame, frameReader, isShellHello, parseHello } from '../../src/window/frames.ts';
 import type { KeeperHello } from '../../src/window/frames.ts';
 import type { ListMessage, SnapMessage } from '../../src/window/protocol.ts';
 import { listKeeperLines } from '../../src/window/runtime.ts';
@@ -123,8 +123,9 @@ async function claimHello(d: ServerSandbox, termId: string): Promise<KeeperHello
         const frame = frames.find((f) => f.type === 'H');
         if (frame === undefined) return;
         const hello = parseHello(frame.payload);
-        if (hello.ok) resolve(hello.value);
-        else reject(new Error(hello.kind));
+        if (!hello.ok) reject(new Error(hello.kind));
+        else if (isShellHello(hello.value)) reject(new Error("a shell's hello"));
+        else resolve(hello.value);
       });
     });
   } finally {

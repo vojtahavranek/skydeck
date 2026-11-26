@@ -234,7 +234,7 @@ describe('keeper: the hang-up (E)', { concurrency: true }, () => {
     const hello = again.hello;
     assert.equal(hello.started, true);
     assert.deepEqual([hello.pid, hello.procStart, hello.exited], [pid, procStart, null]);
-    assert.equal(hello.keeper, '3');
+    assert.equal(hello.keeper, '4');
     again.client.send('I', 'x\r');
     const x = exit(await again.client.next('X'));
     assert.equal(x.code, 0);

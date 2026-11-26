@@ -100,6 +100,11 @@ function terminal(id: string, sessionId: string, slot: number, more: Row = {}): 
   };
 }
 
+/** Issue #199: a shell of the list (`list.shells`), under the terminal `of`. */
+function shellRow(id: string, of: string): Row {
+  return { id, of, state: 'running', cols: 80, rows: 12, ownsSize: true };
+}
+
 /** `list.selected` for `sessionId` (S2 8.2.3, plan D 2.2), with `more` over it. */
 function selectedOf(sessionId: string, more: Row = {}): Row {
   return {
@@ -141,8 +146,13 @@ interface Sections {
   week?: Row[];
 }
 
-/** A list of these sections and terminals, with `selected`. */
-function listOf(sections: Sections, terminals: Row[], selected: Row | null): Row {
+/** A list of these sections and terminals, with `selected` (and issue #199's `shells`). */
+function listOf(
+  sections: Sections,
+  terminals: Row[],
+  selected: Row | null,
+  shells: Row[] = [],
+): Row {
   return {
     ...scriptedList([], []),
     sections: (['open', 'week', 'earlier'] as const).map((name) => ({
@@ -155,6 +165,7 @@ function listOf(sections: Sections, terminals: Row[], selected: Row | null): Row
       closedStacks: [],
     })),
     terminals,
+    shells,
     selected,
   };
 }
@@ -163,14 +174,19 @@ interface Scripted {
   page: Page;
   w: EditWorld;
   /** Sets what the next lists hold and sends one. */
-  set(change: { sections?: Sections; terminals?: Row[]; selected?: Record<string, Row> }): void;
+  set(change: {
+    sections?: Sections;
+    terminals?: Row[];
+    selected?: Record<string, Row>;
+    shells?: Row[];
+  }): void;
 }
 
 /** A page with the real modules on an `editWorld` whose lists are made of `start`. */
 async function scripted(
   t: TestContext,
   chromium: Browser,
-  start: { sections: Sections; terminals?: Row[]; selected?: Record<string, Row> },
+  start: { sections: Sections; terminals?: Row[]; selected?: Record<string, Row>; shells?: Row[] },
   options: { recorder?: boolean } = {},
 ): Promise<Scripted> {
   const page = await newPage(t, chromium);
@@ -178,8 +194,9 @@ async function scripted(
   let sections = start.sections;
   let terminals = start.terminals ?? [];
   let selected = start.selected ?? {};
+  let shells = start.shells ?? [];
   const listFor = (id: string | null): Row =>
-    listOf(sections, terminals, id === null ? null : selectedOf(id, selected[id] ?? {}));
+    listOf(sections, terminals, id === null ? null : selectedOf(id, selected[id] ?? {}), shells);
   const w = await editWorld(t, page, listFor);
   return {
     page,
@@ -188,6 +205,7 @@ async function scripted(
       sections = change.sections ?? sections;
       terminals = change.terminals ?? terminals;
       selected = change.selected ?? selected;
+      shells = change.shells ?? shells;
       w.list(listFor);
     },
   };
@@ -297,6 +315,7 @@ async function measure(page: Page): Promise<Measured> {
           '.header-id',
           '.header-prs-button',
           '.header-note-button',
+          '.header-shell',
           '.header-done',
           '.header-group-edit',
           '.header-group-add',
@@ -449,9 +468,11 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
     async (t) => {
       const term = terminal(TERM_A, S1, 1);
       const bare = running(S1, TERM_A, 1, { title: 'a title' });
+      // Issue #199: with a shell open, so that the header's Shell shows its dot (its widest).
       const s = await scripted(t, chromium, {
         sections: { open: [bare] },
         terminals: [term],
+        shells: [shellRow(TERM_B, TERM_A)],
       });
       const note5 = 'one\ntwo\nthree\nfour\nfive';
       const longDir = `/home/u/${'a-very-long-directory-name/'.repeat(13)}end`;
@@ -531,6 +552,7 @@ test("stage D's header and the pull-request dialog's list", async (t) => {
           for (const [control, whole] of Object.entries(m.whole)) {
             assert.notEqual(whole, false, `${where}: ${control} is whole and inside the header`);
           }
+          if (width === 1280) assert.equal(m.whole['.header-shell'], true, `${where}: Shell`);
           assert.equal(m.whole['.header-id'], true, `${where}: the short id`);
           assert.equal(m.whole['.header-prs-button'], true, `${where}: the pull-request button`);
           // The open pull requests as far as they fit: each shown whole, or left out whole.
@@ -2048,6 +2070,167 @@ test("F16: the flags a session was started with, last on the header's second lin
       await showsText(l.page, '#cards .card-command', new RegExp(`${FLAGS_TEXT}$`));
       await sleep(300);
       assert.equal((await flagsLine(l.page)).flags, null, 'not on the resume card');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+});
+
+test("issue #199: the header's Shell and its dot", async (t) => {
+  const chromium = await browser(t);
+
+  /** The header's Shell: whether it is there, its tooltip, whether its dot shows. */
+  const shellButton = (page: Page): Promise<{ there: boolean; tip: string; dot: boolean }> =>
+    page.evaluate(() => {
+      const button = document.querySelector<HTMLElement>('#cards .header-shell');
+      const mark = button?.querySelector<HTMLElement>('.header-shell-mark');
+      return {
+        there: button !== null && button !== undefined && button.checkVisibility(),
+        tip: button?.title ?? '',
+        dot: mark !== null && mark !== undefined && mark.checkVisibility(),
+      };
+    });
+  const until = async (
+    page: Page,
+    wanted: { there: boolean; tip?: string; dot?: boolean },
+    what: string,
+  ): Promise<void> => {
+    const deadline = performance.now() + PAGE_WAIT_MS;
+    for (;;) {
+      const now = await shellButton(page);
+      if (
+        now.there === wanted.there &&
+        (wanted.tip === undefined || now.tip === wanted.tip) &&
+        (wanted.dot === undefined || now.dot === wanted.dot)
+      ) {
+        return;
+      }
+      assert.ok(performance.now() < deadline, `${what}: ${JSON.stringify(now)}`);
+      await sleep(50);
+    }
+  };
+  const OPEN = "open a shell in this session's folder (Ctrl+Shift+S)";
+  const HIDDEN = 'a shell is open: show it (Ctrl+Shift+S)';
+  const SHOWN = 'hide the shell: what runs in it keeps running (Ctrl+Shift+S)';
+
+  await t.test(
+    'A3: Shell stands in the header of a running terminal only; its dot shows while a shell is open, shown or hidden, and not without one; the tooltips; the list’s row is the same with and without a shell',
+    async (t) => {
+      const term = terminal(TERM_A, S1, 1);
+      const s = await scripted(t, chromium, {
+        sections: { open: [running(S1, TERM_A, 1, { title: 'a title' })], week: [row(S2)] },
+        terminals: [term],
+      });
+      await showsText(s.page, '#cards .header-title', /^a title$/);
+      await until(s.page, { there: true, tip: OPEN, dot: false }, 'no shell');
+      const rowOf = (): Promise<{ text: string; classes: string }> =>
+        s.page.evaluate(() => {
+          const element = document.querySelector<HTMLElement>(`#list [data-id]`);
+          return { text: element?.textContent ?? '', classes: element?.className ?? '' };
+        });
+      const without = await rowOf();
+
+      s.set({ shells: [shellRow(TERM_B, TERM_A)] });
+      await until(s.page, { there: true, tip: HIDDEN, dot: true }, 'a hidden shell');
+      assert.deepEqual(await rowOf(), without, 'the row the same with a shell');
+
+      await s.page.locator('#cards .header-shell').click();
+      await until(s.page, { there: true, tip: SHOWN, dot: true }, 'a shown shell');
+      await s.page.waitForFunction(
+        () => (document.getElementById('shell') as HTMLElement).hidden === false,
+        null,
+        { timeout: PAGE_WAIT_MS },
+      );
+      assert.ok(
+        s.w.sent.some((one) => one['t'] === 'attach' && one['term'] === TERM_B),
+        "the shell's stream attached",
+      );
+      await s.page.locator('#cards .header-shell').click();
+      await until(s.page, { there: true, tip: HIDDEN, dot: true }, 'hidden again');
+      assert.deepEqual(await rowOf(), without);
+
+      s.set({ shells: [] });
+      await until(s.page, { there: true, tip: OPEN, dot: false }, 'the shell gone');
+
+      // A session that does not run in the window has no Shell.
+      await clickRow(s.page, S2);
+      await until(s.page, { there: false }, 'no Shell for a session that does not run');
+      assert.deepEqual(s.w.acts(), [], 'nothing was asked of the server');
+    },
+  );
+
+  await t.test(
+    'A1: a click on Shell opens the shell under the session’s terminal with the keyboard in it; a click that hides moves the keyboard only out of the shell, never out of the list',
+    async (t) => {
+      const l = await launched(t, chromium);
+      l.d.resumable(S1);
+      await resumeFromList(l.page, S1);
+      const term = await l.page.evaluate(
+        () => document.getElementById('right-zone')?.dataset['paneTerm'] ?? '',
+      );
+      const deadline = performance.now() + PAGE_WAIT_MS;
+      while (
+        !l.server.hub.list().some((one) => one.id === term && one.sessionId === S1 && one.program)
+      ) {
+        assert.ok(performance.now() < deadline, 'S1 reported in its terminal');
+        await sleep(50);
+      }
+      await until(l.page, { there: true, tip: OPEN, dot: false }, 'Shell');
+
+      await l.page.locator('#cards .header-shell').click();
+
+      await l.page.waitForFunction(
+        () =>
+          (document.getElementById('shell') as HTMLElement).hidden === false &&
+          document.getElementById('shell')?.contains(document.activeElement) === true,
+        null,
+        { timeout: PAGE_WAIT_MS },
+      );
+      await until(l.page, { there: true, tip: SHOWN, dot: true }, 'Shell says it is shown');
+      assert.equal((l.server.hub.shells?.() ?? []).length, 1);
+      assert.notEqual(await active(l.page), 'BUTTON', 'the click took no keyboard');
+
+      // A click that hides: the keyboard leaves the shell only when it was in it. In the list it
+      // stays in the list, so that the next list keys reach no program.
+      const where = (): Promise<string> =>
+        l.page.evaluate(() => {
+          const at = document.activeElement;
+          if (document.getElementById('shell')?.contains(at) === true) return 'shell';
+          if (document.getElementById('terminal')?.contains(at) === true) return 'terminal';
+          if (document.getElementById('list-zone')?.contains(at) === true) return 'list';
+          return 'other';
+        });
+      const shown = (): Promise<boolean> =>
+        l.page.evaluate(() => (document.getElementById('shell') as HTMLElement).hidden === false);
+      await l.page.keyboard.press('Control+Shift+L');
+      await l.page.waitForFunction(
+        () => document.getElementById('list-zone')?.contains(document.activeElement) === true,
+        null,
+        { timeout: PAGE_WAIT_MS },
+      );
+      await l.page.locator('#cards .header-shell').click();
+      await until(l.page, { there: true, tip: HIDDEN, dot: true }, 'hidden by the click');
+      await sleep(300);
+      assert.equal(await shown(), false);
+      assert.equal(await where(), 'list', 'the keyboard stays in the list');
+      assert.equal(await shownText(l.page, '#focus-zone'), 'Focus: list');
+
+      // Shown again by a click from the list: the shell gets the keyboard (a shell to type into).
+      await l.page.locator('#cards .header-shell').click();
+      await until(l.page, { there: true, tip: SHOWN, dot: true }, 'shown by the click');
+      await l.page.waitForFunction(
+        () => document.getElementById('shell')?.contains(document.activeElement) === true,
+        null,
+        { timeout: PAGE_WAIT_MS },
+      );
+
+      // Hidden by a click while the keyboard is in the shell: it goes to the session's terminal.
+      await l.page.locator('#cards .header-shell').click();
+      await until(l.page, { there: true, tip: HIDDEN, dot: true }, 'hidden again');
+      await l.page.waitForFunction(
+        () => document.getElementById('terminal')?.contains(document.activeElement) === true,
+        null,
+        { timeout: PAGE_WAIT_MS },
+      );
       assert.deepEqual(l.problems, []);
     },
   );

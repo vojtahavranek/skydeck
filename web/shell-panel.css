@@ -1,0 +1,45 @@
+/* A session's shell (issue #199, S2 12.6): its panel (`#shell`, a second terminal view) under the
+   session's terminal in the right zone, and the bar between the two. Drawn only while the pane is
+   a terminal (app.js hides both with the `hidden` attribute otherwise). web/shell-panel.js lays
+   the area out: `data-shell="split"` on the zone, the panel's height in px (its style) and the
+   session's terminal the rest; `data-shell="full"` in an area too low for both: the panel over the
+   whole area, the session's terminal and the bar not laid out (the zone's own children only:
+   xterm.js's element has a class `terminal` too). The bar's 6 px are
+   web/shell-panel-split.js's BAR_PX (its unit test holds them equal). */
+.shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--term-fg);
+  background: var(--term-bg);
+}
+.right-zone[data-shell='full'] > .shell {
+  flex: 1;
+}
+.shell-bar {
+  position: relative;
+  flex: none;
+  height: 6px;
+  background: var(--edge);
+  cursor: row-resize;
+  touch-action: none;
+}
+.shell-bar:hover,
+.shell-bar[data-dragging] {
+  background: var(--selline);
+}
+:root[data-shell-drag],
+:root[data-shell-drag] * {
+  cursor: row-resize !important;
+}
+.shell[hidden],
+.shell-bar[hidden],
+.right-zone:not([data-pane='terminal']) .shell,
+.right-zone:not([data-pane='terminal']) .shell-bar,
+.right-zone[data-shell='full'] > .terminal,
+.right-zone[data-shell='full'] > .shell-bar {
+  display: none;
+}

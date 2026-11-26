@@ -3,8 +3,10 @@
  * `terms/<id>.pid`. The line, exactly, with one '\n' at the end:
  *   server.pid, keepalive.pid:  "4242 51234567 6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f"
  *   terms/<id>.pid (a keeper): "4242 51234567 6c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f 1 0"
+ *   terms/<id>.pid (a shell's keeper, version 4 on): "4242 51234567 6c1d2e3f-… 4 0 shell"
  * — pid, process start (field 22), boot id, and for a keeper its KEEPER_VERSION and started 0|1,
- * separated by one space. The keep-alive script (sh) and the keeper (python) write and read the
+ * and for the keeper of a session's shell (S2 7.10) the word `shell`, separated by one space. A
+ * skydeck before shells reads three or five fields only, so to it a shell's keeper holds no line. The keep-alive script (sh) and the keeper (python) write and read the
  * same form. A reader judges a line by design 5.5's liveness rule, never by the pid alone.
  */
 
@@ -15,14 +17,16 @@ export interface PidLine {
   pid: number;
   procStart: number;
   bootId: string;
-  keeper?: { version: string; started: boolean };
+  /** `shell`: the line is a session's shell's keeper (its sixth field, S2 7.10). */
+  keeper?: { version: string; started: boolean; shell?: true };
 }
 
 /**
  * Contract 2.8: pid and process start are decimal integers; the boot id and a keeper's version are
- * any token without whitespace (tests invent their own boot ids); started is 0 or 1.
+ * any token without whitespace (tests invent their own boot ids); started is 0 or 1; a shell's
+ * keeper's line ends with ` shell`.
  */
-const LINE = /^([0-9]+) ([0-9]+) (\S+)(?: (\S+) ([01]))?\n?$/;
+const LINE = /^([0-9]+) ([0-9]+) (\S+)(?: (\S+) ([01])( shell)?)?\n?$/;
 
 /** The decimal text as a number, or null when it is beyond what a number holds exactly. */
 function safeInteger(text: string): number | null {
@@ -44,6 +48,9 @@ export function formatPidLine(line: PidLine): string {
   const fields = [String(line.pid), String(line.procStart), line.bootId];
   if (line.keeper !== undefined) {
     fields.push(line.keeper.version, line.keeper.started ? '1' : '0');
+    if (line.keeper.shell === true) {
+      fields.push('shell');
+    }
   }
   if (
     !Number.isSafeInteger(line.pid) ||
@@ -67,14 +74,17 @@ export function formatPidLine(line: PidLine): string {
 export function parsePidLine(text: string): PidLine | null {
   const match = LINE.exec(text);
   if (match === null) return null;
-  const [, pidText, startText, bootId, version, started] = match;
+  const [, pidText, startText, bootId, version, started, shell] = match;
   if (pidText === undefined || startText === undefined || bootId === undefined) return null;
   const pid = safeInteger(pidText);
   const procStart = safeInteger(startText);
   if (pid === null || pid < 1 || procStart === null) return null;
   const line: PidLine = { pid, procStart, bootId };
   if (version !== undefined && started !== undefined) {
-    line.keeper = { version, started: started === '1' };
+    line.keeper =
+      shell === undefined
+        ? { version, started: started === '1' }
+        : { version, started: started === '1', shell: true };
   }
   return line;
 }

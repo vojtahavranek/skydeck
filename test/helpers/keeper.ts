@@ -17,6 +17,7 @@ import {
   decodeSnapshot,
   encodeFrame,
   frameReader,
+  isShellHello,
   parseExit,
   parseHello,
   parseResize,
@@ -29,6 +30,8 @@ import type {
   KeeperHello,
   KeeperSpec,
   KeeperStarted,
+  ShellHello,
+  ShellSpec,
 } from '../../src/window/frames.ts';
 import { parsePidLine } from '../../src/window/pidline.ts';
 import type { PidLine } from '../../src/window/pidline.ts';
@@ -99,11 +102,26 @@ export function stillRuns(pid: number, procStart: number): boolean {
   return procStartOf(pid) === procStart;
 }
 
-export function hello(frame: Frame): KeeperHello {
+/** A hello of either kind (a session terminal's or a session's shell's). */
+export function anyHello(frame: Frame): KeeperHello | ShellHello {
   assert.equal(frame.type, 'H');
   const parsed = parseHello(frame.payload);
   assert.ok(parsed.ok, `hello refused by the codec: ${parsed.ok ? '' : parsed.kind}`);
   return parsed.value;
+}
+
+/** A session terminal's hello. */
+export function hello(frame: Frame): KeeperHello {
+  const value = anyHello(frame);
+  assert.ok(!isShellHello(value), "a session terminal's hello, not a shell's");
+  return value;
+}
+
+/** A session's shell's hello. */
+export function shellHello(frame: Frame): ShellHello {
+  const value = anyHello(frame);
+  assert.ok(isShellHello(value), "a session's shell's hello");
+  return value;
 }
 
 export function started(frame: Frame): KeeperStarted {
@@ -251,8 +269,13 @@ function keeperClient(socket: Socket, onFrame: (frame: Frame) => void): KeeperCl
   };
 }
 
-export interface Keeper {
-  spec: KeeperSpec;
+/** The hello a keeper of this spec sends. */
+export type HelloOf<S extends KeeperSpec | ShellSpec> = S extends ShellSpec
+  ? ShellHello
+  : KeeperHello;
+
+export interface Keeper<S extends KeeperSpec | ShellSpec = KeeperSpec> {
+  spec: S;
   /** The keeper's own pid. */
   pid: number;
   procStart: number;
@@ -267,7 +290,7 @@ export interface Keeper {
   pidLine(): PidLine | null;
   connect(): Promise<KeeperClient>;
   /** Connects, claims (C) and waits for the hello. */
-  claim(): Promise<{ client: KeeperClient; hello: KeeperHello }>;
+  claim(): Promise<{ client: KeeperClient; hello: HelloOf<S> }>;
   /** SIGKILL to the keeper, a process this test started (asserted to be still that process). */
   kill(): void;
   /** SIGSTOP or SIGCONT to the keeper, a process this test started (and that still runs). */
@@ -277,6 +300,11 @@ export interface Keeper {
 export interface StartOptions {
   /** Merged over the default spec. */
   spec?: Partial<KeeperSpec>;
+  /**
+   * A session's shell's spec (S2 7.10) instead of a session terminal's: merged over `shellSpec()`'s
+   * default. `spec` is then not read.
+   */
+  shell?: Partial<ShellSpec>;
   /** The keeper's own environment, over the sandbox's (SKYDECK_TEST_KEEPER_* go here). */
   env?: Record<string, string | undefined>;
   /** Written to stdin instead of the spec, as it is. */
@@ -300,6 +328,13 @@ export interface KeeperBox {
   keepersLog: string;
   /** A spec for the stand-in: start deadline in 60 s, 80x24, cwd the sandbox's home. */
   spec(overrides?: Partial<KeeperSpec>): KeeperSpec;
+  /**
+   * A session's shell's spec: the stand-in shell (`file` the platform's loginShell, argv
+   * `-shell-standin`), no lock, meta of kind shell `of` a terminal id that names no keeper; start
+   * deadline in 60 s, 80x24, cwd the sandbox's home.
+   */
+  shellSpec(overrides?: Partial<ShellSpec>): ShellSpec;
+  start(options: StartOptions & { shell: Partial<ShellSpec> }): Promise<Keeper<ShellSpec>>;
   start(options?: StartOptions): Promise<Keeper>;
   /** The lines of keepers.log so far. */
   logLines(): string[];
@@ -315,7 +350,7 @@ function terminalId(tp: RealTestPlatform): string {
  * and its program has ended — before the sandbox is removed.
  */
 export function keeperSandbox(t: TestContext): KeeperBox {
-  const keepers: Keeper[] = [];
+  const keepers: Keeper<KeeperSpec | ShellSpec>[] = [];
   const clients: KeeperClient[] = [];
   const programs: { pid: number; procStart: number }[] = [];
   let box: KeeperBox | null = null;
@@ -389,8 +424,42 @@ export function keeperSandbox(t: TestContext): KeeperBox {
     };
   };
 
-  const start = async (options: StartOptions = {}): Promise<Keeper> => {
-    const keeperSpec = spec(options.spec);
+  const shellSpec = (overrides: Partial<ShellSpec> = {}): ShellSpec => {
+    const id = overrides.id ?? terminalId(tp);
+    const now = tp.platform.clock.nowNs();
+    const file = tp.platform.loginShell;
+    assert.ok(file !== null, 'the test platform names a stand-in shell');
+    return {
+      protocol: 1,
+      id,
+      socket: join(termsDir, `${id}.sock`),
+      cols: 80,
+      rows: 24,
+      cwd: s.home,
+      file,
+      argv: ['-shell-standin'],
+      env: s.env({ TERM: 'xterm-256color', COLORTERM: 'truecolor', PWD: overrides.cwd ?? s.home }),
+      startBy: String(now + 60_000_000_000n),
+      lock: null,
+      coreSoft: '1',
+      meta: {
+        kind: 'shell',
+        of: 'feedfacecafe',
+        openedNs: String(now),
+        build: 'test-build',
+        dir: s.home,
+      },
+      ...overrides,
+    };
+  };
+
+  async function start(
+    options: StartOptions & { shell: Partial<ShellSpec> },
+  ): Promise<Keeper<ShellSpec>>;
+  async function start(options?: StartOptions): Promise<Keeper>;
+  async function start(options: StartOptions = {}): Promise<Keeper<KeeperSpec | ShellSpec>> {
+    const keeperSpec: KeeperSpec | ShellSpec =
+      options.shell === undefined ? spec(options.spec) : shellSpec(options.shell);
     let args = ['-I', KEEPER];
     let env = s.env(options.env);
     if (options.faults !== undefined) {
@@ -431,7 +500,7 @@ export function keeperSandbox(t: TestContext): KeeperBox {
         programs.push({ pid, procStart: start });
       }
     };
-    const keeper: Keeper = {
+    const keeper: Keeper<KeeperSpec | ShellSpec> = {
       spec: keeperSpec,
       pid: child.pid,
       procStart: procStart ?? -1,
@@ -450,7 +519,7 @@ export function keeperSandbox(t: TestContext): KeeperBox {
         const client = await keeper.connect();
         client.send('C');
         const helloFrame = await client.next('H');
-        return { client, hello: hello(helloFrame) };
+        return { client, hello: anyHello(helloFrame) };
       },
       kill() {
         assert.ok(stillRuns(child.pid, keeper.procStart), 'the keeper no longer runs');
@@ -470,7 +539,7 @@ export function keeperSandbox(t: TestContext): KeeperBox {
       assert.ok(!ended, `the keeper ended at start; keepers.log: ${logText()}`);
     }
     return keeper;
-  };
+  }
 
   const logText = (): string => (existsSync(keepersLog) ? readFileSync(keepersLog, 'utf8') : '');
 
@@ -481,6 +550,7 @@ export function keeperSandbox(t: TestContext): KeeperBox {
     termsDir,
     keepersLog,
     spec,
+    shellSpec,
     start,
     logLines: () => logText().split('\n').slice(0, -1),
   };

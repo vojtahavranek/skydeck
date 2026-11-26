@@ -11,8 +11,10 @@ import {
 } from 'node:fs';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { tmpdir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { describe, test } from 'node:test';
 import type { TestContext } from 'node:test';
 
@@ -45,7 +47,9 @@ import {
 } from '../helpers/platform.ts';
 import { sandbox } from '../helpers/sandbox.ts';
 import type { Sandbox } from '../helpers/sandbox.ts';
+import { SHELL_PROMPT, shellStandin } from '../helpers/shell-standin.ts';
 import { writeWindowConfig } from '../helpers/window-config.ts';
+import { serverSandbox } from '../helpers/window.ts';
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -982,6 +986,89 @@ describe('sandbox: step 2', () => {
   });
 });
 
+describe('the stand-in login shell (design-step-2.md 7.10)', () => {
+  /** Whether `path` is a file inside `root` (a relative path from it that does not climb out). */
+  function inside(root: string, path: string): boolean {
+    const rel = relative(root, path);
+    return rel !== '' && !rel.startsWith('..') && !rel.startsWith('/');
+  }
+
+  test('both test platforms name an executable stand-in inside their own sandbox', (t) => {
+    for (const tp of [testPlatform(t), realTestPlatform(t)]) {
+      const shell = tp.platform.loginShell;
+
+      assert.ok(shell !== null, 'a loginShell is set');
+      assert.equal(shell, join(tp.sandbox.bin, 'shell-standin'));
+      assert.ok(inside(tp.sandbox.root, shell), `${shell} is inside the sandbox`);
+      assert.ok(fs.statSync(shell).isFile());
+      assert.equal(fs.statSync(shell).mode & 0o777, 0o755);
+      for (const program of ['sh', 'sleep', 'stty']) {
+        assert.ok(existsSync(join(tp.sandbox.bin, program)), program);
+      }
+    }
+  });
+
+  test('run by hand through a pipe it prompts, runs a typed printf, and ends at exit 3 with 3', async (t) => {
+    const s = sandbox(t);
+    const shell = shellStandin(s);
+    const child = spawn(shell, [], { env: s.env(), cwd: s.home, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      out += chunk;
+    });
+    const status = new Promise<number | null>((resolve) => {
+      child.on('exit', (code) => {
+        resolve(code);
+      });
+    });
+
+    child.stdin.write("printf 'typed %s\\n' here\n");
+    child.stdin.write('exit 3\n');
+
+    assert.equal(await status, 3);
+    assert.equal(out, `${SHELL_PROMPT}typed here\n${SHELL_PROMPT}`);
+  });
+});
+
+describe('no test server can start a real shell (A31)', () => {
+  /** The `loginShell` of the real platform in a child process with exactly `env`, as a server's. */
+  async function loginShellOfChild(env: Record<string, string>): Promise<unknown> {
+    const real = new URL('../../src/platform/real.ts', import.meta.url).href;
+    const program = `const { realPlatform } = await import(${JSON.stringify(real)});
+process.stdout.write(JSON.stringify(realPlatform().loginShell));`;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', program], {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
+    child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
+    const [code] = (await once(child, 'exit')) as [number | null];
+    assert.equal(code, 0, err);
+    return JSON.parse(out) as unknown;
+  }
+
+  test("a server started as a process with serverSandbox's environment has the sandbox's stand-in as its login shell", async (t) => {
+    // Every helper that starts a server as a process (serve, window and update tests) gives it
+    // serverSandbox's environment, or names SKYDECK_TEST_LOGIN_SHELL from it.
+    const d = serverSandbox(t);
+    const standin = d.platform.loginShell;
+
+    assert.ok(standin !== null);
+    assert.equal(standin, join(d.s.bin, 'shell-standin'));
+    assert.equal(d.platform.env.SKYDECK_TEST_LOGIN_SHELL, standin);
+    assert.equal(await loginShellOfChild(d.platform.env as Record<string, string>), standin);
+  });
+
+  test("a process with a sandbox's environment and no stand-in named never gets the account's shell", async (t) => {
+    const s = sandbox(t);
+
+    assert.equal(await loginShellOfChild(s.env()), null);
+  });
+});
+
 describe('realTestPlatform (A36)', () => {
   const PROGRAMS = [
     'python3',
@@ -1421,6 +1508,18 @@ describe('killKeepersIn (A34)', () => {
     assert.deepEqual(keepersToKill(lines, proc, null, [4000]), {
       kill: [],
       unknown: [10, 11, 12, 13, 14],
+    });
+  });
+
+  test("keepersToKill: a session's shell's keeper (its line's sixth field) is one it kills", () => {
+    const proc = fakeProc({
+      bootId: BOOT_A,
+      processes: { 10: { stat: statLine(10, 100), cmdline: [] } },
+    });
+
+    assert.deepEqual(keepersToKill([`10 100 ${BOOT_A} 4 1 shell\n`], proc, BOOT_A, [4000]), {
+      kill: [10],
+      unknown: [],
     });
   });
 

@@ -290,6 +290,52 @@ export function listKeeperLines(
   return found;
 }
 
+/** What a keeper's `.pid` line says it holds (S2 4.2, 7.10): `unknown` when nothing can be told. */
+export type KeeperKind = 'session' | 'shell' | 'unknown';
+
+/**
+ * S2 7.10: the keepers of terms/ that may live and that the caller does not hold (`held`: the
+ * terminal ids it has, whatever their state), each with what its line says it is — `session`
+ * (five fields), `shell` (the sixth field) or `unknown`. Every regular file `terms/<id>.pid` is
+ * read whose id is not held: a line that is dead by design 5.5 is left out; one that is alive or
+ * cannot be judged is in, and so is a file that cannot be read or that holds no line this build
+ * reads (`unknown`: a keeper of a later form may live there). Unlike `listKeeperLines`, which
+ * skips what holds no line, nothing that may be a keeper is left out: the registry opens no shell,
+ * and ends none whose owner is not found, while this is not empty of what could matter.
+ */
+export function keepersThatMayLive(
+  platform: Platform,
+  files: RuntimeFiles,
+  held: ReadonlySet<string>,
+): { id: string; kind: KeeperKind }[] {
+  const bootId = currentBootId(platform.proc);
+  const found: { id: string; kind: KeeperKind }[] = [];
+  for (const name of platform.files.list(files.termsDir)) {
+    const id = PID_FILE.exec(name)?.[1];
+    if (id === undefined || held.has(id)) continue;
+    const path = join(files.termsDir, name);
+    if (platform.files.lstat(path)?.kind !== 'file') continue;
+    let text: string | null;
+    try {
+      text = platform.files.readText(path);
+    } catch {
+      found.push({ id, kind: 'unknown' });
+      continue;
+    }
+    if (text === null) continue; // removed meanwhile: no keeper there
+    const line = parsePidLine(text);
+    if (line === null) {
+      found.push({ id, kind: 'unknown' });
+      continue;
+    }
+    if (pidLineState(line, platform.proc, bootId) === 'dead') continue;
+    const kind: KeeperKind =
+      line.keeper === undefined ? 'unknown' : line.keeper.shell === true ? 'shell' : 'session';
+    found.push({ id, kind });
+  }
+  return found;
+}
+
 /**
  * S2 7.8: removes terms/<id>.sock and .pid of keepers whose line is 'dead' (pidLineState, 2.8) or
  * whose socket refuses connections; a line that is 'unknown' never removes anything by itself.

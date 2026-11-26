@@ -39,6 +39,10 @@ const SECTIONS = [
         'the quick switcher: every session, done ones too — type to narrow; in it ↑ ↓ move, Enter switches to the session or resumes it, Esc closes',
       ],
       [['Ctrl+Shift+J'], 'the next session that needs you; again goes on'],
+      [
+        ['Ctrl+Shift+S'],
+        'a shell under the session’s terminal, in its folder; again hides it (it keeps running)',
+      ],
     ],
   },
   {

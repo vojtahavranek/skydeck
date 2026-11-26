@@ -1465,6 +1465,59 @@ describe('real platform: randomness and identity', () => {
     assert.equal(platform.uid, process.getuid?.());
     assert.equal(platform.userName, userInfo().username);
   });
+
+  test("loginShell is null or the account's shell, an absolute path without NUL", () => {
+    const { loginShell } = realPlatform();
+
+    if (loginShell !== null) {
+      assert.ok(loginShell.startsWith('/'), loginShell);
+      assert.equal(loginShell.includes('\0'), false);
+      assert.equal(loginShell, userInfo().shell);
+    }
+  });
+
+  /** realPlatform().loginShell built while this process's environment has `vars` (undefined: unset). */
+  function loginShellWith(vars: Record<string, string | undefined>): string | null {
+    const saved = Object.fromEntries(Object.keys(vars).map((name) => [name, process.env[name]]));
+    const put = (values: Record<string, string | undefined>): void => {
+      for (const [name, value] of Object.entries(values)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    };
+    put(vars);
+    try {
+      return realPlatform().loginShell;
+    } finally {
+      put(saved);
+    }
+  }
+
+  test('in a marked test sandbox (A31) SKYDECK_TEST_LOGIN_SHELL is the login shell, and the account is never read', () => {
+    const marked = { SKYDECK_TEST_NO_WINDOWS: '1' };
+
+    assert.equal(
+      loginShellWith({ ...marked, SKYDECK_TEST_LOGIN_SHELL: '/sandbox/bin/shell-standin' }),
+      '/sandbox/bin/shell-standin',
+    );
+    for (const value of [undefined, '', 'bin/shell-standin']) {
+      assert.equal(
+        loginShellWith({ ...marked, SKYDECK_TEST_LOGIN_SHELL: value }),
+        null,
+        `${JSON.stringify(value)}: no shell, never the account's`,
+      );
+    }
+  });
+
+  test('without the mark SKYDECK_TEST_LOGIN_SHELL is ignored', () => {
+    const shell = loginShellWith({
+      SKYDECK_TEST_NO_WINDOWS: undefined,
+      SKYDECK_TEST_LOGIN_SHELL: '/sandbox/bin/shell-standin',
+    });
+
+    assert.notEqual(shell, '/sandbox/bin/shell-standin');
+    if (shell !== null) assert.equal(shell, userInfo().shell);
+  });
 });
 
 describe('real processes: startDetached', () => {

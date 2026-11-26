@@ -59,10 +59,17 @@
 // and gives the default back at a double click. It takes no keyboard and does nothing while the
 // page is modal (`modal`).
 //
+// Issue #199 (S2 7.10, 12.6): a session's shell, in a second terminal view (`shellView`, in
+// `#shell` under `#terminal`, inside the right zone). The server lists the shells (`list.shells`);
+// which of them this page shows is the page's own (`state.shellsShown`, nothing of it stored).
+// The panel is drawn while the pane is a terminal that is not ended, a shell of it is listed and
+// this page shows it; the session terminals' exits and re-attach queue stay their own. The split
+// of the terminal area between the two, its bar and the remembered height are web/shell-panel.js's.
+//
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
 
-/** @import { ClosedBlock, ExitMessage, ListMessage, ResultMessage, RowPayload, SearchChip, SectionPayload, ServerMessage, SwitchItem, TerminalPayload, WelcomeMessage } from '../src/window/protocol.ts' */
+/** @import { ClosedBlock, ExitMessage, ListMessage, ResultMessage, RowPayload, SearchChip, SectionPayload, ServerMessage, ShellPayload, SwitchItem, TerminalPayload, WelcomeMessage } from '../src/window/protocol.ts' */
 /** @import { EditWhat, ListAction, WindowChord, Zone } from './keys.js' */
 /** @import { Change } from './connection.js' */
 /** @import { Pane } from './pane.js' */
@@ -88,6 +95,9 @@ import { blockInfo, movedMru, movedWith, paneFor, sessionRow } from './pane.js';
 import { createRestartDialog } from './restart-dialog.js';
 import { ACTION_LOST, noRestartText, offersRestart } from './restart-text.js';
 import { cutWords } from './search-text.js';
+import { createShellPanel } from './shell-panel.js';
+import { LEAST_FALLBACK, MIN_ROWS } from './shell-panel-split.js';
+import { shellPress, shellRefusedText } from './shell-panel-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
 import { createTour } from './tour.js';
@@ -145,6 +155,8 @@ const dom = {
   rightNone: byId('right-none'),
   cards: byId('cards'),
   terminal: byId('terminal'),
+  shellBar: byId('shell-bar'),
+  shell: byId('shell'),
   focusZone: byId('focus-zone'),
   keyMessage: byId('key-message'),
   help: byId('help'),
@@ -239,6 +251,38 @@ const state = {
   waitingSnap: null,
   /** The first list after a welcome starts the re-attach. */
   welcomed: false,
+  /**
+   * Issue #199: the ids of the shells this page shows (its panel is drawn while its terminal is
+   * the pane's); in memory only, empty at a load.
+   * @type {Set<string>}
+   */
+  shellsShown: new Set(),
+  /**
+   * Issue #199: the terminal a `shell` act of this page was sent for, while no list has brought
+   * its shell — `answered` once the act's result came (the first list after it clears it), `from`
+   * what had the keyboard at the press (the list that brings the shell gives it the keyboard only
+   * while that has it still).
+   * @type {{ term: string, answered: boolean, from: Element | null } | null}
+   */
+  shellAsked: /** @type {{ term: string, answered: boolean, from: Element | null } | null} */ (
+    null
+  ),
+  /**
+   * Issue #199: the side of the terminal zone that had the keyboard last: the session's terminal
+   * or its shell (the shell only while its panel is drawn).
+   * @type {'session' | 'shell'}
+   */
+  shellSide: /** @type {'session' | 'shell'} */ ('session'),
+  /** What the shell panel shows now (`renderShell`), to apply a change only. */
+  shellKey: '',
+  /**
+   * Issue #199 (S2 12.9): while the terminal area is too low for both (the split's `full`, come from
+   * `split`), whether the keyboard was in the session's terminal at the change, the element the
+   * change gave it to (null until given) and whether the user did something with the shell since;
+   * null otherwise.
+   * @type {{ fromSession: boolean, to: Element | null, used: boolean } | null}
+   */
+  lowFlip: /** @type {{ fromSession: boolean, to: Element | null, used: boolean } | null} */ (null),
   /** The height of the right side's header (`#cards .card-header`, a hook of contract 2.9) as
    *  last shown; 0 before any (Z1, item 5). */
   headerHeight: 0,
@@ -318,7 +362,11 @@ const list = createList(dom.list, {
   view: (change) => changeView(change),
   say: (text) => say(text),
 });
-const terminalView = createTerminalView(dom.terminal, {
+/**
+ * The terminal views' dependencies: the session terminals' view and (issue #199) the shells'.
+ * @type {Parameters<typeof createTerminalView>[1]}
+ */
+const viewDeps = {
   send: (message) => {
     send(message);
     // The view detached the terminal the re-attach waits for: its snap will not come. The queue
@@ -342,6 +390,27 @@ const terminalView = createTerminalView(dom.terminal, {
   // Issue #184: `window.copyOnSelect` as the server's last list says it, read at each release of
   // the mouse. The default is the server's (S2 4.3): a list without the field copies nothing.
   copyOnSelect: () => state.list?.copyOnSelect === true,
+};
+const terminalView = createTerminalView(dom.terminal, viewDeps);
+/**
+ * Issue #199: the second view, of the sessions' shells, with the same dependencies; its optional
+ * members (`reset`, `drop`, `heightFor`) are used only when present, as `fits` is.
+ * @type {ReturnType<typeof createTerminalView> & { reset?: () => void, drop?: (id: string) => void, heightFor?: (rows: number) => number | null }}
+ */
+const shellView = createTerminalView(dom.shell, viewDeps);
+/**
+ * Issue #199 (S2 12.6): the split of the terminal area between the session's terminal and its
+ * shell's panel, and the bar between the two (web/shell-panel.js); drawn by `renderShell`.
+ */
+const shellPanel = createShellPanel({
+  zone: dom.rightZone,
+  cards: dom.cards,
+  bar: dom.shellBar,
+  panel: dom.shell,
+  blocked: () => modal(),
+  least: () => shellView.heightFor?.(MIN_ROWS) ?? LEAST_FALLBACK,
+  // The session's terminal laid out or not (an area too low for both): the keyboard follows.
+  laidOut: (mode, before) => shellLaidOut(mode, before),
 });
 /**
  * The view's optional `fits(width, height)` (contract 2.9, task 28): the columns and rows a
@@ -368,6 +437,8 @@ const cards = createCards(dom.cards, {
   park: (sessionId) => markParked(sessionId, false),
   unread: (sessionId) => markUnread(sessionId),
   unreadAnswered: (sessionId) => state.unreadAnswered.get(sessionId) ?? null,
+  // Issue #199: the header's Shell is the header's own session's, which the pane shows.
+  shell: () => pressShell(true, true),
   say: (text) => say(text),
   watchFavourites: (listener) => {
     favouritesListener = listener;
@@ -671,7 +742,7 @@ addEventListener('mouseup', () => {
       return; // D2: a dialog keeps the keyboard (it gives its own field the keyboard back)
     }
     if (document.activeElement === dom.rightZone && state.pane.kind === 'terminal') {
-      terminalView.focus();
+      sideView().focus(); // issue #199: the side of the terminal zone that had it last
       return;
     }
     keepKeyboard();
@@ -739,6 +810,8 @@ function area(forAct = false) {
     state.pane.kind === 'terminal' && !forAct
       ? dom.cards.getBoundingClientRect().height
       : headerHeight();
+  // Issue #199 (ruled): a session's shell's panel and its bar are not counted out: the area's one
+  // reader is the first size of a terminal the command line or a restore opens, which has none.
   const height = box.height - above;
   // The view is never asked about an area under 1 px (cards taller than the zone), and its answer
   // is held to what the server takes, as the page's own is: whole numbers, 1…MAX_COLS ×
@@ -1789,7 +1862,7 @@ function openEnder(row, fromList, mark = 'done') {
   // switcher), and while it is shown Ctrl+Shift+H is refused (`windowChordGate`).
   help.hide();
   state.enderFrom = document.activeElement;
-  ender.open(row, fromList, mark);
+  ender.open(row, fromList, mark, state.list); // issue #199: the list says whether it has a shell
   appRoot.inert = true;
 }
 
@@ -2265,6 +2338,17 @@ function welcomed(welcome, change, lostSince) {
     state.exits.clear();
   }
   const attached = change === 'first' ? [] : terminalView.attached();
+  if (change !== 'first') {
+    // Issue #199 (S2 8.2.5): after a reconnect every shell is hidden, its streams gone with the
+    // old connection; the header's dot says it is there, the key shows it again (a fresh snap).
+    state.shellsShown.clear();
+    state.shellAsked = null;
+    state.shellKey = '';
+    shellView.reset?.();
+    dom.shell.hidden = true;
+    dom.shellBar.hidden = true;
+    shellPanel.draw(false);
+  }
   const shown = shownTerminal()?.id;
   state.reattach =
     change === 'wsl-restarted'
@@ -2314,7 +2398,12 @@ function received(message) {
       // of the banner that had it went away (a restore began: Restore is gone).
       banner.render(message.banner ?? null);
       favouritesListener?.(favouritesOf(message)); // F15: the open form's chips (S2 12.6)
+      shellsGone(message); // issue #199: a shell gone from the list leaves the page
+      const toShell = shellListed(message); // issue #199: before the render, which draws it
       render();
+      if (toShell && drawnShell(state.pane) !== null && !modal()) {
+        shellKeyboard();
+      }
       if (editor.shown()) {
         editor.update(message); // the dialog's session's row (task 38's list)
       }
@@ -2346,6 +2435,7 @@ function received(message) {
     }
     case 'snap':
       terminalView.snap(message);
+      shellView.snap(message); // issue #199: each view ignores a terminal it does not have
       keepKeyboard();
       if (message.term === state.waitingSnap) {
         nextReattach();
@@ -2353,9 +2443,14 @@ function received(message) {
       return;
     case 'size':
       terminalView.size(message);
+      shellView.size(message);
       keepKeyboard();
       return;
     case 'exit':
+      if (shellView.attached().includes(message.term)) {
+        shellView.exit(message); // issue #199: a shell's exit is its view's only
+        return;
+      }
       state.exits.set(message.term, message);
       terminalView.exit(message);
       render();
@@ -2382,6 +2477,7 @@ function received(message) {
         keepKeyboard();
       } else if (message.term !== null) {
         terminalView.notice(message.term, message.kind, message.text);
+        shellView.notice(message.term, message.kind, message.text);
         keepKeyboard();
       }
       return;
@@ -2428,6 +2524,298 @@ function renderList(zone) {
   }
 }
 
+/**
+ * Issue #199: the shell the list has for the terminal `termId`, or null.
+ * @param {string} termId
+ * @returns {ShellPayload | null}
+ */
+function shellOf(termId) {
+  return (state.list?.shells ?? []).find((one) => one.of === termId) ?? null;
+}
+
+/**
+ * Issue #199 (S2 12.9): Ctrl+Shift+S (both zones) and the header's `Shell` — what `shellPress`
+ * says for the pane: a toast, the act for the pane's terminal, or the panel shown, hidden or given
+ * the keyboard. `selected`: a session is selected for this press.
+ * `header`: the header's `Shell`, whose click takes no keyboard itself: on a shown panel it hides
+ * it, as its tooltip says, and the keyboard goes to the session's terminal only when it was in the
+ * shell (else it stays where it is); opening or showing a shell gives it the keyboard, as the key
+ * does: the user asked for a shell to type into.
+ * @param {boolean} selected
+ * @param {boolean} [header]
+ */
+function pressShell(selected, header = false) {
+  const pane = state.pane;
+  const term = pane.kind === 'terminal' ? pane.term : null;
+  const shell = term === null ? null : shellOf(term.id);
+  const shown = drawnShell(pane) !== null;
+  const inShell = header ? shown : dom.shell.contains(document.activeElement);
+  const press = shellPress({ pane, selected, shell, shown, inShell });
+  if ('toast' in press) {
+    toast.show(press.toast, null);
+    return;
+  }
+  if (term === null) {
+    return;
+  }
+  switch (press.do) {
+    case 'act':
+      openShell(term.id);
+      return;
+    case 'show':
+      if (shell !== null) {
+        state.shellsShown.add(shell.id);
+        render();
+        shellKeyboard();
+      }
+      return;
+    case 'hide':
+      if (shell !== null) {
+        const wasInShell = dom.shell.contains(document.activeElement);
+        state.shellsShown.delete(shell.id);
+        render();
+        if (wasInShell) {
+          setZone('terminal', false);
+          terminalView.focus();
+        } else {
+          keepKeyboard(); // a header click: the keyboard stays where it was (the list, the session)
+        }
+      }
+      return;
+    case 'focus':
+      shellKeyboard();
+      return;
+  }
+}
+
+/**
+ * Issue #199 (S2 12.9): the split's mode changed (`web/shell-panel.js`). At a change from `split`
+ * to `full` (the area got too low for both) the session's terminal is not laid out: once the render
+ * is done the zone gives what had the keyboard there to the shell (`keepKeyboard`, `sideView`), and
+ * the page remembers whether the keyboard was in the session's terminal and where it went. At the
+ * change back to `split` it goes back to the session's terminal only when it was there, is still
+ * where the change put it, the user did nothing with the shell meanwhile (`shellUsed`: a key — not
+ * a modifier alone, not a chord the window takes for itself —, a press, a paste, a chord that acts
+ * on the shell's view), no text is selected and no dialog is
+ * shown: else it stays. A panel that comes already `full` was asked for (the key, the header's
+ * Shell): nothing to give back. Any other change forgets it and keeps the keyboard where it can be.
+ * @param {'split' | 'full' | null} mode
+ * @param {'split' | 'full' | null} before
+ */
+function shellLaidOut(mode, before) {
+  if (mode === 'full' && before === 'split') {
+    const at = document.activeElement;
+    const flip = {
+      fromSession:
+        dom.terminal.contains(at) ||
+        // Already blurred by the hiding: the zone's side says where it was.
+        ((at === null || at === document.body) &&
+          state.zone === 'terminal' &&
+          state.shellSide === 'session'),
+      to: /** @type {Element | null} */ (null),
+      used: false,
+    };
+    state.lowFlip = flip;
+    queueMicrotask(() => {
+      keepKeyboard();
+      if (state.lowFlip === flip) {
+        flip.to = document.activeElement;
+      }
+    });
+    return;
+  }
+  const flip = state.lowFlip;
+  state.lowFlip = null;
+  queueMicrotask(() => {
+    if (
+      mode === 'split' &&
+      before === 'full' &&
+      flip !== null &&
+      flip.fromSession &&
+      !flip.used &&
+      flip.to !== null &&
+      document.activeElement === flip.to &&
+      !textSelected() &&
+      !modal() &&
+      drawnShell(state.pane) !== null
+    ) {
+      state.shellSide = 'session';
+      terminalView.focus();
+      return;
+    }
+    keepKeyboard();
+  });
+}
+/** Issue #199: the user did something with the shell while the area is too low (`shellLaidOut`). */
+function shellUsed() {
+  if (state.lowFlip !== null) {
+    state.lowFlip.used = true;
+  }
+}
+/** Keys that are no use of the shell pressed alone: each system chord (Win+↑, Alt+Tab) starts so. */
+const LONE_KEYS = new Set(['Shift', 'Control', 'Alt', 'AltGraph', 'Meta', 'OS', 'CapsLock']);
+// A key, a press or a paste in the shell makes the keyboard's place the user's: but a modifier
+// alone, and a chord the window takes for itself (Ctrl+Shift+L, J, P, H, a slot, Ctrl+Tab…); the
+// window's chords that act on the shell's view (find, copy, the raw paste) count by `shellChord`.
+dom.shell.addEventListener(
+  'keydown',
+  (event) => {
+    if (!LONE_KEYS.has(event.key) && windowChord(event, state.zone) === null) {
+      shellUsed();
+    }
+  },
+  true,
+);
+for (const type of ['mousedown', 'pointerdown', 'paste']) {
+  dom.shell.addEventListener(type, () => shellUsed(), true);
+}
+
+/** Issue #199: the keyboard to the shown panel's shell; the zone is the terminal's. */
+function shellKeyboard() {
+  setZone('terminal', false);
+  shellView.focus();
+}
+
+/**
+ * Issue #199: `act shell` for the terminal `termId`, with the first size of the panel as the
+ * split's rules make it for the terminal area now (web/shell-panel.js; 80 × 12 while the view
+ * cannot tell). The panel shows with the list that brings the shell (`state.shellAsked`), not with
+ * the answer; a refusal is the toast.
+ * @param {string} termId
+ */
+function openShell(termId) {
+  if (state.shellAsked?.term === termId && !state.shellAsked.answered) {
+    return; // asked already: the list brings it
+  }
+  const rect = dom.rightZone.getBoundingClientRect();
+  const style = getComputedStyle(dom.rightZone);
+  /** @param {string} side */
+  const border = (side) => parseFloat(style.getPropertyValue(`border-${side}-width`)) || 0;
+  const width = rect.width - border('left') - border('right');
+  // Optional in contract 2.9 (the page tests' stand-in views lack it): 80 × 12 without it.
+  const fitted = shellView.fits?.(Math.max(1, width), Math.max(1, shellPanel.height())) ?? null;
+  const size =
+    fitted !== null && Number.isFinite(fitted.cols) && Number.isFinite(fitted.rows)
+      ? {
+          cols: Math.max(1, Math.min(MAX_COLS, Math.floor(fitted.cols))),
+          rows: Math.max(1, Math.min(MAX_ROWS, Math.floor(fitted.rows))),
+        }
+      : { cols: 80, rows: 12 };
+  const asked = { term: termId, answered: false, from: document.activeElement };
+  state.shellAsked = asked;
+  void act({ kind: 'shell', term: termId, ...size }).then((result) => {
+    const waiting = state.shellAsked === asked; // else a list brought the shell, or a reconnect
+    if (result.ok) {
+      if (waiting) {
+        asked.answered = true;
+      }
+      return;
+    }
+    if (waiting) {
+      state.shellAsked = null;
+    }
+    // Also when a list brought the shell already: one that ended at once was listed while the
+    // server waited for its end, and its panel came and went; the answer says why.
+    toast.show(shellRefusedText(result.error ?? result.lines.join(' ')), null);
+  });
+}
+
+/**
+ * Issue #199: at a list, the shell `state.shellAsked` waits for: brought, it is shown (and, while
+ * its terminal is the pane's and the keyboard is still where it was at the press, gets the
+ * keyboard after the render: typing done since lands where the user put it); not brought by the
+ * first list after the act's answer, the act is forgotten (a shell that ended before that list, or
+ * one another window opens later, must not open this page's panel).
+ * @param {ListMessage} message
+ * @returns {boolean} whether the shell is to get the keyboard after the render
+ */
+function shellListed(message) {
+  const asked = state.shellAsked;
+  if (asked === null) {
+    return false;
+  }
+  const shell = (message.shells ?? []).find((one) => one.of === asked.term);
+  if (shell === undefined) {
+    if (asked.answered) {
+      state.shellAsked = null;
+    }
+    return false;
+  }
+  state.shellAsked = null;
+  state.shellsShown.add(shell.id);
+  return (
+    state.pane.kind === 'terminal' &&
+    state.pane.term.id === asked.term &&
+    document.activeElement === asked.from &&
+    !textSelected()
+  );
+}
+
+/**
+ * Issue #199: a shell that a list no longer has (its `exit`, its session's end) leaves the page:
+ * its id the set of the shown ones, and its terminal the view, also one this page hid (still
+ * attached); the render then hides a drawn panel, and `keepKeyboard` gives the keyboard to the
+ * session's terminal when it was in the shell (ruled); else it stays where it was.
+ * @param {ListMessage} message
+ */
+function shellsGone(message) {
+  const listed = new Set((message.shells ?? []).map((one) => one.id));
+  for (const id of new Set([...state.shellsShown, ...shellView.attached()])) {
+    if (!listed.has(id)) {
+      state.shellsShown.delete(id);
+      shellView.drop?.(id);
+    }
+  }
+}
+
+/**
+ * Issue #199 (S2 12.5): what the header's Shell says for `pane`: null unless the pane is a
+ * terminal of the window that is not ended; else whether a shell of it is open and shown.
+ * @param {Pane} pane
+ * @returns {'none' | 'hidden' | 'shown' | null}
+ */
+function headerShell(pane) {
+  if (pane.kind !== 'terminal' || pane.ended) {
+    return null;
+  }
+  if (shellOf(pane.term.id) === null) {
+    return 'none';
+  }
+  return drawnShell(pane) !== null ? 'shown' : 'hidden';
+}
+
+/**
+ * Issue #199 (S2 12.6): the shell the panel shows for `pane` — a shell of the pane's terminal that
+ * this page shows, while that terminal is not ended —, or null.
+ * @param {Pane} pane
+ * @returns {ShellPayload | null}
+ */
+function drawnShell(pane) {
+  if (pane.kind !== 'terminal' || pane.ended) {
+    return null;
+  }
+  const shell = (state.list?.shells ?? []).find((one) => one.of === pane.term.id);
+  return shell !== undefined && state.shellsShown.has(shell.id) ? shell : null;
+}
+
+/**
+ * Issue #199: the shell panel and its bar drawn for `pane` (or hidden), and the shells' view shown
+ * that shell (or none); applied only when it changed.
+ * @param {Pane} pane
+ */
+function renderShell(pane) {
+  const shell = drawnShell(pane);
+  const key = shell === null ? '' : JSON.stringify(shell);
+  if (key === state.shellKey) {
+    return;
+  }
+  state.shellKey = key;
+  dom.shell.hidden = shell === null;
+  dom.shellBar.hidden = shell === null;
+  shellPanel.draw(shell !== null); // the split laid out before the view measures its box
+  shellView.show(shell);
+}
+
 /** Renders the list and the right side for the current state. */
 function render() {
   renderList(state.zone);
@@ -2455,10 +2843,13 @@ function render() {
   const said = pane.kind === 'terminal' ? (state.restartSaid.get(pane.term.id) ?? '') : '';
   // S2 12.4: the header's Unread / Read follows this page's answered act before the next list.
   const answered = paneRow === null ? null : (state.unreadAnswered.get(paneRow.id) ?? null);
+  // Issue #199: the state of the pane's terminal's shell, for the header's Shell.
+  const shellState = headerShell(pane);
   const key = JSON.stringify(
-    pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines, said, answered],
+    pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines, said, answered, shellState],
   );
   state.pane = pane;
+  renderShell(pane);
   // F22: the right side's line while nothing is shown there and the list holds no session at all.
   const blank = pane.kind === 'none' && holdsNoSession(state.list, state.view.filter);
   if (dom.rightNone.hidden === blank) {
@@ -2470,13 +2861,17 @@ function render() {
   }
   state.paneKey = key;
   const before = dom.rightZone.dataset.paneTerm ?? '';
+  if (pane.kind !== 'terminal' || pane.term.id !== before) {
+    state.shellSide = 'session'; // issue #199: another terminal starts on the session's side
+    state.lowFlip = null;
+  }
   dom.rightZone.dataset.pane = pane.kind;
   dom.rightZone.dataset.paneTerm = pane.kind === 'terminal' ? pane.term.id : '';
   terminalView.show(pane.kind === 'terminal' ? pane.term : null);
   cards.hide();
   switch (pane.kind) {
     case 'terminal':
-      cards.header(pane.row, selected, term, listNow);
+      cards.header(pane.row, selected, term, listNow, shellState);
       if (pane.ended) {
         // #188: the bar's Other flags… closes nothing for a row the list hides (E13: no card).
         cards.endedBar(pane.row, exit, pane.row !== null && rowOf(pane.row.id) !== undefined, said);
@@ -2646,7 +3041,7 @@ function giveKeyboard() {
     return;
   }
   if (state.pane.kind === 'terminal') {
-    terminalView.focus();
+    sideView().focus(); // issue #199: the session's terminal, or its shell when it had it last
     if (dom.rightZone.contains(document.activeElement)) {
       return;
     }
@@ -2669,6 +3064,12 @@ document.addEventListener('focusin', (event) => {
       setZone('list', false);
     }
     return;
+  }
+  // Issue #199: the side of the terminal zone that has the keyboard, for giveKeyboard.
+  if (dom.shell.contains(target)) {
+    state.shellSide = 'shell';
+  } else if (dom.terminal.contains(target)) {
+    state.shellSide = 'session';
   }
   if (dom.listZone.contains(target) && state.zone !== 'list') {
     setZone('list', false);
@@ -2826,10 +3227,12 @@ function doChord(chord, event) {
       openNew();
       return;
     case 'find':
-      terminalView.find();
+      shellChord();
+      keyboardView().find(); // issue #199: the view that holds the keyboard
       return;
     case 'copy':
-      terminalView.copy();
+      shellChord();
+      keyboardView().copy();
       return;
     case 'paste-raw':
       // A key of S2 9.1 that sends bytes acts only while the terminal itself has the keyboard:
@@ -2840,7 +3243,8 @@ function doChord(chord, event) {
         terminalHasKeyboard() &&
         !isTextField(document.activeElement)
       ) {
-        terminalView.pasteRaw();
+        shellChord();
+        keyboardView().pasteRaw();
       }
       return;
     case 'help':
@@ -2861,6 +3265,10 @@ function doChord(chord, event) {
       }
       return;
     }
+    case 'shell':
+      // Issue #199 (S2 12.9): a held key acts once, as every chord (onKeyDown acts on no repeat).
+      pressShell(state.selected !== null);
+      return;
     case 'switcher':
       // E11: Ctrl+Shift+P opens the switcher, and closes it while it is shown.
       if (switcher.shown()) {
@@ -3339,9 +3747,38 @@ addEventListener('blur', () => pressedInDialog.clear());
 const pressedOutside = new Set();
 const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph']);
 
-/** Whether the keyboard is on the terminal view (inside its root `#terminal`). */
+/** Whether the keyboard is on a terminal view (inside its root `#terminal`, or `#shell`: #199). */
 function terminalHasKeyboard() {
-  return dom.terminal.contains(document.activeElement);
+  return (
+    dom.terminal.contains(document.activeElement) || dom.shell.contains(document.activeElement)
+  );
+}
+
+/**
+ * Issue #199 (S2 9.5, 9.7): the view whose element holds the keyboard — the shells' when it is
+ * inside `#shell`, else the session terminals' —, which find, copy and the raw Ctrl+V act on.
+ */
+function keyboardView() {
+  return dom.shell.contains(document.activeElement) ? shellView : terminalView;
+}
+
+/** Issue #199: a chord that acts on the shell's view (it holds the keyboard) is the user's use of it. */
+function shellChord() {
+  if (keyboardView() === shellView) {
+    shellUsed();
+  }
+}
+
+/**
+ * Issue #199: the view of the side of the terminal zone that had the keyboard last: the shell's
+ * while its panel is drawn, else the session's terminal.
+ */
+function sideView() {
+  if (drawnShell(state.pane) === null) {
+    return terminalView;
+  }
+  // In an area too low for both the shell has the whole area: the session's terminal is not shown.
+  return state.shellSide === 'shell' || shellPanel.mode() === 'full' ? shellView : terminalView;
 }
 
 /**
@@ -3414,11 +3851,12 @@ addEventListener('focus', () => focusChanged());
 addEventListener('blur', () => focusChanged());
 document.addEventListener('visibilitychange', () => {
   terminalView.setHidden(document.hidden);
+  shellView.setHidden(document.hidden);
   keepKeyboard();
 });
 /** @type {ReturnType<typeof setTimeout> | null} */
 let resizeTimer = null;
-new ResizeObserver(() => {
+const resizeObserver = new ResizeObserver(() => {
   if (resizeTimer !== null) {
     clearTimeout(resizeTimer);
   }
@@ -3426,7 +3864,8 @@ new ResizeObserver(() => {
     resizeTimer = null;
     focusChanged();
   }, 200);
-}).observe(dom.rightZone);
+});
+resizeObserver.observe(dom.rightZone);
 
 // --- start --------------------------------------------------------------------------------------
 
@@ -3460,7 +3899,10 @@ async function start() {
       state: (value) => setConnectionState(value),
       welcome: (welcome, change, since) => welcomed(welcome, change, since),
       message: (message) => received(message),
-      output: (channel, bytes) => terminalView.output(channel, bytes),
+      output: (channel, bytes) => {
+        terminalView.output(channel, bytes);
+        shellView.output(channel, bytes); // channels are the connection's: they never clash
+      },
       lost: (since) => {
         dropPending();
         state.bringing = null; // the resume's terminal is no longer the page's own news (Z1)

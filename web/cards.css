@@ -39,6 +39,29 @@
     display: none;
   }
 }
+/* Issue #199: the header's Shell (a terminal of the window that runs) needs about 60 px more of
+   the line, its dot included: while it is there each button above gives way 70 px earlier, and
+   Shell, which says that a shell is open, last. `Ctrl+Shift+S` remains. */
+@container card-header (max-width: 520px) {
+  .header-top:has(.header-shell) .header-restart {
+    display: none;
+  }
+}
+@container card-header (max-width: 452px) {
+  .header-top:has(.header-shell) .header-unread {
+    display: none;
+  }
+}
+@container card-header (max-width: 360px) {
+  .header-top:has(.header-shell) .header-park {
+    display: none;
+  }
+}
+@container card-header (max-width: 290px) {
+  .header-shell {
+    display: none;
+  }
+}
 .card-header [hidden] {
   display: none;
 }
@@ -182,6 +205,11 @@
 }
 .header-button:hover {
   border-color: var(--selline);
+}
+/* Issue #199: the dot of the header's Shell while a shell is open, shown or hidden. */
+.header-shell-mark {
+  margin-left: 4px;
+  color: var(--accent);
 }
 .header-group-edit,
 .header-group-add {

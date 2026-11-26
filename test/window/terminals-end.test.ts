@@ -43,7 +43,7 @@ function keeperV2(box: RegistryBox): string {
 }
 
 describe('registry: ending a program (F30)', () => {
-  test('a version 3 keeper: endable while its program runs; end() hangs it up; its exit ends the terminal as any exit', async (t) => {
+  test('a keeper of this build (version 3 or later): endable while its program runs; end() hangs it up; its exit ends the terminal as any exit', async (t) => {
     const box = await registrySandbox(t);
     const r = box.registry();
     const spec = box.spec();
@@ -108,7 +108,7 @@ describe('registry: ending a program (F30)', () => {
     const first = box.registry({ keeperFile: keeperV2(box) });
     const { id } = await startStandin(box, first);
     await first.registry.stopAll();
-    const second = box.registry(); // the updated server spawns version 3; it finds version 2
+    const second = box.registry(); // the updated server spawns this build's version; it finds version 2
     const found = await second.registry.rediscover();
     assert.deepEqual(
       found.map((term) => [term.id, term.state]),

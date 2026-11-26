@@ -999,7 +999,41 @@ effect.
   the old one's place. A session under Recent or Earlier, and any session while a filter or a chip
   is set, do not move: the key bar says why. Caps Lock alone moves nothing (Shift must be held).
   `c` in the list gives the keyboard to the carry-over bar after `/clear` ("After `/clear`: carry
-  over" below).
+  over" below). **Ctrl+Shift+S** opens a shell under the selected session's
+  terminal, in its folder; again it hides it ("A shell under a session" below).
+- **A shell under a session**: when Claude Code asks you to run something yourself — open an SSH
+  tunnel, log in somewhere, run a few commands —, press **Ctrl+Shift+S** (in the list or in the
+  terminal) or `Shell` in the header: a shell opens under the session's terminal,
+  in the session's folder, with the keyboard in it, so that you read the instruction above while you
+  type below. It is your account's login shell (`/bin/sh` when none is known), started as a login
+  shell, with the environment the window's terminals get. One per session. Press the key again
+  with the keyboard in the shell and it hides: what runs in it keeps running, and a dot beside
+  `Shell` in the header says that a shell is open. With the shell hidden the key shows it again;
+  with it shown and the keyboard in the session's terminal (or the list) the key moves the keyboard
+  to the shell, and a click moves it between the two. Ctrl+Shift+F, Ctrl+Shift+C, Ctrl+V and
+  Ctrl+Shift+V act on the one that has the keyboard. The shell starts at a third of the terminal
+  area; drag the bar between the two to change its height (the pointer shows a double arrow over
+  it). The height is kept for the window, one height for every session and for the next load of
+  the page, and a double click on the bar gives the third back. Each of the two keeps at least 4
+  rows; in a window too low for both, the shell takes the whole terminal area while it is shown.
+  Each program is told its new size when the shell shows, hides or is dragged. The bar takes no
+  keyboard: a click on it leaves the keyboard where it was. Shown or hidden is each window's own: after a reload, a lost connection or a
+  restart of skydeck's server (every `skydeck update`) every shell is hidden, still running, and the
+  key shows it again with its screen. A shell opens only for a session that runs in a terminal of
+  this window: for any other the key says why and opens nothing. The shell is never a row of the
+  list, takes no number and never needs you: nothing marks or notifies anything of it but the
+  header's dot. `exit` closes it; it is ended when its session's program ends (End session, `/exit`,
+  a crash) and when you close the session's terminal: the panel closes and the session's terminal
+  takes the whole area again. The dialogs "Mark done" and "Park" say `Ending the session ends its
+  shell too.` when the session has one. A restart of the session (`r`) keeps it, under the
+  session's new terminal, and so does a restart of skydeck's server (every `skydeck update`), with
+  what runs in it. A `claude` you start inside it is a session of its own that runs in another
+  terminal, not in the window's. Limits: ending a shell is a hang-up, as closing any terminal's
+  window is, so a job started in it with `nohup`, `setsid` or `disown` goes on running after its
+  shell and its session ended. A shell does not survive a stop of WSL or a restart of the PC, and
+  is not restored. After going back to a skydeck from before the shell ("Going back" below), a
+  shell that still runs is not seen by it: it is not shown, and it runs on until its program ends
+  or WSL stops; back on this version it is found again.
 
 #### Editing a session (stage D)
 
@@ -2309,7 +2343,7 @@ judged as before.
 | profile folder | It cannot be found and `window.profileDir` is not set. |
 | runtime directory | The directory of the server's and the keepers' sockets is not yours or not mode 700, or a socket path in it would be 108 bytes or longer. `info` when `XDG_RUNTIME_DIR` is passed over because you do not linger (`loginctl enable-linger <you>` makes it usable). |
 | vendored files | A file of `vendor/MANIFEST.json` is missing or changed: a broken checkout (`git status`). |
-| keepers | Never a problem: how many terminals run, and one line each. |
+| keepers | Never a problem: how many terminals run, and one line each. A shell opened under a session's terminal is held the same way and counted with them; its line says `a session's shell` after its keeper version. |
 
 ### Updating while the window runs
 
@@ -2324,8 +2358,8 @@ skydeck update
 stay as they are. `skydeck update` brings the checkout up to date and restarts the window's server
 for the new code, and the window stays open: it says for a few seconds that the server is not
 answering, then reloads itself for the new page and connects again, and the command waits up to 7
-seconds for it, so it opens no second window. Sessions keep running; every terminal's screen is
-rebuilt (see "Known limits"). Keepers that run keep the code they started with; new terminals get
+seconds for it, so it opens no second window. Sessions keep running, and so does a session's
+shell; every terminal's screen is rebuilt (see "Known limits"). Keepers that run keep the code they started with; new terminals get
 the new keeper. No `npm ci`, no `skydeck install`. "Updating" below says what each line means,
 when the command refuses and what to do then. The window also says by itself when there is a newer
 skydeck ("The window says when there is one" below): `Update available` in its title bar, whose
@@ -2783,7 +2817,10 @@ terminal of your own:
    ```
 
    It says `stopped skydeck's window server; 2 terminals in the window keep running` (or `the
-   window's server is not running`); your sessions keep running in their keepers. Quit the
+   window's server is not running`); your sessions keep running in their keepers. A session's
+   shell counts as one of those terminals; a skydeck from before the shell does not see a shell
+   that still runs ("A shell under a session" above), so type `exit` in it first if you want it
+   gone. Quit the
    interactive list (`skydeck` with no command) in any other terminal too: from here on no skydeck
    may have the database open.
 2. Put the checkout back at the commit the update left. `skydeck update` named it: the first id of

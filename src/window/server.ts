@@ -76,6 +76,7 @@ import {
 import type { RuntimeFiles, ServerJson } from './runtime.ts';
 import { createSeen } from './seen.ts';
 import { createSettings } from './settings.ts';
+import { createShells, ENDED_AT_ONCE_MS } from './shells.ts';
 import type { Seen } from './seen.ts';
 import { selectedPayload } from './selected.ts';
 import { decideFoundKeeper } from './starts.ts';
@@ -118,6 +119,10 @@ export interface ServerOptions {
    *  slots before its transaction; a throw of it is that write's failure, and no other write's.
    *  `serve` never sets it. */
   beforeSlotsWrite?: () => void;
+  /** Issue #199, a seam for tests: how long after its start a shell's end counts as "at once"
+   *  (`ENDED_AT_ONCE_MS` when absent), so that a page test on a loaded machine is not raced by
+   *  it. `serve` never sets it. */
+  shellEndedAtOnceMs?: number;
 }
 
 export interface RunningServer {
@@ -596,6 +601,22 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         },
       };
     };
+    // Issue #199 (S2 7.10, 15.1): a session's shell; the act names the terminal, the rest is ours.
+    const shells = createShells({
+      registry: created,
+      files,
+      platform,
+      serverEnv: environment.env,
+      coreSoft: environment.coreSoft,
+      interop: () => interop.current(),
+      refreshInterop: async () => {
+        await interop.refresh();
+      },
+      build,
+      log,
+      stopping: () => stopBegun,
+      endedAtOnceMs: options.shellEndedAtOnceMs ?? ENDED_AT_ONCE_MS,
+    });
     // Plan D7, D8: an edit shows in every window at once; the pull-request fetches the window asks
     // for run in the background, one at a time, aborted by the stop.
     const stopPrs = new AbortController();
@@ -795,6 +816,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       doneUnread: (sessionId) => {
         attending.attention.clearUnread(sessionId);
       },
+      shells,
     });
     // Plan C7, S2 8.2.6: what a terminal the server opens for a command or a restore starts at —
     // the area the page that had focus last reported, read when the terminal is opened.
@@ -905,6 +927,15 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
         // is put into deck.config, and its `changed()` sends every page its next list).
         copyOnSelect: deck.config.window.copyOnSelect,
         terminals: message.terminals.map((term) => ({ ...term, ownsSize: false })),
+        // Issue #199: the sessions' shells, never rows or terminals of the list.
+        shells: created.shells().map((shell) => ({
+          id: shell.id,
+          of: shell.of,
+          state: shell.state,
+          cols: shell.cols,
+          rows: shell.rows,
+          ownsSize: false,
+        })),
       };
       // Plan E12 (task 98): stage C's offer in the switcher, from the banner just put on the list.
       if (list.switcher && typeof view.switcher === 'string') {

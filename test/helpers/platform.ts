@@ -17,6 +17,7 @@ import type {
   Runner,
 } from '../../src/platform/types.ts';
 import { sandbox } from './sandbox.ts';
+import { shellStandin } from './shell-standin.ts';
 import type { Sandbox } from './sandbox.ts';
 
 /** 2026-11-12T09:00:00.000Z */
@@ -425,7 +426,8 @@ export interface TestPlatform<
    * testPlatform: real Files and net; fake clock, proc, runner and processes; env =
    * sandbox.env(options.env); homeDir and cwd = sandbox.home; uuid() returns
    * 00000000-0000-4000-8000-00000000000<n> (n = 1, 2, …); randomBytes 0, 1, 2, … across calls;
-   * pid 4000, the real uid, userName 'tester'; nodePath process.execPath; nodeVersion '24.19.0';
+   * pid 4000, the real uid, userName 'tester'; loginShell the sandbox's stand-in shell
+   * (test/helpers/shell-standin.ts); nodePath process.execPath; nodeVersion '24.19.0';
    * appRoot = the repository root.
    */
   platform: Platform;
@@ -482,6 +484,7 @@ export function testPlatform(
     pid: 4000,
     uid: real.uid,
     userName: 'tester',
+    loginShell: shellStandin(s),
     nodePath: process.execPath,
     nodeVersion: '24.19.0',
     appRoot: real.appRoot,
@@ -544,7 +547,7 @@ const REAL_PROGRAMS = [
  * alive (A36): the real clock, /proc (and so the boot id, unless `options.bootId` overrides what
  * bootId() reports), runner (a run without env or cwd gets the sandbox's environment and home),
  * processes, net and randomBytes; pid = process.pid, the real uid and
- * userName; homeDir and cwd = the sandbox's home, appRoot = the repository, env =
+ * userName; loginShell the sandbox's stand-in shell; homeDir and cwd = the sandbox's home, appRoot = the repository, env =
  * sandbox.env(options.env). Its runner and processes refuse Windows programs always (A32), whatever
  * any environment says. python3, sh and the other programs of REAL_PROGRAMS are linked into the
  * sandbox's bin.
@@ -590,6 +593,7 @@ export function realTestPlatform(
     pid: real.pid,
     uid: real.uid,
     userName: real.userName,
+    loginShell: shellStandin(s),
     nodePath: real.nodePath,
     nodeVersion: real.nodeVersion,
     appRoot: real.appRoot,

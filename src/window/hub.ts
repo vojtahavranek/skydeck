@@ -48,6 +48,24 @@ export interface TerminalInfo {
 }
 
 /**
+ * Issue #199 (S2 7.10): a session's shell, the second kind of terminal. It belongs to a session
+ * terminal of the window and is never a `TerminalInfo`: no slot, no session, no row. Its stream is
+ * served by id as a terminal's is (`attach`, `input`, `resize`).
+ */
+export interface ShellInfo {
+  id: string;
+  /** The session terminal it belongs to now (`TerminalInfo.id`). */
+  of: string;
+  state: 'starting' | 'running' | 'reconnecting';
+  /** The folder it was started in: its session terminal's. */
+  dir: string;
+  program: { pid: number; procStart: number } | null;
+  openedNs: bigint;
+  cols: number;
+  rows: number;
+}
+
+/**
  * Issue #166 (S2 7.6, 7.8): a restart's hold on its terminal's number, from before the hang-up to
  * the session's next terminal. Every rule that reads which numbers are taken sees the held one as
  * taken, so between the program's exit and the next terminal's spawn nobody else gets it.
@@ -61,6 +79,14 @@ export interface SlotHold {
    * while the held terminal's program still runs, once taken, and once let go.
    */
   take(newId: string): number | null;
+  /**
+   * Issue #199 (S2 7.10): right after `take(newId)`, in the same synchronous step: the held
+   * terminal's shell (one that is not being ended) belongs to `newId` from now on, and its id is the
+   * answer, for the new terminal's meta (`shell`). Null when the hold was not taken for `newId`, or
+   * the terminal has no such shell. It announces no change: the spawn that follows does. Optional:
+   * a hold of a hub without shells has none.
+   */
+  moveShell?(newId: string): string | null;
   /**
    * Ends the hold: the terminal is no longer `restarting`; a number nobody took is freed now when
    * its program is over (as F43 frees it at the exit), and the change is announced. Once only.
@@ -105,6 +131,11 @@ export interface TerminalHub {
    * Optional: a hub without it restarts nothing (the actions refuse the request).
    */
   holdSlot?(termId: string): SlotHold | null;
+  /**
+   * Issue #199 (S2 7.10): the sessions' shells, never in `list()`. Optional: a hub without it has
+   * none.
+   */
+  shells?(): readonly ShellInfo[];
   /** The colours the last focused page reported, for OSC 10 and 11 (S2 7.2). Pages calls it when
    *  a page starts focused and when a page reports focus (with the theme of its start, or of its
    *  latest `theme` message; ruled), and when the page that had focus last sends `theme`

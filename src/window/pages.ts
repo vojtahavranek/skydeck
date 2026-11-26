@@ -371,6 +371,15 @@ export function createPages(deps: PagesDeps): Pages {
       ...term,
       ownsSize: sizes.get(term.id)?.owner === conn.id,
     })),
+    // Issue #199: a shell's size is its pty's, owned as a terminal's is (by id).
+    ...(list.shells === undefined
+      ? {}
+      : {
+          shells: list.shells.map((shell) => ({
+            ...shell,
+            ownsSize: sizes.get(shell.id)?.owner === conn.id,
+          })),
+        }),
   });
 
   /**

@@ -80,7 +80,12 @@ interface Sections {
   week?: Row[];
 }
 
-function listOf(sections: Sections, terminals: Row[]): Row {
+/** Issue #199: a session's shell (`list.shells`), opened under the terminal `of`. */
+function shellOf(id: string, of: string): Row {
+  return { id, of, state: 'running', cols: 80, rows: 12, ownsSize: false };
+}
+
+function listOf(sections: Sections, terminals: Row[], shells?: Row[]): Row {
   const names =
     sections.parked === undefined
       ? (['open', 'week', 'earlier'] as const)
@@ -97,6 +102,7 @@ function listOf(sections: Sections, terminals: Row[]): Row {
       closedStacks: [],
     })),
     terminals,
+    ...(shells === undefined ? {} : { shells }),
     selected: null,
   };
 }
@@ -104,27 +110,29 @@ function listOf(sections: Sections, terminals: Row[]): Row {
 interface Deck {
   page: Page;
   w: EditWorld;
-  set(change: { sections?: Sections; terminals?: Row[] }): void;
+  set(change: { sections?: Sections; terminals?: Row[]; shells?: Row[] }): void;
 }
 
 async function deck(
   t: TestContext,
   chromium: Browser,
-  start: { sections: Sections; terminals?: Row[] },
+  start: { sections: Sections; terminals?: Row[]; shells?: Row[] },
   viewport?: { width: number; height: number },
 ): Promise<Deck> {
   const page = await newPage(t, chromium);
   if (viewport !== undefined) await page.setViewportSize(viewport);
   let sections = start.sections;
   let terminals = start.terminals ?? [];
-  const w = await editWorld(t, page, () => listOf(sections, terminals));
+  let shells = start.shells;
+  const w = await editWorld(t, page, () => listOf(sections, terminals, shells));
   return {
     page,
     w,
     set(change) {
       sections = change.sections ?? sections;
       terminals = change.terminals ?? terminals;
-      w.list(() => listOf(sections, terminals));
+      shells = change.shells ?? shells;
+      w.list(() => listOf(sections, terminals, shells));
     },
   };
 }
@@ -136,6 +144,8 @@ async function ender(page: Page): Promise<{
   tip: string;
   line: string;
   warning: string | null;
+  /** Issue #199: the line on the session's shell, null while it is not shown. */
+  shell: string | null;
   buttons: string[];
   focus: string;
   inert: boolean;
@@ -148,6 +158,7 @@ async function ender(page: Page): Promise<{
     const box = root.querySelector('.end-dialog');
     const heading = root.querySelector<HTMLElement>('.end-heading');
     const warning = root.querySelector<HTMLElement>('.end-warning');
+    const shell = root.querySelector<HTMLElement>('.end-shell');
     const focused = document.activeElement;
     return {
       shown: !root.hidden,
@@ -155,6 +166,10 @@ async function ender(page: Page): Promise<{
       tip: heading?.title ?? '',
       line: root.querySelector('.end-line')?.textContent ?? '',
       warning: warning === null || warning.hidden ? null : (warning.textContent ?? ''),
+      shell:
+        shell === null || shell.hidden || !shell.checkVisibility()
+          ? null
+          : (shell.textContent ?? ''),
       buttons: [...root.querySelectorAll('button')].map((one) => one.textContent ?? ''),
       focus:
         focused instanceof HTMLButtonElement && root.contains(focused)
@@ -1980,4 +1995,70 @@ test('F44: the dialog "Park" for a session the window can end', async (t) => {
       assert.equal((await ender(page)).focus, PARK_KEEP);
     },
   );
+});
+
+test('issue #199: both dialogs say that ending the session ends its shell, while it has one', async (t) => {
+  const chromium = await browser(t);
+  const SHELL = 'Ending the session ends its shell too.';
+  const SHELL_ID = 'eeeeeeeeeeee';
+
+  for (const [name, open, end, keep] of [
+    ['Mark done', dFrom, END, KEEP],
+    ['Park', wFrom, PARK_END, PARK_KEEP],
+  ] as const) {
+    await t.test(
+      `the dialog "${name}": the line with a shell of its terminal and not without one, under the warning; it comes and goes with a list while the dialog is open; another terminal's shell says nothing`,
+      async (t) => {
+        const sections = {
+          open: [endable(S1, TERM_A, 1), endable(S2, TERM_B, 2, { state: 'working' })],
+          week: [row(S3)],
+        };
+        const d = await deck(t, chromium, {
+          sections,
+          terminals: [terminal(TERM_A, S1, 1), terminal(TERM_B, S2, 2)],
+          shells: [shellOf(SHELL_ID, TERM_A)],
+        });
+        const { page, w } = d;
+
+        // S1's terminal has a shell: the line, under the warning-less text.
+        await open(page, S1);
+        await shown(page, true);
+        let state = await ender(page);
+        assert.deepEqual([state.buttons, state.shell], [[end, keep, CANCEL], SHELL]);
+        const order = await page.evaluate(() =>
+          [...document.querySelectorAll('#end-dialog .end-text > *')].map((one) => one.className),
+        );
+        assert.deepEqual(order, ['end-line', 'end-warning', 'end-shell'], 'under the warning');
+        // Its shell ended (a list without it): the line goes; it came again: the line comes.
+        d.set({ shells: [] });
+        await eventually(async () => (await ender(page)).shell === null, 'the line gone');
+        d.set({ shells: [shellOf(SHELL_ID, TERM_A)] });
+        await eventually(async () => (await ender(page)).shell === SHELL, 'the line back');
+        // A shell of another terminal: nothing for this one.
+        d.set({ shells: [shellOf(SHELL_ID, TERM_B)] });
+        await eventually(async () => (await ender(page)).shell === null, 'not its shell');
+        assert.equal((await ender(page)).shown, true, 'the dialog stays open throughout');
+        await page.keyboard.press('Escape');
+        await shown(page, false);
+
+        // S2's terminal (working) has the shell now: the line and the warning together.
+        await open(page, S2);
+        await shown(page, true);
+        state = await ender(page);
+        assert.deepEqual([state.warning, state.shell], [WORKING, SHELL]);
+        await page.keyboard.press('Escape');
+        await shown(page, false);
+
+        // No shell at all (a list without `shells`): no line, also at a dialog opened anew.
+        d.set({ shells: [] });
+        await sleep(300);
+        await open(page, S2);
+        await shown(page, true);
+        assert.equal((await ender(page)).shell, null);
+        await page.keyboard.press('Escape');
+        await shown(page, false);
+        assert.deepEqual(w.acts(), [], 'nothing was sent');
+      },
+    );
+  }
 });

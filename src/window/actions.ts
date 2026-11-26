@@ -15,7 +15,9 @@
  * unread mark a session unread or read (`unread`, `read`: attention.ts's `mark`); since issue #166
  * restart a session's program in its terminal, with #188's flags (`restart`, restart.ts: every
  * refusal before the end, then the end as `end-session` makes it without the done mark, then a
- * plain resume). Every field of an action is the page's — any page that passed the handshake — so each
+ * plain resume); since issue #199 open a shell under a session's terminal (`shell`, shells.ts: the
+ * act names only the terminal; the program, its folder and its environment are the server's,
+ * S2 15.1). Every field of an action is the page's — any page that passed the handshake — so each
  * one is checked here again and goes through step 1's own rules: a resume
  * names a session and nothing more (the guard, the lock and the command builder decide the rest,
  * S2 11.1), a new session's directory, label, group and flags are checked as `skydeck new` checks
@@ -56,6 +58,7 @@ import type { ActionHandler, PageInfo, SlotHold, TerminalHub } from './hub.ts';
 import { createLaunches } from './launches.ts';
 import type { Launched } from './launches.ts';
 import type { PrFetches } from './pr-fetches.ts';
+import type { Shells } from './shells.ts';
 import type { TicketFetches } from './ticket-fetches.ts';
 import { parsePageMessage } from './protocol.ts';
 import { createRestarts } from './restart.ts';
@@ -117,6 +120,9 @@ export interface ActionDeps {
    *  every other way of marking done is cleared at the next look); the lists follow the act's own
    *  `changed()`. */
   doneUnread?(sessionId: string): void;
+  /** Issue #199 (S2 7.10): `act shell`, a shell under the session terminal the act names
+   *  (shells.ts, one per server). Absent: the kind answers "skydeck cannot do that action". */
+  shells?: Pick<Shells, 'open'>;
 }
 
 /** A result without its `t` and `id`, which `act` adds. */
@@ -607,6 +613,11 @@ export function createActions(deps: ActionDeps): ActionHandler {
         if (!outcome.ok) return refusal(outcome.error);
         return outcome.changed ? wrote(action.kind) : DONE;
       }
+      case 'shell':
+        // Issue #199: the terminal and a first size; the shell's lists follow the registry's change.
+        return deps.shells === undefined
+          ? refusal(NOT_AN_ACTION)
+          : answered(await deps.shells.open(action.term, { cols: action.cols, rows: action.rows }));
     }
   }
 

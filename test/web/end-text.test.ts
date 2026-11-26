@@ -17,6 +17,7 @@ import {
   cutTitle,
   dialogFollows,
   END_TEXTS,
+  hasShell,
   PARK_TEXTS,
   parkPhase,
   parkWarning,
@@ -209,6 +210,7 @@ test('the words of the dialog and its toasts', () => {
     stopped: 'It stopped by itself: nothing was marked done.',
     doneElsewhere: 'It was marked done in another window: nothing was ended.',
     gone: 'It left the list: nothing was marked done.',
+    shell: 'Ending the session ends its shell too.',
   });
 });
 
@@ -289,6 +291,7 @@ test('F44: the words of the dialog "Park" and its toasts; textsOf picks them by 
     doneElsewhere: 'It was marked done in another window: nothing was ended or parked.',
     parkedElsewhere: 'It was parked in another window: nothing was ended.',
     gone: 'It left the list: nothing was parked.',
+    shell: 'Ending the session ends its shell too.',
   });
   assert.equal(textsOf('park'), PARK_TEXTS);
   assert.equal(textsOf('done'), END_TEXTS);
@@ -395,4 +398,27 @@ test('F44, review 1: parkPhase is idle only for a session that waits with nothin
     assert.equal(parkPhase(given), phase, what);
     assert.equal(parkWarning(parkPhase(given)), warning, what);
   }
+});
+
+test("issue #199: hasShell: only a shell opened under the dialog's terminal counts; a list without shells has none", () => {
+  const shell = (id: string, of: string) => ({
+    id,
+    of,
+    state: 'running',
+    cols: 80,
+    rows: 12,
+    ownsSize: false,
+  });
+  const OTHER = 'f6e5d4c3b2a1';
+  const plain = listOf([row(S1)], [terminal()]);
+  assert.equal(hasShell(plain, TERM), false, 'no `shells` at all');
+  assert.equal(hasShell(null, TERM), false, 'no list yet');
+  assert.equal(hasShell({ ...plain, shells: [] }, TERM), false);
+  assert.equal(hasShell({ ...plain, shells: [shell('a1a1a1a1a1a1', OTHER)] }, TERM), false);
+  assert.equal(
+    hasShell({ ...plain, shells: [shell(TERM, OTHER)] }, TERM),
+    false,
+    'a shell whose own id is the terminal id but opened under another terminal',
+  );
+  assert.equal(hasShell({ ...plain, shells: [shell('a1a1a1a1a1a1', TERM)] }, TERM), true);
 });

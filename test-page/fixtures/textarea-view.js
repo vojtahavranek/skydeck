@@ -4,9 +4,14 @@
 // text selection away, as xterm.js's does. The key events it gets — what xterm.js would act on
 // and send to the program — are kept in `globalThis.programGot`: a keydown as its key (`Enter`,
 // `Ctrl+c`), a keypress and a keyup as `keypress <key>` and `keyup <key>`.
+// Only the view of `#terminal` records and adds its own (issue #199: the page makes a second
+// view, of the shells, in `#shell`; that one is the minimal view as it is).
 import { createTerminalView as createMinimal } from './terminal-view-real.js';
 
 export function createTerminalView(root, deps) {
+  if (root.id !== 'terminal') {
+    return createMinimal(root, deps); // issue #199: the shells' view records nothing
+  }
   const view = createMinimal(root, deps);
   const shell = document.createElement('div');
   shell.className = 'xterm';

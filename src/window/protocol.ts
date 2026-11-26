@@ -202,7 +202,14 @@ export interface ResizeMessage {
  *  `read` marks it seen when it has a mark seeing clears (nothing written else); each names only
  *  the session, and the page picks one from its row's `attention` (`read` while its reason is
  *  ended, finished or unread). The server refuses both for a session that asks, one marked done
- *  and the row of a session not started yet, in the words the page shows. */
+ *  and the row of a session not started yet, in the words the page shows.
+ *
+ *  Issue #199 (S2 7.10, 15.1): `shell` opens a shell under the window's session terminal `term`,
+ *  with `cols` and `rows` its first size; `ok` also when that terminal has one already (nothing is
+ *  started then). It names only the terminal: the program (the account's login shell), its
+ *  argument, its folder (the terminal's) and its environment are the server's, and no field of
+ *  the act can carry one (src/window/shells.ts). There is no act that hides, shows or ends a
+ *  shell: shown and hidden is the page's, the end is the shell's `exit` or its session's. */
 export type ActMessage =
   | {
       t: 'act';
@@ -273,7 +280,8 @@ export type ActMessage =
       fields: CarryField[];
       done: boolean;
     }
-  | { t: 'act'; id: number; kind: 'dismiss-carry-over'; sessionId: string };
+  | { t: 'act'; id: number; kind: 'dismiss-carry-over'; sessionId: string }
+  | { t: 'act'; id: number; kind: 'shell'; term: string; cols: number; rows: number };
 /** Follow-up F13: the page's colours changed while it is open — Mode or Colour theme was picked in
  *  the settings screen (F39; before it, the title bar's switches) here or in another window of the
  *  profile, or the system's scheme changed while the page follows it. The same colours as
@@ -454,6 +462,18 @@ export interface TerminalPayload {
    *  session's next terminal: the page shows its screen without the ended bar meanwhile. */
   restarting?: true;
 }
+/** Issue #199 (S2 7.10): a session's shell, the second kind of terminal: never a row, a number or
+ *  a session. `of` is the session terminal (`TerminalPayload.id`) it belongs to now; its stream is
+ *  attached by its `id` as a terminal's is, and `ownsSize` is this page's as for a terminal. */
+export interface ShellPayload {
+  id: string;
+  of: string;
+  /** `starting`, `running` or `reconnecting`. */
+  state: string;
+  cols: number;
+  rows: number;
+  ownsSize: boolean;
+}
 /** For the selected session only: what the resume card shows (S2 12.6), and what the header and
  *  the dialogs of stage D need (plan D6). */
 export interface SelectedPayload {
@@ -564,6 +584,9 @@ export interface ListMessage {
   /** S2 12.7, the view model's (plan C9): null while nothing is offered and no restore runs. */
   banner: BannerPayload | null;
   terminals: TerminalPayload[];
+  /** Issue #199 (S2 7.10): the sessions' shells. The server always sends it; optional for the
+   *  reader: absent (a scripted list of the test helpers, a server before #199) is none. */
+  shells?: ShellPayload[];
   selected: SelectedPayload | null;
   /** Known project directories, most recent first (S2 12.6, the new form). */
   dirs: string[];
@@ -1255,6 +1278,8 @@ const ACTS: Readonly<Record<string, Check>> = {
     done: BOOLEAN,
   }),
   'dismiss-carry-over': object({ t: ANY, id: COUNT, kind: ANY, sessionId: SESSION }),
+  // Issue #199 (S2 15.1): a terminal and a first size, nothing else: what runs is the server's.
+  shell: object({ t: ANY, id: COUNT, kind: ANY, term: TERM, cols: SIZE, rows: SIZE }),
 };
 
 const INPUT_SHAPE = object({ t: ANY, term: TERM, data: STRING, binary: TRUE }, ['binary']);

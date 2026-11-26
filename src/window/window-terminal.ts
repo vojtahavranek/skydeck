@@ -145,6 +145,11 @@ export function windowTerminal(
       // The slot and the spawn without an await between them: the registry lists the terminal
       // (and so holds its slot) as soon as spawn is called. F44: a terminal of a parked session is
       // born with this slot too, and gives it up in the same step (`listed`).
+      const env = programEnvironment(deps.serverEnv, { cwd: spec.cwd, interop: deps.interop() });
+      const slot = hold === undefined ? registry.nextSlot() : hold.take(id);
+      // Issue #199: the held terminal's shell belongs to this one from now on, read right after
+      // `take` and written into this terminal's meta, so that a later server finds the tie.
+      const shell = hold?.moveShell?.(id) ?? null;
       const keeperSpec: KeeperSpec = {
         protocol: KEEPER_PROTOCOL,
         id,
@@ -153,18 +158,19 @@ export function windowTerminal(
         rows: size.rows,
         cwd: spec.cwd,
         argv: [...spec.argv],
-        env: programEnvironment(deps.serverEnv, { cwd: spec.cwd, interop: deps.interop() }),
+        env,
         startBy: String(spec.startByNs),
         lock: spec.lock,
         coreSoft: deps.coreSoft,
         meta: {
           sessionId: spec.sessionId,
           kind: spec.kind,
-          slot: hold === undefined ? registry.nextSlot() : hold.take(id),
+          slot,
           openedNs: String(registry.nextOpenedNs()), // never one another terminal has (#213)
           build: deps.build,
           label: spec.label,
           dir: spec.cwd,
+          ...(shell === null ? {} : { shell }),
         },
       };
       // Called inside an async function, so a throw of spawn is a rejection, awaited below.

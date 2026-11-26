@@ -60,6 +60,8 @@ function chordTable(shiftedDigits: readonly string[]): Array<[string, KeyLike, C
     ['Ctrl+Shift+V', cs('V', 'KeyV'), { kind: 'paste-raw' }],
     ['Ctrl+Shift+H', cs('H', 'KeyH'), { kind: 'help' }],
     ['Ctrl+Shift+R', cs('R', 'KeyR'), { kind: 'reload' }],
+    // Issue #199: the session's shell.
+    ['Ctrl+Shift+S', cs('S', 'KeyS'), { kind: 'shell' }],
   ];
   shiftedDigits.forEach((typed, index) => {
     const slot = index + 1;
@@ -740,5 +742,30 @@ describe('issue #188: f, the resume card’s Other flags… (S2 12.9)', () => {
 
   test('Ctrl+Shift+F stays the find chord', () => {
     assert.deepEqual(windowChord(ev('F', 'KeyF', 'ctrl', 'shift'), 'list'), { kind: 'find' });
+  });
+});
+
+describe("issue #199: Ctrl+Shift+S, the session's shell (S2 12.9)", () => {
+  test('Ctrl+Shift+S in both zones, on a US and a Czech (QWERTZ) layout, by the character: Windows sends S, Caps Lock s', () => {
+    for (const zone of ZONES) {
+      assert.deepEqual(windowChord(cs('S', 'KeyS'), zone), { kind: 'shell' });
+      assert.deepEqual(windowChord(cs('s', 'KeyS'), zone), { kind: 'shell' });
+      assert.deepEqual(windowChord(cs('S', 'Semicolon'), zone), { kind: 'shell' }, 'Dvorak');
+      assert.equal(windowChord(ev('S', 'KeyS', 'ctrl', 'shift', 'alt'), zone), null, 'with Alt');
+      assert.equal(windowChord(ev('s', 'KeyS', 'ctrl'), zone), null, 'Ctrl alone');
+      assert.equal(windowChord(cs('š', 'Digit3'), zone)?.kind, 'slot', 'Czech š is the third slot');
+    }
+  });
+
+  test('no single key of the list opens a shell (ruled): s, S and š are no list key', () => {
+    for (const e of [
+      ev('s', 'KeyS'),
+      ev('s', 'Semicolon'),
+      ev('S', 'KeyS', 'shift'),
+      ev('S', 'KeyS'),
+      ev('š', 'Digit3'),
+    ]) {
+      assert.equal(listKey(e), null, `${e.key} on ${e.code}`);
+    }
   });
 });

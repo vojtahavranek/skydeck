@@ -50,7 +50,10 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
 - **Principle 4 (no conversation content)** is extended: the screens of the terminals are
   conversation content, and so is what the user types. They exist only in memory — in the
   server's terminal models, in each keeper's parked snapshot and tail, in the page — and are never
-  written to a file, the store or a log by skydeck. Logs name terminals by id and record an error
+  written to a file, the store or a log by skydeck. A session's shell (issue #199, 7.10) is a
+  terminal in this: its screen and what is typed into it are in memory only, and nothing of a
+  shell — not its folder, its program's path or its commands — is stored or logged; logs name it
+  by its id. Logs name terminals by id and record an error
   caused by a peer's data by its kind only, never by its message (5.2), because an error message
   can quote the data (Node.js's `JSON.parse` error quotes its input).
   **Crash dumps** are the one way memory can reach a file: on WSL a crashing process's core dump is
@@ -94,7 +97,10 @@ Design 2 still holds, with these amendments. Each is a change to design 2 made b
   program the same way and then resumes the same session: its keeper sends that program SIGHUP
   and then SIGCONT, what the kernel sends when a terminal's window is closed, and nothing else —
   never SIGTERM or SIGKILL, and never to a session in another terminal. Every other session ends when the user ends it inside
-  `claude`. Nothing moves from one session to another but on the user's word in the window: from
+  `claude`. One process the window ends without being asked each time: a session's shell (issue
+  #199, 7.10). The user opened it under a session's terminal in the window, and it is ended when
+  that session's program ends, whoever ended it (End session, `/exit`, a crash): an ended session
+  holds nothing running. Its keeper sends the shell the same SIGHUP and SIGCONT, and nothing else. Nothing moves from one session to another but on the user's word in the window: from
   follow-up F40 the bar of 12.6 copies the fields the user ticks from the session `/clear` started
   out of to the new one, each time it is answered, and the old session keeps all of them (design
   7.1).
@@ -141,6 +147,7 @@ Design 3's words keep their meaning. New:
 | server | The one Node.js process (`skydeck serve`) that serves the page and owns the screen side of every terminal. |
 | terminal | One pty with one program in it, started for the window. Identified by a **terminal id** (12 lowercase hex characters, random). A terminal is not a session: the session its program holds can change (`/clear`). |
 | keeper | The python3 process that owns one terminal's pty and program (7.1). |
+| shell (a session's) | Issue #199: the second kind of terminal (7.10). The account's login shell, opened under a session's terminal of the window, in its folder, and held by a keeper as that terminal is. It belongs to the session's terminal: no row, no slot, no session of its own, and it ends with that session's program. Where this document says "terminal" alone it means a session's terminal; 7.10 says what of it holds for a shell. |
 | screen side | The server's model of a terminal's screen: a headless xterm.js fed every byte the program writes (7.2). |
 | snapshot | The screen side serialised: viewport, scrollback, cursor and modes, as escape sequences that rebuild it. |
 | park | The server hands a snapshot to the keeper, which keeps the latest one. |
@@ -184,7 +191,7 @@ The places of design 9.1 stay. Step 2 adds:
 | `<runtimeDir>` | The server chooses it by the first rule that applies: `$SKYDECK_HOME/run` when `SKYDECK_HOME` counts (design 9.1: non-empty and absolute) — always, whatever `XDG_RUNTIME_DIR` says, so that a test or a trial installation never reaches the real server or the real keepers; else `$XDG_RUNTIME_DIR/skydeck-<store id>` when `XDG_RUNTIME_DIR` counts by the same rule, is a directory owned by the user and not readable by others, and systemd keeps it while the user has no login session (lingering: `/var/lib/systemd/linger/<user>` exists; without it, systemd removes the directory when the last terminal closes, and with it every keeper socket); else `<stateDir>/run-<store id>`. `<store id>` is the first 8 hex digits of the sha256 of the store's path, so two installations never share a runtime directory. The server records the directory it uses in the store (`kv` `window_runtime_dir`, 10.2) when it takes its lock, and leaves the record while any keeper lives. **A starting server follows the record first**: when it names a directory that exists and holds a keeper alive by its `.pid` line, the server uses that directory, whatever its own environment would give, so that it finds the keepers a server started with another environment left there; a record whose directory is missing or holds nothing alive is ignored, and the server chooses by the rule and replaces the record. **Commands follow the record**, not their own environment — a command run without `XDG_RUNTIME_DIR` (from cron, `wsl.exe --exec`, `sudo -u`) still finds the server and the keepers — and resolve the rule themselves only when there is no record. `uninstall --purge` looks in the recorded directory and in every directory the rule can give (16.2). The keep-alive script is given the directory as an argument (6.1). Created with mode 700. Holds `server.json`, `server.sock`, `server.pid`, `keeper-<build>.py`, `interop`, `keepalive.pid`, `keepalive.interop` and `terms/`. `XDG_RUNTIME_DIR` is emptied when WSL stops; the others are not, so the server treats anything there from another boot as stale (6.3, 7.8). A test asserts that with `SKYDECK_HOME` set nothing is created or opened outside it (17.3). |
 | `<runtimeDir>/server.json` | The running server: `pid`, `procStart`, `bootId`, `port`, `serverId` (random per start), `build` (16.5), `checkout` (its `appRoot`), `startedAt`, and where its environment came from (5.2). Mode 600. Written after the server listens, removed when it stops. |
 | `<runtimeDir>/server.sock` | The server's unix socket for the command line (8.3), mode 600. |
-| `<runtimeDir>/server.pid`, `keepalive.pid`, `terms/<terminal id>.pid` | One line each, `<pid> <process start> <boot id>`, for the server, the keep-alive script and each keeper: the keep-alive script reads them (it cannot read JSON), and every reader judges them by design 5.5's liveness rule (boot id, pid and process start), never by the pid alone. A reader that cannot tell — the boot id cannot be read, or reading `/proc` fails — counts the line as unknown, not dead: nothing is ever removed, ended or given up on an unknown line; only a dead one allows removing a socket or a `.pid` file. A keeper's line has two more fields, its keeper version and `started` (0 or 1), so that `doctor` and `uninstall` need not connect to it (16.2, 16.3). Written through a temporary name and a rename; removed by their owner when it ends, and by the server together with a keeper's socket when it finds that keeper dead. |
+| `<runtimeDir>/server.pid`, `keepalive.pid`, `terms/<terminal id>.pid` | One line each, `<pid> <process start> <boot id>`, for the server, the keep-alive script and each keeper: the keep-alive script reads them (it cannot read JSON), and every reader judges them by design 5.5's liveness rule (boot id, pid and process start), never by the pid alone. A reader that cannot tell — the boot id cannot be read, or reading `/proc` fails — counts the line as unknown, not dead: nothing is ever removed, ended or given up on an unknown line; only a dead one allows removing a socket or a `.pid` file. A keeper's line has two more fields, its keeper version and `started` (0 or 1), so that `doctor` and `uninstall` need not connect to it (16.2, 16.3); from keeper version 4 the line of a session's shell's keeper (7.10) has a sixth, the word `shell` (`<pid> <process start> <boot id> 4 1 shell`), and a session terminal's keeps five. A skydeck before shells reads three or five fields and nothing else, so to it a shell's keeper holds no line (7.7). The keep-alive script reads the first three fields of any form and ignores the rest, so a shell's keeper keeps WSL running too (6.1); its own comment still speaks of "a keeper's two extra fields", as the script is not edited for shells. Written through a temporary name and a rename; removed by their owner when it ends, and by the server together with a keeper's socket when it finds that keeper dead. |
 | `<runtimeDir>/keeper-<build>.py` | The keeper's code as the server read it at start (16.5): what new keepers run. Written by the server at start through a temporary name and a rename, mode 600. A running keeper has read its code when it started, so the server removes the files of other builds at start. |
 | `<runtimeDir>/keepalive.interop` | The keep-alive's `$WSL_INTEROP` (6.4). |
 | `<runtimeDir>/terms/<terminal id>.sock` | A keeper's unix socket, mode 600, in a directory of mode 700. |
@@ -213,6 +220,7 @@ Added to design 11:
 | `src/window/carry-over.ts` | Follow-up F40 (design 7.1, 12.6): the offer to carry fields over after `/clear` — the lookups it is computed with from the store (the `clear` link and the mark of the first start, the pull requests attached by hand, the resume lock), its `rev`, the two acts in one transaction each, the kv entries and their removal. | platform, store, sessions, `view/carry-over.ts`, `protocol.ts`'s types, and `auth.ts`'s `failureKind` |
 | `src/window/updates.ts` | Follow-up F38 (16.5): the server's check for a newer skydeck — when it runs, the state every page is told, the stored outcome; it decides everything the page shows of it. Milestone 2: Update now — its refusals, the start of `skydeck update --from-window` (through python3 for the core limit), the run entry, the result. | platform, sessions (the deck), update, text, `log.ts`'s `serverLog`, and `auth.ts`'s `failureKind` |
 | `src/update/` | Follow-up F38: the look for a newer skydeck, one copy for three callers — `skydeck update`, the window's server and `doctor` (the server may not import `src/cli/`): `git.ts` (how skydeck runs git on its own checkout, and the window's fetch that never asks; moved from `src/cli/update-git.ts`), `look.ts` (the look in the command's order and in the window's tolerant one, the notes and the other changes an update brings, and `--check`'s lines), `news.ts` (a note of what is new: its name, its parse, its limits, its code runs), `record.ts` (the stored outcome, `kv window_update_check`, and the run entry of an update from the window, `kv window_update_run`). | platform, text, store (types), and `protocol.ts`'s types |
+| `src/window/shells.ts` | Issue #199 (7.10): opening a session's shell — the refusals and their words, the program (`shellProgram`: the account's login shell or `/bin/sh`), the spec, the wait for its start. The end of a shell is the registry's (`terminals.ts`). | platform, `env.ts`, `frames.ts`, `hub.ts`'s types, `terminals.ts`, `end-session.ts`'s words |
 | `src/window/protocol.ts` | The messages of 8.2 and 8.3 as TypeScript types, with JSDoc the page's type check reads: the definition of every message's fields. | `src/claude/session-id.ts` only (the session-id rule; it imports nothing) |
 | `src/window/frames.ts` | The keeper frames of 8.1: the byte layout the server and the keeper share, and parsers for the keeper's payloads. | `src/claude/session-id.ts` only |
 | `src/window/view/` | The page's view model as pure functions: sections, rows, the window's pull-request chip (12.3), attention, and through `search/` the blocks (the code's stacks), the switcher's ranking and the filter (12); from follow-up F37 the move of a session of Open by hand and the slots it gives out (`slot-moves.ts`, 12.9, 7.6); from follow-up F42 Open's order once a move made it the server's, the freeze and the places held after `/clear` (`open-sequence.ts`, 12.1); from follow-up F40 the parts of the offer to carry fields over after `/clear` (`carry-over.ts`, design 7.1: it imports no value). | sessions (types, and the pure `isListed` of `src/sessions/list.ts`), text, and design 7.3's order of the pull-request states, `CHIP_ORDER` of `src/github.ts`, so that the order has one place (stage D, plan D4); design 7.4's `matchesFilter` stays for `ls` and the interactive list, and the window's filter is 12.8's (stage E, plan E1) |
@@ -238,7 +246,9 @@ process (`Platform.processes`); an HTTP server on TCP or on a unix socket, conne
 socket and one JSON request over it (`Platform.net`); a one-shot timer (`Clock.after`); random
 bytes (`Platform.randomBytes`); from follow-up F38, a run that a timeout or an abort ends with
 SIGTERM first and SIGKILL only after a grace (`RunOptions.killGraceMs`, answered at the child's
-exit, not when its pipes close); this process's pid, uid and user name; a file's permission bits and
+exit, not when its pipes close); this process's pid, uid and user name; from issue #199 the
+account's login shell (`Platform.loginShell`: `os.userInfo().shell` from the account database, an
+absolute path, or null when it cannot be read; 7.10); a file's permission bits and
 owner (`FileInfo.mode`, `uid`); the target of a process's file descriptor and whether a TCP port
 has a listener (`Proc.fdTarget`, `Proc.tcpListening`, read from `/proc/net/tcp` and `tcp6`). A
 process's parent pid is read from `/proc/<pid>/stat` (`Proc.stat`) by a pure helper of
@@ -804,12 +814,21 @@ hibernation (WSL issue #8696, section 21): then nothing in WSL answers and 6.3's
 
 ## 7. Terminals
 
+A terminal of the window is one of two kinds. A **session's terminal** runs `claude` for a session
+(7.1–7.9). From issue #199 a **session's shell** runs the account's login shell under a session's
+terminal, in its folder (7.10): it is held by a keeper of its own, with the same frames, screen
+side, parking, reconnecting and rediscovery, but it is never a row, a slot or a session's
+terminal, and it ends with its session's program. Where this section says "terminal" alone it
+means a session's terminal; 7.10 says what holds for a shell.
+
 ### 7.1 The keeper
 
 `bin/skydeck-keeper` is one python3 file, standard library only (`pty`, `os`, `sys`, `select`,
 `socket`, `struct`, `json`, `fcntl`, `termios`, `signal`, `ctypes`, `resource`, `collections`,
 `time`; `sys` for the exception hook that keeps an error's message out of `keepers.log`, `ctypes`
-for `prctl`, `resource` for the program's core limit, `collections` for the tail), about 810 lines
+for `prctl`, `resource` for the program's core limit, `collections` for the tail), about 870 lines
+(version 4, issue #199, added the shell's meta, the spec's `file` and the pid line's sixth field;
+before it about 810)
 (about 700 without comments and blank lines; the first estimate counted the prototype's loop, and
 the rules below — claim, start deadline, pid line, queues and caps, linger — and the checks of every
 input it reads add the rest),
@@ -832,6 +851,19 @@ object, then closes stdin:
             "build": "<server build>" } }
 ```
 
+Keeper version 4 (issue #199, 7.10) knows a second form of the spec, a **session's shell's**: its
+`meta` is `{ "kind": "shell", "of": "<the session terminal's id>", "openedNs", "build", "dir" }`
+(no `sessionId`, `slot` or `label`), its `lock` is null, its `startBy` is the clock plus 55 s as a
+new session's, and it alone carries **`file`**, the absolute path of the program to run with
+`argv`: the keeper `exec`s `file` with `argv` as given, so that `argv[0]` can be `-<name>`, the way
+a login shell is told that it is one. A shell's spec without `file` (or with one that is no
+absolute path, or holds a NUL), a session's spec with `file`, a shell's spec with a lock, and a
+shell's meta with a key outside its form (exactly its five keys) are each a bad spec. A session terminal's `meta` may carry **`shell`**, the id of a shell (12
+lowercase hex): written only into the meta of the terminal a restart opens while the terminal it
+replaces has a shell (11.2, 7.10). The hello echoes the fields of the meta's form. A shell's
+keeper writes its `.pid` line with the sixth field `shell` (4.2). Nothing else of the keeper
+changes: no frame, no timer, no signal.
+
 `openedNs` is the terminal's **opening stamp**: when the server opened it, the server's clock — but
 never a stamp that is not later than every opening stamp the server knows, those it gave and those
 of the terminals it found again (7.3, from their `hello`). The clock gives one value to several
@@ -842,7 +874,8 @@ opening stamp, and the stamps rise in the order the terminals were opened, also 
 of the server (issue #213); every order "by opening time" (7.6, 12.1) is the opening order. A kept
 terminal whose stamp is ahead of the new server's clock pulls the stamps of the terminals opened
 after it ahead too, by 1 ns each, until the clock passes it. A keeper whose hello comes late (7.3)
-is known from its hello on.
+is known from its hello on. A session's shell takes its stamp by the same rule (7.10), and a found
+shell's is known from its hello, as a terminal's.
 
 `startBy` is the **start deadline**, no later than the resume lock holds: for a resume, the time
 the lock was taken plus `LOCK_TTL_NS` minus `LOCK_START_TOLERANCE_NS` (55 s, design 7.6); for a
@@ -1088,6 +1121,12 @@ The server's environment (5.2), with:
 `TERM_PROGRAM=vscode` is never set: Claude Code would take the terminal for an editor's (section
 21). The program runs directly (`exec`), as in step 1; no shell is started around it.
 
+**A session's shell** (issue #199, 7.10) gets what a terminal's program gets, by the same cleaning
+(`shellEnvironment` and `programEnvironment` of `src/window/env.ts` share it), and nothing that is
+set for Claude Code alone: for any server environment, the only names in a shell's environment
+that the server's lacks are `TERM`, `COLORTERM`, `PWD` (the shell's folder) and `WSL_INTEROP`.
+`SHELL` and every other variable are the server's.
+
 ### 7.5 A terminal and its session
 
 A terminal is opened for a session (resume) or for a new session id (`new`), and the server keeps
@@ -1136,6 +1175,11 @@ both in memory: the **expected session**. Which session it shows is decided agai
   start leaves the row in place, no longer starting, with the ended terminal (7.8) until the
   terminal is closed.
 
+A holder that descends from a session's shell's keeper (7.10) belongs to no terminal of the
+window: the walk above starts at the programs of the listed terminals, and a shell is never one
+of them. So a `claude` started by hand inside a shell runs outside the window's terminals (7.9),
+and the shell never becomes a session's terminal.
+
 ### 7.6 Slots
 
 A terminal gets the lowest slot 1–9 that no open terminal has, when it is opened, and keeps it
@@ -1179,11 +1223,14 @@ server gives them (`src/window/freed-numbers.ts`, the registry's `giveSlots`) at
 registry — so at each moment a slot becomes free: an exit applied, a `hello` that says the program
 exited, a lost terminal's program that may no longer run, the close of a lost terminal that still
 held one — and after every refresh that worked, so that the gaps a start finds are filled at its
-first refresh. It gives none while a keeper of terms/ is still being found (7.3): that keeper's slot
-is known only at its `hello`, so a slot that looks free may be its own; once every keeper has
-answered or was given up, the true gaps are filled. The server's log says once `freed numbers: none
-given while a keeper is still being found` while that holds a free slot back (a limit: a keeper that
-is never given up and never answers holds it back for as long as it is being found). Never to a
+first refresh. It gives none while a session terminal's keeper of terms/ is still being found
+(7.3): that keeper's slot is known only at its `hello`, so a slot that looks free may be its own;
+once every such keeper has answered or was given up, the true gaps are filled. A session's shell's
+keeper being found holds nothing back (issue #199, 7.10): its `.pid` line says what it is before
+any hello (4.2), and a shell has no slot. The server's log says once `freed numbers: none given
+while a keeper is still being found` while that holds a free slot back (a limit: a session
+terminal's keeper that is never given up and never answers holds it back for as long as it is being
+found). Never to a
 terminal whose program ended, never started or was lost, whose exit came and waits to be applied, or
 whose `hello` said it exited (F43). Free is `nextSlot`'s rule, so a slot held for another terminal
 (moved to a keeper being found, or held otherwise) is never given, and none is taken away from a
@@ -1336,6 +1383,13 @@ slot, its moves change only `window_slots`, and it leaves `window_open_order` al
 while a session that was under Open then still runs, that old kept order wins over the moves made
 meanwhile, and the numbers need not ascend, until the next move or until a refresh sees Open empty.
 
+A session's shell (7.10) has no slot and is no candidate of #189's hand-out, of F44's withholding
+or of a move: each of those rules reads the listed terminals, and a shell is never listed. A
+shell's keeper that is still being found holds no number back either (above): its `.pid` line,
+read before its finding begins, says that it is a shell's. No
+shell is opened while a shell's keeper (or a `.pid` file of no form this build reads) may live
+that the server does not hold (7.10): it could be that terminal's own shell.
+
 ### 7.7 Keeper versions
 
 The keeper file states its version and the protocol version it speaks (`hello`, 8.1). A running
@@ -1347,6 +1401,34 @@ is served as before and its session cannot be ended from the window (12.10). The
 keeper protocol version that has shipped (they are small); it refuses to attach a keeper with a
 newer protocol than it knows and shows "this terminal was started by a newer skydeck; run skydeck
 window --restart" on it. Its program keeps running.
+
+Version 4 (issue #199) holds a session's shell (7.1, 7.10), within protocol 1: no frame is new or
+changed. "A keeper's meta never changes" still holds: the tie of a shell to the terminal a restart
+opens is written into that terminal's meta when it is spawned (`shell`), never into a running
+keeper's. An update and a switch back are tested both ways (17.2, 17.3):
+
+- **This build and the keepers of the build before** (versions 2 and 3): their spec, hello, `.pid`
+  line and frames are unchanged and still parse (`shell` is optional), and nothing is sent to them
+  that they do not know. A terminal a version 3 keeper holds is found again after the update,
+  takes input, shows output, and is endable and ends (the keeper file as released before this
+  change is kept as a test fixture).
+- **The build before and a version 4 keeper of a session's terminal** (a switch back while
+  sessions run): its parser reads the meta's seven fields by name and ignores `shell`, its only
+  version rules are the protocol (still 1) and `E` from version 3, so it lists the terminal,
+  attaches it and can end it (tested with that build's frames codec, kept as a fixture).
+- **The build before and a shell's keeper**: its `.pid` reader takes three or five fields and
+  nothing else, so a six-field line is no line to it: it never claims that keeper, lists nothing
+  for it and blocks nothing (#189's hand-out goes on), and its session terminals work as before;
+  its start-up probe of dead keepers connects once and removes nothing of a live one. The shell
+  keeps running unseen and that server never ends it. Named limits of a switch back: a session's
+  end leaves its shell running until the shell's program ends or WSL stops; that build's `doctor`
+  does not count it and its `uninstall --purge` does not refuse for it; a server left with only
+  shells in its runtime directory reads no keeper there and may take another directory by its
+  rule (4.2), and this build then follows that record and never finds them; a restart (`r`) by
+  that build writes no `shell`, so back on this build that session's shell names a terminal that
+  is gone and is ended although its session runs; and the keep-alive script of every build counts
+  a shell's keeper (4.2), so WSL is kept running for it also where nothing shows it. Back on this
+  build the shell is found again.
 
 ### 7.8 When the program ends
 
@@ -1424,6 +1506,14 @@ another boot under a runtime directory that survives one), are removed by the se
 starts, and when the user closes a lost terminal whose line is dead; they are skydeck's own
 transient files.
 
+**A session's shell** (7.10) ends the same way, by its own program's end (`exit` typed, the
+shell killed) or its keeper's loss, and the server keeps no ended shell: it acknowledges the exit
+(the keeper ends), forgets the shell, and removes a lost shell keeper's files when its line is
+dead. A shell also ends **with its session's program**: when that program's end is applied — End
+session and End session and park, `/exit`, a crash, a lost keeper, closing the terminal, a
+restart that is given up — the server hangs the shell up as 7.10's end rule says. That is the one
+process the window ends without being asked each time (design 2, principle 6).
+
 ### 7.9 Sessions running outside the window
 
 A session whose holder belongs to no terminal of the window runs in another terminal. The window
@@ -1485,6 +1575,163 @@ the user to kill one: Claude Code's supervisor restarts a background session who
 unexpectedly", so skydeck leaves ending it to agent view (or `claude stop`). The field is read while
 the process runs and nothing of it is stored.
 
+**A `claude` started by hand inside a session's shell** (issue #199, 7.10) is a session running
+outside the window's terminals: its holder descends from the shell's keeper, which is no listed
+terminal (7.5), so the window shows it as running in another terminal, never as the shell's
+session or its owner terminal's, and `show` marks no holder under a shell's keeper as in the
+window (11.4).
+
+### 7.10 A session's shell
+
+Issue #199. Now and then Claude Code asks the user to run something themselves: open a tunnel,
+log in somewhere, run a few commands. A **session's shell** is a shell under a session's terminal
+of the window, in the session's folder, so that the instruction can be read above while typing
+below. This section is the server's and the keeper's part; the page's (the act that opens a shell,
+the panel, the key) comes with the window's protocol and page (8.2, 12).
+
+**What it is.** A second kind of terminal: its own keeper process (7.1, version 4), its own
+terminal id, socket and `.pid` file in `terms/`, the same frames, screen side, parking,
+reconnecting and rediscovery. It lives in the same registry (`src/window/terminals.ts`) as the
+session terminals, but `list()` never returns it: `shells()` does, each shell with the session
+terminal it belongs to (`of`), its state (`starting`, `running`, `reconnecting`), its folder, its
+program and its size. Every reader of the server's terminals as session terminals goes through
+`list()` — the rows and Open's order, numbers 1 to 9 and the withheld ones, the mapping and the
+start timeout, attention, parked, End session, the "already open" refusal, restore, `doctor`'s
+count of the server's terminals — so a shell is in none of them by construction, and the type
+checker holds the rest: a shell's hello has another type (`ShellHello`) than a session
+terminal's, and the events of a hello, a start and an exit (7.3, 7.8) are never emitted for a
+shell. At most one shell per session's terminal. Nothing about a shell is stored (no table, no
+`kv` key); its screen and what is typed into it are in memory only (2).
+
+By id the registry serves a shell where a stream is meant and refuses it where a session terminal
+is meant:
+
+| Registry member | For a shell's id |
+|---|---|
+| `list`, `rediscover`'s answer | never in it |
+| `attach`, `input`, `resize`, `setTheme`, parking, reconnecting, `stopAll` | as for any terminal (`input` answers `ended` once the shell is being ended) |
+| `close` | `unknown` (so `close-terminal` answers that the terminal is no longer there) |
+| `end` | `unknown` (only the registry hangs a shell up) |
+| `holdSlot` | null |
+| `setSession` | ignored |
+| `start`, `refuse` | sent (`start` sends no `G` to a shell that is being ended) |
+| `nextOpenedNs` | a shell's opening stamp comes from it (7.1), and a found shell's is known from its hello |
+| the slots (`nextSlot`, `giveSlots`, `withholdSlots`, `setSlots`) | a shell has no slot and is skipped; `setSlots` naming one answers `changed` |
+| `onChange` listeners | called |
+
+**Opening** (`src/window/shells.ts`, `open(terminal, size)`). After the interop link is pointed
+again (6.4), everything up to the spawn runs without an await, so two opens at once meet at the
+registry's list. In order:
+
+1. the server is stopping: `the window's server is stopping`;
+2. the terminal is no listed session terminal: `this session has no terminal in the window: open
+   the session first`;
+3. the terminal is `restarting`: `skydeck is restarting this session`; its program is over
+   (`ended`, `lost`, `not-started`, or an exit that came): `this session has ended: resume it
+   first`; it is held by a newer keeper: `this terminal was started by a newer skydeck; run skydeck
+   window --restart`; it shows no session yet or has no program (starting, or started and not
+   reported): `this session has not started yet: open a shell once it runs`;
+4. it has a shell already: done, nothing started (a second press never opens a second one);
+5. its folder (the launch's working directory, the terminal's `dir`) is no directory: `the
+   session's folder is not there any more`;
+6. the spec (7.1): a new terminal id, the program — the account's login shell
+   (`Platform.loginShell`, read from the account database by `src/platform/` only) when an
+   executable file is there, else `/bin/sh`; `argv` `-<name>` (`-zsh`, `-bash`, `-sh`), the
+   leading `-` that `login` itself uses, rather than a `-l` that a shell might not know —, the
+   terminal's folder, the environment of 7.4, `lock` null, `startBy` the clock plus 55 s, the
+   opening stamp, and the meta `{ kind: "shell", of, openedNs, build, dir }`. The registry
+   refuses the spawn, before anything is started, while a keeper of `terms/` may live that it
+   does not hold and whose line is a shell's or cannot be told (below): `a terminal of this window
+   does not answer; a shell cannot be opened until it does` (it may be that terminal's own shell).
+   A session's keeper that never answers refuses nothing. Then `G`, and the wait for the program:
+   `the shell did not start` when it is gone before its `T`, `the shell did not start within 5
+   seconds` after 5 s (it may still start before its deadline, and then shows in the lists);
+7. after `T`, a wait of 400 ms: `T` comes before the `exec` (7.1), so a shell that cannot be run
+   (127) or that ends at once (an account whose shell is `nologin`, a profile that exits) is the
+   answer `the shell ended at once (status <n>)` (or `(signal <n>)`), not a panel that flashes.
+
+No request of a page carries a program, an argument, a folder or an environment for a shell: the
+page names the session's terminal, and the server chooses the rest (15.1, 15.5).
+
+**The owner.** A shell's owner is a session terminal's id, kept in memory, and it is always sure:
+unknown while it is not. A shell the server opened has the terminal it was opened under; a
+restart moves it (below). For a shell **found** after a server restart the owner is resolved
+once, and an owner once resolved is kept, whatever becomes of that terminal (the end rule then
+decides). Until then each settle (below) tries, in this order — a candidate's program "may run"
+when the terminal is not over, has no exit, and its latest hello does not say exited:
+
+1. a listed session terminal whose meta's `shell` names the shell and whose program may run (the
+   one opened last, if several);
+2. else the terminal of the shell's meta `of`, listed, its program may run;
+3. else the owner is in doubt while a keeper of `terms/` may live that the registry does not hold
+   (`keepersThatMayLive`, `src/window/runtime.ts`: every `.pid` file whose id the registry does not
+   hold and whose line is not dead by design 5.5 — a session's, a shell's, or one that cannot be
+   read or holds no line this build reads; held are all the registry's terminals, shells too, in
+   any state, and a shell that ended, from the exit the server read until its keeper's files are
+   gone (it removes them once it has read the acknowledgement), so a shell's own keeper and another
+   session's shell are never a doubt — but a shell lost with its keeper's line alive is not held:
+   that keeper may still run it; a keeper
+   still being found, and one whose finding gave up after a connect error that was no refusal, are
+   not held). **Nothing is ended on that doubt** (4.2: nothing is ended on unknown): the shell stays
+   resolved to nothing, listed nowhere and running, the server logs once `terminal <id>: its
+   session's terminal is not found; the shell is left running` (once nothing is still being
+   found), and looks again once a second and at every change. Once no keeper may live unheld, a
+   listed candidate is the owner (it is over, so the end rule ends the shell), and with none the
+   shell has no terminal left and is ended.
+
+Two shells resolved to one terminal: the one opened last is the terminal's, the other is ended and
+logged. This build never makes two (the opening refuses while a shell's keeper may live unheld);
+the rule is a safeguard.
+
+**A restart of the session** (`r`, 12.10, 11.2) holds the terminal and hangs its program up; right
+after the resume's spawn takes the held number (`take`), in the same synchronous step, the held
+terminal's shell is moved to the new terminal (`moveShell`, which announces nothing: a settle
+before the spawn lists the new terminal would end the shell), and its id goes into the new
+terminal's meta as `shell`. So the tie lives in the keepers' metas, and a server restart after any
+number of session restarts (and after `/clear`, which changes the session, not the terminal)
+finds it. The same shell process, with its screen, goes on under the new terminal.
+
+**The end rule** (`settleShells`). It runs before the listeners of every change of the registry,
+after a keeper's finding ends and, while a shell's owner is unresolved, once a second; never once
+the server stops. For each shell with an owner that is not being ended: nothing while the owner is
+a listed session terminal whose program may run (not over, no exit), or one a restart holds; the
+shell is **ended** when the owner is listed and over and not held, or no longer listed (closed, or
+a spawn that failed). That covers each way a session's program ends: End session and End session
+and park (`E`, then its exit), `/exit`, a crash, a lost keeper (`lost` is over), closing the
+terminal (its program was over already), a restart that is given up or whose resume opens no
+terminal, and a server that starts and finds the session's keeper exited or its line dead.
+
+**Ending a shell.** It is marked ending and leaves `shells()` at once, so every page's panel closes
+with the next list. Then it is hung up, by one step that runs at the marking, at every hello of the
+shell and at its `T`: with a program and a connection, `E` (SIGHUP and SIGCONT, 7.1), once; with no
+program yet, `N`, once — when `G` was on the wire already the keeper starts the program all the
+same (it ignores an `N` once started), its `T` comes, and the step sends `E`; with no connection,
+at the next hello. The server logs `terminal <id>: its session's terminal is over; the shell is
+hung up`, and once more `terminal <id>: the shell has not ended` when no exit came 10 s after the
+`E`, and goes on waiting.
+
+**What ended means for what runs in it.** `E` is what the kernel sends a session's leader when its
+terminal goes: bash, zsh and dash end on it, bash and zsh pass it to their jobs, and the kernel
+hangs up the foreground job when the leader ends. A job started with `nohup`, `setsid` or
+`disown`, and a shell that ignores SIGHUP, go on, as after closing any terminal's window: a named
+limit. The server never escalates: the keeper has no other signal.
+
+**A shell's own exit** (`exit` typed, the shell killed, its keeper lost): its exit goes to the
+pages attached to it, the keeper is acknowledged, the shell is forgotten (a lost keeper's files
+with it when its line is dead), and the opening's wait is told. A found shell whose hello says its
+program was never started, and whose start nobody waits for any more, is refused (`N`) and
+forgotten at its exit: from the refusal on it is out of `shells()` and takes no input (and no
+`G`), so that an open of its terminal meanwhile opens a shell of its own; one whose hello says
+exited is forgotten after its exit.
+
+**Limits.** While a shell's keeper (or a `.pid` file of no readable form) may live and is not held
+— it never says hello, its finding gave up, its file cannot be read — no shell can be opened in the
+window, for any session, for as long as that lasts; a session's keeper in that state refuses
+nothing. Any keeper that may live unheld keeps a found shell whose owner is in doubt hidden and
+running for as long: nothing ends it, and each server start looks again. After WSL stops a shell is
+gone and is not restored. A switch back to a build before shells leaves them running and unseen
+(7.7).
+
 ## 8. Protocols
 
 ### 8.1 Server and keeper
@@ -1497,7 +1744,7 @@ keeper). Protocol version 1:
 | Type | Direction | Payload |
 |---|---|---|
 | `C` claim | server → keeper | Empty. The connection becomes the screen side (7.1, step 3). The first frame of every connection. |
-| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` and `procStart` (the program's, field 22 of its `/proc/<pid>/stat`; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers; 0 both for none and for the empty screen parked at record 0, 7.3 — see `S`), `tailFrom` (the number of the tail's first record: `snapSeq` + 1, or later when records were dropped, `seq` + 1 for an empty tail), `gap`, `meta` (the spec's), `exited` (null or as `X`). The answer to `C`. |
+| `H` hello | keeper → server | JSON: `protocol` (1), `keeper` (keeper version), `id`, `started` (whether the program was started), `startBy`, `lock`, `pid` and `procStart` (the program's, field 22 of its `/proc/<pid>/stat`; null before the start), `cols`, `rows`, `seq` (records so far), `snapSeq` (the last record the parked snapshot covers; 0 both for none and for the empty screen parked at record 0, 7.3 — see `S`), `tailFrom` (the number of the tail's first record: `snapSeq` + 1, or later when records were dropped, `seq` + 1 for an empty tail), `gap`, `meta` (the spec's, in one of its two forms, 7.1: a session terminal's seven fields, with `shell` when its spec has one, or from keeper version 4 a session's shell's five, `kind` `shell`; the server tells them apart by `kind`, and a shell's hello has `lock` null), `exited` (null or as `X`). The answer to `C`. |
 | `G` start | server → keeper | Empty. Starts the program, only before `startBy` and only once (7.1, steps 1 and 2). |
 | `T` started | keeper → server | JSON `{ pid, procStart, atNs }`: the program was forked. Sent once, to the screen side, right after the fork and before the program's first output (when
 `exec` then fails, `X` with code 127 follows); a server that claims the keeper later finds the same in `hello`. It is what `open()` waits for (11.2) and what ties the terminal to the holder the program becomes (7.5). |
@@ -1804,6 +2051,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `update-seen` | — | Follow-up F38, 16.5: the result bar's ×: the result of the last update from the window is dismissed on every page. The result's `update` is the state. |
 | `carry-over` | `sessionId` (the new session), `rev` (16 lower-case hexadecimal digits: the offer as drawn, `list.selected.carryOver.rev`), `fields` (0 to 5 distinct names of `label`, `group`, `ticket`, `note`, `prs`: the ticked ones), `done` (a boolean: `mark the old one done` ticked) | Follow-up F40, 12.6, design 7.1: in one transaction the server computes the offer again from the store and copies the ticked fields from the old session to the new one and, with `done`, marks the old one done; every page's `list` follows. Refused, nothing written, with the words as the result's error: a session the store does not know; `this offer was answered or dismissed already`; `there is nothing to carry over to this session any more` (no `clear` link from after the first start with F40, or nothing left to carry); `the sessions changed since this offer was drawn; look at it again` (`rev` is not the offer's now, or a name or `done` that the offer does not offer); `nothing is ticked: tick what to carry over, or close the offer with ×`; `cleanLabel`'s and `cleanGroup`'s refusals; a busy store. |
 | `dismiss-carry-over` | `sessionId` | Follow-up F40, 12.6: the bar's ×: the offer of that session ends for good, nothing copied; `ok` also when it was answered already (sent twice, or from two windows), and then nothing is written. Refused, nothing written, with `there is no offer to dismiss for this session` for a session without a `clear` link from after the first start with F40. |
+| `shell` | `term` (a terminal id), `cols`, `rows` (the shell's first size) | Issue #199, 7.10: opens a shell under the window's session terminal `term` (`src/window/shells.ts`, 7.10's opening rules): the account's login shell, in that terminal's folder, with the environment of 7.4; answered `ok` once its program runs (or when the terminal has a shell already: nothing is started), else the refusal's words. The act names only the terminal: the program, its argument, its folder and its environment are the server's, and no field of it can carry one (15.1). No act hides, shows or ends a shell: shown and hidden is each page's (12.6), the end is the shell's `exit` or its session's (7.10). |
 
 An unknown kind or field is refused, and so is a string over its limit (in UTF-8 bytes: paths and
 URLs 4,096 — a `ticket`'s `text` too —, `input.data` 64 KiB, a note's `text` and `base` 64 KiB
@@ -1823,7 +2071,8 @@ stays under the 1 MiB a page's message may hold (8.2.1). A stored note longer th
 sent (`selected.note` null, `noteTooLong`) and the window does not edit it: it says `this note is
 longer than the window edits; use skydeck note <short id>`; the page refuses a longer text before
 sending it, since the server would close the connection for the message (stage D, plan D5). No action carries a program or an argument list to run (8.3), and none a path (a setting's `key`
-is a name of the server's table, follow-up F36):
+is a name of the server's table, follow-up F36; issue #199's `shell` names a terminal only, and
+the server chooses the shell, its folder and its environment, 15.1):
 `resume` names a session, and `new`'s directory, label, group and `claude` flags are the only
 fields that become part of a launch, checked as `skydeck new` checks them — and, from issue #188,
 `resume`'s `flags`, checked as `skydeck resume <ref> -- <flags>` checks them (design 7.6 "Other
@@ -1839,7 +2088,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4 — from follow-up F44 those whose `needsYou` is true, never a parked one —, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, from follow-up F44 `parked`, `week`, `earlier`, in that order, each with `folded` — false for `parked` always: only Earlier folds as a whole —, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4; from F44 by their `needsYou`), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, from follow-up F42 the order they last had under Open, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5; from issue #166 `restarting`, true while a restart holds it — 7.6, 12.10 — and absent otherwise); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), from issue #188 `resumeFlags`, the same flags each exactly as recorded — not sanitised: the page puts them only into the value of the resume card's `Other flags…` field (12.6), as it puts `note` only into a text box — or null when one holds what that field cannot hold as it is (a line break, another control character, a bidirectional control: the favourites' rule; `[]` without a recorded launch), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); issue #184 `copyOnSelect`: `window.copyOnSelect` as the running server uses it (9.5; always sent, so a page has it from its first list and follows a change in Settings at its next; absent, as in a scripted list of the tests, is false: the page holds no default); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, from follow-up F44 `parked` (a session under Parked, never `need`), `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none; from follow-up F44 `parked`, whether the session is parked now — design 7.1's derived mark: marked, and no prompt of the user's since —, and `parkedAtNs`, the time it was parked while it is, else null, both always sent, absent, as in a list of a server before F44, false and null) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), from follow-up F44 `needsYou` (whether the row counts as needing you, 12.4: `attention` set and the session not parked; always sent; absent, as in a list of a server before F44, is `attention` not null; the page counts and closes on it and decides nothing of it), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4 — from follow-up F44 those whose `needsYou` is true, never a parked one —, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, from follow-up F44 `parked`, `week`, `earlier`, in that order, each with `folded` — false for `parked` always: only Earlier folds as a whole —, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4; from F44 by their `needsYou`), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, from follow-up F42 the order they last had under Open, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5; from issue #166 `restarting`, true while a restart holds it — 7.6, 12.10 — and absent otherwise); from issue #199 `shells`, the sessions' shells (7.10): each its `id`, `of` (the session terminal it belongs to now), `state` (`starting`, `running`, `reconnecting`), `cols`, `rows` and whether this page owns the size, never a row, a number or an entry of `terminals` (optional for the reader: absent is none); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), from issue #188 `resumeFlags`, the same flags each exactly as recorded — not sanitised: the page puts them only into the value of the resume card's `Other flags…` field (12.6), as it puts `note` only into a text box — or null when one holds what that field cannot hold as it is (a line break, another control character, a bidirectional control: the favourites' rule; `[]` without a recorded launch), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); issue #184 `copyOnSelect`: `window.copyOnSelect` as the running server uses it (9.5; always sent, so a page has it from its first list and follows a change in Settings at its next; absent, as in a scripted list of the tests, is false: the page holds no default); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, from follow-up F44 `parked` (a session under Parked, never `need`), `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none; from follow-up F44 `parked`, whether the session is parked now — design 7.1's derived mark: marked, and no prompt of the user's since —, and `parkedAtNs`, the time it was parked while it is, else null, both always sent, absent, as in a list of a server before F44, false and null) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), from follow-up F44 `needsYou` (whether the row counts as needing you, 12.4: `attention` set and the session not parked; always sent; absent, as in a list of a server before F44, is `attention` not null; the page counts and closes on it and decides nothing of it), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -1880,7 +2129,10 @@ applied, so nothing is lost or doubled.
 A page that reconnects (6.3) goes through the whole handshake again — `challenge`, `hello`,
 `welcome`, `start` (8.2.2) — in mode `key`, then sends its `view` and `focus` and attaches the
 terminals it had attached; each starts over with a fresh `snap`. There is no resume from a position: a snapshot is cheap enough
-(7.3) and always right.
+(7.3) and always right. A session's shell (issue #199, 7.10) is not attached again: after a
+reconnect, as after a reload or a restart of the server, every shell is hidden on the page and the
+header's dot says that it is there (12.5, 12.6); showing it again attaches it with a fresh `snap`
+(the keeper kept its screen).
 
 #### 8.2.6 Size
 
@@ -1928,11 +2180,30 @@ page last proposed (`attach`, `resize`). The rules:
 The page's xterm.js keeps 5,000 lines of scrollback, as the screen side does (7.2), so that both
 reflow alike and find (9.7) sees what the snapshot holds.
 
+**Two terminals in one area** (issue #199, 7.10, 12.6). While a page shows a session's shell, its
+terminal area holds two terminals: the session's above, the shell's panel below, with the bar
+between them (12.6's split). Each has its own size by the rules above — one size state per
+terminal id, a shell's included, its owner the page that typed into it last, `list.shells`
+carrying whether this page owns it as `list.terminals` does —, and each of the page's two terminal
+views proposes its own terminal's size from its own box when that box changes: showing the panel
+makes the session's terminal lower, so it is told its smaller size, hiding it gives the full
+height back, and a drag of the bar tells both. In an area too low for both the shell takes the
+whole area while it is shown; the session's terminal is not laid out then and proposes nothing,
+so it keeps its last size. A shell's **first size** is its act's (`act shell`, 8.2.3): what fits
+the panel's box as 12.6's rules make it for the terminal area at the press (the stored height, a
+third of the area while none is stored, the whole area when it is too low), counted by the rule
+above for that box, or 80 × 12 while the page cannot tell. `focus.area` stays the whole terminal
+area, the panel and the bar not counted out (ruled): its one reader is the first size of a
+terminal the command line or a restore opens, and such a terminal has no shell.
+
 #### 8.2.7 Several windows
 
 Any number of pages may attach to one terminal; they share its ordered stream. Input from any of
 them goes to the program in the order the server receives it. `list` goes to every page; each
-page's `view` state is its own. Notifications go to one page only (13).
+page's `view` state is its own. A session's shell (issue #199, 7.10) is shared by the windows as a
+terminal is — one per session, in every window's `list.shells`, its size owned by the page that
+typed last —, and whether its panel is shown is each window's own: a shell one window opened is
+hidden in the others until the key there shows it. Notifications go to one page only (13).
 
 Attention (12.4, 13; stage B's plan, B20) is the server's, so it is the same in every window: the
 marks, the title bar's count and the window title — but for what a window lists at all: a done
@@ -2043,7 +2314,7 @@ every key in this table, and the page does what the table says:
 | Ctrl+V | leaves the key to the browser, which pastes; the page takes the paste before xterm.js does (in the capture phase of the terminal's element), cancels the browser's own action, takes every ESC out of the text and hands the rest to xterm.js's paste, which sends it as a bracketed paste (section 21: xterm.js 6.0.0 neither cancels a paste, so the text would stay in its hidden textarea, nor filters it, so a pasted `ESC [ 2 0 1 ~` would end its own bracketed paste) | Pasting text, as in the developer's terminal. No `\x16` is sent (a page test checks it, 17.4). |
 | Ctrl+Shift+V | sends `\x16` (a raw Ctrl+V) and cancels the key | Claude Code's own image paste: on WSL it reads the Windows clipboard itself (6.4); the browser's clipboard is not involved. |
 | Ctrl+Shift+C | copies the selection to the clipboard and cancels the key | Copy. With `window.copyOnSelect` on (issue #184, 9.5) a selection made with the mouse is copied at its release already; Ctrl+Shift+C copies it again, the same text by the same function, with the setting on or off. |
-| the window's own chords (12.9) | acts on them and cancels the key | xterm.js would send nothing for them anyway, so the window takes nothing from Claude Code. |
+| the window's own chords (12.9; from issue #199 Ctrl+Shift+S, the session's shell, among them) | acts on them and cancels the key | xterm.js would send nothing for them anyway, so the window takes nothing from Claude Code. |
 | Alt+F4 | nothing: neither sent nor cancelled | The window closes with it (12.9). |
 
 Every other key goes to xterm.js as it is: the bytes it sends, and the cancelling it does, are
@@ -2099,7 +2370,11 @@ write-only handler (`navigator.clipboard.writeText`), not `addon-clipboard`, and
 terminal that is shown in a focused window, and only up to 1 MiB of text — the up to eight hidden
 terminals a page keeps attached (12.6) cannot replace the clipboard behind the user's back. A
 request to read the clipboard (OSC 52 with `?`) is never answered (design 13: programs in a
-terminal can write to the clipboard but not read it).
+terminal can write to the clipboard but not read it). From issue #199 the page has two terminal
+views, the session terminals' and the shells' (12.6): the rule is each view's own, so the shown
+terminal of each may write — a session's terminal and its shown shell —, and a hidden panel's
+shell is shown in no view and may not. Ctrl+Shift+C, Ctrl+V and the raw Ctrl+Shift+V act on the
+terminal that has the keyboard, and copy on select on the view the selection was made in, once.
 
 **Copy on select** (issue #184; the owner's decisions of 2026-11-23: built, on by default, a switch
 in Settings). While `window.copyOnSelect` is `true` (16.4, the default), a selection the user ends
@@ -2190,7 +2465,9 @@ of the page. Whether a link opens in the user's default browser, logged in, is c
 ### 9.7 Find
 
 Ctrl+Shift+F opens a find bar over the terminal (`@xterm/addon-search`): it searches the page's
-copy of the scrollback, which after a snapshot is the screen side's (5,000 lines).
+copy of the scrollback, which after a snapshot is the screen side's (5,000 lines). From issue #199
+each terminal view has its own find bar: Ctrl+Shift+F opens the one over the terminal that has the
+keyboard, the session's terminal or its shell (12.6).
 
 ## 10. What the server keeps
 
@@ -2612,6 +2889,11 @@ timeout's path: no command — a keeper may run, and a hand-run `claude` could s
 twice, or the terminal offers Resume itself — and the lock and the label stay; the terminal's exit
 gives them back when its program never started (7.8).
 
+Issue #199: a terminal opened for a restart (12.10, 7.6's hold) carries the held terminal's
+session's shell, if it has one that is not being ended: right after `take` gives it the held
+number, in the same synchronous step, the shell is moved to it (`moveShell`) and its id goes into
+the new terminal's meta as `shell` (7.1, 7.10).
+
 ### 11.3 In the window
 
 - **Resume.** Enter on a selected session that is not running, a double click, "Resume here" on
@@ -2664,7 +2946,9 @@ gives them back when its program never started (7.8).
   open in the window is refused as `running (pid <n>)` like any other running session; `show` adds
   `(in the skydeck window)` to a holder's line when the holder is a keeper's program or descends
   from it (7.5's walk: up to 8 parents below the program, so 9 below the keeper) and that keeper is
-  alive by its `.pid` line in the runtime directory the store records (4.2, design 5.5's rule). It
+  alive by its `.pid` line in the runtime directory the store records (4.2, design 5.5's rule) and
+  is no session's shell's keeper (its line's `shell`, 7.10: a `claude` started in a shell runs
+  outside the window's terminals, as the window shows it, 7.9). It
   needs no running server: it creates nothing and connects to nothing, and with no runtime
   directory, no keeper line or no boot id there is no mark. `show --json` is unchanged.
 - `--window` (new for `resume` and `new`; `--here`, `--tab` and `--window` exclude each other: two
@@ -3513,7 +3797,19 @@ rules leave slack for other fonts). With the list 400 px wide a window up to abo
 shows no Restart, one up to about 810 px no Unread / Read and one up to about 718 px no Park /
 Unpark (at 640 px Park was cut before); `r`, `u`, `w` and `skydeck park` remain. A done row at the narrowest windows (below about
 650 px, with the list at 400 px) is the one case where the state may lie under Note (`Undone` is
-wider than `Done`); no button is cut there. Then
+wider than `Done`); no button is cut there. From issue #199 a button **Shell** stands before
+Restart (before Done without it) while the pane is a terminal of the window that is not ended
+(7.10): a click opens the session's shell, shows a hidden one, or hides a shown one, and takes no
+keyboard itself (12.9): a shell it opens or shows gets the keyboard, as the key's does, since the
+user asked for a shell to type into; one it hides gives the keyboard to the session's terminal only
+when the keyboard was in the shell, and else leaves it where it was (the list, the session); its tooltips `open a shell in this session's folder (Ctrl+Shift+S)`, `a
+shell is open: show it (Ctrl+Shift+S)` and `hide the shell: what runs in it keeps running
+(Ctrl+Shift+S)`. While a shell is open, shown or hidden, a dot in the accent colour stands beside
+its word, `Shell ●` (its tooltip and label `a shell is open`): the header's only mark of a shell,
+nothing is on the list's row. Shell needs about 60 px more of the line, so while it is there
+Restart gives way at 520 px inside, Unread / Read at 452 px and Park / Unpark at 360 px, and Shell
+itself, which carries the mark, last, at 290 px (measured as above: no button cut and the state
+never under Note down to 232 px); `Ctrl+Shift+S` remains. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
 F18 the session's ticket first (below, with its status from F19), then the window's chip (12.3),
@@ -3842,6 +4138,48 @@ nothing; `ls` is unchanged.
   or refuses each `input` message on its own and answers only a refusal, and the page has sent
   every part of the paste before the first refusal can come, so it cannot hold back the rest or
   send the end marker later (a named limit).
+- **A session's shell** (issue #199, 7.10): a panel under the session's terminal, `#shell`
+  under `#terminal` in the right zone, with a bar between them (`#shell-bar`). The split
+  (`web/shell-panel.js`, its rules pure in `web/shell-panel-split.js`): the terminal area is the
+  right zone's box less its borders and the cards; each of the two keeps room for at least 4 rows
+  (`least`: what 4 rows of the measured cell and the margin of the text need, 84 px while no cell
+  can be measured); the bar is 6 px; in an area lower than twice `least` and the bar the shell
+  takes the whole area (`data-shell="full"` on the zone: neither the session's terminal nor the bar
+  is laid out, and the key shows and hides the whole-area shell); else (`data-shell="split"`) the
+  shell is the stored height, a third of the area rounded while none is stored, held to `least` …
+  the area less the bar and `least`, and the session's terminal the rest. A `ResizeObserver` on the
+  zone and the cards applies the rules again when the area changes, and each terminal is told its
+  size (8.2.6). **The bar** (modelled on the list's handle, 12.1): a press of the primary button
+  and a move change the height with the pointer, live, within the bounds; the drag begins once the
+  pointer is more than 3 px from the press; the release keeps the height in the page's own
+  `localStorage` under `skydeck-shell-height` (whole px; anything but a whole number of 1 to
+  100,000 counts as none; a begun drag released at its press stores nothing); a double click
+  removes it (back to a third); a `storage` event makes the profile's other pages follow. One
+  height for all sessions, remembered for the window and nothing of it sent to the server; storage
+  that throws keeps nothing, and the height holds for the life of the page. Its tooltip: `Drag to
+  change the height of the shell. Double-click: back to a third.` It takes no keyboard (12.9) and
+  does nothing while a dialog is shown (a drag that meets one ends as at a release). The panel is
+  a second instance of the terminal view, with its own terminals, find bar, shown terminal,
+  refit and limit of attached terminals: the page keeps up to 8 session terminals and up to 8
+  shells attached, each the least recently shown detached first, and while the window is hidden
+  only the shown one of each. `snap`, `size`, `exit`, a terminal's `notice` and the output go to
+  both views, each ignoring a terminal or a channel it does not have; the exits and the re-attach
+  of a reconnect stay the session terminals' own. Which shells it shows is the page's own and in
+  memory only (`state.shellsShown`): the panel is drawn while the pane is a terminal that is not
+  ended, `list.shells` has a shell of it and the page shows that shell; a shell is attached only
+  once its panel was shown, and stays attached while hidden. The page that sent `act shell` shows
+  the shell when a list brings it (and gives it the keyboard while its terminal is still the
+  pane's, the keyboard is still where it was at the press and no text is selected: what the user
+  typed or clicked meanwhile keeps its place, and a dialog its keyboard); an act whose shell the first list after its answer does not bring is forgotten, so a
+  shell another window opens later opens no panel here. A refusal is the toast also when a list
+  brought the shell already: one that ends at once is listed while the server waits for its end,
+  so its panel comes and goes, and the answer says why. Selecting another session keeps each
+  session's panel shown or hidden as it was on this page. A shell a list no longer has (its
+  `exit`, its session's end) leaves the page — also one this page hid, whose terminal the view
+  still held —, and the keyboard goes to the session's terminal when it was in the shell (ruled);
+  else it stays where it was.
+  After a reload, a reconnect or a restart of the server every shell is hidden (8.2.5) and the
+  header's dot says it is there (12.5).
 - **A session running in another terminal**: the card of 7.9.
 - **A session not running**: the **resume card**: how it ended (exited normally, ended
   unexpectedly, mid-turn), last activity, the directory, the exact command (design 7.6's), the flags
@@ -4270,6 +4608,7 @@ keeps Edge's default: in the list zone Ctrl+W closes the window, which ends no s
 | Ctrl+Shift+F | find in the scrollback |
 | Ctrl+Shift+C / Ctrl+Shift+V | copy the selection / send a raw Ctrl+V (image paste) |
 | Ctrl+Shift+H | the key help (under its title, `Take the tour`: 12.14) |
+| Ctrl+Shift+S | the session's shell (issue #199, below): opens it, shows it, gives it the keyboard or hides it |
 | Ctrl+V, Shift+Enter, Ctrl+click | paste text, newline, open a link (9) |
 
 Letters are matched by the character the key types (Claude Code's own rule). A digit is matched by
@@ -4283,6 +4622,42 @@ layout: that is why the help is Ctrl+Shift+H and not Ctrl+Shift+/, whose physica
 a Czech layout and would take Claude Code's Ctrl+Shift+-. If the user turns on the kitty keyboard
 protocol in a later xterm.js and binds a `ctrl+shift+<x>` in Claude Code, the window shadows that
 binding; the help says so.
+
+**A session's shell** (issue #199, 7.10, 12.6). Two ways: Ctrl+Shift+S in both zones and a click
+on the header's `Shell` (12.5) act on the selected session's shell by one pure rule (`shellPress`, `web/shell-panel-text.js`); a dialog, the
+switcher or the tour shown first says its gate's line, as for every chord:
+
+| Where it is pressed | What happens |
+|---|---|
+| no session selected (none, a caption) | the toast `no session selected` |
+| the pane is no terminal of the window: the session does not run, or the New form is over it | the toast `a shell opens under a session's terminal in this window: open the session first (Enter)` |
+| the session runs elsewhere | the toast `a shell opens under a session's terminal in this window; this one runs in another terminal` (`… in Claude Code's background` for one there) |
+| the pane's terminal is ended | the toast `this session has ended: resume it first, then open a shell` |
+| the terminal has no shell | `act shell` with the terminal and the first size of the panel's box as 12.6's split makes it for the area at the press (8.2.6; 80 × 12 while the view cannot tell); the server's refusal is the toast `Shell: <its words>` (7.10) |
+| it has a shell, the panel is hidden | the panel is shown and gets the keyboard |
+| the panel is shown and the keyboard is in the shell (anything inside `#shell`) | the panel is hidden, the keyboard goes to the session's terminal; the shell keeps running |
+| the panel is shown and the keyboard is anywhere else (the session's terminal, the list) | the keyboard goes to the shell (the zone becomes the terminal's) |
+
+The header's `Shell` hides a shown panel whatever has the keyboard, as its tooltip says, and takes
+no keyboard itself: the keyboard goes to the session's terminal only when it was in the shell, and
+else stays where it was (12.5). A held key acts once. The toasts for a pane without a terminal of the window
+are words from the row's own fields, as `r`'s are; for a terminal the server decides again at the
+act (4.3). **The keyboard** between the two: a click moves it (xterm.js takes the focus at its own
+press); giving the terminal zone the keyboard — Ctrl+Shift+L, a click on the zone, a closed
+dialog — gives it to the side that had it last (the shell only while its panel is drawn; in an
+area too low for both, where the session's terminal is not laid out, the shell), and a pane that
+changes to another terminal starts on the session's side. When the area is high enough for both
+again, a keyboard that the change to too low took from the session's terminal to the shell goes
+back to the session's terminal, unless it has moved since, the user did something with the shell
+meanwhile (a key — not a modifier pressed alone, which every system chord such as Win+↑ or Alt+Tab
+starts with, and not a chord the window takes for itself —, a press, a paste, or find, copy or the
+raw paste acting on it), text is selected or a dialog is shown;
+a shell the user opened or showed while the area was too low keeps the keyboard. Find, copy and the raw Ctrl+Shift+V act
+on the view whose element holds the keyboard (9.5, 9.7). **The bar** between the two (12.6) takes
+no key and no keyboard: it is not focusable and every mousedown on it is cancelled, so a press or a
+drag leaves the keyboard where it was (in the shell, the session's terminal or the list). No single key of the
+list opens a shell (ruled): a sentence typed into the list by mistake would open one at its first
+`s` and type the rest into a login shell, to run at the next Enter.
 
 **Marking unread** (12.4). In the list zone `u` marks the selected session unread, or read while
 it has a mark seeing clears (ended, finished, unread), as the header's `Unread` / `Read` does
@@ -4709,7 +5084,10 @@ bring the program back), `Marked done. It has not ended yet: end it inside claud
 open.` with Undo when it has not ended within 10 seconds, or `End session: <why>` for a refusal.
 The terminal is closed by the server once the program ended (also after the 10 seconds), so the row
 leaves Open and, done, is hidden; after `d` in the list the selection follows 12.9's rule for a row
-gone after `d` (a row of Open: nothing else is selected).
+gone after `d` (a row of Open: nothing else is selected). While `list.shells` has a shell of the
+dialog's terminal (issue #199, 7.10), a line under the warning says `Ending the session ends its
+shell too.`; it follows every list while the dialog is shown, so it comes and goes with the shell.
+The dialog "Restart" says nothing of it: a restart keeps the shell (7.10, 12.6).
 
 **The dialog "Park"** (follow-up F44, 12.15; the owner's decision of 2026-11-25) is this dialog for
 `w` and the header's `Park`, in a parking's words: `End session and park` ends the session as `End
@@ -5182,7 +5560,7 @@ none: no made-up data.
   | Region | Title | What it says |
   |---|---|---|
   | the list | The list | every session, one row each, of this window and of any terminal; Open, Recent (the last 7 days) and Earlier; the number 1–9 is the slot |
-  | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it, also with other flags (issue #188) |
+  | the right side | The right side | the selected session's terminal when it runs in the window, else its card, with the way to resume it, also with other flags (issue #188); from issue #199 `Ctrl+Shift+S opens a shell under the terminal, in the session’s folder.` (7.10, 12.6) |
   | the key bar | Where the keyboard is | `Focus: list` or `Focus: terminal`; Ctrl+Shift+L moves it; with `Focus: terminal` a letter goes to Claude Code |
   | the list | The list's keys | with `Focus: list` only: ↑ ↓ move, Enter shows or resumes; Shift+↑ Shift+↓ move a session up or down in Open (12.9, follow-up F37); `l` label, `g` group, `n` note, `t` ticket, `p` pull requests, `d` done, from follow-up F44 `w` park and from issue #166 `r` restart (the version is not raised for them: the tour is not shown again); `/` filter, `a` show done, and from the mark unread `u` mark unread on that line (the line of the letters is full; the version is not raised) |
   | `Switch…` | Getting around | `Switch…` (Ctrl+Shift+P); Ctrl+Shift+1…9 a slot; Ctrl+Tab back to the previous session; Ctrl+Shift+J the next session that needs you; Ctrl+Shift+N a new one |
@@ -5297,7 +5675,9 @@ and none is parked, idle or working. The session ended
 so is listed under Parked and resumed from its row. Everything else is 12.10's: Esc is Cancel; Tab
 and →, Shift+Tab and ← walk the three and stay inside; Enter or Space press at a fresh press only
 (an auto-repeat, or a key held since before it opened, presses nothing); Ctrl+Shift+H is refused
-while it is shown and opening it hides the key help; it belongs to its session and terminal and closes by itself, nothing done,
+while it is shown and opening it hides the key help; while the session's terminal has a shell
+(issue #199, 7.10) it says `Ending the session ends its shell too.` under the warning, following
+every list; it belongs to its session and terminal and closes by itself, nothing done,
 with the toast `It stopped by itself: nothing was parked.`, `It was parked in another window:
 nothing was ended.`, `It was marked done in another window: nothing was ended or parked.` or `It
 left the list: nothing was parked.`; Cancel changes nothing and gives the keyboard back. `Park,
@@ -5492,7 +5872,14 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   `buildNewCommand` building the arguments — from a session id, or from `new`'s directory, label,
   group and `claude` flags after design 7.7's checks; keystrokes go to the program in the terminal
   as keystrokes. The only other argument skydeck passes to a program from a page is a link, and
-  only as 9.6 allows. From follow-up F36 a proven connection can also change skydeck's own
+  only as 9.6 allows. From issue #199 a page can ask for one more program start: `act shell`
+  (8.2.3, 7.10) starts the account's login shell (`/bin/sh` when none is known) in a session
+  terminal's folder, with the environment a terminal's program gets (7.4). The act names only
+  that terminal and a first size; the program, its `argv[0]` (`-<name>`, a login shell), its
+  folder and its environment are the server's, and the parser refuses any other field of the act
+  (8.2.3; a test holds it). A shell is what the user could open in any terminal: it gives a
+  proven connection nothing it did not have (it can type `!` commands into any session already).
+  From follow-up F36 a proven connection can also change skydeck's own
   `config.json` (12.13) — one key at a time, of the server's table's plain ones only: never a
   program, a folder or the port, whose keys the window shows and leaves to the file; never a whole
   configuration or a path; each value by the file's own rules; the file written whole, with a copy
@@ -5624,6 +6011,15 @@ scheme) without this in mind. So no input from a page becomes a program name or 
 skydeck's hand, but a link does reach the Windows shell: only an `http` or `https` address that
 check let through; a page's `new` flags become `claude` arguments only after design 7.7's refusals.
 
+From issue #199 a keeper runs one more thing: a session's shell (7.10), the account's login shell
+from the account database (`Platform.loginShell`), or `/bin/sh` when none is known or it is no
+executable file, with the `argv` the server builds (`-<name>`, a login shell) in the session
+terminal's folder and the environment of 7.4. In a marked test sandbox (`SKYDECK_TEST_NO_WINDOWS=1`)
+the account's shell is not read: `SKYDECK_TEST_LOGIN_SHELL` (an absolute path) names it, else
+there is none (17.3), as `SKYDECK_TEST_PYTHON3` stands for the launcher's python3 there. The spec's `file` exists for it only (7.1): a
+session terminal's keeper still runs `argv[0]`. The server chooses the program, its arguments,
+its folder and its environment; what opens a shell names only the session's terminal.
+
 From follow-up F38 the server also runs `git` on its own checkout (16.5: the check for a newer
 skydeck, and the looks around it), as `git -C <checkout> …` with an argument list it builds itself,
 never a shell; the remote is the one the checkout's branch follows, and nothing a page sends
@@ -5651,7 +6047,9 @@ Before what it does in step 1:
   terminals in the window keep running` (for one: `1 terminal in the window keeps running`), where
   `<n>` counts the keepers whose `.pid` line is alive or cannot be judged (4.2), read before the
   stop: a server that does not answer cannot say how many it has. Keepers and their sessions are
-  never stopped (2).
+  never stopped (2). From issue #199 `<n>` counts every keeper, a session's shell's included
+  (7.10): it is a terminal in the window that keeps running too (`window --stop`, `--restart` and
+  `update` say the same words with the same count).
 - it names the Edge profile folder — the configured one, or the derived one (5.4) — when that
   folder exists (Edge creates it at the window's first start): `the window's Edge profile is in
   <folder>; Edge wrote it and skydeck leaves it (delete it yourself)`.
@@ -5711,7 +6109,7 @@ are problems.
 | profile folder | it cannot be derived (5.4) and `window.profileDir` is not set. |
 | runtime directory | it is not mode 700 or not the user's, or a socket path would be 108 bytes or longer. The line names the directory the store records, or else which rule chose it (4.2), and says `info` when `XDG_RUNTIME_DIR` was passed over because the user does not linger (systemd would remove it when the last terminal closes). |
 | vendored files | a file of `vendor/MANIFEST.json` is missing or its hash differs (a broken checkout). |
-| keepers | never: `info` counts them from their `.pid` lines (4.2), alive by design 5.5's rule, with their keeper versions and whether each program was started; it never connects to a keeper (7.1). When a server runs, `GET /status` adds what it knows. A `.pid` line of a dead keeper is `info` (removed at the next server start); a `.pid` file that cannot be read is named on its own, as one whose keeper cannot be judged. |
+| keepers | never: `info` counts them from their `.pid` lines (4.2), alive by design 5.5's rule, with their keeper versions and whether each program was started; from issue #199 a session's shell's keeper is counted too, and its line says so after its version (`keeper <id>: running (pid 4242, keeper version 4, a session's shell, its program started)`, 7.10); the server's line (`<n> terminals`, from its list) does not count a shell; it never connects to a keeper (7.1). When a server runs, `GET /status` adds what it knows. A `.pid` line of a dead keeper is `info` (removed at the next server start); a `.pid` file that cannot be read is named on its own, as one whose keeper cannot be judged. |
 
 In a test sandbox (`SKYDECK_TEST_NO_WINDOWS=1`, 17) `doctor` and `uninstall` read nothing under
 `/mnt/`: the directory `SKYDECK_TEST_MNT_C` names stands for `/mnt/c`, and without it the C: drive
@@ -5762,6 +6160,10 @@ owner). Then:
   the restart, every screen is rebuilt (7.3), and pages reload themselves for the new assets
   (8.2.2).
 - **Keepers** keep running the code they started with (7.7). The server speaks their protocol.
+  From issue #199 that holds for a session's shell's keeper too: an update keeps every shell and
+  what runs in it, and the new server finds each again under its session's terminal (7.10). A
+  switch back to a build before shells does not see them, and keeps its session terminals working
+  (7.7, with its limits).
 - **Vendored xterm.js** changes for page and screen side together, at the server restart: the new
   screen side rebuilds each terminal from a snapshot written as escape sequences, which any version
   reads.
@@ -6265,6 +6667,15 @@ Driven over its socket by `node:test` with real python3 (CI has it):
 - killing the keeper ends the program (SIGHUP), and the stand-in reports `SessionEnd` `other`;
 - `T` comes once after `G`, before the first output, with the program's pid and process start;
   with a failing `exec`, `T` then `X` 127.
+- issue #199, a session's shell (`test/keeper/shell.test.ts`): a shell spec's hello (keeper 4, no
+  lock, exactly the shell meta's five fields) and its six-field `.pid` line; `file` run with the
+  spec's `argv` as given (`argv[0]` `-<name>`, the spec's folder and exactly its environment, with
+  the test's Node.js as the program); a `file` that is not there (`T`, then 127 and the line naming
+  it); `E` hanging the shell up; a session spec unchanged but for an optional `shell`; each bad
+  spec of 7.1's shell rules. And A13's switch back: the hello of a real version 4 session keeper,
+  its meta carrying `shell`, read by the frames codec of the build before
+  (`test/fixtures/frames-before-shell/frames.ts`, kept as it was), which serves it and can end it,
+  and a shell's hello, which it refuses.
 
 **The keep-alive script** (`bin/skydeck-keepalive`), with real `sh` and real processes: it stays
 while a `.pid` line names a live process; it ends when every line names a dead one, one of another
@@ -6382,7 +6793,43 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
   move after, a write that fails, a slow keeper at a start keeps its number; with Parked (F44): a
   parked session's terminal never waits, a number a parking frees goes to the first that waits
   (also in a block of a kept order, which keeps its place), an un-parked one takes the lowest free
-  number by F44's rule or waits, and the two writes keep each other's part.
+  number by F44's rule or waits, and the two writes keep each other's part;
+- issue #199, a session's shell, with real keepers: the session terminal runs the stand-in
+  `claude`, the shell **the stand-in shell** (`test/helpers/shell-standin.ts`): a `#!/bin/sh`
+  script in the sandbox that prompts `shell-standin> `, reads a line and `eval`s it; the kernel
+  runs it as `/bin/sh <script>`, not a login shell and not interactive, so no profile is read, and
+  both test platforms name it as `loginShell`; in a marked sandbox (`SKYDECK_TEST_NO_WINDOWS=1`)
+  the real platform never reads the account's shell but takes `SKYDECK_TEST_LOGIN_SHELL` (an
+  absolute path, else none), which every helper that starts a server as a process sets to the
+  stand-in (`test/helpers/window.ts`, `test/platform/helpers.test.ts`), so no test starts a real
+  shell of the user's. The
+  registry (`test/window/terminals-shell.test.ts`): a shell is in `shells()` and never in `list()`,
+  has no slot, no session and no event, is served by id, is forgotten at its `exit` and at its
+  keeper's loss, is found again after a restart, and no shell opens while a shell's keeper may
+  live unheld (stopped, a connect that always fails, a `.pid` file of no form). The owner
+  (`test/window/terminals-shell-owner.test.ts`): each way the session's program ends hangs the
+  shell up with a background job and a foreground child of it; the end between `G` and `T`; a
+  restart moves the shell; a found shell's owner by `meta.shell` and by `of`, an orphan beside
+  another session's shell, an owner whose hello says exited, an owner once resolved kept, and
+  nothing ended on a doubt; two shells of one terminal. Opening (`test/window/shells.test.ts`):
+  the program and the login form, each refusal with its words, the server's spec, one shell per
+  terminal, a folder that is gone, a shell that ends at once. The environment
+  (`test/window/env.test.ts`). The switch both ways: a version 3 keeper (the file as released
+  before shells, `test/fixtures/keeper-v3/`) found again by this build and endable
+  (`test/window/terminals-old-keeper.test.ts`); the `.pid` pattern of the build before does not read
+  a shell's keeper's line (`test/window/pidline.test.ts`). Through the server's acts and lists
+  (`test/window/server-shell.test.ts`, a real test server): `act shell` opens one shell in the
+  session's folder and a second opens none; each refusal in its words with nothing started; with a
+  shell open and output in it the rows, counts, `needYou`, terminals and numbers are as before, no
+  `notify` comes and the store's events, metas and keys are unchanged; the shell's program,
+  folder and environment are the server's, and an act with one more field closes its page's
+  connection (1008); `exit`, End session (marked done and parked), `/exit` and a crash of the
+  session's program each end the shell with a job and a child of it; closing the ended terminal
+  leaves no keeper of it; a restart of the server finds the same shell with its screen, also after
+  a restart of the session (`test/window/server-restart.test.ts` keeps the shell over `act
+  restart`); a `claude` started in a shell runs elsewhere. The parser's refusals and the act's
+  dispatch (`protocol.test.ts`, `actions.test.ts`), and a shell's size owned as a terminal's
+  (`pages-stream.test.ts`).
 
 ### 17.4 The page
 
@@ -6472,6 +6919,34 @@ In the browser suite, besides those:
   sideways at 240 px as it does at 400 px with nothing stored; against a
   real server the terminal's size after a drag is the one a window resize to the same width gives,
   with no other message than such a resize sends.
+
+Issue #199, the session's shell on the page (`test-page/shell-panel.test.ts`, real keys, a real
+test server whose login shell is the stand-in shell): the second view's own members (each view
+its own terminal and channel, `reset`, `drop`, `heightFor`); a list with `shells` draws nothing
+until the page shows a shell; Ctrl+Shift+S in both zones opens one shell under the session's
+terminal with the keyboard in it, and the key again and again never makes a second; a sentence
+with an `s` typed into the list opens none and sends no act;
+each toast, and an act answered `ok` whose shell no list brought opens no panel later; the key's
+four cases and the click; find, copy (written once) and the raw paste on the terminal that has the
+keyboard; after a reload, a cut connection and a restart of the server the panel is hidden, the
+dot shows and the key shows it again with its screen; another session and back; `exit`; the
+session's end with the panel shown — End session and park, `/exit`, a crash — takes the panel, the
+dot and the shell's program away, and the ended terminal has the whole area; a restart (`r`, the
+header's Restart) keeps the panel under the new terminal with the same shell process, and the
+dialog "Restart" says nothing of it. The dialogs' line `Ending the session ends its shell too.`
+with a shell of the dialog's terminal and not without one, coming and going with the lists
+(`test-page/end-session.test.ts`). The split (`test-page/shell-panel-layout.test.ts`): a third of
+the area at first; both programs told their sizes when the panel shows, hides and is dragged,
+compared with what the page's own terminal view computes for each box (its `fits`), never with a
+constant, and `stty size` in the shell says the same; a drag of 120 px, the height kept in
+`localStorage`, after a reload and for a second session; a drag past either bound stops at 4 rows;
+a double click gives the third back; a window too low for both shows the shell over the whole
+area; the bar takes no keyboard and does nothing under a dialog. Its rules are unit-tested
+(`test/web/shell-panel-split.test.ts`: the third, both bounds, the too-low boundary, the stored
+values that are none, the bar's 6 px against the style sheet). The header's `Shell` and its dot
+(`test-page/header.test.ts`, with the header's one height with Shell in it). The page tests'
+stand-in views (`test-page/fixtures/*-view.js`) record only for `#terminal`, so that the second
+view leaves their globals the first view's.
 
 No test shows a desktop notification or asks for a permission (stage B, plan B17), whatever a
 server sends: every browser context of the suite is made by `newContext` of
@@ -6655,6 +7130,7 @@ marked **real claude** use a real session in a throwaway folder, as in manual-ch
 | W53 | The update dialog's notes of what is new in the owner's Edge, on the owner's own installation, at the first update after this change that brings a note (nothing is applied): the notes' titles heavier and their text under them, a code run in the terminal's font, the fold of the other changes opened and closed by a click, Enter and Space and folded again at the next open, the Tab round, the database note when there is one, the bottom lines; both schemes and the owner's colour theme read well; a window lower than the dialog scrolls its body with the heading and the buttons in view; `skydeck update --check` lists the titles under `what is new:`. | the notes of what is new | 12.1, 16.5 |
 | W54 | The version number on the owner's own installation, after the workflow Version made its first tags: the tags in the checkout (`git tag --list 'v*'`); `skydeck --version` and doctor's first line `0.9.<n>[+<k>] (<id>, <date>)`, the nearest version tag of HEAD; Settings' group Updates `skydeck 0.9.<n>` above its last check; with commits listed, `skydeck update --check`'s first line and the dialog's bottom line `<version> → <version> on origin/main` with the ids, a note brought making the next minor; and, when the owner wants the update, the running form and `updated to <version>`; the workflow's run in GitHub's Actions (manual-checks.md, "The version number"). | the version number | 12.1, 12.13, 16.5, 17.5 |
 | W55 | **Real claude**, the mark unread on throwaway sessions: `u` and the header's `Unread` / `Read`, the bar, the line `marked unread · <age>`, the count and `(n) skydeck`, no notification; the mark stays while the window stays on the session, loses and regains the focus and reloads, goes when the selection comes back to it after 1.5 s and at a typing; a turn that ends meanwhile shows `finished` and notifies; a session that asks and one marked done are refused in the toast; `skydeck window --restart` keeps it; `u` on a US and a Czech layout (manual-checks.md, "Marked unread"). | the mark unread | 10.2, 12.4, 12.5, 12.9, 13 |
+| W56 | **Real claude** and the owner's own login shell, a session's shell on a throwaway session (issue #199): Ctrl+Shift+S in Edge's app window opens it under the terminal and Edge takes nothing of the chord; `echo $0` shows the login form and the profile was read; hidden with a command running and shown again with its output; the bar dragged, the height kept over a reload, a double click back to a third, a window too low for both; a program that asks a hidden question; a `claude` started in it reads as running in another terminal; `r`, `skydeck window --restart` and `skydeck update` keep it with its screen and the same pid; End session ends it and its background and foreground jobs, in bash and in zsh, and what a `nohup` job does is written down (manual-checks.md, "A session's shell"). | #199 | 7.10, 8.2.6, 12.5, 12.6, 12.9, 12.10 |
 
 Checked by tests rather than by hand (17.4): that xterm.js 6.0.0 sends nothing for a
 Ctrl+Shift+letter, that a paste with Ctrl+V gives a bracketed paste and no `\x16`, that the page's
@@ -6760,6 +7236,11 @@ page's own icon (12.12). Checks W30, W31, and W3's icon on the taskbar button.
   offer after a fork, a copy or an in-session `/resume`, and undoing a carry over (the old session
   keeps its fields, and each field is edited as before).
 - **Bells and program notifications** (OSC 9, OSC 777).
+- **More of a session's shell** (issue #199, 7.10): a shell without a session; several shells or
+  tabs of shells per session; a shell as a row of the list, with a number or a mark of its own; a
+  mark or a notification when a command in a hidden shell ends; changing the shell's height by
+  keys; restoring a shell after WSL stopped; a command of the command line for it; an act that ends
+  a shell (only `exit` and its session's end do); a setting for which shell runs.
 - **Rotating the secret by itself** (`--new-secret` does it on request).
 - **A Start-menu shortcut — proposed, needs the user's agreement.** `skydeck window --shortcut`
   would write `skydeck.lnk` into the user's Start menu, running `wsl.exe -d <distribution> --exec
