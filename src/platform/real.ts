@@ -79,7 +79,7 @@ export function realPlatform(options: RealPlatformOptions = {}): Platform {
     pid: process.pid,
     uid,
     userName: userNameOf(uid),
-    loginShell: loginShellOf(),
+    loginShell: loginShellOf(env),
     env,
     homeDir: homedir(),
     // Read when asked: a shell may sit in a directory that was removed, and `--version` must still work.
@@ -111,16 +111,25 @@ function userNameOf(uid: number): string {
 
 /**
  * os.userInfo().shell when it is an absolute path without NUL; null when it throws (no passwd
- * entry), is empty, or is anything else.
+ * entry), is empty, or is anything else. In a marked test sandbox (SKYDECK_TEST_NO_WINDOWS=1, A31)
+ * the account's shell is never read: SKYDECK_TEST_LOGIN_SHELL names the shell (the tests' stand-in)
+ * when it is such a path, else there is none, so that no server a test starts as a process can
+ * start the developer's own login shell.
  */
-function loginShellOf(): string | null {
+function loginShellOf(env: Env): string | null {
+  const isPath = (value: unknown): value is string =>
+    typeof value === 'string' && value.startsWith('/') && !value.includes('\0');
+  if (env['SKYDECK_TEST_NO_WINDOWS'] === '1') {
+    const standIn = env['SKYDECK_TEST_LOGIN_SHELL'];
+    return isPath(standIn) ? standIn : null;
+  }
   let shell: string | null;
   try {
     shell = userInfo().shell;
   } catch {
     return null;
   }
-  return typeof shell === 'string' && shell.startsWith('/') && !shell.includes('\0') ? shell : null;
+  return isPath(shell) ? shell : null;
 }
 
 function errorCode(error: unknown): string | undefined {

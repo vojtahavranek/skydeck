@@ -12,6 +12,7 @@ import {
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { tmpdir, userInfo } from 'node:os';
 import { join, relative } from 'node:path';
 import { describe, test } from 'node:test';
@@ -48,6 +49,7 @@ import { sandbox } from '../helpers/sandbox.ts';
 import type { Sandbox } from '../helpers/sandbox.ts';
 import { SHELL_PROMPT, shellStandin } from '../helpers/shell-standin.ts';
 import { writeWindowConfig } from '../helpers/window-config.ts';
+import { serverSandbox } from '../helpers/window.ts';
 
 const bytes = (text: string): Uint8Array => new TextEncoder().encode(text);
 
@@ -1026,6 +1028,44 @@ describe('the stand-in login shell (design-step-2.md 7.10)', () => {
 
     assert.equal(await status, 3);
     assert.equal(out, `${SHELL_PROMPT}typed here\n${SHELL_PROMPT}`);
+  });
+});
+
+describe('no test server can start a real shell (A31)', () => {
+  /** The `loginShell` of the real platform in a child process with exactly `env`, as a server's. */
+  async function loginShellOfChild(env: Record<string, string>): Promise<unknown> {
+    const real = new URL('../../src/platform/real.ts', import.meta.url).href;
+    const program = `const { realPlatform } = await import(${JSON.stringify(real)});
+process.stdout.write(JSON.stringify(realPlatform().loginShell));`;
+    const child = spawn(process.execPath, ['--input-type=module', '-e', program], {
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    let err = '';
+    child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString()));
+    child.stderr.on('data', (chunk: Buffer) => (err += chunk.toString()));
+    const [code] = (await once(child, 'exit')) as [number | null];
+    assert.equal(code, 0, err);
+    return JSON.parse(out) as unknown;
+  }
+
+  test("a server started as a process with serverSandbox's environment has the sandbox's stand-in as its login shell", async (t) => {
+    // Every helper that starts a server as a process (serve, window and update tests) gives it
+    // serverSandbox's environment, or names SKYDECK_TEST_LOGIN_SHELL from it.
+    const d = serverSandbox(t);
+    const standin = d.platform.loginShell;
+
+    assert.ok(standin !== null);
+    assert.equal(standin, join(d.s.bin, 'shell-standin'));
+    assert.equal(d.platform.env.SKYDECK_TEST_LOGIN_SHELL, standin);
+    assert.equal(await loginShellOfChild(d.platform.env as Record<string, string>), standin);
+  });
+
+  test("a process with a sandbox's environment and no stand-in named never gets the account's shell", async (t) => {
+    const s = sandbox(t);
+
+    assert.equal(await loginShellOfChild(s.env()), null);
   });
 });
 

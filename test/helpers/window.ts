@@ -156,7 +156,16 @@ export function serverSandbox(t: TestContext, options: ServerSandboxOptions = {}
   // Task 24's stand-in for /mnt/c (drive.ts): a Windows program is started in it, never in /mnt/c.
   const cDrive = join(s.root, 'c-drive');
   mkdirSync(cDrive);
-  const env = s.env({ STANDIN_RECORD: record, SKYDECK_TEST_MNT_C: cDrive, ...options.env });
+  // A server a test starts as a process runs the real platform: its login shell is the sandbox's
+  // stand-in (A31), never the developer's own.
+  const loginShell = tp.platform.loginShell ?? undefined;
+  assert.ok(loginShell !== undefined, "the test platform names the sandbox's stand-in shell");
+  const env = s.env({
+    STANDIN_RECORD: record,
+    SKYDECK_TEST_MNT_C: cDrive,
+    SKYDECK_TEST_LOGIN_SHELL: loginShell,
+    ...options.env,
+  });
   const realProc = tp.platform.proc;
   const bootId = options.bootId;
   const platform: Platform = {

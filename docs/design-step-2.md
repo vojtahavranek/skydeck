@@ -6653,7 +6653,11 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
   `claude`, the shell **the stand-in shell** (`test/helpers/shell-standin.ts`): a `#!/bin/sh`
   script in the sandbox that prompts `shell-standin> `, reads a line and `eval`s it; the kernel
   runs it as `/bin/sh <script>`, not a login shell and not interactive, so no profile is read, and
-  both test platforms name it as `loginShell`, so no test starts a real shell of the user's. The
+  both test platforms name it as `loginShell`; in a marked sandbox (`SKYDECK_TEST_NO_WINDOWS=1`)
+  the real platform never reads the account's shell but takes `SKYDECK_TEST_LOGIN_SHELL` (an
+  absolute path, else none), which every helper that starts a server as a process sets to the
+  stand-in (`test/helpers/window.ts`, `test/platform/helpers.test.ts`), so no test starts a real
+  shell of the user's. The
   registry (`test/window/terminals-shell.test.ts`): a shell is in `shells()` and never in `list()`,
   has no slot, no session and no event, is served by id, is forgotten at its `exit` and at its
   keeper's loss, is found again after a restart, and no shell opens while a shell's keeper may
