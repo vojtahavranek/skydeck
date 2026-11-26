@@ -288,3 +288,23 @@ test('the panel goes to the right of a region, else its left, else below, else a
     { left: 40, top: 60 },
   );
 });
+
+test("issue #199: the right side's step names Ctrl+Shift+S, in both modes, as a key of the window", () => {
+  for (const mode of MODES) {
+    const right = tourSteps(mode)[1];
+    assert.ok(right !== undefined && right.region === 'right', mode);
+    assert.equal(
+      textOf(right).at(-1),
+      'Ctrl+Shift+S opens a shell under the terminal, in the session’s folder.',
+      mode,
+    );
+    assert.deepEqual(right.lines.at(-1)?.[0], { key: 'Ctrl+Shift+S', zone: 'window' }, mode);
+  }
+  // No single key of the list opens a shell (ruled): no step names `s` as a key.
+  for (const mode of MODES) {
+    assert.ok(
+      !keysOf(tourSteps(mode)).some((part) => part.key.toLowerCase() === 's'),
+      `${mode}: no single key s`,
+    );
+  }
+});

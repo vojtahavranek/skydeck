@@ -35,7 +35,8 @@ from the window (issue #166), at "Restarting a session from the window"; W52 che
 window checks for a newer skydeck by itself (follow-up F38's choice), at "How often updates are
 checked"; W53 checks the notes of what is new in the update dialog, at "What is new in
 the update dialog"; W54 checks the version number, at "The version number"; W55 checks marking a
-session unread, at "Marked unread".
+session unread, at "Marked unread"; W56 checks a session's shell (issue #199), at "A session's
+shell".
 
 Setup:
 
@@ -3735,3 +3736,76 @@ Write down: for each step whether it went as expected, and the words where they 
 version and layouts. At the end end the two throwaway sessions (`/exit` in each) and mark them done.
 
 Not tried before this check was written: all of it, in Edge.
+
+## A session's shell
+
+The check of a session's shell (issue #199; design-step-2.md 7.10, 12.6, 12.9;
+[install.md](install.md), "Using the window", its paragraph "A shell under a session"): W56, in
+your window, with real Claude Code and your own login shell, on a throwaway session in the
+throwaway folder. The tests open the stand-in shell (a plain `sh` that reads no profile) in headless
+Chromium against a test server; only here does the shell read your profile, do the keys meet Edge,
+do bash and zsh decide what a hang-up ends, and does a program ask you something in it.
+
+## W56. A throwaway session's shell (real login shell)
+
+Setup: skydeck updated to a commit that has the shell (`skydeck update`, W32), then the window
+open (`skydeck window`); the throwaway folder there (`mkdir -p ~/skydeck-try`). Commands are typed
+in W, a WSL terminal of your own (never a `!` command inside Claude Code), or in the shell where the
+step says so. In W, `getent passwd "$USER" | cut -d: -f7` names your login shell: write it down.
+Start a throwaway session from the New form (Ctrl+Shift+N) in the throwaway folder with the label
+`shell check`; once its prompt shows, type `Reply with the single word ok.` and Enter, and wait for
+the answer. Throughout: type a word only where the step says the keyboard is (the key bar names the
+zone; the shell's panel is the one under the session's terminal).
+
+1. **The key, in Edge.** With `Focus: terminal`, press Ctrl+Shift+S. Expected: a panel opens under
+   the session's terminal, about a third of the area, with your shell's prompt and the keyboard in
+   it; Edge opens nothing of its own (no screenshot tool, no menu). The header's `Shell` has a dot.
+   Ctrl+Shift+L (`Focus: list`), Ctrl+Shift+S: the keyboard goes back to the shell, no second panel.
+2. **A login shell, your profile.** In the shell: `echo $0; pwd; alias | head -3`. Expected: `$0`
+   is your shell's name after a `-` (`-bash`, `-zsh`); `pwd` is the throwaway folder; the prompt is
+   the one your profile sets, and `alias` lists what your profile defines (or nothing, if it
+   defines none).
+3. **Hidden is not ended.** In the shell: `sleep 300 & echo job $!`, then `sleep 20; echo done-20`
+   and Enter, then at once Ctrl+Shift+S. Expected: the panel hides, the keyboard is in the
+   session's terminal, the session's terminal is its full height again, and the dot stays. Wait
+   25 seconds, Ctrl+Shift+S: the panel with `done-20` on it. Click the session's terminal, then
+   the shell: the keyboard follows each click.
+4. **The bar, and a reload.** Drag the bar between the two up by about a third. Expected: the
+   shell gets higher with the pointer, the session's terminal lower, Claude Code redraws for its
+   new size; `stty size` in the shell names the rows and columns its panel shows. Press F5 with
+   `Focus: list` (a reload): the panel is hidden, the dot shows; Ctrl+Shift+S shows it at the
+   dragged height with its screen. Double-click the bar: a third again. Make the window low (drag
+   its lower edge up) until both do not fit: the shell takes the whole area; higher again, both.
+5. **A program that asks.** In the shell, an `ssh` to a host you use that asks for a password or a
+   passphrase (or `python3 -c 'import getpass; print(len(getpass.getpass()))'`). Expected: the
+   question shows, what you type is not echoed, Enter answers it (or Ctrl+C ends it), and Ctrl+C
+   reaches the program, not the session.
+6. **A `claude` started in it.** In the shell, `claude` in the throwaway folder; once its prompt
+   shows, type `Reply with the single word ok.` and Enter. Expected: the list gets a row for that
+   new session, which says it runs in another terminal, without a number; the throwaway's own row
+   and its terminal are unchanged. In W, `skydeck show <the new row's short id>`: no `(in the
+   skydeck window)`. Type `/exit` in that `claude`.
+7. **A restart of the session.** `r` in the list on `shell check`, ←, ←, Enter. Expected: the
+   dialog `Restart: …` says nothing of the shell; after `Restarted.` the panel is under the new
+   terminal with its screen (`done-20` still there), and `echo $$` in it names the same pid as
+   before the restart (run `echo $$` once before it).
+8. **A restart of skydeck's server, and an update.** Hide the panel. In W, `skydeck window
+   --restart`, and once the window is back, `skydeck update` (or, without a newer commit,
+   `skydeck window --restart` again). Expected: each time the window says the server restarted,
+   the dot is there, Ctrl+Shift+S shows the panel with its screen, and `echo $$` names the same pid.
+9. **The end, with jobs.** In the shell: `sleep 301 & echo job $!`, `nohup sleep 302 >/dev/null
+   2>&1 & echo nohup $!`, then `sleep 303` (in the foreground; the shell waits). In W, `ps -o
+   pid,args -C sleep` lists all three. Ctrl+Shift+L, `d` on `shell check`. Expected: the dialog
+   says `Ending the session ends its shell too.`; press ←, Enter (`End session and mark done`).
+   Expected: the panel closes and the dot goes with the session's terminal. In W, `ps -o pid,args
+   -C sleep` again: `sleep 301` and `sleep 303` are gone; write down whether `sleep 302` (started
+   with `nohup`) still runs (the guide names it as a limit: it may), and `kill` it.
+10. **The other shell.** If both bash and zsh are installed, resume the throwaway (Enter on its row
+    under Recent, `a` first to show done sessions), Ctrl+Shift+S, type the name of the shell that
+    is not your login shell (`zsh` or `bash`) and Enter, and do step 9 again inside it.
+
+Write down: for each step whether it went as expected, and the words where they differ; your Edge
+version, your login shell and the other shell of step 10; what `ps` listed in step 9. At the end,
+`/exit` the throwaway session if it runs and mark it done.
+
+Not tried before this check was written: all of it, in Edge and with a real login shell.

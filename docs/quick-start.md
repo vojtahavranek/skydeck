@@ -115,6 +115,15 @@ Ctrl+Shift+C copies too (Ctrl+C interrupts Claude Code, as always); Ctrl+V paste
 that runs in another terminal cannot be shown here: once you `/exit` it there, you can resume it in
 the window.
 
+### Run a command beside a session
+
+When Claude Code asks you to run something yourself (an SSH tunnel, a login), press
+**Ctrl+Shift+S**, or **Shell** in the session's header: a shell opens under its terminal, in its
+folder, so you read the instruction above and type below. A click moves the keyboard between the
+two. **Ctrl+Shift+S** with the keyboard in the shell hides it, and what runs in it goes on; a dot
+beside **Shell** says it is there, and the key shows it again. Drag the bar between the two to
+change its height. `exit` closes it, and it ends when its session ends.
+
 ### Start a new session
 
 Press **Ctrl+Shift+N**. The form "New session" asks for a Directory (a full path such as
