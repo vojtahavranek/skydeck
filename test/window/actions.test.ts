@@ -2388,3 +2388,86 @@ describe('carry-over and dismiss-carry-over (F40, design 7.1)', () => {
     assert.deepEqual(again.told, []);
   });
 });
+
+describe("issue #199's shell reaches its dep (S2 7.10)", () => {
+  /** The harness with `shells.open` that records its calls and answers `answer`. */
+  function withShells(
+    d: TestDeck,
+    answer: () => Promise<{ ok: true } | { ok: false; error: string }>,
+  ): { act: Harness['act']; calls: string[]; logs: string[]; told: string[] } {
+    const h = harness(d);
+    const calls: string[] = [];
+    const actions = createActions({
+      deck: d.deck,
+      hub: h.hub,
+      terminalFor: () => {
+        throw new Error('no terminal is built for a shell act');
+      },
+      openLink: async () => true,
+      log: (line) => h.logs.push(line),
+      changed: () => h.told.push('changed'),
+      prs: { fetch: () => undefined, refresh: () => undefined },
+      shells: {
+        open(term, size) {
+          calls.push(`open ${term} ${size.cols}x${size.rows}`);
+          return answer();
+        },
+      },
+    });
+    return { act: (action) => actions.act(PAGE, action), calls, logs: h.logs, told: h.told };
+  }
+  const SHELL_ACT = {
+    t: 'act',
+    id: 41,
+    kind: 'shell',
+    term: '0123456789ab',
+    cols: 100,
+    rows: 13,
+  } as ActMessage;
+
+  test('it calls open once with the terminal and the size; ok answers ok with no lines and no session', async (t) => {
+    const d = testDeck(t);
+    const h = withShells(d, async () => ({ ok: true }));
+
+    assert.deepEqual(await h.act(SHELL_ACT), ok(41));
+    assert.deepEqual(h.calls, ['open 0123456789ab 100x13']);
+    assert.deepEqual(h.logs, []);
+    assert.deepEqual(h.told, [], "the act writes nothing: the registry's change tells the lists");
+  });
+
+  test("each refusal is open's words, sanitised, as the result's one line", async (t) => {
+    const d = testDeck(t);
+    const words = [
+      "the window's server is stopping",
+      'this session has no terminal in the window: open the session first',
+      'this session has ended: resume it first',
+      'this session has not started yet: open a shell once it runs',
+      'skydeck is restarting this session',
+      'this terminal was started by a newer skydeck; run skydeck window --restart',
+      "the session's folder is not there any more",
+      'a terminal of this window does not answer; a shell cannot be opened until it does',
+      'the shell did not start',
+      'the shell did not start within 5 seconds',
+      'the shell ended at once (status 3)',
+    ];
+    for (const error of words) {
+      const h = withShells(d, async () => ({ ok: false, error: `${error}\x1b[2J` }));
+      assert.deepEqual(await h.act(SHELL_ACT), refused(41, error));
+    }
+  });
+
+  test('without the dep: skydeck cannot do that action; a malformed shell act never reaches it', async (t) => {
+    const d = testDeck(t);
+    const h = harness(d);
+    assert.deepEqual(await h.act(SHELL_ACT), refused(41, 'skydeck cannot do that action'));
+    const s = withShells(d, async () => ({ ok: true }));
+    for (const action of [
+      { ...SHELL_ACT, program: '/bin/bash' },
+      { ...SHELL_ACT, term: 'not-a-terminal' },
+      { ...SHELL_ACT, cols: 0 },
+    ] as unknown as ActMessage[]) {
+      assert.deepEqual(await s.act(action), refused(41, 'skydeck cannot do that action'));
+    }
+    assert.deepEqual(s.calls, []);
+  });
+});

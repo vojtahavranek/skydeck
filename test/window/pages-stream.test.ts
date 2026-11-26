@@ -423,6 +423,36 @@ describe('pages: size', () => {
     ]);
   });
 
+  test("issue #199: a shell's size is owned as a terminal's: list.shells[].ownsSize is true for the page that typed last", async (t) => {
+    const f = await startPages(t);
+    f.hub.add(T1);
+    f.hub.addShell(T2, T1);
+    const a = await openPage(t, f, { view: true });
+    const b = await openPage(t, f, { view: true });
+    await attach(a.client, T2, 80, 12);
+    await attach(b.client, T2, 100, 30);
+    const owns = (list: ServerMessage | undefined): Record<string, boolean> => {
+      assert.ok(list?.t === 'list', list?.t);
+      assert.deepEqual(
+        list.terminals.map((term) => term.id),
+        [T1],
+        'the shell is no terminal of the list',
+      );
+      return Object.fromEntries((list.shells ?? []).map((shell) => [shell.id, shell.ownsSize]));
+    };
+    view(a.client, 'again');
+    view(b.client, 'again');
+    assert.deepEqual(owns((await textsUntilPong(a.client))[0]), { [T2]: true });
+    assert.deepEqual(owns((await textsUntilPong(b.client))[0]), { [T2]: false });
+
+    b.client.send({ t: 'input', term: T2, data: 'x' });
+    await roundTrip(b.client);
+    f.clock.advanceMs(1_000);
+    assert.deepEqual(owns((await textsUntilPong(a.client))[0]), { [T2]: false });
+    assert.deepEqual(owns((await textsUntilPong(b.client))[0]), { [T2]: true });
+    assert.deepEqual(resizes(f).at(-1), { term: T2, cols: 100, rows: 30 }, "b's size applied");
+  });
+
   test('a page that disconnects gives up the size as a detach does', async (t) => {
     const f = await startPages(t);
     f.hub.add(T1);

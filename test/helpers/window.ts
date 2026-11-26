@@ -224,7 +224,8 @@ export function serverSandbox(t: TestContext, options: ServerSandboxOptions = {}
       ...serverOptions,
     });
     server.hub.onChange(() => {
-      for (const term of server.hub.list()) {
+      // Issue #199: a session's shell is a program too, waited for at the end as a terminal's.
+      for (const term of [...server.hub.list(), ...(server.hub.shells?.() ?? [])]) {
         if (term.program !== null) programs.set(term.program.pid, term.program.procStart);
       }
     });

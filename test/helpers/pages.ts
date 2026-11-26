@@ -25,6 +25,7 @@ import type { KeeperExit } from '../../src/window/frames.ts';
 import type {
   ActionHandler,
   PageInfo,
+  ShellInfo,
   StreamSink,
   TerminalHub,
   TerminalInfo,
@@ -59,6 +60,12 @@ export interface FakeHub extends TerminalHub {
   calls: HubCall[];
   /** Adds a running terminal (80 × 24, its screen `screen-<id>`), or changes one. */
   add(id: string, info?: Partial<TerminalInfo>): TerminalInfo;
+  /**
+   * Issue #199: adds a session's shell `id` under the terminal `of` (80 × 12, its screen
+   * `screen-<id>`): in `shells()`, never in `list()`, its stream served by id as a terminal's.
+   */
+  addShell(id: string, of: string): void;
+  shells(): readonly ShellInfo[];
   /** The screen a later `attach` gives in its snapshot. */
   setScreen(id: string, data: string): void;
   /**
@@ -117,6 +124,8 @@ export function fakeHub(): FakeHub {
       answer: 'ok' | 'full' | 'ended' | 'unknown';
     }
   >();
+  /** Issue #199: the shells among `terminals`, each with the terminal it belongs to. */
+  const shellOf = new Map<string, string>();
   const listeners = new Set<() => void>();
   let holding = false;
   const held: (() => void)[] = [];
@@ -140,6 +149,23 @@ export function fakeHub(): FakeHub {
       for (const listener of listeners) listener();
       return merged;
     },
+    addShell(id, of) {
+      shellOf.set(id, of);
+      terminals.set(id, {
+        info: terminalInfo(id, { rows: 12, sessionId: null }),
+        screen: `screen-${id}`,
+        attached: [],
+        answer: 'ok',
+      });
+      for (const listener of listeners) listener();
+    },
+    shells: () =>
+      [...shellOf].flatMap(([id, of]) => {
+        const info = terminals.get(id)?.info;
+        if (info === undefined) return [];
+        const { dir, program, openedNs, cols, rows } = info;
+        return [{ id, of, state: 'running' as const, dir, program, openedNs, cols, rows }];
+      }),
     setScreen(id, data) {
       const terminal = terminals.get(id);
       assert.ok(terminal, id);
@@ -175,7 +201,10 @@ export function fakeHub(): FakeHub {
       each(id, (sink) => sink.exit(exit, lost));
     },
     notice: (id, kind, text) => each(id, (sink) => sink.notice(kind, text)),
-    list: () => [...terminals.values()].map((terminal) => terminal.info),
+    list: () =>
+      [...terminals.values()]
+        .map((terminal) => terminal.info)
+        .filter((info) => !shellOf.has(info.id)),
     attach(termId, sink) {
       calls.push({ kind: 'attach', term: termId });
       const terminal = terminals.get(termId);
@@ -406,6 +435,19 @@ export function defaultList(
       ownsSize: true, // pages replaces it
       openedNs: String(info.openedNs),
     })),
+    // Issue #199: the hub's shells, when it has them (a scripted hub without `shells` has none).
+    ...(hub.shells === undefined
+      ? {}
+      : {
+          shells: hub.shells().map((shell) => ({
+            id: shell.id,
+            of: shell.of,
+            state: shell.state,
+            cols: shell.cols,
+            rows: shell.rows,
+            ownsSize: true, // pages replaces it
+          })),
+        }),
     selected: null,
     dirs: [...dirs, `filter:${page.view.filter}`],
   };

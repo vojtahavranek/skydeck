@@ -698,6 +698,8 @@ export function scriptedList(
   rows: { id: string; terminal: string | null; slot: number | null; title?: string }[],
   terminals: { id: string; slot: number | null; sessionId: string | null }[],
   selected: Record<string, unknown> | null = null,
+  /** Issue #199: the sessions' shells (`list.shells`), each running at 80 × 12; absent: none. */
+  shells?: { id: string; of: string }[],
 ): Record<string, unknown> {
   return {
     t: 'list',
@@ -749,6 +751,17 @@ export function scriptedList(
       ownsSize: true,
       openedNs: '1794470400000000000',
     })),
+    ...(shells === undefined
+      ? {}
+      : {
+          shells: shells.map((shell) => ({
+            ...shell,
+            state: 'running',
+            cols: 80,
+            rows: 12,
+            ownsSize: true,
+          })),
+        }),
     selected,
     dirs: [],
   };
