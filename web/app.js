@@ -408,6 +408,8 @@ const cards = createCards(dom.cards, {
   park: (sessionId) => markParked(sessionId, false),
   unread: (sessionId) => markUnread(sessionId),
   unreadAnswered: (sessionId) => state.unreadAnswered.get(sessionId) ?? null,
+  // Issue #199: the header's Shell is the header's own session's, which the pane shows.
+  shell: () => pressShell(true, true),
   say: (text) => say(text),
   watchFavourites: (listener) => {
     favouritesListener = listener;
@@ -2492,14 +2494,17 @@ function shellOf(termId) {
  * Issue #199 (S2 12.9): Ctrl+Shift+S, `s` and the header's `Shell` — what `shellPress` says for
  * the pane: a toast, the act for the pane's terminal, or the panel shown, hidden or given the
  * keyboard. `selected`: a session is selected for this press (for `s`, one the list shows).
+ * `header`: the header's `Shell`, whose click takes no keyboard: on a shown panel it hides it, as
+ * its tooltip says.
  * @param {boolean} selected
+ * @param {boolean} [header]
  */
-function pressShell(selected) {
+function pressShell(selected, header = false) {
   const pane = state.pane;
   const term = pane.kind === 'terminal' ? pane.term : null;
   const shell = term === null ? null : shellOf(term.id);
   const shown = drawnShell(pane) !== null;
-  const inShell = dom.shell.contains(document.activeElement);
+  const inShell = header ? shown : dom.shell.contains(document.activeElement);
   const press = shellPress({ pane, selected, shell, shown, inShell });
   if ('toast' in press) {
     toast.show(press.toast, null);
@@ -2600,6 +2605,22 @@ function shellListed(message) {
 }
 
 /**
+ * Issue #199 (S2 12.5): what the header's Shell says for `pane`: null unless the pane is a
+ * terminal of the window that is not ended; else whether a shell of it is open and shown.
+ * @param {Pane} pane
+ * @returns {'none' | 'hidden' | 'shown' | null}
+ */
+function headerShell(pane) {
+  if (pane.kind !== 'terminal' || pane.ended) {
+    return null;
+  }
+  if (shellOf(pane.term.id) === null) {
+    return 'none';
+  }
+  return drawnShell(pane) !== null ? 'shown' : 'hidden';
+}
+
+/**
  * Issue #199 (S2 12.6): the shell the panel shows for `pane` — a shell of the pane's terminal that
  * this page shows, while that terminal is not ended —, or null.
  * @param {Pane} pane
@@ -2657,8 +2678,10 @@ function render() {
   const said = pane.kind === 'terminal' ? (state.restartSaid.get(pane.term.id) ?? '') : '';
   // S2 12.4: the header's Unread / Read follows this page's answered act before the next list.
   const answered = paneRow === null ? null : (state.unreadAnswered.get(paneRow.id) ?? null);
+  // Issue #199: the state of the pane's terminal's shell, for the header's Shell.
+  const shellState = headerShell(pane);
   const key = JSON.stringify(
-    pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines, said, answered],
+    pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines, said, answered, shellState],
   );
   state.pane = pane;
   renderShell(pane);
@@ -2682,7 +2705,7 @@ function render() {
   cards.hide();
   switch (pane.kind) {
     case 'terminal':
-      cards.header(pane.row, selected, term, listNow);
+      cards.header(pane.row, selected, term, listNow, shellState);
       if (pane.ended) {
         // #188: the bar's Other flags… closes nothing for a row the list hides (E13: no card).
         cards.endedBar(pane.row, exit, pane.row !== null && rowOf(pane.row.id) !== undefined, said);

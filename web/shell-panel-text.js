@@ -86,3 +86,22 @@ function elsewhereText(row) {
 export function shellRefusedText(error) {
   return `${SHELL_TEXTS.refused}${error}`;
 }
+
+/**
+ * The header's `Shell` (S2 12.5) for the state of the shown terminal's shell: none open, open and
+ * hidden, open and shown. Its words, its tooltip, and whether its dot says that a shell is open.
+ * @param {'none' | 'hidden' | 'shown'} state
+ * @returns {{ text: string, tip: string, mark: boolean }}
+ */
+export function shellControl(state) {
+  return {
+    text: SHELL_TEXTS.control,
+    tip:
+      state === 'none'
+        ? SHELL_TEXTS.open
+        : state === 'hidden'
+          ? SHELL_TEXTS.hidden
+          : SHELL_TEXTS.shown,
+    mark: state !== 'none',
+  };
+}

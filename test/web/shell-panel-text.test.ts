@@ -3,7 +3,12 @@ import { describe, test } from 'node:test';
 
 import type { RowPayload, ShellPayload, TerminalPayload } from '../../src/window/protocol.ts';
 import type { Pane } from '../../web/pane.js';
-import { SHELL_TEXTS, shellPress, shellRefusedText } from '../../web/shell-panel-text.js';
+import {
+  SHELL_TEXTS,
+  shellControl,
+  shellPress,
+  shellRefusedText,
+} from '../../web/shell-panel-text.js';
 
 const TERM = 'aaaaaaaaaaaa';
 const SHELL: ShellPayload = {
@@ -153,5 +158,26 @@ describe("shellPress (issue #199, S2 12.9): every row of the key's table", () =>
       shellRefusedText('the shell ended at once (status 3)'),
       'Shell: the shell ended at once (status 3)',
     );
+  });
+});
+
+describe("shellControl (issue #199, S2 12.5): the header's Shell", () => {
+  test('its words, its tooltip and its dot for each state', () => {
+    assert.deepEqual(shellControl('none'), {
+      text: 'Shell',
+      tip: "open a shell in this session's folder (Ctrl+Shift+S)",
+      mark: false,
+    });
+    assert.deepEqual(shellControl('hidden'), {
+      text: 'Shell',
+      tip: 'a shell is open: show it (Ctrl+Shift+S)',
+      mark: true,
+    });
+    assert.deepEqual(shellControl('shown'), {
+      text: 'Shell',
+      tip: 'hide the shell: what runs in it keeps running (Ctrl+Shift+S)',
+      mark: true,
+    });
+    assert.equal(SHELL_TEXTS.mark, 'a shell is open');
   });
 });

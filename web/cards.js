@@ -49,6 +49,7 @@ import { unreadAct } from './attention-text.js';
 import { elsewhereText, rowText } from './list-text.js';
 import { offersRestart, RESTART_TEXTS, RESTART_TIP } from './restart-text.js';
 import { groupCardText } from './search-text.js';
+import { SHELL_TEXTS, shellControl } from './shell-panel-text.js';
 
 /**
  * @typedef {object} CardsDeps
@@ -66,6 +67,8 @@ import { groupCardText } from './search-text.js';
  *   seeing clears; the act and the toast are app.js's
  * @property {(sessionId: string) => 'unread' | 'read' | null} unreadAnswered S2 12.4: this page's
  *   act on the session the server took that no list shows yet (`unreadAct`'s `answered`)
+ * @property {(sessionId: string) => void} shell issue #199: the header's Shell, which opens, shows
+ *   or hides the session's shell (app.js's, as Ctrl+Shift+S)
  * @property {(text: string) => void} say a line in the key bar
  * @property {(listener: ((favourites: string[]) => void) | null) => void} watchFavourites F15:
  *   the one listener of the favourites every list brings (S2 12.6) — the open new form's, null
@@ -409,6 +412,21 @@ export function createCards(root, deps) {
       deps.restart(headId);
     }
   });
+  // Issue #199: Shell, before Restart, while the header's terminal runs in the window (S2 12.5);
+  // in the header only then (`showShell`). Its dot says that a shell is open, shown or hidden.
+  const shellButton = headerButton('header-shell', SHELL_TEXTS.control, SHELL_TEXTS.open, () => {
+    if (headId !== '') {
+      deps.shell(headId);
+    }
+  });
+  const shellLabel = element('span', 'header-shell-label');
+  shellLabel.textContent = SHELL_TEXTS.control;
+  const shellMark = element('span', 'header-shell-mark');
+  shellMark.textContent = '●';
+  shellMark.title = SHELL_TEXTS.mark;
+  shellMark.setAttribute('aria-label', SHELL_TEXTS.mark);
+  shellMark.hidden = true;
+  shellButton.replaceChildren(shellLabel, shellMark);
   // D15: done, or undone for a done row; one act per session at a time is app.js's.
   const doneButton = headerButton('header-done', 'Done', 'mark it done (d)', () => {
     if (headId !== '') {
@@ -445,6 +463,26 @@ export function createCards(root, deps) {
       actions.insertBefore(restartButton, doneButton);
     } else if (!offered && restartButton.parentElement !== null) {
       restartButton.remove();
+    }
+  };
+  /**
+   * Issue #199: Shell before Restart (or Done), for the state of the terminal's shell; gone for
+   * null (no terminal of the window that runs).
+   * @param {'none' | 'hidden' | 'shown' | null} shell
+   */
+  const showShell = (shell) => {
+    if (shell === null) {
+      if (shellButton.parentElement !== null) {
+        shellButton.remove();
+      }
+      return;
+    }
+    const control = shellControl(shell);
+    setTip(shellButton, control.tip);
+    setHidden(shellMark, !control.mark);
+    const before = restartButton.parentElement === actions ? restartButton : doneButton;
+    if (shellButton.nextSibling !== before || shellButton.parentElement !== actions) {
+      actions.insertBefore(shellButton, before);
     }
   };
   const top = element('div', 'header-top');
@@ -1109,8 +1147,11 @@ export function createCards(root, deps) {
      * @param {SelectedPayload | null} selected
      * @param {TerminalPayload | null} term
      * @param {() => string} now
+     * @param {'none' | 'hidden' | 'shown' | null} [shell] issue #199: the state of the shell of
+     *   the pane's terminal while it runs in the window (none open, hidden, shown); null or absent
+     *   for any other pane: no `Shell`
      */
-    header(row, selected, term, now) {
+    header(row, selected, term, now, shell = null) {
       if (
         flagsNext !== null &&
         (row?.id !== flagsNext.sessionId || (term !== null && term.id !== flagsNext.term))
@@ -1121,6 +1162,7 @@ export function createCards(root, deps) {
         setHidden(head, true);
         shownHead = null;
         showRestart(false);
+        showShell(null);
         return;
       }
       if (row.id !== headId) {
@@ -1148,6 +1190,7 @@ export function createCards(root, deps) {
       // Issue #166: while a restart holds the shown terminal, the state says so.
       setText(stateText, term?.restarting === true ? RESTART_TEXTS.state : stateOf(row));
       showRestart(offersRestart(row));
+      showShell(shell);
       setText(doneButton, row.done ? 'Undone' : 'Done');
       setTip(doneButton, row.done ? 'show it again (d)' : 'mark it done (d)');
       setText(parkButton, row.parked === true ? 'Unpark' : 'Park');
