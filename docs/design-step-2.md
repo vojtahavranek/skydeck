@@ -4649,7 +4649,9 @@ area too low for both, where the session's terminal is not laid out, the shell),
 changes to another terminal starts on the session's side. When the area is high enough for both
 again, a keyboard that the change to too low took from the session's terminal to the shell goes
 back to the session's terminal, unless it has moved since, the user did something with the shell
-meanwhile (a key, a press, a paste, a chord that acts on it), text is selected or a dialog is shown;
+meanwhile (a key — not a modifier pressed alone, which every system chord such as Win+↑ or Alt+Tab
+starts with, and not a chord the window takes for itself —, a press, a paste, or find, copy or the
+raw paste acting on it), text is selected or a dialog is shown;
 a shell the user opened or showed while the area was too low keeps the keyboard. Find, copy and the raw Ctrl+Shift+V act
 on the view whose element holds the keyboard (9.5, 9.7). **The bar** between the two (12.6) takes
 no key and no keyboard: it is not focusable and every mousedown on it is cancelled, so a press or a

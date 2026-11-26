@@ -2594,8 +2594,9 @@ function pressShell(selected, header = false) {
  * is done the zone gives what had the keyboard there to the shell (`keepKeyboard`, `sideView`), and
  * the page remembers whether the keyboard was in the session's terminal and where it went. At the
  * change back to `split` it goes back to the session's terminal only when it was there, is still
- * where the change put it, the user did nothing with the shell meanwhile (`shellUsed`: a key, a
- * press, a paste, a chord that acts on the shell's view), no text is selected and no dialog is
+ * where the change put it, the user did nothing with the shell meanwhile (`shellUsed`: a key — not
+ * a modifier alone, not a chord the window takes for itself —, a press, a paste, a chord that acts
+ * on the shell's view), no text is selected and no dialog is
  * shown: else it stays. A panel that comes already `full` was asked for (the key, the header's
  * Shell): nothing to give back. Any other change forgets it and keeps the keyboard where it can be.
  * @param {'split' | 'full' | null} mode
@@ -2651,8 +2652,21 @@ function shellUsed() {
     state.lowFlip.used = true;
   }
 }
-// A key, a press or a paste in the shell makes the keyboard's place the user's.
-for (const type of ['keydown', 'mousedown', 'pointerdown', 'paste']) {
+/** Keys that are no use of the shell pressed alone: each system chord (Win+↑, Alt+Tab) starts so. */
+const LONE_KEYS = new Set(['Shift', 'Control', 'Alt', 'AltGraph', 'Meta', 'OS', 'CapsLock']);
+// A key, a press or a paste in the shell makes the keyboard's place the user's: but a modifier
+// alone, and a chord the window takes for itself (Ctrl+Shift+L, J, P, H, a slot, Ctrl+Tab…); the
+// window's chords that act on the shell's view (find, copy, the raw paste) count by `shellChord`.
+dom.shell.addEventListener(
+  'keydown',
+  (event) => {
+    if (!LONE_KEYS.has(event.key) && windowChord(event, state.zone) === null) {
+      shellUsed();
+    }
+  },
+  true,
+);
+for (const type of ['mousedown', 'pointerdown', 'paste']) {
   dom.shell.addEventListener(type, () => shellUsed(), true);
 }
 

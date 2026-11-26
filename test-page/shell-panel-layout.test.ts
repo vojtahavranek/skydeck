@@ -714,26 +714,162 @@ test('issue #199: the keyboard when the area gets too low and high again, the si
     },
   );
 
-  await t.test(
-    'the keyboard the change took to the shell, moved by the user to the list while the area is too low, stays in the list when it is high again',
-    async (t) => {
-      const l = await withShell(t, chromium, VIEW);
-      const { page } = l;
-      await clickSession(page);
-      await untilKeyboard(page, 'terminal');
-      await goLow(page);
-      await untilKeyboard(page, 'shell');
+  for (const [how, toList] of [
+    [
+      'a click on the list below its rows',
+      async (page: Page): Promise<void> => {
+        const list = await page.locator('#list').boundingBox();
+        assert.ok(list !== null);
+        await page.mouse.click(list.x + list.width / 2, list.y + list.height - 10);
+      },
+    ],
+    ['Ctrl+Shift+L', (page: Page) => page.keyboard.press('Control+Shift+L')],
+  ] as const) {
+    await t.test(
+      `the keyboard the change took to the shell, moved by the user to the list while the area is too low (${how}), stays in the list when it is high again`,
+      async (t) => {
+        const l = await withShell(t, chromium, VIEW);
+        const { page } = l;
+        await clickSession(page);
+        await untilKeyboard(page, 'terminal');
+        await goLow(page);
+        await untilKeyboard(page, 'shell');
 
-      // A click on the list below its rows: no key and no press in the shell (a chord would be
-      // one: its Ctrl and Shift reach the shell before the page takes its letter).
-      const list = await page.locator('#list').boundingBox();
-      assert.ok(list !== null);
-      await page.mouse.click(list.x + list.width / 2, list.y + list.height - 10);
-      await untilKeyboard(page, 'list');
+        await toList(page);
+        await untilKeyboard(page, 'list');
+
+        await goHigh(page);
+        assert.equal(await keyboard(page), 'list', 'it stays where the user put it');
+        assert.equal(await shownText(page, '#focus-zone'), 'Focus: list');
+        assert.deepEqual(l.problems, []);
+      },
+    );
+  }
+
+  /** The area low by itself with the keyboard in the session's terminal: the shell has it. */
+  const lowFromSession = async (t: TestContext): Promise<Launched & { term: string }> => {
+    const l = await withShell(t, chromium, VIEW);
+    await clickSession(l.page);
+    await untilKeyboard(l.page, 'terminal');
+    await goLow(l.page);
+    await untilKeyboard(l.page, 'shell');
+    return l;
+  };
+
+  for (const [what, keys] of [
+    ['the Windows key alone (as Win+↑ starts)', ['Meta']],
+    ['Alt alone (as Alt+Tab starts)', ['Alt']],
+    ['Ctrl and Shift held and let go with no letter', ['Control', 'Shift']],
+  ] as const) {
+    await t.test(
+      `${what} while the area is too low is no use of the shell: high again, the keyboard is back in the session's terminal`,
+      async (t) => {
+        const l = await lowFromSession(t);
+        const { page } = l;
+        for (const key of keys) await page.keyboard.down(key);
+        for (const key of [...keys].reverse()) await page.keyboard.up(key);
+        assert.equal(await keyboard(page), 'shell');
+
+        await goHigh(page);
+        await untilKeyboard(page, 'terminal');
+        assert.deepEqual(l.problems, []);
+      },
+    );
+  }
+
+  await t.test(
+    "a chord the window takes for itself while the area is too low (the key help, Ctrl+Shift+H, shown and closed again) is no use of the shell: high again, the keyboard is back in the session's terminal",
+    async (t) => {
+      const l = await lowFromSession(t);
+      const { page } = l;
+      const help = (): Promise<boolean> =>
+        readPage(page, () => document.getElementById('help')?.hidden === false, null);
+      await page.keyboard.press('Control+Shift+H');
+      await until(help, 'the key help shown');
+      await page.keyboard.press('Control+Shift+H');
+      await until(async () => !(await help()), 'the key help closed');
+      assert.equal(await keyboard(page), 'shell');
 
       await goHigh(page);
-      assert.equal(await keyboard(page), 'list', 'it stays where the user put it');
-      assert.equal(await shownText(page, '#focus-zone'), 'Focus: list');
+      await untilKeyboard(page, 'terminal');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    "a chord that acts on the shell's view while the area is too low is a use of it: after find (Ctrl+Shift+F, then Esc) and after copy (Ctrl+Shift+C), high again, the keyboard stays in the shell",
+    async (t) => {
+      for (const chord of ['find', 'copy'] as const) {
+        const l = await lowFromSession(t);
+        const { page } = l;
+        if (chord === 'find') {
+          await page.keyboard.press('Control+Shift+F');
+          await page.waitForFunction(
+            () =>
+              document.activeElement?.classList.contains('tv-find-input') === true &&
+              document.getElementById('shell')?.contains(document.activeElement) === true,
+            null,
+            { timeout: 20_000 },
+          );
+          await page.keyboard.press('Escape');
+        } else {
+          await page.keyboard.press('Control+Shift+C');
+        }
+        await untilKeyboard(page, 'shell');
+
+        await goHigh(page);
+        assert.equal(await keyboard(page), 'shell', `${chord}: the user's use of the shell`);
+        assert.deepEqual(l.problems, []);
+      }
+    },
+  );
+
+  await t.test(
+    'text selected when the area is high again: the keyboard stays in the shell, and the selection stays',
+    async (t) => {
+      const l = await lowFromSession(t);
+      const { page } = l;
+      const selected = await page.evaluate(() => {
+        const header = document.querySelector('#cards .card-header');
+        const walker = document.createTreeWalker(header ?? document.body, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        while (node !== null && (node.textContent ?? '').trim() === '') node = walker.nextNode();
+        if (node === null) return '';
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        getSelection()?.removeAllRanges();
+        getSelection()?.addRange(range);
+        return getSelection()?.toString() ?? '';
+      });
+      assert.ok(selected.length > 0, 'text of the header selected');
+
+      await goHigh(page);
+      assert.equal(await keyboard(page), 'shell', 'no move while text is selected');
+      assert.equal(await page.evaluate(() => getSelection()?.toString() ?? ''), selected);
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'a dialog shown when the area is high again (the switcher, opened while low): the keyboard stays in the dialog, and after it closes it is back in the shell, where the zone had it',
+    async (t) => {
+      const l = await lowFromSession(t);
+      const { page } = l;
+      await page.keyboard.press('Control+Shift+P');
+      await page.waitForSelector('#switcher:not([hidden])', { state: 'attached', timeout: 20_000 });
+      const inSwitcher = (): Promise<boolean> =>
+        readPage(
+          page,
+          () => document.getElementById('switcher')?.contains(document.activeElement) === true,
+          null,
+        );
+      assert.equal(await inSwitcher(), true);
+
+      await goHigh(page);
+      assert.equal(await inSwitcher(), true, 'the dialog keeps the keyboard');
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('#switcher[hidden]', { state: 'attached', timeout: 20_000 });
+      await untilKeyboard(page, 'shell');
       assert.deepEqual(l.problems, []);
     },
   );
