@@ -63,7 +63,8 @@
 // `#shell` under `#terminal`, inside the right zone). The server lists the shells (`list.shells`);
 // which of them this page shows is the page's own (`state.shellsShown`, nothing of it stored).
 // The panel is drawn while the pane is a terminal that is not ended, a shell of it is listed and
-// this page shows it; the session terminals' exits and re-attach queue stay their own.
+// this page shows it; the session terminals' exits and re-attach queue stay their own. The split
+// of the terminal area between the two, its bar and the remembered height are web/shell-panel.js's.
 //
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
@@ -94,6 +95,8 @@ import { blockInfo, movedMru, movedWith, paneFor, sessionRow } from './pane.js';
 import { createRestartDialog } from './restart-dialog.js';
 import { ACTION_LOST, noRestartText, offersRestart } from './restart-text.js';
 import { cutWords } from './search-text.js';
+import { createShellPanel } from './shell-panel.js';
+import { LEAST_FALLBACK, MIN_ROWS } from './shell-panel-split.js';
 import { shellPress, shellRefusedText } from './shell-panel-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
@@ -383,6 +386,21 @@ const terminalView = createTerminalView(dom.terminal, viewDeps);
  * @type {ReturnType<typeof createTerminalView> & { reset?: () => void, drop?: (id: string) => void, heightFor?: (rows: number) => number | null }}
  */
 const shellView = createTerminalView(dom.shell, viewDeps);
+/**
+ * Issue #199 (S2 12.6): the split of the terminal area between the session's terminal and its
+ * shell's panel, and the bar between the two (web/shell-panel.js); drawn by `renderShell`.
+ */
+const shellPanel = createShellPanel({
+  zone: dom.rightZone,
+  cards: dom.cards,
+  bar: dom.shellBar,
+  panel: dom.shell,
+  blocked: () => modal(),
+  least: () => shellView.heightFor?.(MIN_ROWS) ?? LEAST_FALLBACK,
+  // The session's terminal laid out or not (an area too low for both): what had the keyboard may
+  // be hidden now; the zone takes it back once the render is done.
+  laidOut: () => queueMicrotask(() => keepKeyboard()),
+});
 /**
  * The view's optional `fits(width, height)` (contract 2.9, task 28): the columns and rows a
  * terminal of the view shows in a terminal area of that many CSS pixels, or null while it cannot
@@ -781,7 +799,13 @@ function area(forAct = false) {
     state.pane.kind === 'terminal' && !forAct
       ? dom.cards.getBoundingClientRect().height
       : headerHeight();
-  const height = box.height - above;
+  // Issue #199: while the shell's panel is drawn beside the session's terminal, the terminal area
+  // of `focus` is what the session's terminal has: the panel and the bar are counted out.
+  const beside =
+    !forAct && state.pane.kind === 'terminal' && shellPanel.mode() === 'split'
+      ? dom.shell.getBoundingClientRect().height + dom.shellBar.getBoundingClientRect().height
+      : 0;
+  const height = box.height - above - beside;
   // The view is never asked about an area under 1 px (cards taller than the zone), and its answer
   // is held to what the server takes, as the page's own is: whole numbers, 1…MAX_COLS ×
   // 1…MAX_ROWS; one that is no number (a cell not measured yet) leaves the page's own arithmetic.
@@ -2316,6 +2340,7 @@ function welcomed(welcome, change, lostSince) {
     shellView.reset?.();
     dom.shell.hidden = true;
     dom.shellBar.hidden = true;
+    shellPanel.draw(false);
   }
   const shown = shownTerminal()?.id;
   state.reattach =
@@ -2556,18 +2581,22 @@ function shellKeyboard() {
 }
 
 /**
- * Issue #199: `act shell` for the terminal `termId`, with the first size of a panel of a third of
- * the terminal area (80 × 12 while the view cannot tell). The panel shows with the list that
- * brings the shell (`state.shellAsked`), not with the answer; a refusal is the toast.
+ * Issue #199: `act shell` for the terminal `termId`, with the first size of the panel as the
+ * split's rules make it for the terminal area now (web/shell-panel.js; 80 × 12 while the view
+ * cannot tell). The panel shows with the list that brings the shell (`state.shellAsked`), not with
+ * the answer; a refusal is the toast.
  * @param {string} termId
  */
 function openShell(termId) {
   if (state.shellAsked?.term === termId && !state.shellAsked.answered) {
     return; // asked already: the list brings it
   }
-  const zone = dom.rightZone.getBoundingClientRect();
-  const height = (zone.height - dom.cards.getBoundingClientRect().height) / 3;
-  const fitted = shellView.fits(Math.max(1, zone.width), Math.max(1, height));
+  const rect = dom.rightZone.getBoundingClientRect();
+  const style = getComputedStyle(dom.rightZone);
+  /** @param {string} side */
+  const border = (side) => parseFloat(style.getPropertyValue(`border-${side}-width`)) || 0;
+  const width = rect.width - border('left') - border('right');
+  const fitted = shellView.fits(Math.max(1, width), Math.max(1, shellPanel.height()));
   const size =
     fitted !== null && Number.isFinite(fitted.cols) && Number.isFinite(fitted.rows)
       ? {
@@ -2679,6 +2708,7 @@ function renderShell(pane) {
   state.shellKey = key;
   dom.shell.hidden = shell === null;
   dom.shellBar.hidden = shell === null;
+  shellPanel.draw(shell !== null); // the split laid out before the view measures its box
   shellView.show(shell);
 }
 
@@ -3631,7 +3661,11 @@ function keyboardView() {
  * while its panel is drawn, else the session's terminal.
  */
 function sideView() {
-  return state.shellSide === 'shell' && drawnShell(state.pane) !== null ? shellView : terminalView;
+  if (drawnShell(state.pane) === null) {
+    return terminalView;
+  }
+  // In an area too low for both the shell has the whole area: the session's terminal is not shown.
+  return state.shellSide === 'shell' || shellPanel.mode() === 'full' ? shellView : terminalView;
 }
 
 /**
@@ -3709,7 +3743,7 @@ document.addEventListener('visibilitychange', () => {
 });
 /** @type {ReturnType<typeof setTimeout> | null} */
 let resizeTimer = null;
-new ResizeObserver(() => {
+const resizeObserver = new ResizeObserver(() => {
   if (resizeTimer !== null) {
     clearTimeout(resizeTimer);
   }
@@ -3717,7 +3751,9 @@ new ResizeObserver(() => {
     resizeTimer = null;
     focusChanged();
   }, 200);
-}).observe(dom.rightZone);
+});
+resizeObserver.observe(dom.rightZone);
+resizeObserver.observe(dom.terminal); // issue #199: the shell's panel and its bar change it too
 
 // --- start --------------------------------------------------------------------------------------
 
