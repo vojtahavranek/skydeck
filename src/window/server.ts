@@ -119,6 +119,10 @@ export interface ServerOptions {
    *  slots before its transaction; a throw of it is that write's failure, and no other write's.
    *  `serve` never sets it. */
   beforeSlotsWrite?: () => void;
+  /** Issue #199, a seam for tests: how long after its start a shell's end counts as "at once"
+   *  (`ENDED_AT_ONCE_MS` when absent), so that a page test on a loaded machine is not raced by
+   *  it. `serve` never sets it. */
+  shellEndedAtOnceMs?: number;
 }
 
 export interface RunningServer {
@@ -611,7 +615,7 @@ export async function runServer(options: ServerOptions): Promise<RunningServer> 
       build,
       log,
       stopping: () => stopBegun,
-      endedAtOnceMs: ENDED_AT_ONCE_MS,
+      endedAtOnceMs: options.shellEndedAtOnceMs ?? ENDED_AT_ONCE_MS,
     });
     // Plan D7, D8: an edit shows in every window at once; the pull-request fetches the window asks
     // for run in the background, one at a time, aborted by the stop.

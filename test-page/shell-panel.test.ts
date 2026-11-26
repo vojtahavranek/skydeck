@@ -23,12 +23,14 @@ import {
   after,
   assetBase,
   clickRow,
+  connection,
   editWorld,
   launched,
   logOf,
   mark,
   pageUrl,
   readPage,
+  RESTARTED,
   scriptedList,
   showsText,
   TERM_A,
@@ -360,7 +362,9 @@ test("issue #199: the key opens, shows and hides the session's shell", async (t)
       const l = await inWindow(t, chromium, (d) => {
         const quick = join(d.s.bin, 'quick-shell');
         writeFileSync(quick, '#!/bin/sh\necho bye\nexit 3\n', { mode: 0o755 });
-        return { platform: (p) => ({ ...p, loginShell: quick }) };
+        // A long wait for an end at once: on a loaded machine the script may take more than
+        // the server's 400 ms between its start and its exit.
+        return { platform: (p) => ({ ...p, loginShell: quick }), shellEndedAtOnceMs: 5000 };
       });
 
       await l.page.keyboard.press('Control+Shift+S');
@@ -660,6 +664,151 @@ test("issue #199: the keyboard between the session's terminal and its shell, and
       );
       assert.ok(!(await screenText(page, '#shell')).includes('pasted-into-session'));
       assert.deepEqual(l.problems, []);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------------------------
+// Step 2.7: after a reload, a reconnect and a server restart; a shell that is gone
+
+/** Whether the header's Shell shows its dot (a shell is open, shown or hidden). */
+async function dot(page: Page): Promise<boolean> {
+  return readPage(
+    page,
+    () =>
+      document.querySelector<HTMLElement>('#cards .header-shell-mark')?.checkVisibility() === true,
+    null,
+  );
+}
+
+/** Keeps every WebSocket the page makes in `globalThis.testSockets` (an init script). */
+const KEEP_SOCKETS = `(() => {
+  const Native = window.WebSocket;
+  const kept = [];
+  globalThis.testSockets = kept;
+  window.WebSocket = class extends Native {
+    constructor(url, protocols) {
+      super(url, protocols);
+      kept.push(this);
+    }
+  };
+})();`;
+
+test('issue #199: after a reload, a reconnect and a server restart every shell is hidden; a shell that is gone leaves', async (t) => {
+  const chromium = await browser(t);
+
+  await t.test(
+    'A9: with the panel shown, a reload and then a connection cut: each time the panel is hidden and the dot shows; the key shows it again with its screen, output written meanwhile included',
+    async (t) => {
+      const l = await withShell(t, chromium);
+      const { page } = l;
+      const [id] = shellsOf(l);
+      await typedInShell(page, 'echo "marker-$((3 * 3))"', /^marker-9$/m);
+
+      await page.addInitScript(KEEP_SOCKETS);
+      await page.reload();
+      await connection(page, 'open');
+      await until(async () => await dot(page), 'the dot after the reload');
+      assert.equal((await panel(page)).shown, false, 'hidden after the reload');
+      await toZone(page, 'terminal');
+      await page.keyboard.press('Control+Shift+S');
+      await untilPanel(page, true);
+      await untilKeyboard(page, 'shell');
+      await untilScreen(page, /^marker-9$/m, undefined, '#shell');
+
+      await page.keyboard.type('sleep 2; echo "meanwhile-$((5 + 5))"');
+      await page.keyboard.press('Enter');
+      await page.evaluate(() => {
+        const sockets = Reflect.get(globalThis, 'testSockets') as WebSocket[];
+        sockets.at(-1)?.close();
+      });
+      await connection(page, 'lost');
+      await connection(page, 'open');
+      await until(async () => await dot(page), 'the dot after the reconnect');
+      assert.equal((await panel(page)).shown, false, 'hidden after the reconnect');
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      await toZone(page, 'terminal');
+      await page.keyboard.press('Control+Shift+S');
+      await untilPanel(page, true);
+      await untilScreen(page, /^meanwhile-10$/m, undefined, '#shell');
+      assert.deepEqual(shellsOf(l), [id], 'the same shell all along');
+    },
+  );
+
+  await t.test(
+    'A7: after the server is stopped and another started, the page says so, the dot shows, the key shows the panel with the screen from before, and a typed command runs in the same process',
+    async (t) => {
+      const l = await withShell(t, chromium);
+      const { page, d } = l;
+      await typedInShell(page, 'echo "pid-$$"', /^pid-\d+$/m);
+      const pid = /^pid-(\d+)$/m.exec(await screenText(page, '#shell'))?.[1];
+      assert.ok(pid !== undefined);
+      const port = l.server.port;
+
+      await l.server.stop('the test restarts it');
+      const again = await d.start({ port });
+
+      await showsText(page, '#info-text', RESTARTED);
+      await connection(page, 'open');
+      await until(async () => await dot(page), 'the dot after the restart');
+      assert.equal((await panel(page)).shown, false);
+      await toZone(page, 'terminal');
+      await page.keyboard.press('Control+Shift+S');
+      await untilPanel(page, true);
+      await untilKeyboard(page, 'shell');
+      await untilScreen(page, new RegExp(`^pid-${pid}$`, 'm'), undefined, '#shell');
+      await typedInShell(page, 'echo "again-$$"', new RegExp(`^again-${pid}$`, 'm'));
+      assert.equal((again.server.hub.shells?.() ?? []).length, 1);
+    },
+  );
+
+  await t.test(
+    "selecting another session and coming back keeps this page's panel shown or hidden; a session with its own shell shows its own state; `exit` closes the panel and the keyboard goes to the session's terminal",
+    async (t) => {
+      const l = await withShell(t, chromium);
+      const { page } = l;
+      const s2 = await resumeHere(page, S2);
+      await untilScreen(page, promptOf(S2));
+      await until(
+        () =>
+          l.server.hub.list().some((one) => one.id === s2 && one.sessionId === S2 && one.program),
+        'S2 reported',
+      );
+      assert.equal((await panel(page)).shown, false, 'S2 has no shell: no panel');
+      await clickRow(page, S1);
+      await page.keyboard.press('Enter');
+      await untilPanel(page, true); // S1's shell was shown: shown again
+
+      // S2's own shell, then hidden; S1's stays shown.
+      await clickRow(page, S2);
+      await page.keyboard.press('Enter');
+      await untilPanel(page, false);
+      await page.keyboard.press('Control+Shift+S');
+      await untilPanel(page, true);
+      await untilKeyboard(page, 'shell');
+      await page.keyboard.press('Control+Shift+S');
+      await untilPanel(page, false);
+      await clickRow(page, S1);
+      await page.keyboard.press('Enter');
+      await untilPanel(page, true);
+      await clickRow(page, S2);
+      await page.keyboard.press('Enter');
+      await untilPanel(page, false);
+      assert.equal(await dot(page), true, "S2's hidden shell: the dot");
+      assert.equal(shellsOf(l).length, 2);
+
+      // `exit` in S1's shell: the panel goes, the keyboard is in S1's terminal.
+      await clickRow(page, S1);
+      await page.keyboard.press('Enter');
+      await untilPanel(page, true);
+      await clickIn(page, '#shell');
+      await untilKeyboard(page, 'shell');
+      await page.keyboard.type('exit');
+      await page.keyboard.press('Enter');
+      await untilPanel(page, false);
+      await untilKeyboard(page, 'terminal');
+      await until(async () => !(await dot(page)), 'no dot: no shell');
+      assert.equal(shellsOf(l).length, 1, "S2's shell runs on");
     },
   );
 });

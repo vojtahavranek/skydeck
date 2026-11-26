@@ -2307,6 +2307,16 @@ function welcomed(welcome, change, lostSince) {
     state.exits.clear();
   }
   const attached = change === 'first' ? [] : terminalView.attached();
+  if (change !== 'first') {
+    // Issue #199 (S2 8.2.5): after a reconnect every shell is hidden, its streams gone with the
+    // old connection; the header's dot says it is there, the key shows it again (a fresh snap).
+    state.shellsShown.clear();
+    state.shellAsked = null;
+    state.shellKey = '';
+    shellView.reset?.();
+    dom.shell.hidden = true;
+    dom.shellBar.hidden = true;
+  }
   const shown = shownTerminal()?.id;
   state.reattach =
     change === 'wsl-restarted'
@@ -2356,6 +2366,7 @@ function received(message) {
       // of the banner that had it went away (a restore began: Restore is gone).
       banner.render(message.banner ?? null);
       favouritesListener?.(favouritesOf(message)); // F15: the open form's chips (S2 12.6)
+      shellsGone(message); // issue #199: a shell gone from the list leaves the page
       const toShell = shellListed(message); // issue #199: before the render, which draws it
       render();
       if (toShell && drawnShell(state.pane) !== null && !modal()) {
@@ -2602,6 +2613,22 @@ function shellListed(message) {
   state.shellAsked = null;
   state.shellsShown.add(shell.id);
   return state.pane.kind === 'terminal' && state.pane.term.id === asked.term;
+}
+
+/**
+ * Issue #199: a shell this page shows that a list no longer has (its `exit`, its session's end)
+ * leaves the page: its id the set, its terminal the view; the render then hides the panel and
+ * `keepKeyboard` gives the keyboard to the session's terminal.
+ * @param {ListMessage} message
+ */
+function shellsGone(message) {
+  const listed = new Set((message.shells ?? []).map((one) => one.id));
+  for (const id of [...state.shellsShown]) {
+    if (!listed.has(id)) {
+      state.shellsShown.delete(id);
+      shellView.drop?.(id);
+    }
+  }
 }
 
 /**
