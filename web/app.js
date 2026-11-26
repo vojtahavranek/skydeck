@@ -711,7 +711,7 @@ addEventListener('mouseup', () => {
       return; // D2: a dialog keeps the keyboard (it gives its own field the keyboard back)
     }
     if (document.activeElement === dom.rightZone && state.pane.kind === 'terminal') {
-      terminalView.focus();
+      sideView().focus(); // issue #199: the side of the terminal zone that had it last
       return;
     }
     keepKeyboard();
@@ -2673,6 +2673,9 @@ function render() {
   }
   state.paneKey = key;
   const before = dom.rightZone.dataset.paneTerm ?? '';
+  if (pane.kind !== 'terminal' || pane.term.id !== before) {
+    state.shellSide = 'session'; // issue #199: another terminal starts on the session's side
+  }
   dom.rightZone.dataset.pane = pane.kind;
   dom.rightZone.dataset.paneTerm = pane.kind === 'terminal' ? pane.term.id : '';
   terminalView.show(pane.kind === 'terminal' ? pane.term : null);
@@ -2849,7 +2852,7 @@ function giveKeyboard() {
     return;
   }
   if (state.pane.kind === 'terminal') {
-    terminalView.focus();
+    sideView().focus(); // issue #199: the session's terminal, or its shell when it had it last
     if (dom.rightZone.contains(document.activeElement)) {
       return;
     }
@@ -2872,6 +2875,12 @@ document.addEventListener('focusin', (event) => {
       setZone('list', false);
     }
     return;
+  }
+  // Issue #199: the side of the terminal zone that has the keyboard, for giveKeyboard.
+  if (dom.shell.contains(target)) {
+    state.shellSide = 'shell';
+  } else if (dom.terminal.contains(target)) {
+    state.shellSide = 'session';
   }
   if (dom.listZone.contains(target) && state.zone !== 'list') {
     setZone('list', false);
@@ -3029,10 +3038,10 @@ function doChord(chord, event) {
       openNew();
       return;
     case 'find':
-      terminalView.find();
+      keyboardView().find(); // issue #199: the view that holds the keyboard
       return;
     case 'copy':
-      terminalView.copy();
+      keyboardView().copy();
       return;
     case 'paste-raw':
       // A key of S2 9.1 that sends bytes acts only while the terminal itself has the keyboard:
@@ -3043,7 +3052,7 @@ function doChord(chord, event) {
         terminalHasKeyboard() &&
         !isTextField(document.activeElement)
       ) {
-        terminalView.pasteRaw();
+        keyboardView().pasteRaw();
       }
       return;
     case 'help':
@@ -3554,9 +3563,27 @@ addEventListener('blur', () => pressedInDialog.clear());
 const pressedOutside = new Set();
 const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'AltGraph']);
 
-/** Whether the keyboard is on the terminal view (inside its root `#terminal`). */
+/** Whether the keyboard is on a terminal view (inside its root `#terminal`, or `#shell`: #199). */
 function terminalHasKeyboard() {
-  return dom.terminal.contains(document.activeElement);
+  return (
+    dom.terminal.contains(document.activeElement) || dom.shell.contains(document.activeElement)
+  );
+}
+
+/**
+ * Issue #199 (S2 9.5, 9.7): the view whose element holds the keyboard — the shells' when it is
+ * inside `#shell`, else the session terminals' —, which find, copy and the raw Ctrl+V act on.
+ */
+function keyboardView() {
+  return dom.shell.contains(document.activeElement) ? shellView : terminalView;
+}
+
+/**
+ * Issue #199: the view of the side of the terminal zone that had the keyboard last: the shell's
+ * while its panel is drawn, else the session's terminal.
+ */
+function sideView() {
+  return state.shellSide === 'shell' && drawnShell(state.pane) !== null ? shellView : terminalView;
 }
 
 /**

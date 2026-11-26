@@ -36,7 +36,15 @@ import {
   toZone,
 } from './helpers/shell.ts';
 import type { Launched } from './helpers/shell.ts';
-import { promptOf, resumeHere, untilScreen, until } from './helpers/terminal.ts';
+import {
+  hexOf,
+  inputOf,
+  promptOf,
+  resumeHere,
+  screenText,
+  untilScreen,
+  until,
+} from './helpers/terminal.ts';
 import type { ServerSandbox, StartOptions } from '../test/helpers/window.ts';
 
 test('issue #199: the second terminal view of the page', async (t) => {
@@ -460,3 +468,198 @@ test("issue #199: the key opens, shows and hides the session's shell", async (t)
 function escapeRe(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
+// ---------------------------------------------------------------------------------------------
+// Step 2.5: the keyboard between the two, and the chords
+
+/**
+ * The middle of `text` on the shown screen of the view in `root` (the last row that holds it; the
+ * text may span several of xterm.js's spans).
+ */
+async function whereIs(page: Page, root: string, text: string): Promise<{ x: number; y: number }> {
+  const at = await page.evaluate(
+    ({ root, text }) => {
+      const box = document.querySelector(`${root} .tv-term:not([hidden])`);
+      let found: { x: number; y: number } | null = null;
+      for (const row of box?.querySelectorAll('.xterm-rows > div') ?? []) {
+        const nodes: Text[] = [];
+        const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+          nodes.push(node as Text);
+        }
+        const whole = nodes.map((node) => node.data).join('');
+        const index = whole.lastIndexOf(text);
+        if (index === -1) continue;
+        const place = (offset: number): [Text, number] => {
+          let left = offset;
+          for (const node of nodes) {
+            if (left <= node.data.length) return [node, left];
+            left -= node.data.length;
+          }
+          const last = nodes[nodes.length - 1] as Text;
+          return [last, last.data.length];
+        };
+        const range = document.createRange();
+        range.setStart(...place(index));
+        range.setEnd(...place(index + text.length));
+        const rect = range.getBoundingClientRect();
+        found = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      }
+      return found;
+    },
+    { root, text },
+  );
+  assert.ok(at !== null, `${text} is on the screen of ${root}`);
+  return at;
+}
+
+/** A click in the middle of the shown screen of the view in `root`. */
+async function clickIn(page: Page, root: string): Promise<void> {
+  await page.locator(`${root} .tv-term:not([hidden]) .xterm-screen`).click();
+}
+
+/** The shell open, shown, with the keyboard in it, under S1's terminal. */
+async function withShell(t: TestContext, chromium: Browser): Promise<Launched & { term: string }> {
+  const l = await inWindow(t, chromium);
+  await l.page.keyboard.press('Control+Shift+S');
+  await untilShellOpen(l);
+  return l;
+}
+
+test("issue #199: the keyboard between the session's terminal and its shell, and the chords", async (t) => {
+  const chromium = await browser(t);
+
+  await t.test(
+    'A4: a click moves the keyboard between the two; with the panel shown and the keyboard in the session or the list the key gives it to the shell; Ctrl+Shift+L returns to the side that had it',
+    async (t) => {
+      const l = await withShell(t, chromium);
+      const { page } = l;
+
+      await clickIn(page, '#terminal');
+      await untilKeyboard(page, 'terminal');
+      await clickIn(page, '#shell');
+      await untilKeyboard(page, 'shell');
+      await clickIn(page, '#terminal');
+      await untilKeyboard(page, 'terminal');
+
+      await page.keyboard.press('Control+Shift+S');
+      await untilKeyboard(page, 'shell');
+      assert.equal((await panel(page)).shown, true, 'the panel stays shown');
+
+      await page.keyboard.press('Control+Shift+L');
+      await untilKeyboard(page, 'list');
+      await page.keyboard.press('Control+Shift+L');
+      await untilKeyboard(page, 'shell');
+
+      await clickIn(page, '#terminal');
+      await untilKeyboard(page, 'terminal');
+      await page.keyboard.press('Control+Shift+L');
+      await untilKeyboard(page, 'list');
+      await page.keyboard.press('Control+Shift+L');
+      await untilKeyboard(page, 'terminal');
+
+      await page.keyboard.press('Control+Shift+L');
+      await untilKeyboard(page, 'list');
+      await page.keyboard.press('Control+Shift+S');
+      await untilKeyboard(page, 'shell');
+      assert.equal((await panel(page)).shown, true);
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'A10: find, copy and the raw paste act on the terminal that has the keyboard: the shell, then the session',
+    async (t) => {
+      const l = await withShell(t, chromium);
+      const { page, d } = l;
+      await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], {
+        origin: `http://127.0.0.1:${l.server.port}`,
+      });
+      const clipboard = (): Promise<string> => page.evaluate(() => navigator.clipboard.readText());
+      await page.evaluate(() => {
+        const write = navigator.clipboard.writeText.bind(navigator.clipboard);
+        Reflect.set(globalThis, 'testWriteText', write);
+        const writes: string[] = [];
+        Reflect.set(globalThis, 'testWrites', writes);
+        navigator.clipboard.writeText = (text: string) => {
+          writes.push(text);
+          return write(text);
+        };
+      });
+      const writes = (): Promise<string[]> =>
+        page.evaluate(() => [...(Reflect.get(globalThis, 'testWrites') as string[])]);
+      const putOnClipboard = (text: string): Promise<void> =>
+        page.evaluate(
+          (text) =>
+            (Reflect.get(globalThis, 'testWriteText') as (t: string) => Promise<void>)(text),
+          text,
+        );
+      await typedInShell(page, 'echo "needle-$((1 + 1))"', /^needle-2$/m);
+
+      // Find, in the shell: its own find bar, over the shell's screen.
+      await page.keyboard.press('Control+Shift+F');
+      await page.waitForFunction(
+        () =>
+          document.activeElement?.classList.contains('tv-find-input') === true &&
+          document.getElementById('shell')?.contains(document.activeElement) === true,
+        null,
+        { timeout: 20_000 },
+      );
+      assert.equal(await page.locator('#terminal .tv-find').isHidden(), true);
+      await page.keyboard.type('needle-2');
+      await page.keyboard.press('Enter');
+      await until(
+        async () => (await page.locator('#shell .tv-find-count').textContent()) === '1 of 1',
+        "one match in the shell's screen",
+      );
+      await page.keyboard.press('Escape');
+      await untilKeyboard(page, 'shell');
+
+      // Copy: the shell's selection, written once (by one view only), then by Ctrl+Shift+C.
+      const word = await whereIs(page, '#shell', 'needle-2');
+      await page.mouse.dblclick(word.x, word.y);
+      await until(async () => (await writes()).length >= 1, 'copied on select');
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const copied = await writes();
+      assert.equal(copied.length, 1, `written once: ${JSON.stringify(copied)}`);
+      assert.match(copied[0] ?? '', /needle/);
+      await putOnClipboard('copied elsewhere');
+      await page.keyboard.press('Control+Shift+C');
+      await until(async () => (await writes()).length === 2, 'Ctrl+Shift+C wrote it');
+      assert.equal((await writes())[1], copied[0]);
+      assert.equal(await clipboard(), copied[0]);
+
+      // Ctrl+V pastes into the shell (its terminal echoes it), nothing reaches the session.
+      const sessionInput = inputOf(d.record, S1);
+      await putOnClipboard('pasted-into-shell');
+      await page.keyboard.press('Control+V');
+      await untilScreen(page, /pasted-into-shell/, undefined, '#shell');
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.equal(inputOf(d.record, S1), sessionInput, 'the session got nothing');
+      await page.keyboard.press('Control+U'); // the shell's line cleared again
+
+      // The session's terminal: each acts there.
+      await clickIn(page, '#terminal');
+      await untilKeyboard(page, 'terminal');
+      await page.keyboard.press('Control+Shift+F');
+      await page.waitForFunction(
+        () =>
+          document.activeElement?.classList.contains('tv-find-input') === true &&
+          document.getElementById('terminal')?.contains(document.activeElement) === true,
+        null,
+        { timeout: 20_000 },
+      );
+      assert.equal(await page.locator('#shell .tv-find').isHidden(), true);
+      await page.keyboard.press('Escape');
+      await untilKeyboard(page, 'terminal');
+      await putOnClipboard('pasted-into-session');
+      await page.keyboard.press('Control+V');
+      await until(
+        () => inputOf(d.record, S1).includes(hexOf('pasted-into-session')),
+        'the session got the paste',
+      );
+      assert.ok(!(await screenText(page, '#shell')).includes('pasted-into-session'));
+      assert.deepEqual(l.problems, []);
+    },
+  );
+});
