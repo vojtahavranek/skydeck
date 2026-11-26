@@ -22,7 +22,7 @@
  * @typedef {{ kind: 'slot', slot: number } | { kind: 'previous' } | { kind: 'toggle-zone' }
  *   | { kind: 'new' } | { kind: 'find' } | { kind: 'copy' } | { kind: 'paste-raw' }
  *   | { kind: 'help' } | { kind: 'reload' } | { kind: 'next-attention' }
- *   | { kind: 'switcher' }} WindowChord
+ *   | { kind: 'switcher' } | { kind: 'shell' }} WindowChord
  */
 /** @typedef {{ send: string } | 'browser' | null} TerminalMapping */
 /**
@@ -36,7 +36,7 @@
  *   | { kind: 'show-done' } | { kind: 'escape' } | { kind: 'reload' }
  *   | { kind: 'edit', what: EditWhat } | { kind: 'done' } | { kind: 'reorder', by: 1 | -1 }
  *   | { kind: 'carry' } | { kind: 'flags' } | { kind: 'park' } | { kind: 'restart' }
- *   | { kind: 'unread' }} ListAction
+ *   | { kind: 'unread' } | { kind: 'shell' }} ListAction
  */
 
 /**
@@ -54,7 +54,7 @@ export function typesCharacter(e) {
  * The window's own chord (S2 12.9, stage A): Ctrl+Shift with a letter or a digit of the table,
  * and Ctrl+Tab. The keys of later stages were the window's from stage A on (A11): Ctrl+Shift+J
  * gives stage B's `next-attention` (S2 12.4, plan B14), Ctrl+Shift+P stage E's `switcher` (S2
- * 12.8, plan E task 98). Every
+ * 12.8, plan E task 98), Ctrl+Shift+S issue #199's `shell` (S2 12.9). Every
  * chord is the window's in both zones, so the result does not depend on `zone`. Ctrl+Shift+R and
  * the BrowserRefresh key (alone, with Shift, with Ctrl; xterm.js sends nothing for it) are the
  * page's reload in both (S2 12.9, 15.3).
@@ -97,6 +97,8 @@ export function windowChord(e, zone) {
       return { kind: 'help' };
     case 'r':
       return { kind: 'reload' };
+    case 's':
+      return { kind: 'shell' };
   }
   const slot = slotOf(e);
   return slot === null ? null : { kind: 'slot', slot };
@@ -143,7 +145,8 @@ export function terminalKey(e) {
  * flags…" (`flags`). Follow-up F44: `w` ("waits") parks the selected session, or un-parks a
  * parked one (`park`; app.js decides which). Issue #166: `r` opens the dialog "Restart" (`restart`).
  * S2 12.4: `u` marks the selected session unread, or read while it has a mark seeing clears
- * (`unread`; app.js picks the act from the row's attention).
+ * (`unread`; app.js picks the act from the row's attention). Issue #199: `s` opens, shows or
+ * hides the selected session's shell, as Ctrl+Shift+S does (`shell`).
  * @param {KeyLike} e
  * @returns {ListAction | null}
  */
@@ -195,6 +198,8 @@ export function listKey(e) {
       return { kind: 'restart' };
     case 'u':
       return { kind: 'unread' };
+    case 's':
+      return { kind: 'shell' };
   }
   if (e.shiftKey) {
     return null;

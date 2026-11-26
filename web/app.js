@@ -94,6 +94,7 @@ import { blockInfo, movedMru, movedWith, paneFor, sessionRow } from './pane.js';
 import { createRestartDialog } from './restart-dialog.js';
 import { ACTION_LOST, noRestartText, offersRestart } from './restart-text.js';
 import { cutWords } from './search-text.js';
+import { shellPress, shellRefusedText } from './shell-panel-text.js';
 import { createSwitcher, pickResumes } from './switcher.js';
 import { createTerminalView } from './terminal-view.js';
 import { createTour } from './tour.js';
@@ -2353,7 +2354,11 @@ function received(message) {
       // of the banner that had it went away (a restore began: Restore is gone).
       banner.render(message.banner ?? null);
       favouritesListener?.(favouritesOf(message)); // F15: the open form's chips (S2 12.6)
+      const toShell = shellListed(message); // issue #199: before the render, which draws it
       render();
+      if (toShell && drawnShell(state.pane) !== null && !modal()) {
+        shellKeyboard();
+      }
       if (editor.shown()) {
         editor.update(message); // the dialog's session's row (task 38's list)
       }
@@ -2472,6 +2477,126 @@ function renderList(zone) {
   if (info !== null) {
     state.caption = { ...caption, ...info };
   }
+}
+
+/**
+ * Issue #199: the shell the list has for the terminal `termId`, or null.
+ * @param {string} termId
+ * @returns {ShellPayload | null}
+ */
+function shellOf(termId) {
+  return (state.list?.shells ?? []).find((one) => one.of === termId) ?? null;
+}
+
+/**
+ * Issue #199 (S2 12.9): Ctrl+Shift+S, `s` and the header's `Shell` — what `shellPress` says for
+ * the pane: a toast, the act for the pane's terminal, or the panel shown, hidden or given the
+ * keyboard. `selected`: a session is selected for this press (for `s`, one the list shows).
+ * @param {boolean} selected
+ */
+function pressShell(selected) {
+  const pane = state.pane;
+  const term = pane.kind === 'terminal' ? pane.term : null;
+  const shell = term === null ? null : shellOf(term.id);
+  const shown = drawnShell(pane) !== null;
+  const inShell = dom.shell.contains(document.activeElement);
+  const press = shellPress({ pane, selected, shell, shown, inShell });
+  if ('toast' in press) {
+    toast.show(press.toast, null);
+    return;
+  }
+  if (term === null) {
+    return;
+  }
+  switch (press.do) {
+    case 'act':
+      openShell(term.id);
+      return;
+    case 'show':
+      if (shell !== null) {
+        state.shellsShown.add(shell.id);
+        render();
+        shellKeyboard();
+      }
+      return;
+    case 'hide':
+      if (shell !== null) {
+        state.shellsShown.delete(shell.id);
+        render();
+        setZone('terminal', false);
+        terminalView.focus();
+      }
+      return;
+    case 'focus':
+      shellKeyboard();
+      return;
+  }
+}
+
+/** Issue #199: the keyboard to the shown panel's shell; the zone is the terminal's. */
+function shellKeyboard() {
+  setZone('terminal', false);
+  shellView.focus();
+}
+
+/**
+ * Issue #199: `act shell` for the terminal `termId`, with the first size of a panel of a third of
+ * the terminal area (80 × 12 while the view cannot tell). The panel shows with the list that
+ * brings the shell (`state.shellAsked`), not with the answer; a refusal is the toast.
+ * @param {string} termId
+ */
+function openShell(termId) {
+  if (state.shellAsked?.term === termId && !state.shellAsked.answered) {
+    return; // asked already: the list brings it
+  }
+  const zone = dom.rightZone.getBoundingClientRect();
+  const height = (zone.height - dom.cards.getBoundingClientRect().height) / 3;
+  const fitted = shellView.fits(Math.max(1, zone.width), Math.max(1, height));
+  const size =
+    fitted !== null && Number.isFinite(fitted.cols) && Number.isFinite(fitted.rows)
+      ? {
+          cols: Math.max(1, Math.min(MAX_COLS, Math.floor(fitted.cols))),
+          rows: Math.max(1, Math.min(MAX_ROWS, Math.floor(fitted.rows))),
+        }
+      : { cols: 80, rows: 12 };
+  const asked = { term: termId, answered: false };
+  state.shellAsked = asked;
+  void act({ kind: 'shell', term: termId, ...size }).then((result) => {
+    if (state.shellAsked !== asked) {
+      return; // a list brought the shell already, or a reconnect forgot the act
+    }
+    if (result.ok) {
+      asked.answered = true;
+      return;
+    }
+    state.shellAsked = null;
+    toast.show(shellRefusedText(result.error ?? result.lines.join(' ')), null);
+  });
+}
+
+/**
+ * Issue #199: at a list, the shell `state.shellAsked` waits for: brought, it is shown (and, while
+ * its terminal is the pane's, gets the keyboard after the render: the answer); not brought by the
+ * first list after the act's answer, the act is forgotten (a shell that ended before that list, or
+ * one another window opens later, must not open this page's panel).
+ * @param {ListMessage} message
+ * @returns {boolean} whether the shell is to get the keyboard after the render
+ */
+function shellListed(message) {
+  const asked = state.shellAsked;
+  if (asked === null) {
+    return false;
+  }
+  const shell = (message.shells ?? []).find((one) => one.of === asked.term);
+  if (shell === undefined) {
+    if (asked.answered) {
+      state.shellAsked = null;
+    }
+    return false;
+  }
+  state.shellAsked = null;
+  state.shellsShown.add(shell.id);
+  return state.pane.kind === 'terminal' && state.pane.term.id === asked.term;
 }
 
 /**
@@ -2939,6 +3064,12 @@ function doChord(chord, event) {
       }
       return;
     }
+    case 'shell':
+      // Issue #199 (S2 12.9): a held key acts once.
+      if (!event.repeat) {
+        pressShell(state.selected !== null);
+      }
+      return;
     case 'switcher':
       // E11: Ctrl+Shift+P opens the switcher, and closes it while it is shown.
       if (switcher.shown()) {
@@ -3082,6 +3213,12 @@ function doListKey(action, event) {
       }
       return true;
     }
+    case 'shell':
+      // Issue #199: as Ctrl+Shift+S, on the selected row the list shows (E13); once when held.
+      if (!event.repeat) {
+        pressShell(selectedRow() !== undefined);
+      }
+      return true;
     case 'escape':
       // S2 12.9: Esc clears the filter — the list's, which also clears its field —, then goes
       // back to the terminal; a held Esc does only the first step (Z1, item 6).

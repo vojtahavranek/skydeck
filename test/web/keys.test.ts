@@ -60,6 +60,8 @@ function chordTable(shiftedDigits: readonly string[]): Array<[string, KeyLike, C
     ['Ctrl+Shift+V', cs('V', 'KeyV'), { kind: 'paste-raw' }],
     ['Ctrl+Shift+H', cs('H', 'KeyH'), { kind: 'help' }],
     ['Ctrl+Shift+R', cs('R', 'KeyR'), { kind: 'reload' }],
+    // Issue #199: the session's shell.
+    ['Ctrl+Shift+S', cs('S', 'KeyS'), { kind: 'shell' }],
   ];
   shiftedDigits.forEach((typed, index) => {
     const slot = index + 1;
@@ -296,6 +298,8 @@ describe('listKey (S2 12.9)', () => {
     ['w', ev('w', 'KeyW'), { kind: 'park' }],
     // S2 12.4: the mark unread, or read.
     ['u', ev('u', 'KeyU'), { kind: 'unread' }],
+    // Issue #199: the session's shell.
+    ['s', ev('s', 'KeyS'), { kind: 'shell' }],
   ];
   for (const [name, e, action] of table) {
     test(name, () => {
@@ -740,5 +744,29 @@ describe('issue #188: f, the resume card’s Other flags… (S2 12.9)', () => {
 
   test('Ctrl+Shift+F stays the find chord', () => {
     assert.deepEqual(windowChord(ev('F', 'KeyF', 'ctrl', 'shift'), 'list'), { kind: 'find' });
+  });
+});
+
+describe("issue #199: Ctrl+Shift+S and s, the session's shell (S2 12.9)", () => {
+  test('Ctrl+Shift+S in both zones, on a US and a Czech (QWERTZ) layout, by the character: Windows sends S, Caps Lock s', () => {
+    for (const zone of ZONES) {
+      assert.deepEqual(windowChord(cs('S', 'KeyS'), zone), { kind: 'shell' });
+      assert.deepEqual(windowChord(cs('s', 'KeyS'), zone), { kind: 'shell' });
+      assert.deepEqual(windowChord(cs('S', 'Semicolon'), zone), { kind: 'shell' }, 'Dvorak');
+      assert.equal(windowChord(ev('S', 'KeyS', 'ctrl', 'shift', 'alt'), zone), null, 'with Alt');
+      assert.equal(windowChord(ev('s', 'KeyS', 'ctrl'), zone), null, 'Ctrl alone');
+      assert.equal(windowChord(cs('š', 'Digit3'), zone)?.kind, 'slot', 'Czech š is the third slot');
+    }
+  });
+
+  test('s alone in the list, matched by the character; S, and s with Ctrl, Alt or Meta, are not', () => {
+    assert.deepEqual(listKey(ev('s', 'KeyS')), { kind: 'shell' });
+    assert.deepEqual(listKey(ev('s', 'Semicolon')), { kind: 'shell' }, 'Dvorak types s there');
+    assert.equal(listKey(ev('S', 'KeyS', 'shift')), null);
+    assert.equal(listKey(ev('S', 'KeyS')), null, 'Caps Lock alone');
+    for (const mod of ['ctrl', 'alt', 'meta'] as const) {
+      assert.equal(listKey(ev('s', 'KeyS', mod)), null, `${mod}+s`);
+    }
+    assert.equal(listKey(ev('š', 'Digit3')), null, 'Czech š is no list key');
   });
 });
