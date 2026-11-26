@@ -2192,9 +2192,9 @@ whole area while it is shown; the session's terminal is not laid out then and pr
 so it keeps its last size. A shell's **first size** is its act's (`act shell`, 8.2.3): what fits
 the panel's box as 12.6's rules make it for the terminal area at the press (the stored height, a
 third of the area while none is stored, the whole area when it is too low), counted by the rule
-above for that box, or 80 × 12 while the page cannot tell. While the panel is drawn beside the
-session's terminal, `focus.area` is the session's terminal's: the panel and the bar are counted
-out of it.
+above for that box, or 80 × 12 while the page cannot tell. `focus.area` stays the whole terminal
+area, the panel and the bar not counted out (ruled): its one reader is the first size of a
+terminal the command line or a restore opens, and such a terminal has no shell.
 
 #### 8.2.7 Several windows
 
@@ -4176,7 +4176,8 @@ nothing; `ls` is unchanged.
   so its panel comes and goes, and the answer says why. Selecting another session keeps each
   session's panel shown or hidden as it was on this page. A shell a list no longer has (its
   `exit`, its session's end) leaves the page — also one this page hid, whose terminal the view
-  still held —, and the keyboard goes to the session's terminal.
+  still held —, and the keyboard goes to the session's terminal when it was in the shell (ruled);
+  else it stays where it was.
   After a reload, a reconnect or a restart of the server every shell is hidden (8.2.5) and the
   header's dot says it is there (12.5).
 - **A session running in another terminal**: the card of 7.9.
@@ -4645,7 +4646,10 @@ act (4.3). **The keyboard** between the two: a click moves it (xterm.js takes th
 press); giving the terminal zone the keyboard — Ctrl+Shift+L, a click on the zone, a closed
 dialog — gives it to the side that had it last (the shell only while its panel is drawn; in an
 area too low for both, where the session's terminal is not laid out, the shell), and a pane that
-changes to another terminal starts on the session's side. Find, copy and the raw Ctrl+Shift+V act
+changes to another terminal starts on the session's side. When the area is high enough for both
+again, a keyboard that the change to too low took from the session's terminal to the shell goes
+back to the session's terminal, unless it has moved since, a key was typed into the shell, text is
+selected or a dialog is shown. Find, copy and the raw Ctrl+Shift+V act
 on the view whose element holds the keyboard (9.5, 9.7). **The bar** between the two (12.6) takes
 no key and no keyboard: it is not focusable and every mousedown on it is cancelled, so a press or a
 drag leaves the keyboard where it was (in the shell, the session's terminal or the list). No single key of the

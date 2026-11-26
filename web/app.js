@@ -275,6 +275,15 @@ const state = {
   shellSide: /** @type {'session' | 'shell'} */ ('session'),
   /** What the shell panel shows now (`renderShell`), to apply a change only. */
   shellKey: '',
+  /**
+   * Issue #199 (S2 12.9): while the terminal area is too low for both (the split's `full`), whether
+   * the keyboard was in the session's terminal at the change, the element the change gave it to
+   * (null until given) and whether a key was typed into the shell since; null otherwise.
+   * @type {{ fromSession: boolean, to: Element | null, typed: boolean } | null}
+   */
+  lowFlip: /** @type {{ fromSession: boolean, to: Element | null, typed: boolean } | null} */ (
+    null
+  ),
   /** The height of the right side's header (`#cards .card-header`, a hook of contract 2.9) as
    *  last shown; 0 before any (Z1, item 5). */
   headerHeight: 0,
@@ -401,9 +410,8 @@ const shellPanel = createShellPanel({
   panel: dom.shell,
   blocked: () => modal(),
   least: () => shellView.heightFor?.(MIN_ROWS) ?? LEAST_FALLBACK,
-  // The session's terminal laid out or not (an area too low for both): what had the keyboard may
-  // be hidden now; the zone takes it back once the render is done.
-  laidOut: () => queueMicrotask(() => keepKeyboard()),
+  // The session's terminal laid out or not (an area too low for both): the keyboard follows.
+  laidOut: (mode, before) => shellLaidOut(mode, before),
 });
 /**
  * The view's optional `fits(width, height)` (contract 2.9, task 28): the columns and rows a
@@ -803,13 +811,9 @@ function area(forAct = false) {
     state.pane.kind === 'terminal' && !forAct
       ? dom.cards.getBoundingClientRect().height
       : headerHeight();
-  // Issue #199: while the shell's panel is drawn beside the session's terminal, the terminal area
-  // of `focus` is what the session's terminal has: the panel and the bar are counted out.
-  const beside =
-    !forAct && state.pane.kind === 'terminal' && shellPanel.mode() === 'split'
-      ? dom.shell.getBoundingClientRect().height + dom.shellBar.getBoundingClientRect().height
-      : 0;
-  const height = box.height - above - beside;
+  // Issue #199 (ruled): a session's shell's panel and its bar are not counted out: the area's one
+  // reader is the first size of a terminal the command line or a restore opens, which has none.
+  const height = box.height - above;
   // The view is never asked about an area under 1 px (cards taller than the zone), and its answer
   // is held to what the server takes, as the page's own is: whole numbers, 1…MAX_COLS ×
   // 1…MAX_ROWS; one that is no number (a cell not measured yet) leaves the page's own arithmetic.
@@ -2585,6 +2589,72 @@ function pressShell(selected, header = false) {
   }
 }
 
+/**
+ * Issue #199 (S2 12.9): the split's mode changed (`web/shell-panel.js`). At the change to `full`
+ * (an area too low for both) the session's terminal is not laid out: once the render is done the
+ * zone gives what had the keyboard there to the shell (`keepKeyboard`, `sideView`), and the page
+ * remembers whether the keyboard was in the session's terminal and where it went. At the change
+ * back to `split` it goes back to the session's terminal only when it was there, is still where the
+ * change put it, no key was typed into the shell meanwhile, no text is selected and no dialog is
+ * shown: else it stays. Any other change forgets it and keeps the keyboard where it can be.
+ * @param {'split' | 'full' | null} mode
+ * @param {'split' | 'full' | null} before
+ */
+function shellLaidOut(mode, before) {
+  if (mode === 'full') {
+    const at = document.activeElement;
+    const flip = {
+      fromSession:
+        dom.terminal.contains(at) ||
+        // Already blurred by the hiding: the zone's side says where it was.
+        ((at === null || at === document.body) &&
+          state.zone === 'terminal' &&
+          state.shellSide === 'session'),
+      to: /** @type {Element | null} */ (null),
+      typed: false,
+    };
+    state.lowFlip = flip;
+    queueMicrotask(() => {
+      keepKeyboard();
+      if (state.lowFlip === flip) {
+        flip.to = document.activeElement;
+      }
+    });
+    return;
+  }
+  const flip = state.lowFlip;
+  state.lowFlip = null;
+  queueMicrotask(() => {
+    if (
+      mode === 'split' &&
+      before === 'full' &&
+      flip !== null &&
+      flip.fromSession &&
+      !flip.typed &&
+      flip.to !== null &&
+      document.activeElement === flip.to &&
+      !textSelected() &&
+      !modal() &&
+      drawnShell(state.pane) !== null
+    ) {
+      state.shellSide = 'session';
+      terminalView.focus();
+      return;
+    }
+    keepKeyboard();
+  });
+}
+// A key typed into the shell while the area is too low makes the keyboard's place the user's.
+dom.shell.addEventListener(
+  'keydown',
+  () => {
+    if (state.lowFlip !== null) {
+      state.lowFlip.typed = true;
+    }
+  },
+  true,
+);
+
 /** Issue #199: the keyboard to the shown panel's shell; the zone is the terminal's. */
 function shellKeyboard() {
   setZone('terminal', false);
@@ -2669,8 +2739,8 @@ function shellListed(message) {
 /**
  * Issue #199: a shell that a list no longer has (its `exit`, its session's end) leaves the page:
  * its id the set of the shown ones, and its terminal the view, also one this page hid (still
- * attached); the render then hides a drawn panel and `keepKeyboard` gives the keyboard to the
- * session's terminal.
+ * attached); the render then hides a drawn panel, and `keepKeyboard` gives the keyboard to the
+ * session's terminal when it was in the shell (ruled); else it stays where it was.
  * @param {ListMessage} message
  */
 function shellsGone(message) {
@@ -2778,6 +2848,7 @@ function render() {
   const before = dom.rightZone.dataset.paneTerm ?? '';
   if (pane.kind !== 'terminal' || pane.term.id !== before) {
     state.shellSide = 'session'; // issue #199: another terminal starts on the session's side
+    state.lowFlip = null;
   }
   dom.rightZone.dataset.pane = pane.kind;
   dom.rightZone.dataset.paneTerm = pane.kind === 'terminal' ? pane.term.id : '';
@@ -3770,7 +3841,6 @@ const resizeObserver = new ResizeObserver(() => {
   }, 200);
 });
 resizeObserver.observe(dom.rightZone);
-resizeObserver.observe(dom.terminal); // issue #199: the shell's panel and its bar change it too
 
 // --- start --------------------------------------------------------------------------------------
 

@@ -62,7 +62,8 @@ function write(height) {
  * @property {HTMLElement} panel  `#shell`
  * @property {() => boolean} blocked  whether a dialog is shown (app.js's `modal`)
  * @property {() => number} least  the px of MIN_ROWS rows (the shells' view's `heightFor`)
- * @property {() => void} [laidOut]  the split's mode changed (the session's terminal shown or not)
+ * @property {(mode: ShellMode | null, before: ShellMode | null) => void} [laidOut]  the split's
+ *   mode changed (the session's terminal laid out or not): the mode now and the one before
  */
 
 /** @typedef {'split' | 'full'} ShellMode */
@@ -112,7 +113,10 @@ export function createShellPanel(deps) {
       }
     }
     if ((zone.dataset['shell'] ?? null) !== before) {
-      deps.laidOut?.();
+      deps.laidOut?.(
+        /** @type {ShellMode | null} */ (zone.dataset['shell'] ?? null),
+        /** @type {ShellMode | null} */ (before),
+      );
     }
   };
 

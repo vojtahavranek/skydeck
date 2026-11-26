@@ -17,8 +17,18 @@ import type { Browser, Page } from 'playwright';
 import { S1, S2 } from '../test/helpers/platform.ts';
 import { SHELL_PROMPT } from '../test/helpers/shell-standin.ts';
 import { BAR_PX, BAR_TITLE, MIN_ROWS, SHELL_HEIGHT_KEY } from '../web/shell-panel-split.js';
-import { browser } from './helpers/browser.ts';
-import { assetBase, clickRow, connection, launched, readPage, toZone } from './helpers/shell.ts';
+import { browser, newPage } from './helpers/browser.ts';
+import { startTestServer } from '../test/helpers/window.ts';
+import {
+  assetBase,
+  clickRow,
+  connection,
+  launched,
+  pageUrl,
+  readPage,
+  shownText,
+  toZone,
+} from './helpers/shell.ts';
 import type { Launched } from './helpers/shell.ts';
 import { promptOf, recordsOf, resumeHere, untilScreen, until } from './helpers/terminal.ts';
 
@@ -135,14 +145,33 @@ async function untilPanel(page: Page, shown: boolean): Promise<void> {
   );
 }
 
-/** S1 resumed into the window's terminal and reported there, its shell open with the keyboard. */
-async function withShell(
+interface InWindowOptions {
+  viewport?: { width: number; height: number };
+  /** Init scripts for the page, in force from a reload before S1 is resumed. */
+  init?: string[];
+  /** A value of the shell's height in the page's localStorage before that reload. */
+  stored?: string;
+}
+
+/** S1 resumed into the window's terminal and reported there (S2 resumable too). */
+async function inWindow(
   t: TestContext,
   chromium: Browser,
-  viewport?: { width: number; height: number },
+  options: InWindowOptions = {},
 ): Promise<Launched & { term: string }> {
   const l = await launched(t, chromium);
-  if (viewport !== undefined) await l.page.setViewportSize(viewport);
+  if (options.viewport !== undefined) await l.page.setViewportSize(options.viewport);
+  if (options.stored !== undefined) {
+    await l.page.evaluate(({ key, value }) => localStorage.setItem(key, value), {
+      key: SHELL_HEIGHT_KEY,
+      value: options.stored,
+    });
+  }
+  if (options.init !== undefined || options.stored !== undefined) {
+    for (const script of options.init ?? []) await l.page.addInitScript(script);
+    await l.page.reload();
+    await connection(l.page, 'open');
+  }
   l.d.resumable(S1);
   l.d.resumable(S2);
   const term = await resumeHere(l.page, S1);
@@ -154,11 +183,110 @@ async function withShell(
         .some((one) => one.id === term && one.sessionId === S1 && one.program !== null),
     'S1 reported in its terminal',
   );
-  await l.page.keyboard.press('Control+Shift+S');
-  await untilPanel(l.page, true);
-  await untilKeyboard(l.page, 'shell');
-  await untilScreen(l.page, new RegExp(SHELL_PROMPT.trimEnd()), undefined, '#shell');
   return { ...l, term };
+}
+
+/** The shell opened by the key (the keyboard where the key was pressed) and shown, with its prompt. */
+async function openShell(page: Page): Promise<void> {
+  await page.keyboard.press('Control+Shift+S');
+  await untilPanel(page, true);
+  await untilKeyboard(page, 'shell');
+  await untilScreen(page, new RegExp(SHELL_PROMPT.trimEnd()), undefined, '#shell');
+}
+
+/** S1 resumed into the window's terminal and reported there, its shell open with the keyboard. */
+async function withShell(
+  t: TestContext,
+  chromium: Browser,
+  viewport?: { width: number; height: number },
+  options: Omit<InWindowOptions, 'viewport'> = {},
+): Promise<Launched & { term: string }> {
+  const l = await inWindow(t, chromium, {
+    ...options,
+    ...(viewport === undefined ? {} : { viewport }),
+  });
+  await openShell(l.page);
+  return l;
+}
+
+/** An init script that keeps every JSON message the page sends in `globalThis.testSent`. */
+const KEEP_SENT = `(() => {
+  const sent = [];
+  globalThis.testSent = sent;
+  const send = WebSocket.prototype.send;
+  WebSocket.prototype.send = function (data) {
+    if (typeof data === 'string') {
+      try {
+        const message = JSON.parse(data);
+        if (message.t !== 'ping') sent.push(message);
+      } catch {}
+    }
+    return send.call(this, data);
+  };
+})();`;
+
+type Sent = Record<string, unknown> & { t: string };
+
+/** What the page sent so far (KEEP_SENT). */
+async function sentOf(page: Page): Promise<Sent[]> {
+  return page.evaluate(() => [...(Reflect.get(globalThis, 'testSent') as Sent[])]);
+}
+
+const sizeOf = (message: Sent | undefined): Size | null =>
+  message === undefined
+    ? null
+    : { cols: message['cols'] as number, rows: message['rows'] as number };
+
+/** Keeps every WebSocket the page makes in `globalThis.testSockets` (an init script). */
+const KEEP_SOCKETS = `(() => {
+  const Native = window.WebSocket;
+  const kept = [];
+  globalThis.testSockets = kept;
+  window.WebSocket = class extends Native {
+    constructor(url, protocols) {
+      super(url, protocols);
+      kept.push(this);
+    }
+  };
+})();`;
+
+/** The window's height that leaves the terminal area `under` px under twice least and the bar. */
+async function lowHeight(page: Page, height: number, under: number): Promise<number> {
+  const least = await leastOf(page);
+  const now = await layout(page);
+  return Math.floor(height - (now.area - (2 * least + BAR_PX - under)));
+}
+
+/** What the page's own view computes for the whole terminal area (the zone less the cards). */
+async function fitsOfArea(page: Page): Promise<Size | null> {
+  const base = await assetBase(page);
+  return page.evaluate(async (base) => {
+    type Probe = { fits(width: number, height: number): Size | null };
+    let probe = Reflect.get(globalThis, 'testProbe') as Probe | undefined;
+    if (probe === undefined) {
+      const module = (await import(`${base}terminal-view.js`)) as {
+        createTerminalView(root: HTMLElement, deps: object): Probe;
+      };
+      const root = document.createElement('div');
+      root.style.cssText = 'position:fixed;left:-5000px;top:0;width:100px;height:100px';
+      document.body.append(root);
+      probe = module.createTerminalView(root, {
+        send: () => {},
+        chord: () => false,
+        openLink: () => {},
+      });
+      Reflect.set(globalThis, 'testProbe', probe);
+    }
+    const zone = document.getElementById('right-zone') as HTMLElement;
+    const style = getComputedStyle(zone);
+    const px = (name: string): number => parseFloat(style.getPropertyValue(name)) || 0;
+    const box = zone.getBoundingClientRect();
+    const cards = (document.getElementById('cards') as HTMLElement).getBoundingClientRect().height;
+    return probe.fits(
+      box.width - px('border-left-width') - px('border-right-width'),
+      box.height - px('border-top-width') - px('border-bottom-width') - cards,
+    );
+  }, base);
 }
 
 /** The size the session's stand-in program was told last (its start's or a resize's). */
@@ -221,6 +349,7 @@ async function untilToldBoxes(
 
 /** The bar's middle, in the page's px. */
 async function barAt(page: Page): Promise<{ x: number; y: number }> {
+  await page.locator('#shell-bar').waitFor({ state: 'visible', timeout: 20_000 });
   const box = await page.locator('#shell-bar').boundingBox();
   assert.ok(box !== null, 'the bar is laid out');
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -391,17 +520,17 @@ test('issue #199: the split of the terminal area between a session and its shell
   );
 
   await t.test(
-    'A8: a window too low for both: the shell over the whole terminal area with no bar and no session terminal; higher again shows both',
+    'A8: a window too low for both: the shell over the whole terminal area with no bar and no session terminal, whose program is told nothing; higher again shows both',
     async (t) => {
-      const l = await withShell(t, chromium, { width: 1100, height: 700 });
+      const l = await withShell(t, chromium, { width: 1100, height: 700 }, { init: [KEEP_SENT] });
       const { page, term } = l;
-      const least = await leastOf(page);
       const split = await layout(page);
       assert.equal(split.mode, 'split');
-      // The window's height that leaves the area 10 px under twice the least and the bar.
-      const low = 700 - (split.area - (2 * least + BAR_PX - 10));
+      await untilToldBoxes(l, S1, term, true);
+      const toldBefore = toldLast(l, S1);
+      const sentBefore = (await sentOf(page)).length;
 
-      await page.setViewportSize({ width: 1100, height: Math.floor(low) });
+      await page.setViewportSize({ width: 1100, height: await lowHeight(page, 700, 10) });
 
       await until(async () => (await layout(page)).mode === 'full', 'the shell over the area');
       const full = await layout(page);
@@ -411,6 +540,18 @@ test('issue #199: the split of the terminal area between a session and its shell
       await until(async () => (await keyboard(page)) === 'shell', 'the keyboard in the shell');
       const shellFits = await fitsOf(page, '#shell');
       await until(() => same(serverSizes(l, term).shell, shellFits), 'the shell told its size');
+      // Its echo back from the shell comes after every refit the change set off.
+      await page.keyboard.type('echo "low-$((2 + 3))"');
+      await page.keyboard.press('Enter');
+      await untilScreen(page, /^low-5$/m, undefined, '#shell');
+      assert.deepEqual(
+        (await sentOf(page))
+          .slice(sentBefore)
+          .filter((one) => one.t === 'resize' && one['term'] === term),
+        [],
+        "the page proposed no size for the session's terminal it does not lay out",
+      );
+      assert.deepEqual(toldLast(l, S1), toldBefore, "the session's program was told nothing");
 
       await page.setViewportSize({ width: 1100, height: 700 });
 
@@ -445,45 +586,509 @@ test('issue #199: the split of the terminal area between a session and its shell
       assert.equal(await page.locator('#shell-bar').getAttribute('tabindex'), null);
 
       // A dialog: the dialog "Mark done" (`d` once the window can end S1), with a height stored
-      // first, which a double click would remove.
+      // first, which a double click would remove, and then a plain click (no drag: the double
+      // click's own rule about a drag would hold nothing back).
       await dragBar(page, -60);
       await until(async () => (await layout(page)).stored !== null, 'a height stored');
+      await press();
       await page.waitForSelector('#cards .header-restart', { state: 'visible', timeout: 20_000 });
       await clickRow(page, S1);
       await toZone(page, 'list');
       const before = await layout(page);
       await page.keyboard.press('d');
       await page.waitForSelector('#end-dialog:not([hidden])', { state: 'attached' });
+      const unchanged = async (how: string): Promise<void> => {
+        const now = await layout(page);
+        assert.deepEqual([now.shell, now.stored], [before.shell, before.stored], how);
+      };
       await dragBar(page, -120); // the dialog's scrim lies over it
+      await unchanged('a drag by the mouse, on the scrim');
       const at = await barAt(page);
-      // And the bar's own events, past the scrim: a press, a move, a release, a double click.
-      await page.evaluate(
-        ({ x, y }) => {
-          const bar = document.getElementById('shell-bar') as HTMLElement;
-          const event = (type: string, dy: number): PointerEvent =>
-            new PointerEvent(type, {
-              bubbles: true,
-              button: 0,
-              pointerId: 1,
-              clientX: x,
-              clientY: y + dy,
-            });
-          bar.dispatchEvent(event('pointerdown', 0));
-          bar.dispatchEvent(event('pointermove', -120));
-          bar.dispatchEvent(event('pointerup', -120));
-          bar.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
-        },
-        { x: at.x, y: at.y },
-      );
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      const during = await layout(page);
-      assert.deepEqual(
-        [during.shell, during.stored],
-        [before.shell, before.stored],
-        'nothing changed under the dialog',
-      );
+      /** The bar's own events, past the scrim (the mouse's pointer, id 1). */
+      const dispatch = (types: string[], dy: number): Promise<void> =>
+        page.evaluate(
+          ({ types, x, y }) => {
+            const bar = document.getElementById('shell-bar') as HTMLElement;
+            for (const type of types) {
+              bar.dispatchEvent(
+                type === 'dblclick'
+                  ? new MouseEvent('dblclick', { bubbles: true, detail: 2 })
+                  : new PointerEvent(type, {
+                      bubbles: true,
+                      button: 0,
+                      pointerId: 1,
+                      clientX: x,
+                      clientY: y,
+                    }),
+              );
+            }
+          },
+          { types, x: at.x, y: at.y + dy },
+        );
+      await dispatch(['dblclick'], 0);
+      await unchanged('a double click');
+      await dispatch(['pointerdown'], 0);
+      await unchanged('a press');
       await page.keyboard.press('Escape');
       await page.waitForSelector('#end-dialog[hidden]', { state: 'attached' });
+      // The press under the dialog armed nothing: a move and a release after it move nothing.
+      await dispatch(['pointermove'], -120);
+      await dispatch(['pointerup'], -120);
+      await unchanged('a move after a press made under the dialog');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+});
+
+test('issue #199: the keyboard when the area gets too low and high again, the sizes the page sends, and the bar’s rules', async (t) => {
+  const chromium = await browser(t);
+  const VIEW = { width: 1100, height: 700 };
+
+  /** The window made too low for both (10 px under the rule), and the split's `full` laid out. */
+  const goLow = async (page: Page): Promise<void> => {
+    await page.setViewportSize({
+      width: VIEW.width,
+      height: await lowHeight(page, VIEW.height, 10),
+    });
+    await until(
+      async () => (await layout(page)).mode === 'full',
+      'too low: the shell over the area',
+    );
+  };
+  const goHigh = async (page: Page): Promise<void> => {
+    await page.setViewportSize(VIEW);
+    await until(async () => (await layout(page)).mode === 'split', 'high again: both');
+  };
+  const clickSession = (page: Page): Promise<void> =>
+    page.locator('#terminal .tv-term:not([hidden]) .xterm-screen').click();
+
+  await t.test(
+    "the keyboard in the session's terminal when the area gets too low goes to the shell, and back to the session's terminal when it is high again",
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW);
+      const { page } = l;
+      await clickSession(page);
+      await untilKeyboard(page, 'terminal');
+
+      await goLow(page);
+      await untilKeyboard(page, 'shell');
+      await goHigh(page);
+      await untilKeyboard(page, 'terminal');
+      assert.equal(await shownText(page, '#focus-zone'), 'Focus: terminal');
+
+      // And again: the rule holds at every change, not once.
+      await goLow(page);
+      await untilKeyboard(page, 'shell');
+      await goHigh(page);
+      await untilKeyboard(page, 'terminal');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'a key typed into the shell while the area is too low keeps the keyboard in the shell when it is high again; one in the shell before stays there both ways',
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW);
+      const { page } = l;
+      await clickSession(page);
+      await untilKeyboard(page, 'terminal');
+      await goLow(page);
+      await untilKeyboard(page, 'shell');
+      await page.keyboard.type('echo typed-while-low');
+      await page.keyboard.press('Enter');
+      await untilScreen(page, /^typed-while-low$/m, undefined, '#shell');
+
+      await goHigh(page);
+      assert.equal(await keyboard(page), 'shell', 'the keyboard is the user’s now: it stays');
+
+      await goLow(page);
+      assert.equal(await keyboard(page), 'shell');
+      await goHigh(page);
+      assert.equal(await keyboard(page), 'shell', 'it was in the shell: it stays there');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'the keyboard in the list stays in the list when the area gets too low and high again',
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW);
+      const { page } = l;
+      await toZone(page, 'list');
+      await untilKeyboard(page, 'list');
+      await goLow(page);
+      assert.equal(await keyboard(page), 'list');
+      await goHigh(page);
+      assert.equal(await keyboard(page), 'list');
+      assert.equal(await shownText(page, '#focus-zone'), 'Focus: list');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    "a connection cut and back while the area is too low: the shell hidden, the session's terminal laid out again with the keyboard",
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW, { init: [KEEP_SOCKETS] });
+      const { page } = l;
+      await goLow(page);
+      await untilKeyboard(page, 'shell');
+
+      await page.evaluate(() => {
+        (Reflect.get(globalThis, 'testSockets') as WebSocket[]).at(-1)?.close();
+      });
+      await connection(page, 'lost');
+      await connection(page, 'open');
+
+      await untilPanel(page, false);
+      const now = await layout(page);
+      assert.equal(now.mode, null, 'no split laid out');
+      assert.equal(now.terminalShown, true, "the session's terminal is laid out");
+      await untilKeyboard(page, 'terminal');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    "the cards growing while split: the rules are applied again (the session's terminal keeps its least height), and past the rule the shell takes the area",
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW);
+      const { page } = l;
+      const least = await leastOf(page);
+      page.on('console', (m) => {});
+      const start = await layout(page);
+      const grow = (px: number): Promise<void> =>
+        page.evaluate((px) => {
+          (document.getElementById('cards') as HTMLElement).style.paddingBottom = `${px}px`;
+        }, px);
+
+      // The area 20 px over the rule: both, each at least its least.
+      await grow(start.area - (2 * least + BAR_PX) - 20);
+      await until(async () => {
+        const now = await layout(page);
+        return now.mode === 'split' && now.terminal >= least - 1 && now.shell >= least - 1;
+      }, "both kept at least 4 rows' height");
+      // 10 px under it: the shell over the area.
+      await grow(start.area - (2 * least + BAR_PX) + 10);
+      await until(async () => (await layout(page)).mode === 'full', 'the shell over the area');
+      await grow(0);
+      await until(async () => (await layout(page)).mode === 'split', 'both again');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    "the split's own observer: cards that grow in a page of the module alone (no list, no render) shrink the shell to a third of what is left, and past the rule give it the area",
+    async (t) => {
+      const page = await newPage(t, chromium);
+      const started = await startTestServer(t);
+      await page.goto(pageUrl(started.server.port));
+      const base = await assetBase(page);
+      const result = await page.evaluate(async (base) => {
+        type Panel = { draw(shown: boolean): void; mode(): string | null };
+        const module = (await import(`${base}shell-panel.js`)) as {
+          createShellPanel(deps: object): Panel;
+        };
+        const frame = (): Promise<void> =>
+          new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 50)));
+        const made = (tag: string, css: string): HTMLElement => {
+          const one = document.createElement(tag);
+          one.style.cssText = css;
+          return one;
+        };
+        const zone = made(
+          'section',
+          'position:fixed;left:0;top:0;width:600px;height:600px;display:flex;flex-direction:column',
+        );
+        const cards = made('div', 'flex:none;height:0');
+        const terminal = made('div', 'flex:1;min-height:0');
+        const bar = made('div', 'flex:none;height:6px');
+        const panel = made('div', 'flex:none;min-height:0');
+        zone.append(cards, terminal, bar, panel);
+        document.body.append(zone);
+        const shell = module.createShellPanel({
+          zone,
+          cards,
+          bar,
+          panel,
+          blocked: () => false,
+          least: () => 84,
+        });
+        shell.draw(true);
+        const read = () => ({
+          mode: shell.mode(),
+          panel: panel.getBoundingClientRect().height,
+          terminal: terminal.getBoundingClientRect().height,
+        });
+        const seen = [read()];
+        for (const height of [300, 430]) {
+          cards.style.height = `${height}px`;
+          await frame();
+          await frame();
+          seen.push(read());
+        }
+        return seen;
+      }, base);
+      assert.deepEqual(result[0], { mode: 'split', panel: 200, terminal: 394 }, 'a third of 600');
+      assert.deepEqual(result[1], { mode: 'split', panel: 100, terminal: 194 }, 'a third of 300');
+      assert.equal(result[2]?.mode, 'full', '170 px: under twice 84 and the bar');
+    },
+  );
+
+  await t.test(
+    'too low, selecting a session without a shell: its terminal laid out over the area, with the keyboard',
+    async (t) => {
+      const l = await inWindow(t, chromium, { viewport: VIEW });
+      const { page } = l;
+      await resumeHere(page, S2);
+      await untilScreen(page, promptOf(S2));
+      await clickRow(page, S1);
+      await page.keyboard.press('Enter');
+      await until(async () => (await layout(page)).terminalShown, "S1's terminal shown");
+      await openShell(page);
+      await goLow(page);
+
+      await clickRow(page, S2);
+      await page.keyboard.press('Enter');
+
+      await untilPanel(page, false);
+      await untilKeyboard(page, 'terminal');
+      const now = await layout(page);
+      assert.equal(now.mode, null);
+      assert.equal(now.terminalShown, true);
+      near(now.terminal, now.area, 'over the whole area');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  for (const [what, stored, low] of [
+    ['without a stored height (a third)', undefined, false],
+    ['with a stored height', '300', false],
+    ['in a window too low for both (the whole area)', undefined, true],
+  ] as const) {
+    await t.test(
+      `the act's first size ${what} is what the page's view computes for the panel's box, and the shell's attach proposes the same: no resize of it follows`,
+      async (t) => {
+        const l = await inWindow(t, chromium, {
+          viewport: VIEW,
+          init: [KEEP_SENT],
+          ...(stored === undefined ? {} : { stored }),
+        });
+        const { page, term } = l;
+        if (low) {
+          await page.setViewportSize({
+            width: VIEW.width,
+            height: await lowHeight(page, VIEW.height, 10),
+          });
+          // The session's terminal, alone in the lower area, told its size first.
+          await untilToldBoxes(l, S1, term, false);
+        }
+        const mark = (await sentOf(page)).length;
+        await openShell(page);
+        if (stored !== undefined)
+          near((await layout(page)).shell, Number(stored), 'the stored height');
+        if (low) assert.equal((await layout(page)).mode, 'full');
+        // Its echo back from the shell comes after every refit the panel set off.
+        await page.keyboard.type('echo "first-$((1 + 1))"');
+        await page.keyboard.press('Enter');
+        await untilScreen(page, /^first-2$/m, undefined, '#shell');
+
+        const sent = await sentOf(page);
+        const asked = sent.find((one) => one.t === 'act' && one['kind'] === 'shell');
+        const [shell] = l.server.hub.shells?.() ?? [];
+        assert.ok(asked !== undefined && shell !== undefined);
+        const fit = await fitsOf(page, '#shell');
+        assert.deepEqual(sizeOf(asked), fit, "the act's size is the panel's fit");
+        const attach = sent.find((one) => one.t === 'attach' && one['term'] === shell.id);
+        assert.deepEqual(sizeOf(attach), fit, 'the attach proposes the same');
+        assert.deepEqual(
+          sent.filter((one) => one.t === 'resize' && one['term'] === shell.id),
+          [],
+          'no resize of the shell',
+        );
+        if (low) {
+          assert.deepEqual(
+            sent.slice(mark).filter((one) => one.t === 'resize' && one['term'] === term),
+            [],
+            "no size proposed for the session's terminal it does not lay out",
+          );
+        }
+        assert.deepEqual(l.problems, []);
+      },
+    );
+  }
+
+  await t.test(
+    '`focus.area` is the whole terminal area while the panel is drawn (ruled): the panel and the bar are not counted out',
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW, { init: [KEEP_SENT] });
+      const { page } = l;
+      /**
+       * The `focus` the page sends once the window is `width` px wide (S2 8.2.3: at every change;
+       * the zone's size changes, the panel stays drawn), and what the page's own view computes for
+       * the whole terminal area and for the session's terminal's box then.
+       */
+      const focusAt = async (
+        width: number,
+      ): Promise<{ area: unknown; whole: Size | null; session: Size | null }> => {
+        const before = (await sentOf(page)).length;
+        await page.setViewportSize({ width, height: VIEW.height });
+        let focus: Sent | undefined;
+        await until(async () => {
+          focus = (await sentOf(page))
+            .slice(before)
+            .filter((one) => one.t === 'focus')
+            .at(-1);
+          return focus !== undefined;
+        }, 'a focus sent');
+        assert.equal((await layout(page)).mode, 'split', 'the panel drawn beside');
+        return {
+          area: focus?.['area'],
+          whole: await fitsOfArea(page),
+          session: await fitsOf(page, '#terminal'),
+        };
+      };
+      for (const width of [VIEW.width - 80, VIEW.width]) {
+        const now = await focusAt(width);
+        assert.ok(
+          now.session !== null && now.whole !== null && now.session.rows < now.whole.rows,
+          'the panel takes rows of the area',
+        );
+        assert.deepEqual(now.area, now.whole, `${width} px: the whole area`);
+      }
+      await dragBar(page, -100);
+      const dragged = await focusAt(VIEW.width - 40);
+      assert.deepEqual(dragged.area, dragged.whole, 'after a drag of the bar too');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'a press on the bar that slips up to 3 px changes and stores nothing, past 3 px it drags; a drag back to its press stores nothing and leaves the height',
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW);
+      const { page } = l;
+      const start = await layout(page);
+      const at = await barAt(page);
+      for (const dy of [-1, 1, -2, 2, -3, 3]) {
+        await page.mouse.move(at.x, at.y);
+        await page.mouse.down();
+        await page.mouse.move(at.x, at.y + dy);
+        await page.mouse.up();
+        const now = await layout(page);
+        assert.deepEqual([now.shell, now.stored], [start.shell, null], `a slip of ${dy} px`);
+      }
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down();
+      await page.mouse.move(at.x, at.y - 4);
+      near((await layout(page)).shell, start.shell + 4, 'past 3 px the drag begins');
+      await page.mouse.move(at.x, at.y - 60, { steps: 4 });
+      near((await layout(page)).shell, start.shell + 60, 'and follows the pointer');
+      await page.mouse.move(at.x, at.y, { steps: 4 });
+      await page.mouse.up();
+      const back = await layout(page);
+      assert.deepEqual(
+        [back.shell, back.stored],
+        [start.shell, null],
+        'back at its press: nothing',
+      );
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    "a second page of the same browser follows the first one's drag when it ends, and its double click",
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW);
+      const { page } = l;
+      const two = await page.context().newPage();
+      await two.setViewportSize(VIEW);
+      await two.goto(pageUrl(l.server.port));
+      await connection(two, 'open');
+      await clickRow(two, S1);
+      await two.keyboard.press('Enter');
+      await until(
+        async () => (await layout(two)).terminalShown,
+        "S1's terminal on the second page",
+      );
+      await two.keyboard.press('Control+Shift+S'); // the shell is open: shown here too
+      await untilPanel(two, true);
+      const start = await layout(two);
+
+      await dragBar(page, -100);
+      const dragged = await layout(page);
+      await until(
+        async () => Math.abs((await layout(two)).shell - dragged.shell) <= 1,
+        'the second page follows',
+      );
+
+      const at = await barAt(page);
+      await page.mouse.dblclick(at.x, at.y);
+      await until(
+        async () => Math.abs((await layout(two)).shell - start.shell) <= 1,
+        'and its double click',
+      );
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  /** A localStorage that throws at its every use, one that reads nothing and refuses writes, none. */
+  const STORAGES = [
+    [
+      'storage that throws',
+      `Object.defineProperty(window, 'localStorage', { configurable: true, get() { throw new DOMException('denied', 'SecurityError'); } });`,
+    ],
+    [
+      'storage that takes nothing',
+      `Object.defineProperty(window, 'localStorage', { configurable: true, value: { getItem: () => null, setItem() { throw new DOMException('full', 'QuotaExceededError'); }, removeItem() { throw new DOMException('full', 'QuotaExceededError'); } } });`,
+    ],
+    [
+      'no storage',
+      `Object.defineProperty(window, 'localStorage', { configurable: true, value: undefined });`,
+    ],
+  ] as const;
+  for (const [what, storage] of STORAGES) {
+    await t.test(
+      `${what}: the page loads and the shell opens at a third; a drag and a double click work, the height holds until the page is closed`,
+      async (t) => {
+        const l = await withShell(t, chromium, VIEW, { init: [storage] });
+        const { page } = l;
+        const start = await layout(page);
+        near(start.shell, Math.round(start.area / 3), 'a third');
+        await dragBar(page, -100);
+        near((await layout(page)).shell, start.shell + 100, 'dragged');
+        await page.keyboard.type('echo "held-$((4 + 4))"');
+        await page.keyboard.press('Enter');
+        await untilScreen(page, /^held-8$/m, undefined, '#shell');
+        near((await layout(page)).shell, start.shell + 100, 'it holds');
+        const at = await barAt(page);
+        await page.mouse.dblclick(at.x, at.y);
+        await until(
+          async () => Math.abs((await layout(page)).shell - start.shell) <= 1,
+          'a third again',
+        );
+        assert.deepEqual(l.problems, [], 'no problem on the page');
+      },
+    );
+  }
+
+  await t.test(
+    'a dialog that opens during a drag ends it: the height stops where the dialog met it, and is kept',
+    async (t) => {
+      const l = await withShell(t, chromium, VIEW);
+      const { page } = l;
+      const start = await layout(page);
+      const at = await barAt(page);
+      await page.mouse.move(at.x, at.y);
+      await page.mouse.down();
+      await page.mouse.move(at.x, at.y - 60, { steps: 4 });
+      await page.keyboard.press('Control+Shift+P'); // the switcher, a dialog
+      await page.waitForSelector('#switcher:not([hidden])', { state: 'attached', timeout: 20_000 });
+      await page.mouse.move(at.x, at.y - 160, { steps: 4 });
+      await page.mouse.up();
+      const now = await layout(page);
+      near(now.shell, start.shell + 60, 'stopped at the meeting');
+      assert.equal(now.stored, String(Math.round(now.shell)), 'kept as at a release');
+      await page.keyboard.press('Escape');
       assert.deepEqual(l.problems, []);
     },
   );

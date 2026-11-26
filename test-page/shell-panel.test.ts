@@ -925,6 +925,58 @@ test('issue #199: after a reload, a reconnect and a server restart every shell i
       );
     },
   );
+
+  await t.test(
+    'a shell that ends while the keyboard is elsewhere (ruled): moved to the list, or to the list’s filter, before the `exit`, the keyboard stays there after the panel went',
+    async (t) => {
+      const l = await withShell(t, chromium);
+      const { page } = l;
+      for (const where of ['list', 'filter'] as const) {
+        if (where === 'filter') {
+          await page.keyboard.press('Control+Shift+S'); // a new shell, the keyboard in it
+          await untilPanel(page, true);
+          await untilKeyboard(page, 'shell');
+          await untilScreen(page, new RegExp(SHELL_PROMPT.trimEnd()), undefined, '#shell');
+        }
+        // The shell ends once the test says so (a file it waits for), not by a clock.
+        const go = join(l.d.s.home, `go-${where}`);
+        await page.keyboard.type(`while [ ! -e '${go}' ]; do sleep 0.1; done; exit`);
+        await page.keyboard.press('Enter');
+        await page.keyboard.press('Control+Shift+L');
+        await untilKeyboard(page, 'list');
+        if (where === 'filter') {
+          await page.keyboard.press('/');
+          await until(
+            () =>
+              readPage(
+                page,
+                () => document.activeElement?.classList.contains('list-filter') === true,
+                null,
+              ),
+            'the keyboard in the filter',
+          );
+        }
+        const holder = await readPage(page, () => document.activeElement?.className ?? '', null);
+
+        writeFileSync(go, '');
+
+        await untilPanel(page, false);
+        await until(() => shellsOf(l).length === 0, 'the shell gone on the server');
+        await until(async () => !(await dot(page)), 'no dot');
+        assert.equal(
+          await readPage(page, () => document.activeElement?.className ?? '', null),
+          holder,
+          `${where}: the keyboard stays where it was`,
+        );
+        assert.equal(await keyboard(page), 'list');
+        assert.equal(await shownText(page, '#focus-zone'), 'Focus: list');
+        if (where === 'filter') {
+          await page.keyboard.press('Escape');
+        }
+      }
+      assert.deepEqual(l.problems, []);
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -1231,7 +1283,7 @@ async function shellBoxes(page: Page): Promise<number> {
 
 const settle = (ms = 400): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-test("issue #199: milestone 2's review — the keyboard, the views and the streams", async (t) => {
+test("issue #199: the keyboard where the user put it, a held key, a shell that is gone, and the shells' streams", async (t) => {
   const chromium = await browser(t);
 
   await t.test(
@@ -1303,6 +1355,45 @@ test("issue #199: milestone 2's review — the keyboard, the views and the strea
       await untilPanel(page, true);
       await settle();
       assert.equal(await keyboard(page), 'terminal', 'the keyboard stays where the user put it');
+      w.answer(asked, { ok: true });
+    },
+  );
+
+  await t.test(
+    'the shell an act asked for takes no keyboard while text of the page is selected when the list brings it: the keyboard and the selection stay',
+    async (t) => {
+      const { page, w, set } = await scriptedWorld(t, chromium);
+      await clickRow(page, S1);
+      await toZone(page, 'list');
+      await untilKeyboard(page, 'list');
+      await page.keyboard.press('Control+Shift+S');
+      const asked = await w.act(1);
+      // Text of the header selected (a drag over it, as a user selects it to copy).
+      const selected = await page.evaluate(() => {
+        const title = document.querySelector('#cards .card-header');
+        const walker = document.createTreeWalker(title ?? document.body, NodeFilter.SHOW_TEXT);
+        let node = walker.nextNode();
+        while (node !== null && (node.textContent ?? '').trim() === '') node = walker.nextNode();
+        if (node === null) return '';
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const selection = getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        return selection?.toString() ?? '';
+      });
+      assert.ok(selected.length > 0, 'text of the header is selected');
+      assert.equal(await keyboard(page), 'list');
+
+      set([{ id: SHELL_A, of: TERM_A }]);
+      await untilPanel(page, true);
+      await settle();
+      assert.equal(await keyboard(page), 'list', 'the keyboard stays in the list');
+      assert.equal(
+        await page.evaluate(() => getSelection()?.toString() ?? ''),
+        selected,
+        'the selection stays',
+      );
       w.answer(asked, { ok: true });
     },
   );
