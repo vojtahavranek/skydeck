@@ -59,10 +59,16 @@
 // and gives the default back at a double click. It takes no keyboard and does nothing while the
 // page is modal (`modal`).
 //
+// Issue #199 (S2 7.10, 12.6): a session's shell, in a second terminal view (`shellView`, in
+// `#shell` under `#terminal`, inside the right zone). The server lists the shells (`list.shells`);
+// which of them this page shows is the page's own (`state.shellsShown`, nothing of it stored).
+// The panel is drawn while the pane is a terminal that is not ended, a shell of it is listed and
+// this page shows it; the session terminals' exits and re-attach queue stay their own.
+//
 // Order at load (S2 8.2.2): the launch token leaves the address first, before anything can open a
 // connection; then the stored key is read; then the connection opens.
 
-/** @import { ClosedBlock, ExitMessage, ListMessage, ResultMessage, RowPayload, SearchChip, SectionPayload, ServerMessage, SwitchItem, TerminalPayload, WelcomeMessage } from '../src/window/protocol.ts' */
+/** @import { ClosedBlock, ExitMessage, ListMessage, ResultMessage, RowPayload, SearchChip, SectionPayload, ServerMessage, ShellPayload, SwitchItem, TerminalPayload, WelcomeMessage } from '../src/window/protocol.ts' */
 /** @import { EditWhat, ListAction, WindowChord, Zone } from './keys.js' */
 /** @import { Change } from './connection.js' */
 /** @import { Pane } from './pane.js' */
@@ -145,6 +151,8 @@ const dom = {
   rightNone: byId('right-none'),
   cards: byId('cards'),
   terminal: byId('terminal'),
+  shellBar: byId('shell-bar'),
+  shell: byId('shell'),
   focusZone: byId('focus-zone'),
   keyMessage: byId('key-message'),
   help: byId('help'),
@@ -239,6 +247,26 @@ const state = {
   waitingSnap: null,
   /** The first list after a welcome starts the re-attach. */
   welcomed: false,
+  /**
+   * Issue #199: the ids of the shells this page shows (its panel is drawn while its terminal is
+   * the pane's); in memory only, empty at a load.
+   * @type {Set<string>}
+   */
+  shellsShown: new Set(),
+  /**
+   * Issue #199: the terminal a `shell` act of this page was sent for, while no list has brought
+   * its shell — `answered` once the act's result came (the first list after it clears it).
+   * @type {{ term: string, answered: boolean } | null}
+   */
+  shellAsked: /** @type {{ term: string, answered: boolean } | null} */ (null),
+  /**
+   * Issue #199: the side of the terminal zone that had the keyboard last: the session's terminal
+   * or its shell (the shell only while its panel is drawn).
+   * @type {'session' | 'shell'}
+   */
+  shellSide: /** @type {'session' | 'shell'} */ ('session'),
+  /** What the shell panel shows now (`renderShell`), to apply a change only. */
+  shellKey: '',
   /** The height of the right side's header (`#cards .card-header`, a hook of contract 2.9) as
    *  last shown; 0 before any (Z1, item 5). */
   headerHeight: 0,
@@ -318,7 +346,11 @@ const list = createList(dom.list, {
   view: (change) => changeView(change),
   say: (text) => say(text),
 });
-const terminalView = createTerminalView(dom.terminal, {
+/**
+ * The terminal views' dependencies: the session terminals' view and (issue #199) the shells'.
+ * @type {Parameters<typeof createTerminalView>[1]}
+ */
+const viewDeps = {
   send: (message) => {
     send(message);
     // The view detached the terminal the re-attach waits for: its snap will not come. The queue
@@ -342,7 +374,14 @@ const terminalView = createTerminalView(dom.terminal, {
   // Issue #184: `window.copyOnSelect` as the server's last list says it, read at each release of
   // the mouse. The default is the server's (S2 4.3): a list without the field copies nothing.
   copyOnSelect: () => state.list?.copyOnSelect === true,
-});
+};
+const terminalView = createTerminalView(dom.terminal, viewDeps);
+/**
+ * Issue #199: the second view, of the sessions' shells, with the same dependencies; its optional
+ * members (`reset`, `drop`, `heightFor`) are used only when present, as `fits` is.
+ * @type {ReturnType<typeof createTerminalView> & { reset?: () => void, drop?: (id: string) => void, heightFor?: (rows: number) => number | null }}
+ */
+const shellView = createTerminalView(dom.shell, viewDeps);
 /**
  * The view's optional `fits(width, height)` (contract 2.9, task 28): the columns and rows a
  * terminal of the view shows in a terminal area of that many CSS pixels, or null while it cannot
@@ -2346,6 +2385,7 @@ function received(message) {
     }
     case 'snap':
       terminalView.snap(message);
+      shellView.snap(message); // issue #199: each view ignores a terminal it does not have
       keepKeyboard();
       if (message.term === state.waitingSnap) {
         nextReattach();
@@ -2353,9 +2393,14 @@ function received(message) {
       return;
     case 'size':
       terminalView.size(message);
+      shellView.size(message);
       keepKeyboard();
       return;
     case 'exit':
+      if (shellView.attached().includes(message.term)) {
+        shellView.exit(message); // issue #199: a shell's exit is its view's only
+        return;
+      }
       state.exits.set(message.term, message);
       terminalView.exit(message);
       render();
@@ -2382,6 +2427,7 @@ function received(message) {
         keepKeyboard();
       } else if (message.term !== null) {
         terminalView.notice(message.term, message.kind, message.text);
+        shellView.notice(message.term, message.kind, message.text);
         keepKeyboard();
       }
       return;
@@ -2428,6 +2474,37 @@ function renderList(zone) {
   }
 }
 
+/**
+ * Issue #199 (S2 12.6): the shell the panel shows for `pane` — a shell of the pane's terminal that
+ * this page shows, while that terminal is not ended —, or null.
+ * @param {Pane} pane
+ * @returns {ShellPayload | null}
+ */
+function drawnShell(pane) {
+  if (pane.kind !== 'terminal' || pane.ended) {
+    return null;
+  }
+  const shell = (state.list?.shells ?? []).find((one) => one.of === pane.term.id);
+  return shell !== undefined && state.shellsShown.has(shell.id) ? shell : null;
+}
+
+/**
+ * Issue #199: the shell panel and its bar drawn for `pane` (or hidden), and the shells' view shown
+ * that shell (or none); applied only when it changed.
+ * @param {Pane} pane
+ */
+function renderShell(pane) {
+  const shell = drawnShell(pane);
+  const key = shell === null ? '' : JSON.stringify(shell);
+  if (key === state.shellKey) {
+    return;
+  }
+  state.shellKey = key;
+  dom.shell.hidden = shell === null;
+  dom.shellBar.hidden = shell === null;
+  shellView.show(shell);
+}
+
 /** Renders the list and the right side for the current state. */
 function render() {
   renderList(state.zone);
@@ -2459,6 +2536,7 @@ function render() {
     pane.kind === 'new' ? ['new'] : [pane, exit, selected, lines, said, answered],
   );
   state.pane = pane;
+  renderShell(pane);
   // F22: the right side's line while nothing is shown there and the list holds no session at all.
   const blank = pane.kind === 'none' && holdsNoSession(state.list, state.view.filter);
   if (dom.rightNone.hidden === blank) {
@@ -3414,6 +3492,7 @@ addEventListener('focus', () => focusChanged());
 addEventListener('blur', () => focusChanged());
 document.addEventListener('visibilitychange', () => {
   terminalView.setHidden(document.hidden);
+  shellView.setHidden(document.hidden);
   keepKeyboard();
 });
 /** @type {ReturnType<typeof setTimeout> | null} */
@@ -3460,7 +3539,10 @@ async function start() {
       state: (value) => setConnectionState(value),
       welcome: (welcome, change, since) => welcomed(welcome, change, since),
       message: (message) => received(message),
-      output: (channel, bytes) => terminalView.output(channel, bytes),
+      output: (channel, bytes) => {
+        terminalView.output(channel, bytes);
+        shellView.output(channel, bytes); // channels are the connection's: they never clash
+      },
       lost: (since) => {
         dropPending();
         state.bringing = null; // the resume's terminal is no longer the page's own news (Z1)

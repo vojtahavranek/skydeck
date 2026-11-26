@@ -21,6 +21,11 @@
 
 /** @import { ExitMessage, SizeMessage, SnapMessage, TerminalPayload } from '../src/window/protocol.ts' */
 /** @import { IBufferRange, ILink, ILinkHandler, ITheme } from '@xterm/xterm' */
+/**
+ * What `show` reads of a terminal: a session terminal's `list.terminals` entry, or (issue #199) a
+ * session's shell's `list.shells` entry, which the page shows in a second view.
+ * @typedef {Pick<TerminalPayload, 'id' | 'state' | 'cols' | 'rows' | 'ownsSize'>} ShownPayload
+ */
 import { Terminal } from '../vendor/xterm/xterm/lib/xterm.mjs';
 import { SearchAddon } from '../vendor/xterm/addon-search/lib/addon-search.mjs';
 import { UnicodeGraphemesAddon } from '../vendor/xterm/addon-unicode-graphemes/lib/addon-unicode-graphemes.mjs';
@@ -213,7 +218,7 @@ export function createTerminalView(root, deps) {
   /**
    * A new xterm.js for `payload`, in its own box under the root, shown: it must be visible when it
    * is opened (xterm.js measures its cell then).
-   * @param {TerminalPayload} payload
+   * @param {ShownPayload} payload
    * @returns {Term}
    */
   const create = (payload) => {
@@ -982,7 +987,7 @@ export function createTerminalView(root, deps) {
    * A new terminal, attached at once in attached(); its `attach` goes out once the caller's
    * render is done (a microtask), so that the proposal is measured with the header app.js puts
    * above the terminal after `show`.
-   * @param {TerminalPayload} payload
+   * @param {ShownPayload} payload
    * @returns {Term}
    */
   const attach = (payload) => {
@@ -1007,9 +1012,20 @@ export function createTerminalView(root, deps) {
    */
   const trim = () => {
     const keep = hidden ? (shown === null ? [] : [shown.id]) : order.slice(0, MAX_ATTACHED);
-    const gone = order.filter((id) => !keep.includes(id));
-    order = order.filter((id) => keep.includes(id));
-    for (const id of gone) {
+    detach(order.filter((id) => !keep.includes(id)));
+  };
+
+  /**
+   * Detaches the terminals `ids` (each one this view attached): each dropped from attached() and
+   * disposed before its `detach` is sent; a shown one is shown no more.
+   * @param {string[]} ids
+   */
+  const detach = (ids) => {
+    if (shown !== null && ids.includes(shown.id)) {
+      setShown(null);
+    }
+    order = order.filter((id) => !ids.includes(id));
+    for (const id of ids) {
       const t = terms.get(id);
       terms.delete(id);
       if (t !== undefined) {
@@ -1153,7 +1169,7 @@ export function createTerminalView(root, deps) {
   // --- contract 2.9 -----------------------------------------------------------------------------
 
   return {
-    /** @param {TerminalPayload | null} payload */
+    /** @param {ShownPayload | null} payload */
     show(payload) {
       if (payload === null) {
         setShown(null);
@@ -1319,6 +1335,38 @@ export function createTerminalView(root, deps) {
     },
     /** @returns {string[]} */
     attached: () => [...order],
+    /**
+     * Issue #199 (an optional member of contract 2.9): every terminal of the view detached and
+     * disposed, none shown — after a reconnect, when the page's shells are all hidden again.
+     */
+    reset() {
+      detach([...order]);
+    },
+    /**
+     * Issue #199 (optional): the terminal `id` detached and disposed (shown no more), when this
+     * view has it; nothing else.
+     * @param {string} id
+     */
+    drop(id) {
+      if (terms.has(id)) {
+        detach([id]);
+      }
+    },
+    /**
+     * Issue #199 (optional): the CSS pixels a terminal of this view needs to show `rows` rows —
+     * the rows of the measured cell, as xterm.js draws them (whole CSS pixels), and the style
+     * sheet's room above and below the text —, or null while no cell can be measured.
+     * @param {number} rows
+     * @returns {number | null}
+     */
+    heightFor(rows) {
+      const cell = measureCell();
+      if (cell === null || !(rows > 0)) {
+        return null;
+      }
+      const room = padding(shown?.xterm.element ?? root);
+      return Math.round((cell.height * Math.floor(rows)) / cell.ratio) + room.top + room.bottom;
+    },
     /**
      * What fits (an optional member of contract 2.9, for app.js's `area()`): the columns and
      * rows a terminal of this view shows in a terminal area (`#terminal`'s box) of `width` ×

@@ -747,7 +747,7 @@ test('the terminal view', async (t) => {
       assert.equal(inputOf(d.record, S1), before, 'the paste reached no program');
       await page.keyboard.press('Escape');
       await untilTerminalOf(page, S1);
-      assert.equal(await page.locator('.tv-find').isHidden(), true);
+      assert.equal(await page.locator('#terminal .tv-find').isHidden(), true);
       assert.deepEqual(l.problems, [], 'the page reports no problem');
     },
   );

@@ -3,9 +3,14 @@
 // xterm.js's custom key handler does in task 28 (xterm.js calls it for keydown, keypress and
 // keyup; true means "drop the event"), and which counts the calls the page makes on it in
 // `globalThis.viewCalls`.
+// Only the view of `#terminal` records and adds its own (issue #199: the page makes a second
+// view, of the shells, in `#shell`; that one is the minimal view as it is).
 import { createTerminalView as createMinimal } from './terminal-view-real.js';
 
 export function createTerminalView(root, deps) {
+  if (root.id !== 'terminal') {
+    return createMinimal(root, deps); // issue #199: the shells' view records nothing
+  }
   const calls = { find: 0, copy: 0, pasteRaw: 0, dropped: [] };
   globalThis.viewCalls = calls;
   const view = createMinimal(root, deps);

@@ -1,0 +1,25 @@
+/* A session's shell (issue #199, S2 12.6): its panel (`#shell`, a second terminal view) under the
+   session's terminal in the right zone, and the bar between the two. Drawn only while the pane is
+   a terminal (app.js hides both with the `hidden` attribute otherwise). For now the panel is a
+   fixed third of the zone's height and the bar is not dragged. */
+.shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 34%;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--term-fg);
+  background: var(--term-bg);
+}
+.shell-bar {
+  flex: none;
+  height: 6px;
+  background: var(--edge);
+}
+.shell[hidden],
+.shell-bar[hidden],
+.right-zone:not([data-pane='terminal']) .shell,
+.right-zone:not([data-pane='terminal']) .shell-bar {
+  display: none;
+}
