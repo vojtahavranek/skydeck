@@ -529,3 +529,34 @@ describe('restarting a session: when it does not work (#166)', () => {
     assert.equal(d.deck.store.meta(S1)?.doneAtNs ?? null, null);
   });
 });
+
+describe("a restart keeps the session's shell (issue #199, S2 7.10)", () => {
+  test('A6: after act restart the same shell, with the same program, belongs to the new terminal', async (t) => {
+    const { server, page, list } = await started(t, [S1]);
+    const old = termOf(list, S1);
+    const opened = await page.act({ kind: 'shell', term: old, cols: 80, rows: 12 });
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+    const [shell, ...more] = server.server.hub.shells?.() ?? [];
+    assert.ok(shell !== undefined && shell.program !== null && shell.of === old);
+    assert.deepEqual(more, []);
+
+    const result = await page.act({ kind: 'restart', term: old, sessionId: S1 }, 20_000);
+    assert.deepEqual([result.ok, result.ended], [true, true], JSON.stringify(result));
+    const again = await runsAgain(page, S1, old);
+    const next = termOf(again, S1);
+
+    const after = await listWhere(
+      page,
+      again,
+      (candidate) => (candidate.shells ?? []).some((one) => one.of === next),
+      'the shell under the new terminal',
+    );
+    assert.deepEqual(
+      (after.shells ?? []).map((one) => [one.id, one.of]),
+      [[shell.id, next]],
+    );
+    const moved = (server.server.hub.shells?.() ?? []).find((one) => one.id === shell.id);
+    assert.deepEqual(moved?.program, shell.program, 'the same program');
+    assert.equal(moved?.of, next);
+  });
+});
