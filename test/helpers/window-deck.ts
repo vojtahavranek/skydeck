@@ -114,9 +114,18 @@ export async function windowDeck(
   const prompt: WindowDeck['prompt'] = async (r, termId, sessionId) => {
     const m = await attachMirror(r.registry, box.modules, termId);
     const text = sessionId === undefined ? PROMPT : `standin ${sessionId.slice(0, 8)}> `;
+    // A prompt printed before the attach is on the snapshot's screen, not in the text after it.
+    const screen = (): string => {
+      const buffer = m.term.buffer.active;
+      const lines: string[] = [];
+      for (let y = 0; y < buffer.length; y++)
+        lines.push(buffer.getLine(y)?.translateToString(false) ?? '');
+      return lines.join('\n');
+    };
     await until(
-      () => m.text().includes(text),
-      () => `${JSON.stringify(text)} in ${JSON.stringify(m.text().slice(-300))}`,
+      () => screen().includes(text) || m.text().includes(text),
+      () =>
+        `${JSON.stringify(text)} in the screen ${JSON.stringify(screen().slice(-300))} or the text after it ${JSON.stringify(m.text().slice(-300))}`,
       15_000,
     );
     return m;
