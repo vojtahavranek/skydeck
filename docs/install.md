@@ -999,7 +999,28 @@ effect.
   the old one's place. A session under Recent or Earlier, and any session while a filter or a chip
   is set, do not move: the key bar says why. Caps Lock alone moves nothing (Shift must be held).
   `c` in the list gives the keyboard to the carry-over bar after `/clear` ("After `/clear`: carry
-  over" below).
+  over" below). **Ctrl+Shift+S** (or `s` in the list) opens a shell under the selected session's
+  terminal, in its folder; again it hides it ("A shell under a session" below).
+- **A shell under a session**: when Claude Code asks you to run something yourself — open an SSH
+  tunnel, log in somewhere, run a few commands —, press **Ctrl+Shift+S** (in the list or in the
+  terminal), `s` in the list, or `Shell` in the header: a shell opens under the session's terminal,
+  in the session's folder, with the keyboard in it, so that you read the instruction above while you
+  type below. It is your account's login shell (`/bin/sh` when none is known), started as a login
+  shell, with the environment the window's terminals get. One per session. Press the key again
+  with the keyboard in the shell and it hides: what runs in it keeps running, and a dot beside
+  `Shell` in the header says that a shell is open. With the shell hidden the key shows it again;
+  with it shown and the keyboard in the session's terminal (or the list) the key moves the keyboard
+  to the shell, and a click moves it between the two. Ctrl+Shift+F, Ctrl+Shift+C, Ctrl+V and
+  Ctrl+Shift+V act on the one that has the keyboard. For now the shell takes a third of the
+  terminal area. Shown or hidden is each window's own: after a reload, a lost connection or a
+  restart of skydeck's server (every `skydeck update`) every shell is hidden, still running, and the
+  key shows it again with its screen. A shell opens only for a session that runs in a terminal of
+  this window: for any other the key says why and opens nothing. The shell is never a row of the
+  list, takes no number and never needs you: nothing marks or notifies anything of it but the
+  header's dot. `exit` closes it; it is ended when its session's program ends (End session, `/exit`,
+  a crash) and when you close the session's terminal, and a restart of the session (`r`) keeps it.
+  A `claude` you start inside it is a session of its own that runs in another terminal, not in the
+  window's. A `s` in a word typed into the list by mistake opens a shell like the key.
 
 #### Editing a session (stage D)
 

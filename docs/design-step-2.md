@@ -2041,6 +2041,7 @@ Page → server (after `hello` and `start`, 8.2.2):
 | `update-seen` | — | Follow-up F38, 16.5: the result bar's ×: the result of the last update from the window is dismissed on every page. The result's `update` is the state. |
 | `carry-over` | `sessionId` (the new session), `rev` (16 lower-case hexadecimal digits: the offer as drawn, `list.selected.carryOver.rev`), `fields` (0 to 5 distinct names of `label`, `group`, `ticket`, `note`, `prs`: the ticked ones), `done` (a boolean: `mark the old one done` ticked) | Follow-up F40, 12.6, design 7.1: in one transaction the server computes the offer again from the store and copies the ticked fields from the old session to the new one and, with `done`, marks the old one done; every page's `list` follows. Refused, nothing written, with the words as the result's error: a session the store does not know; `this offer was answered or dismissed already`; `there is nothing to carry over to this session any more` (no `clear` link from after the first start with F40, or nothing left to carry); `the sessions changed since this offer was drawn; look at it again` (`rev` is not the offer's now, or a name or `done` that the offer does not offer); `nothing is ticked: tick what to carry over, or close the offer with ×`; `cleanLabel`'s and `cleanGroup`'s refusals; a busy store. |
 | `dismiss-carry-over` | `sessionId` | Follow-up F40, 12.6: the bar's ×: the offer of that session ends for good, nothing copied; `ok` also when it was answered already (sent twice, or from two windows), and then nothing is written. Refused, nothing written, with `there is no offer to dismiss for this session` for a session without a `clear` link from after the first start with F40. |
+| `shell` | `term` (a terminal id), `cols`, `rows` (the shell's first size) | Issue #199, 7.10: opens a shell under the window's session terminal `term` (`src/window/shells.ts`, 7.10's opening rules): the account's login shell, in that terminal's folder, with the environment of 7.4; answered `ok` once its program runs (or when the terminal has a shell already: nothing is started), else the refusal's words. The act names only the terminal: the program, its argument, its folder and its environment are the server's, and no field of it can carry one (15.1). No act hides, shows or ends a shell: shown and hidden is each page's (12.6), the end is the shell's `exit` or its session's (7.10). |
 
 An unknown kind or field is refused, and so is a string over its limit (in UTF-8 bytes: paths and
 URLs 4,096 — a `ticket`'s `text` too —, `input.data` 64 KiB, a note's `text` and `base` 64 KiB
@@ -2060,7 +2061,8 @@ stays under the 1 MiB a page's message may hold (8.2.1). A stored note longer th
 sent (`selected.note` null, `noteTooLong`) and the window does not edit it: it says `this note is
 longer than the window edits; use skydeck note <short id>`; the page refuses a longer text before
 sending it, since the server would close the connection for the message (stage D, plan D5). No action carries a program or an argument list to run (8.3), and none a path (a setting's `key`
-is a name of the server's table, follow-up F36):
+is a name of the server's table, follow-up F36; issue #199's `shell` names a terminal only, and
+the server chooses the shell, its folder and its environment, 15.1):
 `resume` names a session, and `new`'s directory, label, group and `claude` flags are the only
 fields that become part of a launch, checked as `skydeck new` checks them — and, from issue #188,
 `resume`'s `flags`, checked as `skydeck resume <ref> -- <flags>` checks them (design 7.6 "Other
@@ -2076,7 +2078,7 @@ Server → page:
 |---|---|
 | `challenge`, `welcome` | 8.2.2. |
 | `pong` | `n`, `bootId`, `serverId`. |
-| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4 — from follow-up F44 those whose `needsYou` is true, never a parked one —, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, from follow-up F44 `parked`, `week`, `earlier`, in that order, each with `folded` — false for `parked` always: only Earlier folds as a whole —, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4; from F44 by their `needsYou`), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, from follow-up F42 the order they last had under Open, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5; from issue #166 `restarting`, true while a restart holds it — 7.6, 12.10 — and absent otherwise); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), from issue #188 `resumeFlags`, the same flags each exactly as recorded — not sanitised: the page puts them only into the value of the resume card's `Other flags…` field (12.6), as it puts `note` only into a text box — or null when one holds what that field cannot hold as it is (a line break, another control character, a bidirectional control: the favourites' rule; `[]` without a recorded launch), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); issue #184 `copyOnSelect`: `window.copyOnSelect` as the running server uses it (9.5; always sent, so a page has it from its first list and follows a change in Settings at its next; absent, as in a scripted list of the tests, is false: the page holds no default); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, from follow-up F44 `parked` (a session under Parked, never `need`), `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none; from follow-up F44 `parked`, whether the session is parked now — design 7.1's derived mark: marked, and no prompt of the user's since —, and `parkedAtNs`, the time it was parked while it is, else null, both always sent, absent, as in a list of a server before F44, false and null) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), from follow-up F44 `needsYou` (whether the row counts as needing you, 12.4: `attention` set and the session not parked; always sent; absent, as in a list of a server before F44, is `attention` not null; the page counts and closes on it and decides nothing of it), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
+| `list` | The view model (12), sent whole (about 50 KB for 100 sessions; from stage D up to 64 KiB more for the selected session's note, which JSON may escape to six times as many bytes, within 8.2.8's rule) when it changed, at most once a second: `counts` (`working`, `waiting`, `running`, `starting`, `elsewhere`, `notRunning` and, from follow-up F34, `background`: the sessions in Claude Code's background, 7.9, each counted there and not in `elsewhere`; absent, as from a server before F34, is none); `needYou` (`count`: the listed rows that need you, 12.4 — from follow-up F44 those whose `needsYou` is true, never a parked one —, whatever the filter or the fold, each counted in none of `counts`; `order`: the ids of the rows this page shows that need you — from follow-up F3 also those a closed block hides (12.2; since follow-up F9 its first session too, which the card no longer draws), so that `needYou` is the same whether a block is open or closed —, in Ctrl+Shift+J's order; stage B, 12.1); `sections` (`open`, from follow-up F44 `parked`, `week`, `earlier`, in that order, each with `folded` — false for `parked` always: only Earlier folds as a whole —, its time span, its `rows` and, from follow-up F9, `closedStacks`: its closed blocks in the section's order — a closed block has no row in `rows`, its first neither —, `[]` while the section is folded or the view has a typed search (from follow-up F35; until then also under chips alone) and when it has none — always sent (ruled on review 1 of F9: no reader falls back for a list without it) —, each with `group`, `size` — its rows —, `needYou` — how many of its rows need you (12.4; from F44 by their `needsYou`), all of them hidden —, `head`, the session id of its first row in the section's order, which → and Enter on its caption open and select, and `at`, its place: the caption is drawn right before `rows[at]` of the section, and after its last row when `at` is `rows.length`, captions at one place coming in the array's order); `doneHidden` (the done sessions the view hides — under chips alone, from follow-up F35, those the chips match —, 0 during a typed search); `banner` (12.7, the view model's, stage C: null while nothing is offered and no restore runs; else `bootId`, the latest earlier boot whose sessions are offered — what `dismiss-restore` names — and `lastActivityNs`, that boot's last event, both null only while a restore runs and nothing is offered; `entries`, design 7.8's default set in its order (from follow-up F37 the order of the slots the sessions last had in the window, from follow-up F42 the order they last had under Open, then list order), each with `sessionId`, `shortId`, `title`, `endedAtNs` (null: no exit recorded), `wasWorking` and `preselected`; `shown`, false once the user said "Not now" for that boot, when the page shows no banner; `running`, true while a restore runs in the server, whoever asked for it); `terminals` (`id`, `slot`, `sessionId`, `state`, `notReported` (7.5's "started, not reported"), `cols`, `rows`, whether this page owns the size, and from stage D `openedNs`, when the window opened it: the header's "opened <time>", 12.5; from issue #166 `restarting`, true while a restart holds it — 7.6, 12.10 — and absent otherwise); from issue #199 `shells`, the sessions' shells (7.10): each its `id`, `of` (the session terminal it belongs to now), `state` (`starting`, `running`, `reconnecting`), `cols`, `rows` and whether this page owns the size, never a row, a number or an entry of `terminals` (optional for the reader: absent is none); `selected`: for the session the page's `view` names, what the resume card shows (12.6: the exact command, the flags that will not be passed on, how it ended, expiring or expired), from follow-up F16 `launchFlags`, the recorded flags a resume passes on again with their values, in the order recorded, each sanitised (`[]` without a recorded launch; the header's "started with", 12.5), from issue #188 `resumeFlags`, the same flags each exactly as recorded — not sanitised: the page puts them only into the value of the resume card's `Other flags…` field (12.6), as it puts `note` only into a text box — or null when one holds what that field cannot hold as it is (a line break, another control character, a bidirectional control: the favourites' rule; `[]` without a recorded launch), and, from stage D, what the header and its dialogs need (12.5: `note`, the note exactly as stored while it holds at most 65,536 bytes of UTF-8, else null, with `noteTooLong` when it is longer; `ticketUrl`, the ticket address of the group, or null; from follow-up F18 `ticket`, the ticket set on the session — `url`, its address as stored, and `text`, its short name, sanitised — or null, and `ticketKeys`, true while `ticketUrl` is configured, so that a bare key sets a ticket; from follow-up F19 `ticketStatus`, null while no provider takes the address of the session's ticket — the one set, else its group's link (12.5) —, else `{ url, name, stored, status, category, okAtNs, triedAtNs, error }`: that address, the ticket's short name, whether it is the one set (false for the group's link), the last status read and its category (null until a read succeeded, and for no category), the time of the last read that succeeded and of the last attempt (nanosecond text, null when none) and the last attempt's failure in words (null after a success); absent, as in a list of a server before F19, is none), or null; `dirs`: the known project directories, most recent first (12.6's new form); from follow-up F15 `favourites`: the new form's favourite flags, each as stored, in their order (12.6, 10.2; at most 12 of at most 200 characters, none holding a control character: about 2.4 KB, at most about 9.4 KiB when every character takes four bytes; absent, as in a list of a server before F15, is none); issue #184 `copyOnSelect`: `window.copyOnSelect` as the running server uses it (9.5; always sent, so a page has it from its first list and follows a change in Settings at its next; absent, as in a scripted list of the tests, is false: the page holds no default); from stage E, `filtering` (the view's words or chips are set, 12.8: the page draws its empty line), from follow-up F35 `searching` (a word is set, a typed search: the rows are flat, every section unfolded, no block formed and no done session hidden, so the page folds nothing and shows no footer of done sessions — what `filtering` meant for the page before F35; absent, as from a server before F35, is `filtering`), `switcher` (while `view.switcher` is a string, else null, 12.8: `query`, the text it answers as the page sent it; `command`, true when that text's first character is `>`, a command that lists no session; `items`, at most 50, each with its `rank` — `need`, `open`, from follow-up F44 `parked` (a session under Parked, never `need`), `not-running` or `done` —, its `row` as the sections carry it without a stack, `found`, where the words are in its title, and `hiddenBy`, what this page's list would change to show it — `filter`, `done`, `folded`, in that order, none when the list shows it; `more`, how many matching sessions were left out; `restore`, stage C's offer, 12.7, null from the view model; from follow-up F36 `settings`, true when that text names the command `> settings`, 12.13; from follow-up F41 `tour`, true when it names the command `> tour`, 12.14; each absent, as from a server before it, is false) and `selectedRow` (12.9: the row of the session `view.selected` names, as the sections would carry it without a stack, also when they leave it out — a filter, the chips, done sessions hidden, a folded Earlier; null when the view selects none or a session the view model does not list even with done ones shown; the page uses it only while its id is the page's own selection, since a list can answer the selection before). A row carries the list row's display fields (design 7.4: id, short id, title and its source, group and its source, state and detail, times, directory, marks, note mark and the note's first three lines, done, pull requests — each with its level, its error and, from stage D, `okAtNs`, its last successful read, for "checked 4m ago" and "last read 3h ago" —, and the window's chip of 12.3: `level`, `open` and `merged`, not design 7.3's chip of `ls`; from follow-up F19 `ticketStatus`, `{ name, status, category }` — the ticket's short name, the status' text (at most 40 characters) and its category, one of the six words or null — while the session's ticket has a known status (12.2), else null: 20 bytes a row without (`,"ticketStatus":null`), 76 with `{"name":"ABC-123","status":"In Progress","category":"doing"}`, at most about 105 plus the name's length with a 40-character status; absent, as in a list of a server before F19, is none; from follow-up F33 `copyOf`, `{ id, title, hiddenWhileEmpty }` — the session it began as a copy of, its title as listed (null when skydeck has no row for it), and whether the list shows it only with done sessions shown or a typed search (an empty copy the user did not keep that no terminal of the window shows, 12.1; absent is true) — for a copy (design 5.3 "Copies"), else null; absent, as in a list of a server before F33, is none; from follow-up F44 `parked`, whether the session is parked now — design 7.1's derived mark: marked, and no prompt of the user's since —, and `parkedAtNs`, the time it was parked while it is, else null, both always sent, absent, as in a list of a server before F44, false and null) and the window's own: `terminal`, `slot`, `elsewhere` (running in another terminal: `pid`, `tty`, `dir` and, from follow-up F34, `background`, true while Claude Code runs the session in its background, 7.9; absent, as from a server before F34, is false), `attention` (null, or reason, detail and since), from follow-up F44 `needsYou` (whether the row counts as needing you, 12.4: `attention` set and the session not parked; always sent; absent, as in a list of a server before F44, is `attention` not null; the page counts and closes on it and decides nothing of it), `stack` (null, or from stage E the block the row is drawn in — the protocol calls a block a stack —, 12.2: `group`, `size` — its rows, the first included —, `role` — `head` for the first row, `member` for the others —, and `head`, the first row's session id; since follow-up F9 only a row of an OPEN block has one, and it lost `open` and F3's `hiddenNeedYou` — the page draws every row of a card alike, and a closed block's rows are not carried, its count is the section's `closedStacks`). |
 | `snap` | `term`, `ch` (the channel number for its output), `cols`, `rows`, `data` (the snapshot). |
 | `size` | `term`, `cols`, `rows`, `owner` (this page or another): the terminal's size changed, in stream order. |
 | `exit` | `term`, `code`, `signal`, `atNs`, `lost`, `notStarted` (null, or the reason the program was never started, 8.1). |
@@ -2117,7 +2119,10 @@ applied, so nothing is lost or doubled.
 A page that reconnects (6.3) goes through the whole handshake again — `challenge`, `hello`,
 `welcome`, `start` (8.2.2) — in mode `key`, then sends its `view` and `focus` and attaches the
 terminals it had attached; each starts over with a fresh `snap`. There is no resume from a position: a snapshot is cheap enough
-(7.3) and always right.
+(7.3) and always right. A session's shell (issue #199, 7.10) is not attached again: after a
+reconnect, as after a reload or a restart of the server, every shell is hidden on the page and the
+header's dot says that it is there (12.5, 12.6); showing it again attaches it with a fresh `snap`
+(the keeper kept its screen).
 
 #### 8.2.6 Size
 
@@ -2169,7 +2174,10 @@ reflow alike and find (9.7) sees what the snapshot holds.
 
 Any number of pages may attach to one terminal; they share its ordered stream. Input from any of
 them goes to the program in the order the server receives it. `list` goes to every page; each
-page's `view` state is its own. Notifications go to one page only (13).
+page's `view` state is its own. A session's shell (issue #199, 7.10) is shared by the windows as a
+terminal is — one per session, in every window's `list.shells`, its size owned by the page that
+typed last —, and whether its panel is shown is each window's own: a shell one window opened is
+hidden in the others until the key there shows it. Notifications go to one page only (13).
 
 Attention (12.4, 13; stage B's plan, B20) is the server's, so it is the same in every window: the
 marks, the title bar's count and the window title — but for what a window lists at all: a done
@@ -2280,7 +2288,7 @@ every key in this table, and the page does what the table says:
 | Ctrl+V | leaves the key to the browser, which pastes; the page takes the paste before xterm.js does (in the capture phase of the terminal's element), cancels the browser's own action, takes every ESC out of the text and hands the rest to xterm.js's paste, which sends it as a bracketed paste (section 21: xterm.js 6.0.0 neither cancels a paste, so the text would stay in its hidden textarea, nor filters it, so a pasted `ESC [ 2 0 1 ~` would end its own bracketed paste) | Pasting text, as in the developer's terminal. No `\x16` is sent (a page test checks it, 17.4). |
 | Ctrl+Shift+V | sends `\x16` (a raw Ctrl+V) and cancels the key | Claude Code's own image paste: on WSL it reads the Windows clipboard itself (6.4); the browser's clipboard is not involved. |
 | Ctrl+Shift+C | copies the selection to the clipboard and cancels the key | Copy. With `window.copyOnSelect` on (issue #184, 9.5) a selection made with the mouse is copied at its release already; Ctrl+Shift+C copies it again, the same text by the same function, with the setting on or off. |
-| the window's own chords (12.9) | acts on them and cancels the key | xterm.js would send nothing for them anyway, so the window takes nothing from Claude Code. |
+| the window's own chords (12.9; from issue #199 Ctrl+Shift+S, the session's shell, among them) | acts on them and cancels the key | xterm.js would send nothing for them anyway, so the window takes nothing from Claude Code. |
 | Alt+F4 | nothing: neither sent nor cancelled | The window closes with it (12.9). |
 
 Every other key goes to xterm.js as it is: the bytes it sends, and the cancelling it does, are
@@ -2336,7 +2344,11 @@ write-only handler (`navigator.clipboard.writeText`), not `addon-clipboard`, and
 terminal that is shown in a focused window, and only up to 1 MiB of text — the up to eight hidden
 terminals a page keeps attached (12.6) cannot replace the clipboard behind the user's back. A
 request to read the clipboard (OSC 52 with `?`) is never answered (design 13: programs in a
-terminal can write to the clipboard but not read it).
+terminal can write to the clipboard but not read it). From issue #199 the page has two terminal
+views, the session terminals' and the shells' (12.6): the rule is each view's own, so the shown
+terminal of each may write — a session's terminal and its shown shell —, and a hidden panel's
+shell is shown in no view and may not. Ctrl+Shift+C, Ctrl+V and the raw Ctrl+Shift+V act on the
+terminal that has the keyboard, and copy on select on the view the selection was made in, once.
 
 **Copy on select** (issue #184; the owner's decisions of 2026-11-23: built, on by default, a switch
 in Settings). While `window.copyOnSelect` is `true` (16.4, the default), a selection the user ends
@@ -2427,7 +2439,9 @@ of the page. Whether a link opens in the user's default browser, logged in, is c
 ### 9.7 Find
 
 Ctrl+Shift+F opens a find bar over the terminal (`@xterm/addon-search`): it searches the page's
-copy of the scrollback, which after a snapshot is the screen side's (5,000 lines).
+copy of the scrollback, which after a snapshot is the screen side's (5,000 lines). From issue #199
+each terminal view has its own find bar: Ctrl+Shift+F opens the one over the terminal that has the
+keyboard, the session's terminal or its shell (12.6).
 
 ## 10. What the server keeps
 
@@ -3757,7 +3771,17 @@ rules leave slack for other fonts). With the list 400 px wide a window up to abo
 shows no Restart, one up to about 810 px no Unread / Read and one up to about 718 px no Park /
 Unpark (at 640 px Park was cut before); `r`, `u`, `w` and `skydeck park` remain. A done row at the narrowest windows (below about
 650 px, with the list at 400 px) is the one case where the state may lie under Note (`Undone` is
-wider than `Done`); no button is cut there. Then
+wider than `Done`); no button is cut there. From issue #199 a button **Shell** stands before
+Restart (before Done without it) while the pane is a terminal of the window that is not ended
+(7.10): a click opens the session's shell, shows a hidden one, or hides a shown one, and takes no
+keyboard itself (12.9); its tooltips `open a shell in this session's folder (Ctrl+Shift+S)`, `a
+shell is open: show it (Ctrl+Shift+S)` and `hide the shell: what runs in it keeps running
+(Ctrl+Shift+S)`. While a shell is open, shown or hidden, a dot in the accent colour stands beside
+its word, `Shell ●` (its tooltip and label `a shell is open`): the header's only mark of a shell,
+nothing is on the list's row. Shell needs about 60 px more of the line, so while it is there
+Restart gives way at 520 px inside, Unread / Read at 452 px and Park / Unpark at 360 px, and Shell
+itself, which carries the mark, last, at 290 px (measured as above: no button cut and the state
+never under Note down to 232 px); `Ctrl+Shift+S` and `s` remain. Then
 two lines, ruled by the lead on 2026-11-15 (the user may change it), so that the header keeps one
 height from stage D on (the next paragraph): **one line for the pull requests** — from follow-up
 F18 the session's ticket first (below, with its status from F19), then the window's chip (12.3),
@@ -4086,6 +4110,25 @@ nothing; `ls` is unchanged.
   or refuses each `input` message on its own and answers only a refusal, and the page has sent
   every part of the paste before the first refusal can come, so it cannot hold back the rest or
   send the end marker later (a named limit).
+- **A session's shell** (issue #199, 7.10): a panel under the session's terminal, `#shell`
+  under `#terminal` in the right zone, with a bar of 6 px between them; for now a fixed third
+  (34 %) of the zone's height, the session's terminal the rest (both told their sizes, 8.2.6). It
+  is a second instance of the terminal view, with its own terminals, find bar, shown terminal,
+  refit and limit of attached terminals: the page keeps up to 8 session terminals and up to 8
+  shells attached, each the least recently shown detached first, and while the window is hidden
+  only the shown one of each. `snap`, `size`, `exit`, a terminal's `notice` and the output go to
+  both views, each ignoring a terminal or a channel it does not have; the exits and the re-attach
+  of a reconnect stay the session terminals' own. Which shells it shows is the page's own and in
+  memory only (`state.shellsShown`): the panel is drawn while the pane is a terminal that is not
+  ended, `list.shells` has a shell of it and the page shows that shell; a shell is attached only
+  once its panel was shown, and stays attached while hidden. The page that sent `act shell` shows
+  the shell when a list brings it (and, while its terminal is still the pane's, gives it the
+  keyboard); an act whose shell the first list after its answer does not bring is forgotten, so a
+  shell another window opens later opens no panel here. Selecting another session keeps each
+  session's panel shown or hidden as it was on this page. A shell a list no longer has (its
+  `exit`, its session's end) leaves the page, and the keyboard goes to the session's terminal.
+  After a reload, a reconnect or a restart of the server every shell is hidden (8.2.5) and the
+  header's dot says it is there (12.5).
 - **A session running in another terminal**: the card of 7.9.
 - **A session not running**: the **resume card**: how it ended (exited normally, ended
   unexpectedly, mid-turn), last activity, the directory, the exact command (design 7.6's), the flags
@@ -4514,6 +4557,7 @@ keeps Edge's default: in the list zone Ctrl+W closes the window, which ends no s
 | Ctrl+Shift+F | find in the scrollback |
 | Ctrl+Shift+C / Ctrl+Shift+V | copy the selection / send a raw Ctrl+V (image paste) |
 | Ctrl+Shift+H | the key help (under its title, `Take the tour`: 12.14) |
+| Ctrl+Shift+S | the session's shell (issue #199, below): opens it, shows it, gives it the keyboard or hides it |
 | Ctrl+V, Shift+Enter, Ctrl+click | paste text, newline, open a link (9) |
 
 Letters are matched by the character the key types (Claude Code's own rule). A digit is matched by
@@ -4527,6 +4571,32 @@ layout: that is why the help is Ctrl+Shift+H and not Ctrl+Shift+/, whose physica
 a Czech layout and would take Claude Code's Ctrl+Shift+-. If the user turns on the kitty keyboard
 protocol in a later xterm.js and binds a `ctrl+shift+<x>` in Claude Code, the window shadows that
 binding; the help says so.
+
+**A session's shell** (issue #199, 7.10, 12.6). Ctrl+Shift+S in both zones, `s` in the list zone
+(on the selected row the list shows, E13) and a click on the header's `Shell` (12.5) act on the
+selected session's shell by one pure rule (`shellPress`, `web/shell-panel-text.js`); a dialog, the
+switcher or the tour shown first says its gate's line, as for every chord:
+
+| Where it is pressed | What happens |
+|---|---|
+| no session selected (none, a caption; for `s` a selection the list hides) | the toast `no session selected` |
+| the pane is no terminal of the window: the session does not run, or the New form is over it | the toast `a shell opens under a session's terminal in this window: open the session first (Enter)` |
+| the session runs elsewhere | the toast `a shell opens under a session's terminal in this window; this one runs in another terminal` (`… in Claude Code's background` for one there) |
+| the pane's terminal is ended | the toast `this session has ended: resume it first, then open a shell` |
+| the terminal has no shell | `act shell` with the terminal and a first size of a third of the terminal area (80 × 12 while the view cannot tell); the server's refusal is the toast `Shell: <its words>` (7.10) |
+| it has a shell, the panel is hidden | the panel is shown and gets the keyboard |
+| the panel is shown and the keyboard is in the shell (anything inside `#shell`) | the panel is hidden, the keyboard goes to the session's terminal; the shell keeps running |
+| the panel is shown and the keyboard is anywhere else (the session's terminal, the list) | the keyboard goes to the shell (the zone becomes the terminal's) |
+
+The header's `Shell` hides a shown panel whatever has the keyboard, as its tooltip says, and takes
+no keyboard itself. A held key acts once. The toasts for a pane without a terminal of the window
+are words from the row's own fields, as `r`'s are; for a terminal the server decides again at the
+act (4.3). **The keyboard** between the two: a click moves it (xterm.js takes the focus at its own
+press); giving the terminal zone the keyboard — Ctrl+Shift+L, a click on the zone, a closed
+dialog — gives it to the side that had it last (the shell only while its panel is drawn), and a
+pane that changes to another terminal starts on the session's side. Find, copy and the raw
+Ctrl+Shift+V act on the view whose element holds the keyboard (9.5, 9.7). A `s` in a word typed
+into the list by mistake opens a shell like the key (a named limit).
 
 **Marking unread** (12.4). In the list zone `u` marks the selected session unread, or read while
 it has a mark seeing clears (ended, finished, unread), as the header's `Unread` / `Read` does
@@ -5736,7 +5806,14 @@ Every request the command line makes goes over a unix socket instead (8.3). So:
   `buildNewCommand` building the arguments — from a session id, or from `new`'s directory, label,
   group and `claude` flags after design 7.7's checks; keystrokes go to the program in the terminal
   as keystrokes. The only other argument skydeck passes to a program from a page is a link, and
-  only as 9.6 allows. From follow-up F36 a proven connection can also change skydeck's own
+  only as 9.6 allows. From issue #199 a page can ask for one more program start: `act shell`
+  (8.2.3, 7.10) starts the account's login shell (`/bin/sh` when none is known) in a session
+  terminal's folder, with the environment a terminal's program gets (7.4). The act names only
+  that terminal and a first size; the program, its `argv[0]` (`-<name>`, a login shell), its
+  folder and its environment are the server's, and the parser refuses any other field of the act
+  (8.2.3; a test holds it). A shell is what the user could open in any terminal: it gives a
+  proven connection nothing it did not have (it can type `!` commands into any session already).
+  From follow-up F36 a proven connection can also change skydeck's own
   `config.json` (12.13) — one key at a time, of the server's table's plain ones only: never a
   program, a folder or the port, whose keys the window shows and leaves to the file; never a whole
   configuration or a path; each value by the file's own rules; the file written whole, with a copy
@@ -6672,7 +6749,19 @@ With real sockets on `127.0.0.1` and real keepers running the stand-in:
   (`test/window/env.test.ts`). The switch both ways: a version 3 keeper (the file as released
   before shells, `test/fixtures/keeper-v3/`) found again by this build and endable
   (`test/window/terminals-old-keeper.test.ts`); the `.pid` pattern of the build before does not read
-  a shell's keeper's line (`test/window/pidline.test.ts`).
+  a shell's keeper's line (`test/window/pidline.test.ts`). Through the server's acts and lists
+  (`test/window/server-shell.test.ts`, a real test server): `act shell` opens one shell in the
+  session's folder and a second opens none; each refusal in its words with nothing started; with a
+  shell open and output in it the rows, counts, `needYou`, terminals and numbers are as before, no
+  `notify` comes and the store's events, metas and keys are unchanged; the shell's program,
+  folder and environment are the server's, and an act with one more field closes its page's
+  connection (1008); `exit`, End session (marked done and parked), `/exit` and a crash of the
+  session's program each end the shell with a job and a child of it; closing the ended terminal
+  leaves no keeper of it; a restart of the server finds the same shell with its screen, also after
+  a restart of the session (`test/window/server-restart.test.ts` keeps the shell over `act
+  restart`); a `claude` started in a shell runs elsewhere. The parser's refusals and the act's
+  dispatch (`protocol.test.ts`, `actions.test.ts`), and a shell's size owned as a terminal's
+  (`pages-stream.test.ts`).
 
 ### 17.4 The page
 
@@ -6762,6 +6851,19 @@ In the browser suite, besides those:
   sideways at 240 px as it does at 400 px with nothing stored; against a
   real server the terminal's size after a drag is the one a window resize to the same width gives,
   with no other message than such a resize sends.
+
+Issue #199, the session's shell on the page (`test-page/shell-panel.test.ts`, real keys, a real
+test server whose login shell is the stand-in shell): the second view's own members (each view
+its own terminal and channel, `reset`, `drop`, `heightFor`); a list with `shells` draws nothing
+until the page shows a shell; Ctrl+Shift+S in both zones and `s` open one shell under the
+session's terminal with the keyboard in it, and the key again and again never makes a second;
+each toast, and an act answered `ok` whose shell no list brought opens no panel later; the key's
+four cases and the click; find, copy (written once) and the raw paste on the terminal that has the
+keyboard; after a reload, a cut connection and a restart of the server the panel is hidden, the
+dot shows and the key shows it again with its screen; another session and back; `exit`. The
+header's `Shell` and its dot (`test-page/header.test.ts`, with the header's one height with Shell
+in it). The page tests' stand-in views (`test-page/fixtures/*-view.js`) record only for
+`#terminal`, so that the second view leaves their globals the first view's.
 
 No test shows a desktop notification or asks for a permission (stage B, plan B17), whatever a
 server sends: every browser context of the suite is made by `newContext` of
