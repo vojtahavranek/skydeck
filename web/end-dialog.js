@@ -36,9 +36,20 @@
 // Done. So a word typed into the list by mistake never ends a session: only `w` directly followed
 // by Enter does. It follows its session as for Done, and also closes when the session is parked
 // elsewhere.
+//
+// Issue #199 (S2 12.10, 12.15): under the warning, both dialogs say `Ending the session ends its
+// shell too.` while the list has a shell of the dialog's terminal; it comes and goes with the lists.
 
 /** @import { ListMessage, RowPayload } from '../src/window/protocol.ts' */
-import { cutTitle, dialogFollows, END_TEXTS, parkPhase, parkWarning, textsOf } from './end-text.js';
+import {
+  cutTitle,
+  dialogFollows,
+  END_TEXTS,
+  hasShell,
+  parkPhase,
+  parkWarning,
+  textsOf,
+} from './end-text.js';
 import { sessionRow } from './pane.js';
 
 /**
@@ -129,7 +140,9 @@ export function createEndDialog(root, deps) {
   text.setAttribute('aria-live', 'polite');
   const line = element('div', 'end-line', END_TEXTS.running);
   const warning = element('div', 'end-warning', END_TEXTS.working);
-  text.append(line, warning);
+  const shellLine = element('div', 'end-shell', END_TEXTS.shell);
+  shellLine.hidden = true;
+  text.append(line, warning, shellLine);
   const endButton = button('end-end', END_TEXTS.end);
   const keepButton = button('end-keep', END_TEXTS.keep);
   const cancelButton = button('end-cancel', END_TEXTS.cancel);
@@ -179,6 +192,14 @@ export function createEndDialog(root, deps) {
     if (away && document.activeElement === endButton && !current.typed) {
       keepButton.focus();
     }
+  };
+
+  /**
+   * Issue #199: the line on the session's shell, shown while `list` has one of the terminal.
+   * @param {ListMessage | null} list
+   */
+  const setShell = (list) => {
+    shellLine.hidden = current === null || !hasShell(list, current.term);
   };
 
   /** @param {RowPayload} row */
@@ -352,12 +373,14 @@ export function createEndDialog(root, deps) {
   return {
     /**
      * Opens the dialog of `mark` (Done's by default) for `row`, which runs in its terminal
-     * (`row.terminal`); `fromList`: `d` (or `w`) in the list opened it (app.js's selection rule).
+     * (`row.terminal`); `fromList`: `d` (or `w`) in the list opened it (app.js's selection rule);
+     * `list`: the page's last list, which says whether the terminal has a shell (issue #199).
      * @param {RowPayload} row
      * @param {boolean} fromList
      * @param {DialogMark} [mark]
+     * @param {ListMessage | null} [list]
      */
-    open(row, fromList, mark = 'done') {
+    open(row, fromList, mark = 'done', list = null) {
       if (current !== null || typeof row.terminal !== 'string') {
         return;
       }
@@ -380,11 +403,13 @@ export function createEndDialog(root, deps) {
       endButton.textContent = texts.end;
       keepButton.textContent = texts.keep;
       cancelButton.textContent = texts.cancel;
+      shellLine.textContent = texts.shell;
       box.dataset['mark'] = mark;
       box.dataset['session'] = row.id;
       // Its first state as any later one; `phase` already set, so that nothing counts as a change.
       setState(row);
       setTitle(row);
+      setShell(list);
       root.hidden = false;
       // Done's: never on End by itself (ruled). Park's: on End only when known idle (ruled).
       (mark === 'park' && phase === 'idle' ? endButton : keepButton).focus();
@@ -414,6 +439,7 @@ export function createEndDialog(root, deps) {
       current.done = follows.stay.done;
       setTitle(follows.stay);
       setState(follows.stay);
+      setShell(list);
     },
     /**
      * A keydown while the dialog is shown, from app.js's capture phase: true when the dialog took

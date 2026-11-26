@@ -1831,7 +1831,7 @@ function openEnder(row, fromList, mark = 'done') {
   // switcher), and while it is shown Ctrl+Shift+H is refused (`windowChordGate`).
   help.hide();
   state.enderFrom = document.activeElement;
-  ender.open(row, fromList, mark);
+  ender.open(row, fromList, mark, state.list); // issue #199: the list says whether it has a shell
   appRoot.inert = true;
 }
 

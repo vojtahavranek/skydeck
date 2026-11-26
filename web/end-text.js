@@ -8,6 +8,9 @@
 // `w` or the header's `Park` on a session not parked that the window can end asks first
 // (`asksPark`), and the dialog follows its session with the words of a parking, also closing when
 // the session is parked elsewhere (`dialogFollows` with the mark `park`).
+//
+// Issue #199 (S2 12.10, 12.15): both dialogs say `Ending the session ends its shell too.` while the
+// list has a shell of the dialog's terminal (`hasShell`), followed at every list.
 
 /** @import { ListMessage, RowPayload } from '../src/window/protocol.ts' */
 
@@ -39,6 +42,8 @@ export const END_TEXTS = {
   stopped: 'It stopped by itself: nothing was marked done.',
   doneElsewhere: 'It was marked done in another window: nothing was ended.',
   gone: 'It left the list: nothing was marked done.',
+  /** Issue #199: the line under the warning while the session's terminal has a shell. */
+  shell: 'Ending the session ends its shell too.',
 };
 
 /** @typedef {'done' | 'park'} DialogMark the dialog's mark: Done's (`d`) or Park's (`w`) */
@@ -72,6 +77,7 @@ export const PARK_TEXTS = {
   doneElsewhere: 'It was marked done in another window: nothing was ended or parked.',
   parkedElsewhere: 'It was parked in another window: nothing was ended.',
   gone: 'It left the list: nothing was parked.',
+  shell: END_TEXTS.shell,
 };
 
 /**
@@ -144,6 +150,17 @@ export function asksPark(row) {
 export function cannotEndText(row, mark = 'done') {
   const texts = textsOf(mark);
   return row.elsewhere?.background === true ? texts.cannotEndBackground : texts.cannotEnd;
+}
+
+/**
+ * Issue #199: whether `list` has a shell of the terminal `term` (one opened under it: the dialogs
+ * say that ending the session ends it too).
+ * @param {ListMessage | null} list
+ * @param {string} term
+ * @returns {boolean}
+ */
+export function hasShell(list, term) {
+  return (list?.shells ?? []).some((shell) => shell.of === term);
 }
 
 /**

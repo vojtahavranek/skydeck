@@ -15,6 +15,7 @@ import type { TestContext } from 'node:test';
 import type { Browser, Page } from 'playwright';
 
 import { S1, S2 } from '../test/helpers/platform.ts';
+import { stillRuns } from '../test/helpers/keeper.ts';
 import { SHELL_PROMPT } from '../test/helpers/shell-standin.ts';
 import { startTestServer } from '../test/helpers/window.ts';
 import { SHELL_TEXTS } from '../web/shell-panel-text.js';
@@ -31,6 +32,7 @@ import {
   pageUrl,
   readPage,
   RESTARTED,
+  shownText,
   scriptedList,
   showsText,
   TERM_A,
@@ -846,6 +848,255 @@ test('issue #199: after a reload, a reconnect and a server restart every shell i
       await untilKeyboard(page, 'terminal');
       await until(async () => !(await dot(page)), 'no dot: no shell');
       assert.equal(shellsOf(l).length, 1, "S2's shell runs on");
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------------------------
+// Step 3.1: the ends on the page, and the dialogs' line
+
+const SHELL_LINE = 'Ending the session ends its shell too.';
+
+/** Whether the session's terminal (`#terminal`) has the whole terminal area under the cards. */
+async function wholeArea(page: Page): Promise<{ whole: boolean; detail: string }> {
+  return readPage(
+    page,
+    () => {
+      const zone = document.getElementById('right-zone') as HTMLElement;
+      const cards = (document.getElementById('cards') as HTMLElement).getBoundingClientRect();
+      const terminal = (document.getElementById('terminal') as HTMLElement).getBoundingClientRect();
+      const rect = zone.getBoundingClientRect();
+      const bottom = rect.bottom - (parseFloat(getComputedStyle(zone).borderBottomWidth) || 0);
+      return {
+        whole:
+          Math.abs(terminal.bottom - bottom) <= 1 && Math.abs(terminal.top - cards.bottom) <= 1,
+        detail: JSON.stringify({ terminal, cards: cards.bottom, bottom }),
+      };
+    },
+    null,
+  );
+}
+
+/** The program of the one shell the server has (its pid and start), read before an end. */
+function shellProgramOf(l: Launched): { pid: number; procStart: number } {
+  const [shell] = l.server.hub.shells?.() ?? [];
+  assert.ok(shell?.program !== null && shell?.program !== undefined, 'a shell with its program');
+  return shell.program;
+}
+
+/** The panel and the dot gone, no shell on the server, and the shell's program `program` ended. */
+async function shellGone(l: Launched, program: { pid: number; procStart: number }): Promise<void> {
+  await untilPanel(l.page, false);
+  await until(async () => !(await dot(l.page)), 'no dot');
+  await until(() => shellsOf(l).length === 0, 'no shell on the server');
+  await until(() => !stillRuns(program.pid, program.procStart), "the shell's program ended");
+}
+
+/** The ended bar shown, the panel and the dot gone, the session's terminal over the whole area. */
+async function endedWithoutShell(
+  l: Launched,
+  program: { pid: number; procStart: number },
+): Promise<void> {
+  const { page } = l;
+  await page.waitForSelector('#cards [data-card="ended"]', { state: 'attached', timeout: 20_000 });
+  await shellGone(l, program);
+  await until(async () => (await wholeArea(page)).whole, 'the ended terminal over the whole area');
+  assert.equal(
+    await page.locator('#cards .header-shell').isVisible(),
+    false,
+    'no Shell in the header of an ended terminal',
+  );
+}
+
+/** The dialog "Mark done" or "Park" shown, and its line on the session's shell (null: none). */
+async function dialogShellLine(page: Page): Promise<string | null> {
+  await page.waitForSelector('#end-dialog:not([hidden])', { state: 'attached', timeout: 20_000 });
+  return readPage(
+    page,
+    () => {
+      const line = document.querySelector<HTMLElement>('#end-dialog .end-shell');
+      return line === null || !line.checkVisibility() ? null : (line.textContent ?? '');
+    },
+    null,
+  );
+}
+
+/** Waits until the window can end S1 (the header offers Restart then: the row is endable). */
+async function endable(page: Page): Promise<void> {
+  await page.waitForSelector('#cards .header-restart', { state: 'visible', timeout: 20_000 });
+}
+
+test("issue #199: the session's end and its restart on the page", async (t) => {
+  const chromium = await browser(t);
+
+  await t.test(
+    'A5: the dialogs say that ending the session ends its shell; End session and park from the header with the panel shown: the panel and the dot go with the closed terminal, the keyboard stays in the terminal zone, on what is visible there',
+    async (t) => {
+      const l = await withShell(t, chromium);
+      const { page } = l;
+      await endable(page);
+      await toZone(page, 'list');
+      await page.keyboard.press('d');
+      assert.equal(await dialogShellLine(page), SHELL_LINE, 'the dialog "Mark done" says it');
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('#end-dialog[hidden]', { state: 'attached' });
+      await page.keyboard.press('w');
+      assert.equal(await dialogShellLine(page), SHELL_LINE, 'the dialog "Park" says it');
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('#end-dialog[hidden]', { state: 'attached' });
+      await toZone(page, 'terminal');
+      await clickIn(page, '#shell');
+      await untilKeyboard(page, 'shell');
+
+      const program = shellProgramOf(l);
+      await page.locator('#cards .header-park').click();
+      assert.equal(await dialogShellLine(page), SHELL_LINE);
+      await page.locator('#end-dialog:not([hidden]) .end-end').click();
+
+      // The end closes the session's terminal (S2 12.15): the pane is the parked session's card.
+      await shellGone(l, program);
+      await until(
+        () =>
+          readPage(page, () => document.getElementById('right-zone')?.dataset['pane'], null).then(
+            (pane) => pane !== 'terminal',
+          ),
+        'the terminal closed',
+      );
+      await until(
+        () =>
+          readPage(
+            page,
+            () => {
+              const at = document.activeElement;
+              return (
+                at instanceof HTMLElement &&
+                at.checkVisibility() &&
+                document.getElementById('right-zone')?.contains(at) === true &&
+                document.getElementById('shell')?.contains(at) === false
+              );
+            },
+            null,
+          ),
+        'the keyboard in the terminal zone, on what is visible there',
+      );
+      assert.equal(await shownText(page, '#focus-zone'), 'Focus: terminal');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'A5: `/exit` typed into the session with the panel shown: the panel and the dot go, the ended bar over the whole area, the keyboard stays in the session’s terminal',
+    async (t) => {
+      const l = await withShell(t, chromium);
+      const { page } = l;
+      await clickIn(page, '#terminal');
+      await untilKeyboard(page, 'terminal');
+      const shell = shellProgramOf(l);
+
+      await page.keyboard.type('/exit');
+      await page.keyboard.press('Enter');
+
+      await endedWithoutShell(l, shell);
+      await untilKeyboard(page, 'terminal');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'A5: the session’s program killed with the keyboard in the shell: the panel and the dot go, the ended bar over the whole area, the keyboard in the session’s terminal',
+    async (t) => {
+      const l = await withShell(t, chromium);
+      const { page } = l;
+      const program = l.server.hub.list().find((one) => one.id === l.term)?.program;
+      assert.ok(program !== null && program !== undefined);
+      const shell = shellProgramOf(l);
+
+      process.kill(program.pid, 'SIGKILL');
+
+      await endedWithoutShell(l, shell);
+      await untilKeyboard(page, 'terminal');
+      assert.deepEqual(l.problems, []);
+    },
+  );
+
+  await t.test(
+    'A6: `r` with the panel shown: the panel stays, under the new terminal, the same shell and process with its screen; Restart from the header with the panel hidden: the dot stays; the dialog "Restart" says nothing of the shell',
+    async (t) => {
+      const l = await withShell(t, chromium);
+      const { page } = l;
+      await typedInShell(page, 'echo "marker-$$"', /^marker-\d+$/m);
+      const [before] = l.server.hub.shells?.() ?? [];
+      assert.ok(before?.program !== null && before?.program !== undefined);
+      await endable(page);
+
+      await toZone(page, 'list');
+      await page.keyboard.press('r');
+      await page.waitForSelector('#restart-dialog:not([hidden])', { state: 'attached' });
+      const words = await page.locator('#restart-dialog').innerText();
+      assert.doesNotMatch(words, /shell/i, 'a restart keeps the shell: the dialog says nothing');
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('Enter');
+
+      const paneTerm = (): Promise<string> =>
+        readPage(
+          page,
+          () => document.getElementById('right-zone')?.dataset['paneTerm'] ?? '',
+          null,
+        );
+      await until(async () => {
+        const now = await paneTerm();
+        return now !== '' && now !== l.term;
+      }, 'the new terminal shown');
+      const second = await paneTerm();
+      await untilScreen(page, promptOf(S1));
+      await untilPanel(page, true);
+      assert.equal((await panel(page)).under, true);
+      await untilScreen(
+        page,
+        new RegExp(`^marker-${before.program.pid}$`, 'm'),
+        undefined,
+        '#shell',
+      );
+      const moved = l.server.hub.shells?.() ?? [];
+      assert.deepEqual(
+        moved.map((one) => [one.id, one.of, one.program?.pid]),
+        [[before.id, second, before.program.pid]],
+        'the same shell and process, under the new terminal',
+      );
+
+      // Hidden, then Restart from the header: the dot stays, the panel stays hidden.
+      await page.keyboard.press('Control+Shift+S');
+      await untilKeyboard(page, 'shell');
+      await page.keyboard.press('Control+Shift+S');
+      await untilPanel(page, false);
+      await endable(page);
+      await page.locator('#cards .header-restart').click();
+      await page.waitForSelector('#restart-dialog:not([hidden])', { state: 'attached' });
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('ArrowLeft');
+      await page.keyboard.press('Enter');
+      await until(async () => {
+        const now = await paneTerm();
+        return now !== '' && now !== second;
+      }, 'the third terminal shown');
+      await untilScreen(page, promptOf(S1));
+      await until(async () => await dot(page), 'the dot stays');
+      assert.equal((await panel(page)).shown, false, 'still hidden');
+      const third = await paneTerm();
+      assert.deepEqual(
+        (l.server.hub.shells?.() ?? []).map((one) => [one.id, one.of, one.program?.pid]),
+        [[before.id, third, before.program.pid]],
+      );
+      await page.keyboard.press('Control+Shift+S');
+      await untilPanel(page, true);
+      await untilScreen(
+        page,
+        new RegExp(`^marker-${before.program.pid}$`, 'm'),
+        undefined,
+        '#shell',
+      );
+      assert.deepEqual(l.problems, []);
     },
   );
 });
