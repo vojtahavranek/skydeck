@@ -43,7 +43,13 @@ export const SHORT = [
     id: 'appearance',
     title: 'Appearance',
     entries: [
-      { local: 'mode', label: 'Mode', hint: null },
+      // Issue #204: Claude Code draws its own colours (diffs, prompts) in its own theme, which
+      // follows the window's light or dark only when it is Auto (match terminal).
+      {
+        local: 'mode',
+        label: 'Mode',
+        hint: 'Claude Code follows it only with /theme set to Auto.',
+      },
       { local: 'palette', label: 'Colour theme', hint: 'Light and dark each keep their own.' },
     ],
   },

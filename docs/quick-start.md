@@ -190,6 +190,10 @@ name a program, a folder or the port you change in the file itself (and then run
 --restart`). The ticket's status shows as a chip when the ticket is a GitHub issue, or when you name
 a program that reads it (the guide's [A ticket's status](install.md#a-tickets-status)).
 
+Settings also shows the window's light or dark (**Mode**). Claude Code draws its diffs and prompts
+in its own theme, which follows the window only when it is Auto: type `/theme` in a session and pick
+**Auto (match terminal)** (install.md's [Claude Code's own theme](install.md#colours)).
+
 ### Find a session
 
 Press `/` (with the keyboard in the list) or click the filter at the top of the list, and type.
