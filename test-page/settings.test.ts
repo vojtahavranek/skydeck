@@ -893,7 +893,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
     },
   );
   await t.test(
-    'the short screen (F39): four groups, eight controls (F38: Updates; #184: Copy on select) under plain labels, each showing the file’s value; a hint only under four; `after a restart` beside Keep WSL running; no Save, no Default, no line about the default, the file or when a change applies',
+    'the short screen (F39): four groups, eight controls (F38: Updates; #184: Copy on select) under plain labels, each showing the file’s value; a hint only under five (#204: Mode); `after a restart` beside Keep WSL running; no Save, no Default, no line about the default, the file or when a change applies',
     async (t) => {
       const l = await launched(t, chromium, {
         config: {
@@ -943,7 +943,7 @@ test('the settings screen (F36, S2 12.13)', async (t) => {
               labelled: true,
               control: ['Auto', 'Light', 'Dark'],
               value: 'system',
-              hint: [],
+              hint: ['Claude Code follows it only with /theme set to Auto.'],
               mark: [],
             },
             {

@@ -3238,6 +3238,7 @@ switch). The page is light or dark as the
 system is (Windows' Settings, Personalization, Colors: the `prefers-color-scheme` media query), and
 changes with it while it is open. The settings screen's first group, Appearance (12.13), has
 `Mode`, a choice of `Auto` (the system's, the default), `Light` and `Dark`; a pick applies at once.
+Its hint (issue #204) says that Claude Code's own colours follow it only with its `/theme` at Auto.
 Forced dark is exactly the system's dark and forced light exactly the system's
 light: every colour of the page and `color-scheme` (scroll bars, form controls); at a pick every
 terminal of the page is repainted in the new colours — background, text, the cursor, the sixteen
@@ -5338,8 +5339,11 @@ screen's describe Advanced, which keeps F36's screen whole.
 - **The short screen.** Four groups (the fourth, Updates, follow-up F38's), in this order, each
   setting under a plain label (not its name in the file), its control on the same line, and a hint
   under it only where the label alone would mislead:
-  - **Appearance**: `Mode` (`Auto`, `Light`, `Dark`) and `Colour theme` (the themes of the scheme
-    the page shows; hint `Light and dark each keep their own.`) — the theme of 12.1, the page's own
+  - **Appearance**: `Mode` (`Auto`, `Light`, `Dark`; hint `Claude Code follows it only with
+    /theme set to Auto.`, issue #204: Claude Code draws its diffs and prompts in its own theme,
+    which follows the window only at `Auto (match terminal)`, install.md's "Claude Code's own
+    theme") and `Colour theme` (the themes of the scheme the page shows; hint `Light and dark
+    each keep their own.`) — the theme of 12.1, the page's own
     (its `localStorage`, read before the first paint, followed by another window of the profile and,
     at Auto, by the system), drawn at once, without the server's answer.
   - **Links**: `Open links in` (`window.links`: `The default browser`, `Edge`) and `Ticket address`

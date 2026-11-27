@@ -63,7 +63,14 @@ test('no label is a key name, and a hint is one short line', () => {
       (entry) => entry.label,
     ),
     // Copy on select: its group is the window's, whose list and header text it does not copy.
-    ['Colour theme', 'Ticket address', 'Typed commands start sessions in', 'Copy on select'],
+    // Mode (issue #204): Claude Code's own colours follow it only with its /theme at Auto.
+    [
+      'Mode',
+      'Colour theme',
+      'Ticket address',
+      'Typed commands start sessions in',
+      'Copy on select',
+    ],
   );
 });
 

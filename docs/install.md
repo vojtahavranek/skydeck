@@ -2131,7 +2131,8 @@ in `config.json`).
 **Claude Code's own theme.** Claude Code draws parts of its screen in the colours of its own theme
 (`/theme`), whatever the window shows. Set it to **Auto (match terminal)**, so that it picks its
 light or dark theme to match the window's. A Claude Code that runs does not follow a later change
-of the window between light and dark: after one, start or resume the session again.
+of the window between light and dark: after one, start or resume the session again. Settings says
+it too, under `Mode`.
 
 ### Known limits of stage A
 
